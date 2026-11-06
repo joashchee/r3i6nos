@@ -51,11 +51,15 @@ fi
 mkdir -p "$ROOTFS"
 
 mounted=0
-cleanup() {
+unmount_chroot() {
     if [ "$mounted" = 1 ]; then
-        umount "$ROOTFS/proc" "$ROOTFS/sys" "$ROOTFS/dev/pts" "$ROOTFS/dev" 2>/dev/null || true
+        umount "$ROOTFS/dev/pts" "$ROOTFS/dev" "$ROOTFS/sys" "$ROOTFS/proc" 2>/dev/null || true
+        mounted=0
     fi
-    [ -n "$QEMU" ] && rm -f "$ROOTFS/usr/bin/qemu-aarch64-static"
+}
+cleanup() {
+    unmount_chroot
+    if [ -n "$QEMU" ]; then rm -f "$ROOTFS/usr/bin/qemu-aarch64-static"; fi
 }
 trap cleanup EXIT
 
@@ -88,5 +92,9 @@ chroot "$ROOTFS" chown -R loveos:loveos /opt/native_apps /opt/launchers
 chroot "$ROOTFS" apt-get clean
 rm -rf "$ROOTFS"/var/lib/apt/lists/* "$ROOTFS"/debootstrap
 
+# Unmount before anything walks the tree: /proc is empty again and du/tar see the real rootfs.
+unmount_chroot
+if [ -n "$QEMU" ]; then rm -f "$ROOTFS/usr/bin/qemu-aarch64-static"; fi
+
 echo "[*] Rootfs ready: $ROOTFS"
-du -sh "$ROOTFS"
+du -sx -h "$ROOTFS"
