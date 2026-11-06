@@ -40,9 +40,10 @@ jobs:
           sudo du -sh $R
 
       - name: Verify the unit with systemd-analyze
-        # Reads the file only; the host's systemd checks the syntax, not the arm64 tree.
+        # --root makes it look for ExecStart inside the rootfs, not on the runner.
+        # The host's systemd does the checking, so this is syntax and paths only.
         run: |
-          sudo systemd-analyze verify build/rootfs/etc/systemd/system/loveos.service || true
+          sudo systemd-analyze --root=build/rootfs verify /etc/systemd/system/loveos.service
 
       - name: Pack
         run: |

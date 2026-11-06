@@ -35,7 +35,10 @@ All of it goes in the gitignored `local_hardware_assets/`.
   log to the journal. The session loop is tested with fakes; the unit is not yet verified by systemd.
 - [x] **fstab:** games card by label `EASYROMS` with `nofail`. Assumes FAT/exFAT (`uid=1000`); phase 1 confirms.
 - [x] **Manual CI job** `.github/workflows/rootfs.yml` (2026-11-06, workflow_dispatch only): checks, build, sanity checks, `systemd-analyze verify`, uploads `r3i6nos-rootfs.tar.zst`.
-- [ ] **First run of that job:** not run yet; fix what it shows (package names, qemu, keyring), then make `systemd-analyze verify` fail the job.
+- [x] **First successful run of that job** (2026-11-06, after pinning `ubuntu-24.04` and unmounting `/proc` before `du`): rootfs builds, sanity checks pass, artifact uploaded (444 MB tree).
+- [x] **`systemd-analyze verify` fails the job** (2026-11-06; its only message was a false alarm from checking the runner's paths, now `--root=build/rootfs`).
+- [ ] **Confirm that run:** the `--root` form is not yet run; fix any real warnings it shows.
+- [ ] **Slim the 444 MB tree** (probably Mesa's LLVM stack); see phase 6.
 - [ ] **Chroot tests under qemu:** Python and Lua tests, `deb_watcher.py` with a real `.deb`, `systemd-analyze verify`.
 
 ## 4. Phase 3: LÖVE runtimes (no hardware)
