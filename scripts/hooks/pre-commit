@@ -1,0 +1,15 @@
+#!/bin/bash
+# Refuses a commit that stages the vendor's captured files or anything huge.
+# Install once per clone:  git config core.hooksPath scripts/hooks
+bad="$(git diff --cached --name-only --diff-filter=ACM | grep -E '^local_hardware_assets|\.(img|zip)(\.gz)?$' || true)"
+if [ -n "$bad" ]; then
+    echo "pre-commit: refusing to commit files that must stay out of the repo:" >&2
+    echo "$bad" >&2
+    exit 1
+fi
+while IFS= read -r -d '' f; do
+    if [ -f "$f" ] && [ "$(wc -c < "$f")" -gt 20971520 ]; then
+        echo "pre-commit: $f is over 20 MB; GitHub rejects files over 100 MB and this repo has no use for them" >&2
+        exit 1
+    fi
+done < <(git diff --cached --name-only --diff-filter=ACM -z)

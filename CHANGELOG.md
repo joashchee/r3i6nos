@@ -5,6 +5,29 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **Real stock GPU listing read** (2026-11-06): the card has one Mali blob, `libmali-bifrost-g31-rxp0-wayland-gbm.so`, with
+  `libEGL`, `libGLESv2`, `libgbm` and others linked to it through `libMali.so`; the planner handles it (tests use the real listing).
+  The wayland build links `libwayland-client0` and `libwayland-server0`, so the rootfs now installs them; `inject_rootfs.py`
+  reads the blob's ELF `NEEDED` list (own 64-bit parser, tested on a built ELF) and `inject-rootfs.sh` prints it.
+- **GPU decision A: the stock Mali blob, injected locally** (2026-11-06). `scripts/inject-rootfs.sh`
+  (debugfs, works on a Mac) writes the card's kernel modules and firmware to `/usr/lib` and the `libmali` blob to
+  `/opt/libmali` of an image, after fsck and a read-back compare, and leaves the image alone if anything fails;
+  `scripts/inject_rootfs.py` plans it (9 tests). `loveos-session` puts `/opt/libmali` first on `LD_LIBRARY_PATH` and sets
+  `LOVE_GRAPHICS_USE_OPENGLES=1` when it exists (tested). New `docs/making-a-card.md`; CLAUDE.md rule 2 now says the blob,
+  modules and bootloader never go in the repo, CI artifacts or releases. Not run on a real card.
+- **First card capture read** (2026-11-06): genuine RK3326, MBR card, bootloader 15.1 MB from sector 64, BOOT at
+  32768, `boot.ini` plus per-panel DTB folders, **kernel 4.4.189 (Rockchip vendor)**. Findings in
+  `docs/hardware-findings.md`; the big one is that Mesa's panfrost cannot drive the GPU on a 4.4 kernel.
+- **Image UUIDs fixed and `root=` rewritten** (2026-11-06): `scripts/image-layout.sh` holds the layout
+  constants; the ROOTFS ext4 UUID is fixed; `inject-boot.sh` rewrites `root=` in every `.ini`/`.conf` of a temporary
+  copy of the boot files to that UUID (same `root=UUID='...'` form as the stock card), writes nothing to the image
+  until the files are staged, works on macOS (no `sfdisk`, no GNU `dd` flags), and `test_image.sh` covers it.
+- **`capture-card.sh` also lists and copies the stock GPU libraries** (`libmali*`) into `rootfs/gpu/`.
+- **Card capture** (2026-11-06): `scripts/capture-card.sh <disk>` (read-only on the card) copies the raw
+  bootloader area, BOOT files, kernel modules and firmware into `local_hardware_assets/`, writes a report
+  (partitions, DTBs, `root=` lines) and flags Allwinner clones; `scripts/capture_mbr.py` does the MBR parsing
+  (8 tests); `scripts/device-info.sh` runs on the R36S for the kernel command line and controller mapping.
+  **`local_hardware_assets/` is now in `.gitignore`** (it was only in the guide's draft). Never run on a card.
 - **Phase 4 written, not yet run** (2026-11-06): `assemble_image.sh`, `check_image.sh`, `inject-boot.sh`,
   `flash-macos.sh`, `tests/test_image.sh` (Linux and root only, "NOT RUN" elsewhere), and an `image` job.
   `rootfs.yml` is now `build.yml` ("Build (manual and tags)"), also run on `v*` tags. The image has no

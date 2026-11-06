@@ -6,7 +6,7 @@
 # the menu's memory is free while a game runs, then shows the menu again.
 #
 # Overrides, for tests on a laptop: R3I6NOS_NEXT_DIR, R3I6NOS_MENU,
-# R3I6NOS_MENU_LOVE, R3I6NOS_RUN_APP, R3I6NOS_WATCHER, and R3I6NOS_ONCE=1
+# R3I6NOS_MENU_LOVE, R3I6NOS_RUN_APP, R3I6NOS_WATCHER, R3I6NOS_GPU_DIR, and R3I6NOS_ONCE=1
 # (one pass, then exit).
 
 set -u
@@ -17,9 +17,20 @@ MENU_LOVE="${R3I6NOS_MENU_LOVE:-/opt/love/11.5/bin/love}"
 RUN_APP="${R3I6NOS_RUN_APP:-/usr/local/bin/run_app.sh}"
 WATCHER="${R3I6NOS_WATCHER:-/usr/local/bin/deb_watcher.py}"
 
+GPU_DIR="${R3I6NOS_GPU_DIR:-/opt/libmali}"
+
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
 export SDL_NOMOUSE=1
 export R3I6NOS_NEXT="$NEXT_DIR/next"
+
+# The stock kernel is 4.x, where Mesa's panfrost cannot run: the GPU is driven by the
+# vendor's Mali blob, injected from the user's own card (scripts/inject-rootfs.sh) into
+# /opt/libmali. Its libEGL, libGLESv2 and libgbm must come first, and it offers OpenGL ES
+# only, which LÖVE needs to be told to use. Without it, Mesa's software renderer is used.
+if [ -d "$GPU_DIR" ]; then
+    export LD_LIBRARY_PATH="$GPU_DIR${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+    export LOVE_GRAPHICS_USE_OPENGLES=1
+fi
 
 mkdir -p "$NEXT_DIR"
 

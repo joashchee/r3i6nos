@@ -13,8 +13,9 @@
 #                      inject-boot.sh writes the board's own bootloader into it
 #   p1 BOOT    FAT32   from 16 MiB, 256 MiB; the kernel, DTB and boot config
 #   p2 ROOTFS  ext4    the rest
-# The disk signature is fixed (0x52333669), so PARTUUID=52333669-02 names the
-# root partition for a kernel command line that has no initramfs.
+# The disk signature (0x52333669) and the ext4 UUID are fixed (scripts/image-layout.sh),
+# so the board's boot.ini can say root=UUID='52333669-0000-4000-8000-000000000002',
+# the same form the stock card uses; inject-boot.sh rewrites it to match.
 #
 # NOT here: anything from the board's own card. The image alone does not boot.
 
@@ -24,7 +25,8 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 ROOTFS="${1:-$REPO/build/rootfs}"
 IMG="${2:-$REPO/build/r36s-loveos.img}"
 
-BOOT_START=32768                                  # sectors: 16 MiB, room for the bootloader
+# shellcheck source=scripts/image-layout.sh
+. "$REPO/scripts/image-layout.sh"
 BOOT_MIB="${R3I6NOS_BOOT_MIB:-256}"
 BOOT_SECT=$((BOOT_MIB * 2048))
 ROOT_START=$((BOOT_START + BOOT_SECT))
@@ -69,7 +71,7 @@ truncate -s "$TOTAL_BYTES" "$IMG"      # sparse: zeros take no space until writt
 echo "[*] Partition table..."
 sfdisk --quiet "$IMG" <<EOF
 label: dos
-label-id: 0x52333669
+label-id: $DISK_SIGNATURE
 unit: sectors
 
 start=$BOOT_START, size=$BOOT_SECT, type=c
@@ -80,7 +82,7 @@ echo "[*] BOOT (FAT32)..."
 mkfs.fat -F 32 -n BOOT --offset "$BOOT_START" "$IMG" "$((BOOT_SECT / 2))" >/dev/null
 
 echo "[*] ROOTFS (ext4) from $ROOTFS..."
-mke2fs -q -F -t ext4 -m 1 -L ROOTFS -d "$ROOTFS" \
+mke2fs -q -F -t ext4 -m 1 -L ROOTFS -U "$ROOT_UUID" -d "$ROOTFS" \
     -E "offset=$((ROOT_START * 512))" "$IMG" "$((ROOT_SECT / 2))k"
 
 echo "[*] Image ready: $IMG"

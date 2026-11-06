@@ -1,0 +1,44 @@
+link libEGL.so.1.0.0 -> libMali.so
+link libgbm.so -> libMali.so
+link libdrm_etnaviv.so -> libdrm_etnaviv.so.1
+link libdrm_freedreno.so -> libdrm_freedreno.so.1
+link libGLESv2.so.2.0.0 -> libMali.so
+link libOpenCL.so -> libMali.so
+link libGLES_CM.so -> libMali.so
+file libEGL_mesa.so.0.0.0
+link libgbm.so.1.0.0 -> libMali.so
+file libdrm_nouveau.so.2.0.0
+link libdrm_radeon.so.1 -> libdrm_radeon.so.1.0.1
+link libdrm_tegra.so -> libdrm_tegra.so.0
+link libEGL.so.1 -> libMali.so
+link libmali.so.1 -> libmali.so
+link libdrm_nouveau.so.2 -> libdrm_nouveau.so.2.0.0
+link libdrm_tegra.so.0 -> libdrm_tegra.so.0.0.0
+file libdrm_etnaviv.so.1.0.0
+link libdrm_etnaviv.so.1 -> libdrm_etnaviv.so.1.0.0
+link libEGL.so.1.1.0 -> libMali.so
+link libdrm_amdgpu.so.1 -> libdrm_amdgpu.so.1.0.0
+link libdrm_freedreno.so.1 -> libdrm_freedreno.so.1.0.0
+file libdrm_tegra.so.0.0.0
+link libGLESv1_CM.so.1 -> libGLESv1_CM.so.1.2.0
+link libEGL.so -> libMali.so
+link libMaliOpenCL.so -> libMali.so
+link libEGL_mesa.so.0 -> libEGL_mesa.so.0.0.0
+link libdrm_amdgpu.so -> libdrm_amdgpu.so.1
+link libGLESv2.so.2.1.0 -> libMali.so
+link libdrm_nouveau.so -> libdrm_nouveau.so.2
+link libgbm.so.1 -> libMali.so
+link libMali.so -> libmali-bifrost-g31-rxp0-wayland-gbm.so
+link libmali.so -> libMali.so
+file libdrm_freedreno.so.1.0.0
+link libdrm_radeon.so -> libdrm_radeon.so.1
+link libdrm.so -> libdrm.so.2
+link libGLESv2.so.2 -> libMali.so
+link libGLESv1_CM.so.1.1.0 -> libMali.so
+link libGLESv2.so -> libMali.so
+file libdrm.so.2.4.0
+file libGLESv1_CM.so.1.2.0
+file libmali-bifrost-g31-rxp0-wayland-gbm.so
+link libdrm.so.2 -> libdrm.so.2.4.0
+file libdrm_radeon.so.1.0.1
+link libGLESv1_CM.so -> libMali.so

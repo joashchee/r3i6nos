@@ -17,7 +17,8 @@ is blocked and on what.
 - `menu/`: the boot menu, a LÖVE 11.5 app installed at `/opt/loveos/menu`.
 - `scripts/`: host-side tools. `check.sh` runs everything CI runs.
 - `tests/`: Python (`unittest`) and Lua tests; no hardware needed.
-- `vendor/`, `build/`: fetched or built, gitignored.
+- `vendor/`, `build/`, `local_hardware_assets/`: fetched, built or captured, gitignored.
+- `docs/hardware-findings.md`: what the stock card showed (kernel 4.4.189, no panfrost, boot flow). Read it before touching boot or graphics.
 
 ## Rules
 
@@ -25,8 +26,11 @@ is blocked and on what.
    on hardware yet. A claim about behaviour on the device is "untested"
    until ROADMAP section 2 says otherwise. The gamepad mapping in
    `run_app.sh` is unverified.
-2. **No copyrighted content in the repo or the image:** no ROMs, BIOS files,
-   or proprietary emulator assets. Record the licence and source of every
+2. **No copyrighted or proprietary content in the repo, in CI artifacts or in a release:** no ROMs, BIOS files,
+   or proprietary emulator assets. **The Mali GPU blob (`libmali`), kernel modules,
+   bootloader and boot files come from the user's own card at flash time
+   (`capture-card.sh`, `inject-boot.sh`, `inject-rootfs.sh`) and live only in
+   the gitignored `local_hardware_assets/` and on that user's cards.** Record the licence and source of every
    vendored base, kernel or runtime.
 3. **Only RK3326 R36S boards.** Allwinner and other clones (spec section 1)
    must never get this image; keep the identification steps in the flashing docs.

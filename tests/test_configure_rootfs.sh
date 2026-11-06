@@ -41,6 +41,7 @@ exec_start="$(sed -n 's/^ExecStart=//p' overlay/etc/systemd/system/loveos.servic
 cat > "$T/menu" <<EOF
 #!/bin/bash
 printf 'love115\t/roms/Love 11.5/a game.love\n' > "\$R3I6NOS_NEXT"
+printf '%s|%s\n' "\${LD_LIBRARY_PATH:-}" "\${LOVE_GRAPHICS_USE_OPENGLES:-}" > "$T/env"
 EOF
 cat > "$T/run_app" <<EOF
 #!/bin/bash
@@ -53,5 +54,13 @@ R3I6NOS_ONCE=1 R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_MENU_LOVE="$T/menu" \
 R3I6NOS_RUN_APP="$T/run_app" R3I6NOS_WATCHER="$T/watcher" \
     overlay/usr/local/bin/loveos-session
 [ "$(cat "$T/got")" = 'love115|/roms/Love 11.5/a game.love' ] || fail "session passed: $(cat "$T/got")"
+[ "$(cat "$T/env")" = '|' ] || fail "no GPU dir, yet the session set GPU env: $(cat "$T/env")"
+
+# With the Mali blob dir present: it goes first on LD_LIBRARY_PATH and LÖVE is told to use GLES.
+mkdir -p "$T/libmali"
+LD_LIBRARY_PATH=/other R3I6NOS_ONCE=1 R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_MENU_LOVE="$T/menu" \
+R3I6NOS_RUN_APP="$T/run_app" R3I6NOS_WATCHER="$T/watcher" R3I6NOS_GPU_DIR="$T/libmali" \
+    overlay/usr/local/bin/loveos-session
+[ "$(cat "$T/env")" = "$T/libmali:/other|1" ] || fail "GPU env wrong: $(cat "$T/env")"
 
 echo "configure_rootfs and session: ok"

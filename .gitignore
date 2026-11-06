@@ -14,6 +14,10 @@ dist/
 *.deb
 *.love
 
+# Captured from the user's own card: the board vendor's files, never published
+local_hardware_assets*
+*.zip
+
 # Firmware vendor trees fetched by scripts (dArkOS, kernels, rootfs)
 vendor/
 

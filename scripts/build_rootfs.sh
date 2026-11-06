@@ -30,6 +30,7 @@ PACKAGES=(
     libvorbisfile3 libtheora0 libmodplug1
     libluajit-5.1-2                      # LÖVE is linked against the system LuaJIT
     libharfbuzz0b                        # LÖVE 12 text shaping
+    libwayland-client0 libwayland-server0  # the stock Mali blob is the wayland-gbm build and links them
     exfatprogs                           # a likely games-card filesystem
 )
 

@@ -27,6 +27,11 @@ Reboot. The menu lists everything it finds; D-pad to move, A to launch, L/R for 
 Allwinner-based clones are not. How to tell is in section 1 of
 [the spec](docs/r36s_love_only_firmware_specification.md).
 
+## Making a card
+
+The board's bootloader, kernel modules and GPU driver come from your own working card and are
+added to the image on your Mac: see [docs/making-a-card.md](docs/making-a-card.md).
+
 ## Developing
 
 ```sh

@@ -17,13 +17,38 @@ Why: the guide's image has no bootloader or kernel modules (`docs/build-plan.md`
 gaps 1 and 2). Everything after depends on what is on the user's own card.
 All of it goes in the gitignored `local_hardware_assets/`.
 
-- [ ] **`scripts/capture-card.sh`:** from a working card, save the first 16 MiB
-  raw (bootloader sectors), the partition table, the `BOOT` files, `/lib/modules`
-  and firmware, and print the kernel version and DTB name. Read-only on the card.
-- [ ] **Confirm the board** is RK3326 (spec section 1) and record which DTBs are supported.
+- [x] **`scripts/capture-card.sh`** written (see phase 4); **now run it on your card** (needs `brew install e2fsprogs` for the modules).
+- [ ] **Run `scripts/device-info.sh` on the R36S** (stock OS booted, over SSH) and keep the output in `local_hardware_assets/info/`.
+- [x] **Confirm the board** is RK3326 (spec section 1): yes, see Phase 1b.
 - [ ] **Capture the gamepad mapping** on a real unit; replace the unverified `SDL_GAMECONTROLLERCONFIG` in `run_app.sh`.
-- [ ] **Decide the kernel:** reuse the stock one (default) or build our own later.
+- [x] **Kernel:** reuse the stock 4.4.189 for now (it is what the DTBs and the Mali blob go with); mainline is phase C above.
 - [ ] **Decide gptokeyb:** keep or drop it, and `etc/love_keys.cfg` with it.
+
+## 2b. Phase 1b: what the card showed (2026-11-06; facts in `docs/hardware-findings.md`)
+
+- [x] **Board is supported:** genuine RK3326 DTBs, no clone markers. Card is MBR; BOOT at sector 32768, same as ours.
+- [x] **Bootloader captured** (15.1 MB from sector 64) and `boot.ini` understood; `inject-boot.sh` rewrites `root=` to the image's UUID.
+- [x] **Kernel is the Rockchip vendor 4.4.189.** Consequences below.
+- [ ] **Re-run `capture-card.sh`** (move `local_hardware_assets/` aside first): the first run predates the GPU
+  library capture (`rootfs/gpu/`, `info/stock-gpu-libs.txt`). Paste `stock-gpu-libs.txt` here.
+- [x] **GPU path decided: A** (2026-11-06): the stock `libmali` blob, captured from your own card and injected locally
+  into `/opt/libmali`; never in the repo, CI artifacts or releases. `LOVE_GRAPHICS_USE_OPENGLES=1` is set when it is present.
+  - [x] `capture-card.sh` copies the blob and records the stock links (`rootfs/gpu/`, `info/stock-gpu-libs.txt`).
+  - [x] `scripts/inject-rootfs.sh` + `inject_rootfs.py` (2026-11-06, **never run on a real card**; the planner has 9 unit tests and
+    CI's `tests/test_image.sh` runs it against real `debugfs` on a tiny image): modules and firmware to `/usr/lib`, the blob
+    to `/opt/libmali` with only the links that resolve to it; refuses unless `libEGL.so.1`, `libGLESv2.so.2` and `libgbm.so.1` are provided.
+  - [x] `loveos-session` puts `/opt/libmali` first on `LD_LIBRARY_PATH` when it exists (tested).
+  - [x] **Stock listing read** (2026-11-06; kept as `tests/fixtures/stock-gpu-libs.txt`): one blob, `libmali-bifrost-g31-rxp0-wayland-gbm.so`,
+    reached by `libMali.so`; `libEGL.so.1`, `libGLESv2.so.2` and `libgbm.so.1` all link to it, so the planner's assumption holds (tested on the real listing).
+    Stock Mesa/libdrm leftovers on that card are correctly left out.
+  - [ ] **Blob dependencies:** the wayland build links `libwayland-client`/`-server` (added to the rootfs, a guess). `inject-rootfs.sh` now prints the blob's
+    real `needs:` list: compare it with the rootfs packages the first time you run it.
+  - [ ] **Does SDL's KMS/DRM driver work with the blob's gbm/EGL?** Only a boot answers that (phase 5). Fallback **B** (Mesa llvmpipe, remove `/opt/libmali`) stays available and shippable.
+  - [ ] **Legal note** for the README: images with the blob are not redistributable; say so wherever images are mentioned. (Written in `docs/making-a-card.md`.)
+- [x] **Getting the card's modules and blob into the image:** `debugfs` on the Mac (`docs/making-a-card.md`), no Linux needed.
+- [ ] **systemd 252 on kernel 4.4:** unknown until it boots (phase 5). Watch for cgroup, seccomp and `/proc` errors in the journal.
+- [ ] **Games card:** stock has `/roms` on partition 3 of the same card; ours expects TF2 by label. Add an optional
+  partition 3 (EASYROMS exFAT) to the image, or document TF2 only.
 
 ## 3. Phase 2: rootfs in CI (no hardware)
 
@@ -71,8 +96,9 @@ All of it goes in the gitignored `local_hardware_assets/`.
   assembles, checks, compresses and uploads `r36s-loveos.img.gz` with a checksum.
 - [ ] **First green `image` job:** fix what it shows. `tests/test_image.sh` has only run as "NOT RUN" so far.
 - [ ] **Try the refusals yourself:** `scripts/flash-macos.sh <image> disk0 --dry-run` must say it is internal.
-- [ ] **`scripts/capture-card.sh`** (phase 1): writes `local_hardware_assets/bootloader.bin` and `boot/`
-  in the format `inject-boot.sh` reads.
+- [x] **`scripts/capture-card.sh`** (2026-11-06, **never run on a card**; the MBR parsing is unit-tested on synthetic cards):
+  read-only copy of the bootloader, BOOT files, modules and firmware into `local_hardware_assets/`, plus a report.
+  `scripts/device-info.sh` runs on the R36S itself for the real kernel command line and controller mapping.
 - [ ] **First-boot resize** of ROOTFS to fill the card (the image is ~2.3 GB; `resize2fs` in a oneshot unit).
 - [ ] **Match the stock kernel command line:** the stock `boot.ini` or `extlinux.conf` names its own `root=`;
   it must point at partition 2 (or `PARTUUID=52333669-02`). Found out in phase 1.

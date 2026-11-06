@@ -6,6 +6,17 @@ fail=0
 
 step() { echo "== $1"; }
 
+step "no vendor or huge files tracked"
+if git rev-parse --git-dir >/dev/null 2>&1; then
+    bad="$(git ls-files | grep -E '^local_hardware_assets|\.(img|zip)(\.gz)?$' || true)"
+    big="$(git ls-files -z | xargs -0 find -maxdepth 0 -size +20M 2>/dev/null || true)"
+    if [ -n "$bad$big" ]; then
+        echo "FAIL: tracked files that must not be in the repo:" >&2
+        printf '%s\n%s\n' "$bad" "$big" >&2
+        fail=1
+    fi
+else echo "NOT RUN: not a git checkout"; fi
+
 step "python tests"
 python3 -I -m unittest discover -s tests -v || fail=1
 
