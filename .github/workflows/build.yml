@@ -133,7 +133,7 @@ jobs:
           sudo apt-get install -y dosfstools mtools e2fsprogs fdisk zstd
 
       - name: Image script tests (tiny fake image)
-        run: sudo tests/test_image.sh
+        run: sudo bash tests/test_image.sh
 
       - uses: actions/download-artifact@v4
         with:
