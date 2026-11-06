@@ -1,0 +1,42 @@
+#!/bin/bash
+# loveos-session - the boot loop, run by loveos.service.
+#
+# The menu (a LÖVE 11.5 app) writes the chosen entry to $R3I6NOS_NEXT as
+# "<type><TAB><path>" and quits; this loop runs it through run_app.sh, so
+# the menu's memory is free while a game runs, then shows the menu again.
+#
+# Overrides, for tests on a laptop: R3I6NOS_NEXT_DIR, R3I6NOS_MENU,
+# R3I6NOS_MENU_LOVE, R3I6NOS_RUN_APP, R3I6NOS_WATCHER, and R3I6NOS_ONCE=1
+# (one pass, then exit).
+
+set -u
+
+NEXT_DIR="${R3I6NOS_NEXT_DIR:-/run/loveos}"
+MENU="${R3I6NOS_MENU:-/opt/loveos/menu}"
+MENU_LOVE="${R3I6NOS_MENU_LOVE:-/opt/love/11.5/bin/love}"
+RUN_APP="${R3I6NOS_RUN_APP:-/usr/local/bin/run_app.sh}"
+WATCHER="${R3I6NOS_WATCHER:-/usr/local/bin/deb_watcher.py}"
+
+export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
+export SDL_NOMOUSE=1
+export R3I6NOS_NEXT="$NEXT_DIR/next"
+
+mkdir -p "$NEXT_DIR"
+
+while true; do
+    # Pick up any .deb dropped on the card since the last pass.
+    "$WATCHER" || echo "loveos-session: deb_watcher failed" >&2
+
+    rm -f "$R3I6NOS_NEXT"
+    "$MENU_LOVE" "$MENU"
+
+    if [ -f "$R3I6NOS_NEXT" ]; then
+        IFS=$'\t' read -r type target < "$R3I6NOS_NEXT"
+        "$RUN_APP" "$type" "$target" || echo "loveos-session: $type $target exited $?" >&2
+    else
+        # Menu quit or crashed without choosing: don't spin.
+        sleep 1
+    fi
+
+    [ "${R3I6NOS_ONCE:-}" = 1 ] && exit 0
+done

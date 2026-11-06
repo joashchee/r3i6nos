@@ -1,0 +1,52 @@
+#!/bin/bash
+# configure_rootfs.sh against a fake rootfs, and the session loop against fakes.
+set -eu
+cd "$(dirname "$0")/.."
+
+T="$(mktemp -d "${TMPDIR:-/tmp}/r3i6nos.XXXXXX")"
+trap 'rm -rf "$T"' EXIT
+fail() { echo "FAIL: $*" >&2; exit 1; }
+
+# --- configure_rootfs.sh
+R="$T/rootfs"
+mkdir -p "$R/usr/share/doc/foo" "$R/usr/share/man/man1"
+touch "$R/usr/share/doc/foo/copyright" "$R/usr/share/doc/foo/changelog.gz" "$R/usr/share/man/man1/x.1"
+scripts/configure_rootfs.sh "$R" >/dev/null
+
+[ -x "$R/usr/local/bin/run_app.sh" ]            || fail "run_app.sh not installed executable"
+[ -x "$R/usr/local/bin/loveos-session" ]        || fail "loveos-session not installed executable"
+[ -f "$R/opt/loveos/menu/main.lua" ]            || fail "menu not installed"
+[ "$(cat "$R/etc/hostname")" = r3i6nos ]        || fail "hostname"
+grep -q 'LABEL=EASYROMS /roms' "$R/etc/fstab"   || fail "fstab games card"
+grep -q 'nofail' "$R/etc/fstab"                 || fail "fstab nofail"
+[ -L "$R/etc/systemd/system/multi-user.target.wants/loveos.service" ] || fail "unit not enabled"
+[ -f "$R/usr/share/doc/foo/copyright" ]         || fail "copyright was trimmed"
+[ ! -e "$R/usr/share/doc/foo/changelog.gz" ]    || fail "doc not trimmed"
+[ ! -e "$R/usr/share/man" ]                     || fail "man not trimmed"
+
+# Running it twice must give the same tree (no nested menu/menu).
+scripts/configure_rootfs.sh "$R" >/dev/null
+[ ! -e "$R/opt/loveos/menu/menu" ] || fail "second run nested the menu"
+
+# --- unit file names things that exist in the overlay
+exec_start="$(sed -n 's/^ExecStart=//p' overlay/etc/systemd/system/loveos.service)"
+[ -x "overlay$exec_start" ] || fail "ExecStart $exec_start is not in the overlay"
+
+# --- loveos-session: menu picks, run_app gets the type and target, then exits (ONCE)
+cat > "$T/menu" <<EOF
+#!/bin/bash
+printf 'love115\t/roms/Love 11.5/a game.love\n' > "\$R3I6NOS_NEXT"
+EOF
+cat > "$T/run_app" <<EOF
+#!/bin/bash
+printf '%s|%s\n' "\$1" "\$2" > "$T/got"
+EOF
+printf '#!/bin/bash\nexit 0\n' > "$T/watcher"
+chmod +x "$T/menu" "$T/run_app" "$T/watcher"
+
+R3I6NOS_ONCE=1 R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_MENU_LOVE="$T/menu" \
+R3I6NOS_RUN_APP="$T/run_app" R3I6NOS_WATCHER="$T/watcher" \
+    overlay/usr/local/bin/loveos-session
+[ "$(cat "$T/got")" = 'love115|/roms/Love 11.5/a game.love' ] || fail "session passed: $(cat "$T/got")"
+
+echo "configure_rootfs and session: ok"

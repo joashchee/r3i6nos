@@ -14,14 +14,17 @@ if command -v luajit >/dev/null; then luajit tests/test_scan.lua || fail=1
 elif command -v lua >/dev/null; then lua tests/test_scan.lua || fail=1
 else echo "NOT RUN: no lua/luajit"; fi
 
+step "shell tests"
+bash tests/test_configure_rootfs.sh || fail=1
+
 step "shell syntax"
-for f in overlay/usr/local/bin/run_app.sh overlay/etc/init.d/S99loveos scripts/*.sh; do
+for f in overlay/usr/local/bin/run_app.sh overlay/usr/local/bin/loveos-session scripts/*.sh tests/*.sh; do
     bash -n "$f" || fail=1
 done
 
 step "shellcheck"
 if command -v shellcheck >/dev/null; then
-    shellcheck overlay/usr/local/bin/run_app.sh overlay/etc/init.d/S99loveos scripts/*.sh || fail=1
+    shellcheck overlay/usr/local/bin/run_app.sh overlay/usr/local/bin/loveos-session scripts/*.sh tests/*.sh || fail=1
 else echo "NOT RUN: shellcheck not installed"; fi
 
 exit $fail

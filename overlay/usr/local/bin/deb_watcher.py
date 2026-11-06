@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """deb_watcher.py - extract native ARM64 .deb packages and write launchers.
 
-Runs at boot (S99loveos). Every *.deb in the native_deb folder is extracted
+Runs at boot (loveos-session). Every *.deb in the native_deb folder is extracted
 with `dpkg-deb -x` (no dpkg database, no locks) into /opt/native_apps/<name>/
 and gets a launcher script in /opt/launchers/native/<name>.sh.
 

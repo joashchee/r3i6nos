@@ -13,7 +13,7 @@ is blocked and on what.
 ## Layout
 
 - `overlay/`: files copied onto the image's root filesystem as-is
-  (`usr/local/bin/`, `etc/init.d/`). Paths mirror the device.
+  (`usr/local/bin/`, `etc/systemd/system/`). Paths mirror the device.
 - `menu/`: the boot menu, a LÖVE 11.5 app installed at `/opt/loveos/menu`.
 - `scripts/`: host-side tools. `check.sh` runs everything CI runs.
 - `tests/`: Python (`unittest`) and Lua tests; no hardware needed.

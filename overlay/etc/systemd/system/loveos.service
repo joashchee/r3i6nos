@@ -1,0 +1,30 @@
+[Unit]
+Description=r3i6nos menu and game session
+After=local-fs.target roms.mount sound.target
+Wants=roms.mount
+# The menu owns the screen: no login prompt on tty1.
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+Type=simple
+User=loveos
+Group=loveos
+SupplementaryGroups=video audio input render
+RuntimeDirectory=loveos
+Environment=SDL_VIDEODRIVER=kmsdrm
+Environment=SDL_NOMOUSE=1
+Environment=HOME=/home/loveos
+# SDL's KMS/DRM driver wants a VT to switch modes on.
+TTYPath=/dev/tty1
+StandardInput=tty-force
+TTYReset=yes
+TTYVHangup=yes
+StandardOutput=journal
+StandardError=journal
+ExecStart=/usr/local/bin/loveos-session
+Restart=always
+RestartSec=2
+
+[Install]
+WantedBy=multi-user.target

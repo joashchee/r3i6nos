@@ -1,0 +1,58 @@
+name: Rootfs (manual)
+
+# Builds the Debian arm64 rootfs and uploads it. Manual only: it takes minutes
+# and downloads a lot. The fast checks live in ci.yml.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  rootfs:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y debootstrap debian-archive-keyring \
+            qemu-user-static binfmt-support systemd zstd
+
+      - name: Fast checks first
+        run: |
+          sudo apt-get install -y shellcheck luajit
+          scripts/check.sh
+
+      - name: Build rootfs
+        run: sudo scripts/build_rootfs.sh
+
+      - name: Sanity check the tree
+        run: |
+          set -e
+          R=build/rootfs
+          sudo test -L $R/etc/systemd/system/multi-user.target.wants/loveos.service
+          sudo test -x $R/usr/local/bin/loveos-session
+          sudo test -f $R/opt/loveos/menu/main.lua
+          sudo grep -q '^loveos:x:1000:' $R/etc/passwd
+          sudo grep -q '^root:!' $R/etc/shadow
+          sudo find $R/usr/share/doc -name copyright | head -3
+          sudo du -sh $R
+
+      - name: Verify the unit with systemd-analyze
+        # Reads the file only; the host's systemd checks the syntax, not the arm64 tree.
+        run: |
+          sudo systemd-analyze verify build/rootfs/etc/systemd/system/loveos.service || true
+
+      - name: Pack
+        run: |
+          sudo tar --numeric-owner -C build/rootfs -cf - . | zstd -T0 -10 -o r3i6nos-rootfs.tar.zst
+          sha256sum r3i6nos-rootfs.tar.zst | tee r3i6nos-rootfs.tar.zst.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r3i6nos-rootfs
+          path: |
+            r3i6nos-rootfs.tar.zst
+            r3i6nos-rootfs.tar.zst.sha256
+          retention-days: 7
