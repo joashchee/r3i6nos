@@ -63,7 +63,12 @@ TOTAL_BYTES=$(( (ROOT_START + ROOT_SECT) * 512 ))
 
 mkdir -p "$(dirname "$IMG")"
 rm -f "$IMG"
-trap 'rc=$?; [ "$rc" -ne 0 ] && rm -f "$IMG"; exit "$rc"' EXIT
+cleanup() {
+    status=$?
+    if [ "$status" -ne 0 ]; then rm -f "$IMG"; fi   # never leave a half-built image
+    exit "$status"
+}
+trap cleanup EXIT
 
 echo "[*] Image: $((TOTAL_BYTES / 1048576)) MiB (rootfs uses ${used_mib} MiB; ext4 ${ROOT_MIB} MiB)"
 truncate -s "$TOTAL_BYTES" "$IMG"      # sparse: zeros take no space until written

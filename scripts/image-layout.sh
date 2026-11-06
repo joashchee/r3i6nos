@@ -1,3 +1,5 @@
+# shellcheck shell=bash
+# shellcheck disable=SC2034  # the variables are used by the scripts that source this file
 # Layout constants shared by assemble_image.sh, check_image.sh and inject-boot.sh.
 # Sourced, not run. Changing a value here changes images: say so in the CHANGELOG.
 
