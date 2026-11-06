@@ -20,6 +20,21 @@ rm -rf "$ROOTFS/opt/loveos/menu"
 cp -a "$REPO/menu" "$ROOTFS/opt/loveos/menu"
 chmod 755 "$ROOTFS"/usr/local/bin/*
 
+# LÖVE runtimes built by build_love.sh (build/love/<version>/) go to /opt/love/<version>/.
+LOVE_BUILD="${R3I6NOS_LOVE_BUILD:-$REPO/build/love}"
+if [ -d "$LOVE_BUILD" ]; then
+    for dir in "$LOVE_BUILD"/*/; do
+        [ -x "${dir}bin/love" ] || continue
+        ver="$(basename "$dir")"
+        echo "[*] Installing LÖVE $ver..."
+        mkdir -p "$ROOTFS/opt/love"
+        rm -rf "$ROOTFS/opt/love/$ver"
+        cp -a "$dir" "$ROOTFS/opt/love/$ver"
+    done
+else
+    echo "[!] No LÖVE runtimes in $LOVE_BUILD: the menu cannot start until phase 3 builds them" >&2
+fi
+
 # Mount points and places the boot scripts write to.
 mkdir -p "$ROOTFS"/{roms,boot,opt/love,opt/native_apps,opt/launchers/native}
 

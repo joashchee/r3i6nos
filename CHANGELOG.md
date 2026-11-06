@@ -5,6 +5,10 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **LÖVE 11.5 build script** (2026-11-06): `scripts/build_love.sh` cross-compiles the pinned release (sha256
+  checked) for arm64 inside a Debian 12 container; `configure_rootfs.sh` installs `build/love/*` to
+  `/opt/love/`; the manual workflow builds it (cached) before the rootfs; the rootfs gains `libluajit-5.1-2`.
+  Not run yet. 12.0 is refused until a commit is pinned.
 - **`systemd-analyze verify` now fails the job and checks inside the rootfs** (2026-11-06): its first output, "/usr/local/bin/loveos-session is not executable", was a false alarm from looking at the runner's filesystem. Untested form: `--root=build/rootfs`.
 - **Rootfs workflow succeeded** (2026-11-06): the manual job now builds, checks and uploads `r3i6nos-rootfs.tar.zst`.
 - **First rootfs run** (2026-11-06): debootstrap, both stages, configure and the chroot steps all completed (444 MB tree). The job then failed because `build_rootfs.sh` ran `du` with `/proc` still mounted; it now unmounts first, and removes the qemu binary before finishing.

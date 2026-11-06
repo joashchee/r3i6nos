@@ -28,6 +28,7 @@ PACKAGES=(
     libasound2 alsa-utils                # audio
     libopenal1 libfreetype6 libmpg123-0  # LÖVE runtime libraries (phase 3 may add more)
     libvorbisfile3 libtheora0 libmodplug1
+    libluajit-5.1-2                      # LÖVE 11.5 is linked against the system LuaJIT
     exfatprogs                           # a likely games-card filesystem
 )
 

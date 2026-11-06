@@ -43,10 +43,12 @@ All of it goes in the gitignored `local_hardware_assets/`.
 
 ## 4. Phase 3: LÖVE runtimes (no hardware)
 
-- [ ] **LÖVE 11.5** for arm64 (Bookworm ships 11.4, so build from source) into `/opt/love/11.5/`.
+- [x] **LÖVE 11.5** `scripts/build_love.sh` (2026-11-06; **not yet run**): cross-compiles the pinned release tarball in a
+  Debian 12 container, installed to `/opt/love/11.5/` by `configure_rootfs.sh`; the `love` job in `rootfs.yml` builds it first.
 - [ ] **LÖVE 12.0** nightly, pinned to a commit, into `/opt/love/12.0/`.
 - [ ] **Smoke test** under qemu with dummy video and audio: a test `.love` prints its version and quits, on both.
-- [ ] **Cache** the built runtimes in CI so the image build does not recompile them.
+- [x] **Cache** the built runtime in CI (`actions/cache`, keyed on `build_love.sh`).
+- [ ] **First green `love` job:** fix what the run shows (dev package names, SDL2 and LuaJIT detection when cross-compiling).
 
 ## 5. Phase 4: image and flashing
 

@@ -11,8 +11,12 @@ fail() { echo "FAIL: $*" >&2; exit 1; }
 R="$T/rootfs"
 mkdir -p "$R/usr/share/doc/foo" "$R/usr/share/man/man1"
 touch "$R/usr/share/doc/foo/copyright" "$R/usr/share/doc/foo/changelog.gz" "$R/usr/share/man/man1/x.1"
-scripts/configure_rootfs.sh "$R" >/dev/null
+mkdir -p "$T/love/11.5/bin" "$T/love/notaruntime"
+printf '#!/bin/sh\n' > "$T/love/11.5/bin/love"; chmod +x "$T/love/11.5/bin/love"
+R3I6NOS_LOVE_BUILD="$T/love" scripts/configure_rootfs.sh "$R" >/dev/null
 
+[ -x "$R/opt/love/11.5/bin/love" ]              || fail "LÖVE 11.5 not installed"
+[ ! -e "$R/opt/love/notaruntime" ]              || fail "a folder without bin/love was installed"
 [ -x "$R/usr/local/bin/run_app.sh" ]            || fail "run_app.sh not installed executable"
 [ -x "$R/usr/local/bin/loveos-session" ]        || fail "loveos-session not installed executable"
 [ -f "$R/opt/loveos/menu/main.lua" ]            || fail "menu not installed"
@@ -24,8 +28,9 @@ grep -q 'nofail' "$R/etc/fstab"                 || fail "fstab nofail"
 [ ! -e "$R/usr/share/doc/foo/changelog.gz" ]    || fail "doc not trimmed"
 [ ! -e "$R/usr/share/man" ]                     || fail "man not trimmed"
 
-# Running it twice must give the same tree (no nested menu/menu).
-scripts/configure_rootfs.sh "$R" >/dev/null
+# Running it twice must give the same tree (no nested menu/menu or love/11.5/11.5).
+R3I6NOS_LOVE_BUILD="$T/love" scripts/configure_rootfs.sh "$R" >/dev/null
+[ ! -e "$R/opt/love/11.5/11.5" ] || fail "second run nested the runtime"
 [ ! -e "$R/opt/loveos/menu/menu" ] || fail "second run nested the menu"
 
 # --- unit file names things that exist in the overlay

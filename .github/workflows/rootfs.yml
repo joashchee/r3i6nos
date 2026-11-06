@@ -7,11 +7,51 @@ on:
   workflow_dispatch:
 
 jobs:
-  rootfs:
+  love:
+    # Cross-compiled in a Debian 12 container so it links against Bookworm's
+    # libraries, like the rootfs. Cached on the script, so only edits rebuild it.
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: build/love/11.5
+          key: love-11.5-${{ hashFiles('scripts/build_love.sh') }}
+
+      - name: Build LÖVE 11.5 (arm64)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          docker run --rm -v "$PWD":/src -w /src debian:bookworm \
+            scripts/build_love.sh 11.5
+
+      # A tar: upload-artifact zips and drops the executable bit.
+      - name: Pack
+        run: tar -C build/love -cf love-11.5.tar 11.5
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: love-11.5-arm64
+          path: love-11.5.tar
+          retention-days: 7
+
+  rootfs:
+    needs: love
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: love-11.5-arm64
+
+      - name: Unpack LÖVE
+        run: |
+          mkdir -p build/love
+          sudo tar -C build/love -xf love-11.5.tar
 
       - name: Install build tools
         run: |
@@ -34,6 +74,7 @@ jobs:
           sudo test -L $R/etc/systemd/system/multi-user.target.wants/loveos.service
           sudo test -x $R/usr/local/bin/loveos-session
           sudo test -f $R/opt/loveos/menu/main.lua
+          sudo test -x $R/opt/love/11.5/bin/love
           sudo grep -q '^loveos:x:1000:' $R/etc/passwd
           sudo grep -q '^root:!' $R/etc/shadow
           sudo find $R/usr/share/doc -name copyright | head -3
