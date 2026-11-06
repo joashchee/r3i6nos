@@ -49,6 +49,13 @@ class Plan(unittest.TestCase):
         self.assertIn("/usr/lib/firmware/x.bin", writes)
         self.assertIn(("symlink", "/usr/lib/modules/4.4.189/build", "/usr/src/missing"), ops)
 
+    def test_parent_directories_come_first(self):
+        ops = inj.build_plan(make_assets())
+        order = [o[1] for o in ops if o[0] == "mkdir"]
+        self.assertLess(order.index("/usr"), order.index("/usr/lib"))
+        self.assertLess(order.index("/usr/lib"), order.index("/usr/lib/modules"))
+        self.assertLess(order.index("/opt"), order.index("/opt/libmali"))
+
     def test_gpu_keeps_only_libmali_and_links_that_resolve_to_it(self):
         ops = inj.build_plan(make_assets())
         writes = {o[2] for o in ops if o[0] == "write"}

@@ -91,7 +91,11 @@ for p in /usr/lib/modules /usr/lib/firmware /opt/libmali; do
         "$DEBUGFS" -R "rdump $p $DUMP$(dirname "$p")" "$PART" >/dev/null 2>&1
     fi
 done
-python3 -I "$REPO/scripts/inject_rootfs.py" verify "$ASSETS" "$DUMP" || fail "read-back differs (the image is untouched)"
+if ! python3 -I "$REPO/scripts/inject_rootfs.py" verify "$ASSETS" "$DUMP"; then
+    echo "debugfs said (without the routine lines):" >&2
+    grep -vE '^debugfs |^Allocated inode|already exists' "$TMP/debugfs.log" | head -10 >&2
+    fail "read-back differs (the image is untouched)"
+fi
 
 echo "[*] Writing ROOTFS back into the image..."
 dd if="$PART" of="$IMG" bs=512 seek="$root_start" conv=notrunc 2>/dev/null

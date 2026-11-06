@@ -5,6 +5,11 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **`inject-rootfs` found its first real bug in CI** (2026-11-06): debugfs's exit status and error text cannot be
+  trusted (it exits 0 on failure and its missing-parent message matched none of my patterns), so the read-back compare is
+  the real check. The test rootfs has no `/usr/lib`, so the module directories silently failed to be created. The plan now
+  creates `/usr`, `/usr/lib` and `/opt` first (a real root already has them), and a failed read-back prints debugfs's own
+  messages. 28 tests.
 - **Real stock GPU listing read** (2026-11-06): the card has one Mali blob, `libmali-bifrost-g31-rxp0-wayland-gbm.so`, with
   `libEGL`, `libGLESv2`, `libgbm` and others linked to it through `libMali.so`; the planner handles it (tests use the real listing).
   The wayland build links `libwayland-client0` and `libwayland-server0`, so the rootfs now installs them; `inject_rootfs.py`

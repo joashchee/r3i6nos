@@ -151,10 +151,13 @@ def build_plan(assets: str, allow_partial: bool = False):
     for name in ("modules", "firmware"):
         src = os.path.join(lib, name)
         if os.path.isdir(src):
+            if not ops:
+                # Parents first. On a real Debian root they exist, and debugfs only says so.
+                ops += [("mkdir", "/usr"), ("mkdir", "/usr/lib")]
             ops += _tree_ops(src, f"/usr/lib/{name}")
     gpu = os.path.join(assets, "rootfs", "gpu")
     if os.path.isdir(gpu):
-        ops += gpu_ops(gpu, os.path.join(assets, "info", "stock-gpu-libs.txt"), allow_partial)
+        ops += [("mkdir", "/opt")] + gpu_ops(gpu, os.path.join(assets, "info", "stock-gpu-libs.txt"), allow_partial)
     if not ops:
         raise PlanError(f"nothing to inject under {assets}/rootfs (run capture-card.sh)")
     return ops
