@@ -14,6 +14,13 @@ if command -v luajit >/dev/null; then luajit tests/test_scan.lua || fail=1
 elif command -v lua >/dev/null; then lua tests/test_scan.lua || fail=1
 else echo "NOT RUN: no lua/luajit"; fi
 
+step "lua syntax"
+if command -v luajit >/dev/null; then
+    for f in menu/*.lua tests/smoke/love/*.lua; do
+        luajit -bl "$f" >/dev/null || fail=1
+    done
+else echo "NOT RUN: no luajit"; fi
+
 step "shell tests"
 bash tests/test_configure_rootfs.sh || fail=1
 

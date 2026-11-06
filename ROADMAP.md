@@ -46,7 +46,9 @@ All of it goes in the gitignored `local_hardware_assets/`.
 - [x] **LÖVE 11.5** `scripts/build_love.sh` (2026-11-06; **not yet run**): cross-compiles the pinned release tarball in a
   Debian 12 container, installed to `/opt/love/11.5/` by `configure_rootfs.sh`; the `love` job in `rootfs.yml` builds it first.
 - [ ] **LÖVE 12.0** nightly, pinned to a commit, into `/opt/love/12.0/`.
-- [ ] **Smoke test** under qemu with dummy video and audio: a test `.love` prints its version and quits, on both.
+- [x] **Smoke test** (2026-11-06, **not yet run**): `scripts/smoke_love.sh` runs the rootfs's `love` under
+  `qemu-aarch64-static -L`, dummy video and audio, on `tests/smoke/love` (data, zlib, filesystem, PNG, physics, sound
+  modules); a step in `rootfs.yml`. 11.5 only; add 12.0 when it is built. Does not prove drawing.
 - [x] **Cache** the built runtime in CI (`actions/cache`, keyed on `build_love.sh`).
 - [ ] **First green `love` job:** fix what the run shows (dev package names, SDL2 and LuaJIT detection when cross-compiling).
 

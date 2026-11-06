@@ -67,6 +67,10 @@ jobs:
       - name: Build rootfs
         run: sudo scripts/build_rootfs.sh
 
+      - name: Smoke test LÖVE under qemu
+        # Dummy video and audio: proves it links and its non-graphical modules work, not that it draws.
+        run: sudo scripts/smoke_love.sh build/rootfs 11.5
+
       - name: Sanity check the tree
         run: |
           set -e

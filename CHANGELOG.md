@@ -5,6 +5,9 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **LÖVE smoke test under qemu** (2026-11-06): `scripts/smoke_love.sh` and `tests/smoke/love` check that the arm64
+  runtime in a built rootfs starts and its non-graphical modules work; a step in the manual rootfs workflow.
+  Not run yet. `check.sh` now also syntax-checks the Lua files.
 - **LÖVE 11.5 build script** (2026-11-06): `scripts/build_love.sh` cross-compiles the pinned release (sha256
   checked) for arm64 inside a Debian 12 container; `configure_rootfs.sh` installs `build/love/*` to
   `/opt/love/`; the manual workflow builds it (cached) before the rootfs; the rootfs gains `libluajit-5.1-2`.
