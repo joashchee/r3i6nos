@@ -5,6 +5,10 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **Phase 4 written, not yet run** (2026-11-06): `assemble_image.sh`, `check_image.sh`, `inject-boot.sh`,
+  `flash-macos.sh`, `tests/test_image.sh` (Linux and root only, "NOT RUN" elsewhere), and an `image` job.
+  `rootfs.yml` is now `build.yml` ("Build (manual and tags)"), also run on `v*` tags. The image has no
+  bootloader or kernel until `inject-boot.sh` adds them from the user's own card.
 - **12.0 smoke test output read** (2026-11-06): `R3I6NOS_SMOKE ok love=12.0.0 jit=LuaJIT 2.1.0-beta3`, with two deprecation warnings (`love.data.hash` old form, `love.math.noise`). The smoke game now uses the new forms where they exist and falls back on 11.5. Untested on either version until the next CI run.
 - **Phase 3 done in CI** (2026-11-06): LÖVE 11.5 and 12.0 (with SDL3) build for arm64, install into the rootfs, and pass the qemu smoke test; shellcheck is clean.
 - **First shellcheck run** (2026-11-06) failed the job on four info-level notes in `build_love.sh` (SC2015, SC2012 twice, SC2016); fixed (if/then, `find`, and a justified `disable` for the literal `$ORIGIN`). Every other script was already clean.

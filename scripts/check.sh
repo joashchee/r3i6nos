@@ -23,6 +23,7 @@ else echo "NOT RUN: no luajit"; fi
 
 step "shell tests"
 bash tests/test_configure_rootfs.sh || fail=1
+bash tests/test_image.sh || fail=1
 
 step "shell syntax"
 for f in overlay/usr/local/bin/run_app.sh overlay/usr/local/bin/loveos-session scripts/*.sh tests/*.sh; do

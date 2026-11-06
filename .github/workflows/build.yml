@@ -1,10 +1,14 @@
-name: Rootfs (manual)
+name: Build (manual and tags)
 
-# Builds the Debian arm64 rootfs and uploads it. Manual only: it takes minutes
-# and downloads a lot. The fast checks live in ci.yml.
+# Builds the LÖVE runtimes, the Debian arm64 rootfs, and the SD card image
+# (without the board's bootloader and kernel: inject-boot.sh adds those from
+# your own card). Manual or on a v* tag only: it takes a while and downloads a
+# lot. The fast checks live in ci.yml.
 
 on:
   workflow_dispatch:
+  push:
+    tags: ["v*"]
 
 jobs:
   love:
@@ -113,4 +117,50 @@ jobs:
           path: |
             r3i6nos-rootfs.tar.zst
             r3i6nos-rootfs.tar.zst.sha256
+          retention-days: 7
+
+  image:
+    needs: rootfs
+    if: ${{ needs.rootfs.result == 'success' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install image tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y dosfstools mtools e2fsprogs fdisk zstd
+
+      - name: Image script tests (tiny fake image)
+        run: sudo tests/test_image.sh
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: r3i6nos-rootfs
+
+      - name: Unpack rootfs
+        run: |
+          mkdir -p build/rootfs
+          zstd -dc r3i6nos-rootfs.tar.zst | sudo tar --numeric-owner -C build/rootfs -xpf -
+
+      - name: Assemble image
+        run: sudo scripts/assemble_image.sh
+
+      - name: Check image
+        run: sudo scripts/check_image.sh build/r36s-loveos.img
+
+      - name: Compress
+        run: |
+          sudo gzip -9 build/r36s-loveos.img
+          cd build
+          sha256sum r36s-loveos.img.gz | sudo tee r36s-loveos.img.gz.sha256
+          ls -lh r36s-loveos.img.gz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: r3i6nos-image
+          path: |
+            build/r36s-loveos.img.gz
+            build/r36s-loveos.img.gz.sha256
           retention-days: 7

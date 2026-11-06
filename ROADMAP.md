@@ -34,7 +34,7 @@ All of it goes in the gitignored `local_hardware_assets/`.
 - [x] **systemd unit `loveos.service`** and `loveos-session` (replace `S99loveos`): restart on crash,
   log to the journal. The session loop is tested with fakes; the unit is not yet verified by systemd.
 - [x] **fstab:** games card by label `EASYROMS` with `nofail`. Assumes FAT/exFAT (`uid=1000`); phase 1 confirms.
-- [x] **Manual CI job** `.github/workflows/rootfs.yml` (2026-11-06, workflow_dispatch only): checks, build, sanity checks, `systemd-analyze verify`, uploads `r3i6nos-rootfs.tar.zst`.
+- [x] **Manual CI job** `.github/workflows/build.yml (was rootfs.yml)` (2026-11-06, workflow_dispatch only): checks, build, sanity checks, `systemd-analyze verify`, uploads `r3i6nos-rootfs.tar.zst`.
 - [x] **First successful run of that job** (2026-11-06, after pinning `ubuntu-24.04` and unmounting `/proc` before `du`): rootfs builds, sanity checks pass, artifact uploaded (444 MB tree).
 - [x] **`systemd-analyze verify` fails the job** (2026-11-06; its only message was a false alarm from checking the runner's paths, now `--root=build/rootfs`).
 - [ ] **Confirm that run:** the `--root` form is not yet run; fix any real warnings it shows.
@@ -44,26 +44,38 @@ All of it goes in the gitignored `local_hardware_assets/`.
 ## 4. Phase 3: LÖVE runtimes (no hardware)
 
 - [x] **LÖVE 11.5** `scripts/build_love.sh` (2026-11-06, built in CI): cross-compiles the pinned release tarball in a
-  Debian 12 container, installed to `/opt/love/11.5/` by `configure_rootfs.sh`; the `love` job in `rootfs.yml` builds it first.
+  Debian 12 container, installed to `/opt/love/11.5/` by `configure_rootfs.sh`; the `love` job in `build.yml` builds it first.
 - [x] **LÖVE 12.0** (2026-11-06, built in CI): `build_love.sh 12.0`, pinned to `love2d/love` commit `def2451`
   (2026-11-05), CMake. It needs **SDL3** (>= 3.1.3), which Bookworm lacks, so SDL3 3.4.20 is built too (KMS/DRM, ALSA,
-  no X11/Wayland) and shipped in the runtime's `lib/`. Both pins are sha256-checked. Matrix job in `rootfs.yml`.
+  no X11/Wayland) and shipped in the runtime's `lib/`. Both pins are sha256-checked. Matrix job in `build.yml`.
 - [x] **First green 12.0 build and smoke test** (2026-11-06, run reported all green; the 12.0 smoke output line was not
   read): SDL3 needed `SDL_UNIX_CONSOLE_BUILD`; shellcheck notes fixed.
 - [ ] **Re-pin 12.0** when it matters: it is a moving nightly, so keep the commit, note why each move, and test games on both.
 - [x] **Smoke test** (2026-11-06, passed in CI: `R3I6NOS_SMOKE ok love=11.5.0 jit=LuaJIT 2.1.0-beta3`): `scripts/smoke_love.sh` runs the rootfs's `love` under
   `qemu-aarch64-static -L`, dummy video and audio, on `tests/smoke/love` (data, zlib, filesystem, PNG, physics, sound
-  modules); a step in `rootfs.yml` that runs on every runtime in the rootfs (11.5 and 12.0). Does not prove drawing.
+  modules); a step in `build.yml` that runs on every runtime in the rootfs (11.5 and 12.0). Does not prove drawing.
 - [x] **Cache** the built runtime in CI (`actions/cache`, keyed on `build_love.sh`).
 - [x] **First green `love` job** (2026-11-06): LÖVE 11.5 cross-compiles for arm64 and links against the rootfs.
 
 ## 5. Phase 4: image and flashing
 
-- [ ] **`scripts/assemble_image.sh`:** MBR layout, `mktemp` mount points with a `trap`, rsync the rootfs; no proprietary files.
-- [ ] **`scripts/inject-boot.sh`:** writes the raw bootloader sectors and `BOOT` files from `local_hardware_assets/` into the image.
-- [ ] **`scripts/flash-macos.sh`:** refuses internal disks, shows name and size, requires typing the identifier, verifies the `.sha256`, writes with `rdisk` and `bs=4m`, ejects.
-- [ ] **`.github/workflows/build.yml`:** tags and manual runs only; uploads the image `.gz` and checksum.
-- [ ] **Image checks:** partition layout, `fsck`, raw-sector readback.
+- [x] **`scripts/assemble_image.sh`** (2026-11-06, **not yet run**): MBR (signature `0x52333669`, so
+  `PARTUUID=52333669-02` is the root), BOOT FAT32 at 16 MiB, ROOTFS ext4; written straight into the image
+  with `mke2fs -d` and `mkfs.fat --offset`, no loop devices. Refuses a rootfs with a mounted `/proc`.
+- [x] **`scripts/check_image.sh`:** partition table, `fsck`, labels, and the files the device needs.
+- [x] **`scripts/inject-boot.sh`:** raw bootloader from sector 64 and the BOOT files, both read back
+  and compared; never touches the MBR. **Layout unverified:** sector 64 is the usual Rockchip start.
+- [x] **`scripts/flash-macos.sh`** (**never run on a card**; `diskutil` is blocked in the dev sandbox, so even its
+  refusals are unproven): internal, partition, huge or tiny disks refused; checksum; type the disk name; `rdisk`, `bs=4m`.
+- [x] **`.github/workflows/build.yml`** (was `rootfs.yml`): manual or `v*` tags; an `image` job runs the image tests,
+  assembles, checks, compresses and uploads `r36s-loveos.img.gz` with a checksum.
+- [ ] **First green `image` job:** fix what it shows. `tests/test_image.sh` has only run as "NOT RUN" so far.
+- [ ] **Try the refusals yourself:** `scripts/flash-macos.sh <image> disk0 --dry-run` must say it is internal.
+- [ ] **`scripts/capture-card.sh`** (phase 1): writes `local_hardware_assets/bootloader.bin` and `boot/`
+  in the format `inject-boot.sh` reads.
+- [ ] **First-boot resize** of ROOTFS to fill the card (the image is ~2.3 GB; `resize2fs` in a oneshot unit).
+- [ ] **Match the stock kernel command line:** the stock `boot.ini` or `extlinux.conf` names its own `root=`;
+  it must point at partition 2 (or `PARTUUID=52333669-02`). Found out in phase 1.
 
 ## 6. Phase 5: bring-up on the R36S (needs the unit)
 
