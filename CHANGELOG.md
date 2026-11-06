@@ -5,6 +5,7 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **CI pinned to `ubuntu-24.04`** (2026-11-06): the first rootfs run died with exit code 100 (an `apt-get` failure) on `ubuntu-latest`, which is moving to Ubuntu 26. Cause not confirmed from the log given.
 - **Manual rootfs CI job** (2026-11-06): `.github/workflows/rootfs.yml`, run by hand from the Actions tab. Not run yet.
 - **Rootfs build and systemd unit** (2026-11-06): `scripts/build_rootfs.sh` (two-stage Bookworm arm64
   debootstrap, `loveos` user, root locked), `scripts/configure_rootfs.sh` (overlay, menu, fstab, volatile
