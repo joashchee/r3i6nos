@@ -63,9 +63,11 @@ PART="$TMP/root.ext4"
 echo "[*] Copying ROOTFS out ($((root_size / 2048)) MiB)..."
 dd if="$IMG" of="$PART" bs=512 skip="$root_start" count="$root_size" 2>/dev/null
 
+# debugfs exits 0 even when a command fails, so "does it exist" means "did it print an inode".
+exists() { "$DEBUGFS" -R "stat $1" "$PART" 2>/dev/null | grep -q '^Inode:'; }
+
 ver="$(find "$ASSETS/rootfs/lib/modules" -mindepth 1 -maxdepth 1 -exec basename {} \; 2>/dev/null | head -1)"
-if "$DEBUGFS" -R "stat /opt/libmali" "$PART" >/dev/null 2>&1 \
-   || { [ -n "$ver" ] && "$DEBUGFS" -R "stat /usr/lib/modules/$ver" "$PART" >/dev/null 2>&1; }; then
+if exists /opt/libmali || { [ -n "$ver" ] && exists "/usr/lib/modules/$ver"; }; then
     fail "this image already has /opt/libmali or the kernel modules: inject into a fresh image"
 fi
 
@@ -85,7 +87,7 @@ echo "[*] Reading everything back..."
 DUMP="$TMP/dump"
 mkdir -p "$DUMP/usr/lib" "$DUMP/opt"
 for p in /usr/lib/modules /usr/lib/firmware /opt/libmali; do
-    if "$DEBUGFS" -R "stat $p" "$PART" >/dev/null 2>&1; then
+    if exists "$p"; then
         "$DEBUGFS" -R "rdump $p $DUMP$(dirname "$p")" "$PART" >/dev/null 2>&1
     fi
 done

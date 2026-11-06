@@ -113,7 +113,8 @@ if [ -z "$DEBUGFS" ]; then
 else
     ROOTPART=""
     for n in 2 3 4; do
-        if $SUDO "$DEBUGFS" -c -R "stat /etc/os-release" "$(part_dev "$n")" >/dev/null 2>&1; then ROOTPART="$n"; break; fi
+        # debugfs exits 0 even when the command fails: look for an inode in what it printed.
+        if $SUDO "$DEBUGFS" -c -R "stat /etc/os-release" "$(part_dev "$n")" 2>/dev/null | grep -q '^Inode:'; then ROOTPART="$n"; break; fi
     done
     if [ -z "$ROOTPART" ]; then
         warn "no ext4 root partition with /etc/os-release found among partitions 2 to 4"

@@ -40,7 +40,8 @@ done
 size="$(wc -c < "$ASSETS/bootloader.bin" | tr -d ' ')"
 [ "$size" -gt 0 ] || fail "bootloader.bin is empty"
 [ "$size" -le "$MAX_LOADER" ] || fail "bootloader.bin is $size bytes; the area before BOOT holds $MAX_LOADER"
-[ -n "$(tr -d '\0' < "$ASSETS/bootloader.bin" | head -c 1)" ] || fail "bootloader.bin is all zeros"
+python3 -I -c 'import sys; sys.exit(0 if any(open(sys.argv[1], "rb").read()) else 1)' "$ASSETS/bootloader.bin" \
+    || fail "bootloader.bin is all zeros"
 
 # The image must be one of ours: MBR signature and BOOT where we expect it.
 layout="$(python3 -I - "$IMG" <<'PY'

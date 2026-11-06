@@ -84,7 +84,9 @@ start=$ROOT_START, size=$ROOT_SECT, type=83
 EOF
 
 echo "[*] BOOT (FAT32)..."
-mkfs.fat -F 32 -n BOOT --offset "$BOOT_START" "$IMG" "$((BOOT_SECT / 2))" >/dev/null
+# The block count is what keeps BOOT from growing over ROOTFS; mkfs.fat warns that the file is bigger. Expected.
+mkfs.fat -F 32 -n BOOT --offset "$BOOT_START" "$IMG" "$((BOOT_SECT / 2))" >/dev/null \
+    2> >(grep -v 'block count mismatch' >&2)
 
 echo "[*] ROOTFS (ext4) from $ROOTFS..."
 mke2fs -q -F -t ext4 -m 1 -L ROOTFS -U "$ROOT_UUID" -d "$ROOTFS" \
