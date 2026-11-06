@@ -11,7 +11,10 @@ local function check()
   assert(love.system.getOS() == "Linux", "getOS: " .. tostring(love.system.getOS()))
 
   -- love.data: hash and zlib round trip.
-  local md5 = love.data.encode("string", "hex", love.data.hash("md5", "abc"))
+  -- 12.0 deprecates hash(algorithm, data) for hash(container, algorithm, data); try the new form first.
+  local okHash, digest = pcall(love.data.hash, "string", "md5", "abc")
+  if not okHash then digest = love.data.hash("md5", "abc") end
+  local md5 = love.data.encode("string", "hex", digest)
   assert(md5 == "900150983cd24fb0d6963f7d28e17f72", "md5: " .. md5)
   local packed = love.data.compress("string", "zlib", string.rep("r3i6nos", 100))
   assert(tostring(love.data.decompress("string", "zlib", packed)) == string.rep("r3i6nos", 100), "zlib round trip")
@@ -28,7 +31,9 @@ local function check()
   assert(png:getSize() > 8, "png encode")
 
   -- love.math, love.physics (Box2D), love.sound (decoders are linked in).
-  assert(love.math.noise(0.5) ~= nil, "noise")
+  -- love.math.noise became perlinNoise in 12.0.
+  local noise = love.math.perlinNoise or love.math.noise
+  assert(noise(0.5) ~= nil, "noise")
   local world = love.physics.newWorld(0, 9.8)
   world:update(1 / 60)
   assert(love.sound.newSoundData(441, 44100, 16, 1):getSampleCount() == 441, "sounddata")

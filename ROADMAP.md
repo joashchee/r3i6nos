@@ -45,14 +45,15 @@ All of it goes in the gitignored `local_hardware_assets/`.
 
 - [x] **LÖVE 11.5** `scripts/build_love.sh` (2026-11-06, built in CI): cross-compiles the pinned release tarball in a
   Debian 12 container, installed to `/opt/love/11.5/` by `configure_rootfs.sh`; the `love` job in `rootfs.yml` builds it first.
-- [x] **LÖVE 12.0** (2026-11-06, **not yet run**): `build_love.sh 12.0`, pinned to `love2d/love` commit `def2451`
+- [x] **LÖVE 12.0** (2026-11-06, built in CI): `build_love.sh 12.0`, pinned to `love2d/love` commit `def2451`
   (2026-11-05), CMake. It needs **SDL3** (>= 3.1.3), which Bookworm lacks, so SDL3 3.4.20 is built too (KMS/DRM, ALSA,
   no X11/Wayland) and shipped in the runtime's `lib/`. Both pins are sha256-checked. Matrix job in `rootfs.yml`.
-- [ ] **First green 12.0 build and smoke test:** expect CMake/SDL3 option and package-name fixes.
+- [x] **First green 12.0 build and smoke test** (2026-11-06, run reported all green; the 12.0 smoke output line was not
+  read): SDL3 needed `SDL_UNIX_CONSOLE_BUILD`; shellcheck notes fixed.
 - [ ] **Re-pin 12.0** when it matters: it is a moving nightly, so keep the commit, note why each move, and test games on both.
 - [x] **Smoke test** (2026-11-06, passed in CI: `R3I6NOS_SMOKE ok love=11.5.0 jit=LuaJIT 2.1.0-beta3`): `scripts/smoke_love.sh` runs the rootfs's `love` under
   `qemu-aarch64-static -L`, dummy video and audio, on `tests/smoke/love` (data, zlib, filesystem, PNG, physics, sound
-  modules); a step in `rootfs.yml`. 11.5 only; add 12.0 when it is built. Does not prove drawing.
+  modules); a step in `rootfs.yml` that runs on every runtime in the rootfs (11.5 and 12.0). Does not prove drawing.
 - [x] **Cache** the built runtime in CI (`actions/cache`, keyed on `build_love.sh`).
 - [x] **First green `love` job** (2026-11-06): LÖVE 11.5 cross-compiles for arm64 and links against the rootfs.
 
