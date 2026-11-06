@@ -16,6 +16,8 @@ set -eu
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 ROOTFS="${1:-$REPO/build/rootfs}"
 SUITE=bookworm
+# Never let a package script wait for an answer (a hang here costs the whole CI hour).
+export DEBIAN_FRONTEND=noninteractive
 MIRROR="${R3I6NOS_MIRROR:-https://deb.debian.org/debian/}"
 
 # Needed on the device. Comments say why, so nothing gets removed by accident.
