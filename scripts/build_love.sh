@@ -124,15 +124,20 @@ set(CMAKE_FIND_ROOT_PATH_MODE_PACKAGE BOTH)
 EOF
 
     echo "[*] Building SDL3 (KMS/DRM, ALSA; no X11, Wayland, PulseAudio)..."
-    cmake -S SDL3-3.4.20 -B sdl3-build -G Ninja \
+    # SDL_UNIX_CONSOLE_BUILD: X11 and Wayland are off on purpose, and SDL refuses to
+    # configure without X11 or Wayland unless told this is a console (KMS/DRM) build.
+    cmake -S "$WORK/SDL3-3.4.20" -B "$WORK/sdl3-build" -G Ninja \
         -DCMAKE_TOOLCHAIN_FILE="$WORK/toolchain.cmake" \
         -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$WORK/sdl3" \
         -DSDL_SHARED=ON -DSDL_STATIC=OFF -DSDL_TESTS=OFF -DSDL_EXAMPLES=OFF \
         -DSDL_X11=OFF -DSDL_WAYLAND=OFF -DSDL_PULSEAUDIO=OFF -DSDL_PIPEWIRE=OFF \
         -DSDL_JACK=OFF -DSDL_SNDIO=OFF -DSDL_VULKAN=OFF \
-        -DSDL_KMSDRM=ON -DSDL_ALSA=ON
-    cmake --build sdl3-build
-    cmake --install sdl3-build
+        -DSDL_KMSDRM=ON -DSDL_ALSA=ON \
+        -DSDL_INSTALL=ON -DSDL_UNIX_CONSOLE_BUILD=ON
+    cmake --build "$WORK/sdl3-build"
+    cmake --install "$WORK/sdl3-build"
+    test -e "$WORK/sdl3/lib/libSDL3.so.0" && test -d "$WORK/sdl3/lib/cmake/SDL3" \
+        || { echo "build_love: SDL3 did not install where expected" >&2; ls -R "$WORK/sdl3" | head -40 >&2; exit 1; }
 
     # --- LÖVE ---
     fetch "$LOVE120_URL" "$LOVE120_SHA256" love.tar.gz
