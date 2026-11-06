@@ -136,13 +136,18 @@ EOF
         -DSDL_INSTALL=ON -DSDL_UNIX_CONSOLE_BUILD=ON
     cmake --build "$WORK/sdl3-build"
     cmake --install "$WORK/sdl3-build"
-    test -e "$WORK/sdl3/lib/libSDL3.so.0" && test -d "$WORK/sdl3/lib/cmake/SDL3" \
-        || { echo "build_love: SDL3 did not install where expected" >&2; ls -R "$WORK/sdl3" | head -40 >&2; exit 1; }
+    if [ ! -e "$WORK/sdl3/lib/libSDL3.so.0" ] || [ ! -d "$WORK/sdl3/lib/cmake/SDL3" ]; then
+        echo "build_love: SDL3 did not install where expected:" >&2
+        find "$WORK/sdl3" | head -40 >&2
+        exit 1
+    fi
 
     # --- LÖVE ---
     fetch "$LOVE120_URL" "$LOVE120_SHA256" love.tar.gz
     tar -xzf love.tar.gz
     echo "[*] Building LÖVE 12.0 ($LOVE120_COMMIT)..."
+    # $ORIGIN below is for the dynamic loader, not for the shell: single quotes are intended.
+    # shellcheck disable=SC2016
     cmake -S "love-$LOVE120_COMMIT" -B love-build -G Ninja \
         -DCMAKE_TOOLCHAIN_FILE="$WORK/toolchain.cmake" \
         -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/opt/love/12.0 \
@@ -179,7 +184,7 @@ esac
 echo "bin/love: $machine; needs:"
 "$HOST-readelf" -d "$OUT/bin/love" | sed -n 's/.*\(NEEDED\|RUNPATH\|RPATH\).*\[\(.*\)\]/  \1 \2/p'
 if [ "$VERSION" = 12.0 ]; then
-    ls "$OUT/lib" | sed 's/^/  lib\//'
+    find "$OUT/lib" -maxdepth 1 \( -type f -o -type l \) | sed "s#^$OUT/#  #"
     test -e "$OUT"/lib/libSDL3.so.0 || { echo "build_love: SDL3 missing from lib/" >&2; exit 1; }
 fi
 du -sh "$OUT"

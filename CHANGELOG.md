@@ -5,6 +5,7 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **First shellcheck run** (2026-11-06) failed the job on four info-level notes in `build_love.sh` (SC2015, SC2012 twice, SC2016); fixed (if/then, `find`, and a justified `disable` for the literal `$ORIGIN`). Every other script was already clean.
 - **12.0 build, first run** (2026-11-06): SDL3 3.4.20 configured on arm64 (KMS/DRM, ALSA, udev found) but refused to finish without X11 or Wayland; added `-DSDL_UNIX_CONSOLE_BUILD=ON`, and set `-DSDL_INSTALL=ON` explicitly because the summary showed it OFF. The SDL3 install is now checked before LÖVE is built.
 - **LÖVE 12.0 build** (2026-11-06): `build_love.sh 12.0` builds `love2d/love` at the pinned commit `def2451`
   with CMake. 12.0 needs SDL3, which Bookworm does not ship, so SDL3 3.4.20 is built from its release tarball
