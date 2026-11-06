@@ -1,0 +1,27 @@
+# OS / editor
+.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea/
+
+# Build output and images: large, rebuilt by scripts, never committed
+build/
+out/
+dist/
+*.img
+*.img.xz
+*.img.gz
+*.deb
+*.love
+
+# Firmware vendor trees fetched by scripts (dArkOS, kernels, rootfs)
+vendor/
+
+# Python
+__pycache__/
+*.pyc
+
+# Claude Code local state
+.claude/settings.local.json
+.claude/.cc-writes/
+CLAUDE.local.md
