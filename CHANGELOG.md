@@ -5,6 +5,12 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **LÖVE 12.0 build** (2026-11-06): `build_love.sh 12.0` builds `love2d/love` at the pinned commit `def2451`
+  with CMake. 12.0 needs SDL3, which Bookworm does not ship, so SDL3 3.4.20 is built from its release tarball
+  and bundled in the runtime's `lib/` (RUNPATH `$ORIGIN`). Both downloads are sha256-pinned. `rootfs.yml`
+  builds 11.5 and 12.0 as a matrix, the rootfs takes whatever was built, the smoke test runs on each, and the
+  rootfs gains `libharfbuzz0b`. Not run yet.
+- **LÖVE 11.5 builds and passes the smoke test in CI** (2026-11-06): `R3I6NOS_SMOKE ok love=11.5.0 jit=LuaJIT 2.1.0-beta3` under qemu, dummy video and audio.
 - **LÖVE smoke test under qemu** (2026-11-06): `scripts/smoke_love.sh` and `tests/smoke/love` check that the arm64
   runtime in a built rootfs starts and its non-graphical modules work; a step in the manual rootfs workflow.
   Not run yet. `check.sh` now also syntax-checks the Lua files.
