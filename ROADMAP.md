@@ -94,7 +94,7 @@ All of it goes in the gitignored `local_hardware_assets/`.
   refusals are unproven): internal, partition, huge or tiny disks refused; checksum; type the disk name; `rdisk`, `bs=4m`.
 - [x] **`.github/workflows/build.yml`** (was `rootfs.yml`): manual or `v*` tags; an `image` job runs the image tests,
   assembles, checks, compresses and uploads `r36s-loveos.img.gz` with a checksum.
-- [ ] **First green `image` job:** fix what it shows. `tests/test_image.sh` has only run as "NOT RUN" so far.
+- [x] **First green `image` job** (2026-11-07): `tests/test_image.sh` (assemble, check, inject-boot, inject-rootfs against real `debugfs`) and the image build pass in CI. Still never booted on hardware.
 - [ ] **Try the refusals yourself:** `scripts/flash-macos.sh <image> disk0 --dry-run` must say it is internal.
 - [x] **`scripts/capture-card.sh`** (2026-11-06, **never run on a card**; the MBR parsing is unit-tested on synthetic cards):
   read-only copy of the bootloader, BOOT files, modules and firmware into `local_hardware_assets/`, plus a report.
