@@ -5,6 +5,7 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **`app-input-checker-native.yml`** (2026-11-07): the native input checker gets its own build and release workflow, like Commander's (tag `input-checker-native-v*`). Not run on GitHub yet.
 - **Each native app builds on its own, apart from the firmware** (2026-11-07), starting with Commander. New `apps/*/app.conf` manifests and
   `scripts/build_native_app.sh <app> [--smoke]` (one app to one `.deb`, plus a qemu self-test); `build_native_apps.sh` now only loops over the
   `DEFAULT=1` apps. New reusable `.github/workflows/native-app.yml` and `app-commander.yml` (runs on Commander's own paths, by hand, and on a `commander-v*` tag,
