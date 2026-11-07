@@ -42,6 +42,18 @@ love menu           # run the menu on a desktop (set R3I6NOS_ROMS to a test fold
 
 Layout and rules are in `CLAUDE.md`; what's next is in `ROADMAP.md`.
 
+## Disclaimer
+
+r3i6nos is an independent hobby project. It is **not made, endorsed or supported by** the makers or sellers of the R36S, by Rockchip, Arm, the LÖVE
+project, Debian or anyone else whose names appear here; those names belong to their owners and are used only to say what this works with.
+
+- **Use it at your own risk.** The software is provided as is, without warranty (`LICENSE`). Nothing here has booted on a real R36S yet.
+- **Flashing writes to a disk.** The scripts refuse internal disks and ask first, but you choose the target: check the disk identifier twice, and keep a backup of your working card.
+- **No games, ROMs, BIOS files or proprietary drivers are included**, and the project does not help find them. The GPU driver, kernel modules and bootloader are copied
+  from *your own* card onto *your own* images. An image that contains them is for your card only; do not share it.
+- **Games and `.deb` files you add are your responsibility.** They run on the device without a sandbox, so install only what you trust.
+- Security problems: see [SECURITY.md](SECURITY.md).
+
 ## Licence
 
 MIT, see `LICENSE`, **except the theme's font** (`theme/font/`, `theme/vga8x16.lua`, `theme/r3i6nos_vga8x16.h`), which is VileR's
