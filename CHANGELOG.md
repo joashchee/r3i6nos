@@ -5,6 +5,14 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **`flash-macos.sh`: games partition by default, and every failure explained** (2026-11-07). The rest of the card becomes `EASYROMS` unless `--no-games`
+  (`--games` is still accepted); new `--games-only DISK` adds it to a card that is already flashed (found when a card flashed without `--games` showed 125.7 GB
+  free and no `/roms`). Each failure (unreadable MBR, not an r3i6nos card, partition 3 already there, under 1 GiB free, write-protected card, macOS not
+  seeing the partition, exFAT format failing, not mounted, folders) prints the step, what happened and what to do, says whether the partition table was
+  already changed (so whether to re-run), leaves the card un-ejected and exits 1; the flash, unmount, size, checksum and image errors are wordier too.
+  New `tests/test_flash_macos.sh` drives it with fake `diskutil`, `plutil`, `sudo` and `dd`. **Still not run on a real card.**
+- **`flash-macos.sh --games` could not edit the MBR** (2026-11-07, found adding the games partition to a flashed card): `sudo dd of=mbr` made the file
+  root-owned, so the unprivileged `add_games_partition.py` got "Permission denied". The sector is now read into a file the shell owns. **Not re-run on a real card.**
 - **Dependabot for the GitHub Actions** (2026-11-07): `.github/dependabot.yml`, weekly, one grouped pull request for all the actions the workflows use.
   The scripts' pinned downloads (LÖVE, SDL3) are not covered and stay pinned by hand.
 - **Font licence terms done** (2026-11-07), keeping VileR's IBM VGA 8x16 (CC BY-SA 4.0): new root `NOTICE` (credit, licence link, what changed, and that the two

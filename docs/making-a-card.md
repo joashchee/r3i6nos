@@ -18,7 +18,7 @@ One-off: `brew install mtools e2fsprogs`.
    Run it once per fresh image.
 5. **Flash it** to a different microSD card:
    `scripts/flash-macos.sh r36s-loveos.img disk5 --dry-run`, then without `--dry-run`.
-   Add `--games` to use the rest of the card as the games partition (below).
+   The rest of the card, whatever its size, becomes the games partition (below); add `--no-games` to skip that.
 6. Put the card in TF1 and power on.
 
 ## Built-in apps
@@ -38,13 +38,16 @@ The menu lists what it finds under `/roms`, the partition labelled `EASYROMS`:
 
 Two ways to have that partition:
 
-- **One card:** `scripts/flash-macos.sh r36s-loveos.img disk5 --games` makes everything after the
+- **One card (the default):** `scripts/flash-macos.sh r36s-loveos.img disk5` makes everything after the
   system partition an exFAT partition named `EASYROMS` and creates the three folders. A Mac or Windows PC
-  can write to it. The card must be at least about 4 GB.
+  can write to it. The card must be at least about 4 GB. If this step fails the script says which step, what happened and what to do,
+  leaves the card in place (not ejected) and exits non-zero; the system partitions are never touched by it.
+- **A card already flashed without it:** `scripts/flash-macos.sh --games-only disk5` adds the partition without writing the image (the
+  existing partitions are kept; it refuses a card that is not an untouched r3i6nos card).
 - **Two cards:** a second card in TF2, formatted FAT32 or exFAT, labelled `EASYROMS`, with the folders above.
 
-The games partition is never formatted by the device: only `flash-macos.sh --games` creates it, once, on a
-card it has just erased. Without one, boot still works; the menu is just empty.
+The games partition is never formatted by the device: only `flash-macos.sh` creates it, once, on a
+card it has just erased (or `--games-only` on a card with free space and no partition 3). Without one, boot still works; the menu is just empty.
 
 **Never share the result.** The image contains the vendor's Mali blob, kernel
 modules and bootloader. Share the repo, not the card image.

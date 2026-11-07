@@ -64,6 +64,7 @@ else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
 
 step "shell tests"
 bash tests/test_configure_rootfs.sh || fail=1
+bash tests/test_flash_macos.sh || fail=1
 bash tests/test_image.sh || fail=1
 
 step "shell syntax"

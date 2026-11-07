@@ -63,9 +63,9 @@ All of it goes in the gitignored `local_hardware_assets/`.
   - [ ] **Legal note** for the README: images with the blob are not redistributable; say so wherever images are mentioned. (Written in `docs/making-a-card.md`.)
 - [x] **Getting the card's modules and blob into the image:** `debugfs` on the Mac (`docs/making-a-card.md`), no Linux needed.
 - [ ] **systemd 252 on kernel 4.4:** unknown until it boots (phase 5). Watch for cgroup, seccomp and `/proc` errors in the journal.
-- [x] **Games card:** `flash-macos.sh --games` (2026-11-07) adds partition 3 (exFAT, `EASYROMS`, the stock card used exfat too) in the
+- [x] **Games card:** `flash-macos.sh` makes it by default (2026-11-07; `--no-games` skips it, `--games-only` adds it to a card already flashed) and adds partition 3 (exFAT, `EASYROMS`, the stock card used exfat too) in the
   space after ROOTFS and creates `Love 11.5/`, `Love 12.0/`, `native_deb/`; the MBR edit is tested (`add_games_partition.py`). **Untried on a real
-  card.** Without `--games`, use a second card labelled `EASYROMS` in TF2 (`docs/making-a-card.md`).
+  card** (the first hardware try hit a root-owned MBR file, fixed; every failure now explains itself, tested with fake `diskutil`/`dd` in `tests/test_flash_macos.sh`). Without it, use a second card labelled `EASYROMS` in TF2 (`docs/making-a-card.md`).
 
 ## 3. Phase 2: rootfs in CI (no hardware)
 
