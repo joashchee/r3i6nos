@@ -5,6 +5,12 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **A port workflow, and the plan for the first port, KlamANSI** (2026-11-07). `scripts/build_port.sh <app> [--validate | --prepare-only DIR | --smoke]`, a reusable `port-app.yml` and
+  `apps/_port-template/` (manifest, `build.sh`, workflow and README templates; no `app.conf`, so nothing picks it up). A `TYPE=port` manifest pins public upstream source by sha256 (https only, no
+  credentials), applies `patches/`, cross-builds in Debian 12, fails unless every library the binary needs is in the rootfs's `PACKAGES` (or bundled), puts the upstream licence, source URL, hash and patches
+  in the deb, and refuses `DATA` other than none, free or user-supplied. Package lists are checked to be names only; a fork's pull request never runs the build. `check.sh` validates every port
+  manifest and runs `tests/test_build_port.sh` (refusals, fetch, pin, unpack, patch, over `file://`). New `docs/KLAMANSI-PORT.md`: QuickJS plus an SDL2 host around KlamANSI's pure modules, 48 x 24
+  display flush top-left with a 16-column side column, and the pad mapping. **Not run:** the container build and the workflow (no port yet), and nothing of KlamANSI exists on the device; `shellcheck` not installed here.
 - **A LÖVE app workflow, apart from the firmware** (2026-11-07). `apps/*/app.conf` now has `TYPE=love` too (new for `input-checker-love`); `scripts/build_love_app.sh <app>` syntax-checks
   the Lua, runs the app's tests and packs `build/love-apps/Love <version>/<NAME>.love`; new reusable `love-app.yml` and `app-input-checker-love.yml` (tag `input-checker-love-v*` releases the
   `.love` files). `configure_rootfs.sh` no longer packs the input checker itself: it copies the built `.love` files (warns when none), and `build.yml` gets a `loveapps` job that calls the same

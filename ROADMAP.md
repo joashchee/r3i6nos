@@ -160,3 +160,15 @@ All of it goes in the gitignored `local_hardware_assets/`.
 - [ ] **Release:** image uploaded by hand with `gh release upload`, checksums in the notes.
 - [ ] **Flashing guide** for macOS (from the script), Windows and Linux.
 - [ ] **Native apps:** dependency handling beyond bundled libs; choosing which binary a package launches.
+
+## 8. Ports (apps built from other people's or the maintainer's source; `docs/KLAMANSI-PORT.md`)
+
+- [x] **Port build workflow** (2026-11-07; `scripts/build_port.sh`, `.github/workflows/port-app.yml`, `apps/_port-template/`, `tests/test_build_port.sh`): a `TYPE=port`
+  manifest pins public upstream source by sha256, applies patches, cross-builds in a Debian 12 container, link-checks the binary against the rootfs's
+  packages (deb_watcher installs no dependencies), ships the upstream licence, source URL and hash in the `.deb`, and smoke-tests under qemu. Not in the image.
+  The manifest checks and the fetch, pin and patch steps are tested offline; **untested:** the container build and the workflow on GitHub (no port exists yet to run them on).
+- [ ] **KlamANSI, the first port** (plan: `docs/KLAMANSI-PORT.md`; plan only, nothing built). A native SDL2 host with QuickJS running KlamANSI's pure modules; 48 x 24 display flush
+  top-left, a 16-column side column (line, status, radial legend, panels), no tool bar or command-line rows (a documented departure from rule 8); pad mapping per the plan.
+  - [ ] **Decide** where the code lives (recommended: the private KlamANSI repo, since this repo is MIT and takes no proprietary code), how it is released (free with notices, or paid), and the typed line's place in the side column.
+  - [ ] **Spike:** QuickJS cross-built; load `klam.js` and `screens.js`, draw an example `.kan` and compare with Node. Go/no-go on browser-only APIs, speed and memory.
+  - [ ] Host, controls (pointer, radial, virtual keyboard overlay, Start menu), files and settings, package and smoke test, a try on the R36S.

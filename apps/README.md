@@ -90,6 +90,8 @@ Each native app builds on its own; the firmware only bundles the results.
   the reusable `.github/workflows/love-app.yml` (artifact `loveapp-<name>-love`) and a caller `app-<name>-love.yml` (tag `<name>-love-v*` releases one `.love` per runtime).
   It needs only python3 and luajit, no container. It does not run the app under real LÖVE (the runtimes are built by the firmware workflow); the app's fake-LÖVE tests stand in for that.
   `configure_rootfs.sh` only copies the built `.love` files into the image.
+- **Ports** (open-source programs built from pinned upstream source) have `TYPE=port`, `scripts/build_port.sh` and `port-app.yml`; `apps/_port-template/` says how. They are
+  user-installed `.deb` files in `native_deb/`, never part of the image, and may link only what the rootfs has. The first planned one is KlamANSI (`docs/KLAMANSI-PORT.md`).
 - Not tried yet: the workflows themselves (they run on GitHub; first push will show) and `build_native_app.sh` in a Debian 12 container (no Docker here).
 
 ## Trying them on a Mac

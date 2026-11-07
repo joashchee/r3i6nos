@@ -1,0 +1,59 @@
+name: Port (reusable)
+
+# Builds ONE port from apps/<app>/: the pinned upstream source is fetched, verified against its sha256, patched, cross-built
+# for arm64 in a Debian 12 container by the port's build.sh, link-checked against the rootfs's packages, packed as a .deb
+# and started under qemu with SMOKE_ARGS. Called by each port's own workflow (app-<name>.yml, from
+# apps/_port-template/app-port.yml.template). Ports are never part of the firmware image (build.yml does not call this).
+# How a port builds is in its apps/<app>/app.conf and scripts/build_port.sh; nothing here names a port.
+
+on:
+  workflow_call:
+    inputs:
+      app:
+        description: "Folder under apps/ (with an app.conf of TYPE=port and a build.sh)"
+        required: true
+        type: string
+    outputs:
+      artifact:
+        description: "Name of the uploaded artifact (the .deb)"
+        value: ${{ jobs.build.outputs.artifact }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    # The build runs the port's build.sh as root in a container and downloads upstream source: never for a fork's pull request.
+    if: ${{ github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    outputs:
+      artifact: port-${{ inputs.app }}-arm64
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the manifest
+        env:
+          APP: ${{ inputs.app }}
+        run: scripts/build_port.sh "$APP" --validate
+
+      # Cached on this port's files and the build script, so only edits to them rebuild it (the source is pinned by hash).
+      - uses: actions/cache@v6
+        id: cache
+        with:
+          path: build/ports
+          key: port-${{ inputs.app }}-${{ hashFiles('scripts/build_port.sh', 'scripts/build_rootfs.sh', format('apps/{0}/**', inputs.app)) }}
+
+      - name: Build and smoke test (arm64, Debian 12)
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          APP: ${{ inputs.app }}
+        run: |
+          docker run --rm -v "$PWD":/src -w /src debian:bookworm \
+            scripts/build_port.sh "$APP" --smoke
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: port-${{ inputs.app }}-arm64
+          path: build/ports/*.deb
+          retention-days: 7

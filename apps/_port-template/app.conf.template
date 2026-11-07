@@ -1,0 +1,20 @@
+# Copy this folder to apps/<name>-port/, rename this file to app.conf and fill it in. See scripts/build_port.sh.
+# A port is open-source software built from upstream source. The source is pinned by hash and never kept in this repo.
+TYPE=port
+NAME=Example_Port                    # the .deb's file name, and the app's name in the menu
+BIN=example                          # usr/games/<BIN>: what build.sh must install
+PKG=r36s-example                     # Debian package name
+VERSION=1.0                          # must start with a digit
+SOURCE_URL=https://example.org/example-1.0.tar.gz   # https only; a tarball (tar auto-detects the compression)
+SOURCE_SHA256=                       # 64 hex digits of that exact file: `shasum -a 256 file.tar.gz`
+SOURCE_STRIP=1                       # leading folders to drop on unpacking
+LICENSE=MIT                          # SPDX id of the program's licence
+LICENSE_FILES="LICENSE"              # files in the source that carry it; they ship in the deb
+DATA=none                            # none | free | user. user = the player supplies it; never ship proprietary data
+BUILD_TOOLS="cmake make"             # build-machine tools (apt, amd64)
+BUILD_PKGS="libsdl2-image-dev:arm64" # arm64 -dev packages to link against (libsdl2-dev is always there)
+RUNTIME_PKGS="libsdl2-2.0-0"         # runtime packages the binary needs. Each MUST already be in build_rootfs.sh's PACKAGES
+                                     # (deb_watcher installs no dependencies); otherwise bundle it or link statically
+SMOKE_ARGS="--version"               # run under qemu with dummy video; omit if the program can't start without data
+DESC="Example: one line
+ What it is, in a line or two. Built from upstream source by r3i6nos."

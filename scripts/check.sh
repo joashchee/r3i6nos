@@ -82,9 +82,19 @@ if command -v luajit >/dev/null; then
     rm -rf "$love_out"
 else echo "NOT RUN: no luajit"; fi
 
+step "ports (manifests)"
+for conf in apps/*/app.conf; do
+    [ -f "$conf" ] || continue
+    # shellcheck disable=SC1090  # the app's own manifest
+    if (TYPE=native; . "$conf"; [ "$TYPE" = port ]); then
+        scripts/build_port.sh "$(basename "$(dirname "$conf")")" --validate || fail=1
+    fi
+done
+
 step "shell tests"
 bash tests/test_configure_rootfs.sh || fail=1
 bash tests/test_flash_macos.sh || fail=1
+bash tests/test_build_port.sh || fail=1
 bash tests/test_image.sh || fail=1
 
 step "shell syntax"

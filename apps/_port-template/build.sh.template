@@ -1,0 +1,8 @@
+#!/bin/bash
+# Copy to apps/<name>-port/build.sh. Runs in the unpacked, patched source (the current folder), as root in a Debian 12 container.
+# Provided: SRC (the source), STAGE (the package root), HOST (aarch64-linux-gnu), BIN, JOBS, and CC CXX AR STRIP PKG_CONFIG
+# for the arm64 cross toolchain (PKG_CONFIG_LIBDIR already points at the arm64 libraries).
+# It must install the program as "$STAGE/usr/games/$BIN" (an arm64 ELF). Data files go under "$STAGE/usr/share/<name>/".
+set -eu
+make -j"$JOBS" CC="$CC" PKG_CONFIG="$PKG_CONFIG"
+install -D "$BIN" "$STAGE/usr/games/$BIN"

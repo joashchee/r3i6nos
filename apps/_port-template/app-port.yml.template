@@ -1,0 +1,50 @@
+name: App - Example Port
+
+# Copy to .github/workflows/app-<name>.yml and replace example-port. The port's own build, apart from the firmware's: runs when
+# the port changes, by hand, or on an `example-port-v*` tag, which publishes a release with the .deb (and the pinned source's
+# licence, URL and hash travel inside it). Never for a fork's pull request (port-app.yml refuses).
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "apps/example-port/**"
+      - "scripts/build_port.sh"
+      - ".github/workflows/port-app.yml"
+      - ".github/workflows/app-example-port.yml"
+    tags: ["example-port-v*"]
+  pull_request:
+    paths:
+      - "apps/example-port/**"
+      - "scripts/build_port.sh"
+      - ".github/workflows/port-app.yml"
+      - ".github/workflows/app-example-port.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/port-app.yml
+    with:
+      app: example-port
+
+  release:
+    needs: build
+    if: ${{ startsWith(github.ref, 'refs/tags/example-port-v') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum Example_Port.deb | tee Example_Port.deb.sha256
+          gh release create "${{ github.ref_name }}" Example_Port.deb Example_Port.deb.sha256 \
+            --repo "${{ github.repository }}" --title "Example Port ${{ github.ref_name }}" \
+            --notes "Example Port for the R36S as an arm64 .deb: drop it in \`native_deb/\` on the games card. Built from upstream source (see usr/share/doc/example/SOURCE in the package). Not run on a real R36S yet."
