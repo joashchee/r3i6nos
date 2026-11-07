@@ -5,6 +5,12 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **LÖVE for the Mac, to try apps before they go on the card** (2026-11-07). `scripts/fetch_love_mac.sh`: 11.5 is the official release,
+  checked against a pinned sha256 (tried: downloads, verifies, `LOVE 11.5 (Mysterious Mysteries)`, universal arm64 and x86_64, ad-hoc signed
+  as upstream ships it); 12.0 has no release, so it comes from the CI artifact `love-macos` of the run for the commit `build_love.sh` pins
+  (run 41957924703) through `gh`, which needs a login (stops with a message without one; **not run past that check**). Into gitignored
+  `vendor/love-mac/`. `scripts/preview_input_checker.sh` draws the real checker once under a real LÖVE with a fake R36S pad and saves a
+  PNG (`scripts/preview/`); needs a desktop, so it was **not run** here (the sandbox has no display: LÖVE says "the video driver did not add any displays").
 - **Input checker fixed from the first run on a real R36S** (2026-11-07). The unit's D-pad is four buttons (9 left, 10 down, 11 up, 12 right),
   Fn 13, Select 14, L3 15, R3 16, Start 17, and SDL's gamepad mapping does not match, so the first version lit nothing for the D-pad, Select,
   Fn and Start, and its Select+Start exit (which needed the mapping) never fired. Now: everything reads raw buttons from one `LAYOUT` table

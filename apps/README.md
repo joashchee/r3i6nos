@@ -34,3 +34,20 @@ PWR pills light from keyboard key events, if the system delivers them (not yet s
 **Run on a real R36S:** the first LÖVE 11.5 version (2026-11-07), which found its layout bugs. This revision has not been.
 Tested here: the logic, the LÖVE code against a fake LÖVE, the native app's draw and self-test on a Mac (dummy video).
 The LÖVE layout itself has only been drawn by LÖVE on the device; the native one is checked by screenshot here.
+
+## Trying them on a Mac
+
+```sh
+scripts/fetch_love_mac.sh 11.5                 # official release, sha256-pinned -> vendor/love-mac/11.5/love.app
+gh auth login                                  # once: the 12.0 build is a CI artifact and needs a login
+scripts/fetch_love_mac.sh 12.0                 # the macOS build of the commit build_love.sh pins -> vendor/love-mac/12.0/
+vendor/love-mac/11.5/love.app/Contents/MacOS/love apps/input-checker-love     # run it (no pad: "NO GAMEPAD")
+scripts/preview_input_checker.sh 11.5          # draws it once with a fake R36S pad -> build/preview/input-checker-11.5.png
+scripts/preview_input_checker.sh 12.0
+```
+
+`vendor/` and `build/` are gitignored. The preview needs a desktop session (it opens a window for a moment).
+The 12.0 download has not been run end to end: artifacts expire after 90 days, and the first run prints the
+artifact's sha256 so it can be pinned in `fetch_love_mac.sh`. A Mac cannot run the native ARM64 `.deb`; build the C app
+with `cc ... $(sdl2-config --cflags --libs)` instead (see `scripts/check.sh`) and run `--screenshot out.bmp` for a demo frame.
+
