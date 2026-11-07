@@ -54,7 +54,7 @@ if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     for conf in apps/*/app.conf; do
         [ -f "$conf" ] || continue
         # shellcheck disable=SC1090  # the app's own manifest
-        name="$( . "$conf"; echo "$BIN")"; src="$(dirname "$conf")/$( . "$conf"; echo "$SRC")"
+        read -r name src < <(. "$conf"; echo "$BIN $(dirname "$conf")/$SRC")
         native_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-native.XXXXXX")"
         # shellcheck disable=SC2046  # sdl2-config prints separate flags
         if cc -std=c11 -Wall -Wextra $werror -O2 -I theme $(sdl2-config --cflags) -o "$native_bin" "$src" $(sdl2-config --libs) -lm; then

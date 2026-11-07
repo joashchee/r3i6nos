@@ -29,7 +29,7 @@ SMOKE=""
 CONF="$REPO/apps/$APP_DIR/app.conf"
 [ -f "$CONF" ] || { echo "build_native_app: no $CONF" >&2; exit 1; }
 
-NAME="" BIN="" PKG="" SRC="" THEME=0 DEFAULT=0 DESC=""
+NAME="" BIN="" PKG="" SRC="" THEME=0 DESC=""
 # shellcheck disable=SC1090  # the app's own manifest
 . "$CONF"
 for v in NAME BIN PKG SRC DESC; do
