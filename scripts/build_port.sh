@@ -77,7 +77,7 @@ for p in $BUILD_TOOLS $BUILD_PKGS $RUNTIME_PKGS; do
 done
 [ -f "$APPS/$APP_DIR/build.sh" ] || die "no apps/$APP_DIR/build.sh"
 # deb_watcher runs no dpkg: every runtime package must already be in the rootfs, as a whole name in PACKAGES.
-rootfs_pkgs="$(sed -n '/^PACKAGES=(/,/^)/p' "$REPO/scripts/build_rootfs.sh" | sed 's/#.*//' | tr -s ' \t' '\n\n')"
+rootfs_pkgs="$(sed -n '/^PACKAGES=(/,/^)/p' "$REPO/scripts/build_rootfs.sh" | sed 's/#.*//' | tr -s ' \t' '\n')"
 for p in $RUNTIME_PKGS; do
     if ! grep -qxF -- "$p" <<<"$rootfs_pkgs"; then
         die "runtime package $p is not in the rootfs (scripts/build_rootfs.sh PACKAGES): add it there (a firmware change), bundle it, or link statically"
@@ -137,7 +137,8 @@ prepare "$work"
 echo "[*] Building $NAME (arm64)..."
 (
     cd "$work/src"
-    export SRC="$work/src" STAGE="$stage" HOST BIN JOBS="$(nproc)"
+    JOBS="$(nproc)"
+    export SRC="$work/src" STAGE="$stage" HOST BIN JOBS
     export CC="$HOST-gcc" CXX="$HOST-g++" AR="$HOST-ar" STRIP="$HOST-strip" PKG_CONFIG="pkg-config"
     bash "$APPS/$APP_DIR/build.sh"
 )
