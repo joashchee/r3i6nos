@@ -14,7 +14,8 @@ touch "$R/usr/share/doc/foo/copyright" "$R/usr/share/doc/foo/changelog.gz" "$R/u
 mkdir -p "$T/love/11.5/bin" "$T/love/notaruntime"
 printf '#!/bin/sh\n' > "$T/love/11.5/bin/love"; chmod +x "$T/love/11.5/bin/love"
 mkdir -p "$T/native"; printf 'not a real deb' > "$T/native/Input_Checker_Native.deb"
-R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/native" scripts/configure_rootfs.sh "$R" >/dev/null
+for v in 11.5 12.0; do mkdir -p "$T/loveapps/Love $v"; python3 -I scripts/pack_love.py apps/input-checker-love "$T/loveapps/Love $v/Input_Checker.love" >/dev/null; done
+R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/native" R3I6NOS_LOVE_APPS_BUILD="$T/loveapps" scripts/configure_rootfs.sh "$R" >/dev/null
 
 [ -x "$R/opt/love/11.5/bin/love" ]              || fail "LÖVE 11.5 not installed"
 [ ! -e "$R/opt/love/notaruntime" ]              || fail "a folder without bin/love was installed"
@@ -38,9 +39,10 @@ done
 [ -f "$R/opt/loveos/defaults/native_deb/Input_Checker_Native.deb" ] || fail "default native deb not installed"
 [ "$(find "$R/opt/loveos/defaults" -type f ! -perm -444 | wc -l | tr -d ' ')" = 0 ] || fail "defaults must be world-readable"
 R2="$T/rootfs-no-native"; mkdir -p "$R2"
-R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/nothing-here" scripts/configure_rootfs.sh "$R2" >/dev/null 2>"$T/warn.txt" \
+R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/nothing-here" R3I6NOS_LOVE_APPS_BUILD="$T/nothing-here" scripts/configure_rootfs.sh "$R2" >/dev/null 2>"$T/warn.txt" \
     || fail "a missing native app must be a warning, not an error"
 grep -q 'No native default app' "$T/warn.txt" || fail "no warning when the native app is missing"
+grep -q 'No LÖVE default app' "$T/warn.txt" || fail "no warning when the LÖVE app is missing"
 [ ! -e "$R2/opt/loveos/defaults/native_deb/Input_Checker_Native.deb" ] || fail "phantom native deb"
 [ -x "$R/usr/local/bin/r3i6nos-bootlog" ]        || fail "r3i6nos-bootlog not installed executable"
 [ -L "$R/etc/systemd/system/multi-user.target.wants/r3i6nos-bootlog.service" ] || fail "bootlog unit not enabled"

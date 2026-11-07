@@ -5,6 +5,11 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **A LÖVE app workflow, apart from the firmware** (2026-11-07). `apps/*/app.conf` now has `TYPE=love` too (new for `input-checker-love`); `scripts/build_love_app.sh <app>` syntax-checks
+  the Lua, runs the app's tests and packs `build/love-apps/Love <version>/<NAME>.love`; new reusable `love-app.yml` and `app-input-checker-love.yml` (tag `input-checker-love-v*` releases the
+  `.love` files). `configure_rootfs.sh` no longer packs the input checker itself: it copies the built `.love` files (warns when none), and `build.yml` gets a `loveapps` job that calls the same
+  reusable workflow. The native build scripts skip `TYPE=love` manifests; `check.sh` builds every LÖVE app. `tests/test_configure_rootfs.sh` covers both the copy and the warning.
+  **Not run:** the workflows on GitHub, and the packed apps under real LÖVE by this workflow (only the fake-LÖVE tests); `check.sh` passes on the Mac, `shellcheck` is not installed here.
 - **`app-input-checker-native.yml`** (2026-11-07): the native input checker gets its own build and release workflow, like Commander's (tag `input-checker-native-v*`). Not run on GitHub yet.
 - **Each native app builds on its own, apart from the firmware** (2026-11-07), starting with Commander. New `apps/*/app.conf` manifests and
   `scripts/build_native_app.sh <app> [--smoke]` (one app to one `.deb`, plus a qemu self-test); `build_native_apps.sh` now only loops over the

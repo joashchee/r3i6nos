@@ -85,6 +85,11 @@ Each native app builds on its own; the firmware only bundles the results.
   a GitHub release with the `.deb`. Copy `app-commander.yml` for a new app.
 - The firmware (`build.yml`, `scripts/build_native_apps.sh`) builds only the `DEFAULT=1` apps, through the same reusable workflow. An app that is
   not a default (a port, an extra) is released by its own workflow and never enters the image; the user drops its `.deb` in `native_deb/`.
+- **LÖVE apps work the same way:** `apps/<name>-love/app.conf` (`TYPE=love`, `NAME`, `RUNTIMES`, optional `TESTS`, `DEFAULT`),
+  `scripts/build_love_app.sh <name>-love` (Lua syntax check of every file, the app's tests under luajit, then `build/love-apps/Love <version>/<NAME>.love` per runtime),
+  the reusable `.github/workflows/love-app.yml` (artifact `loveapp-<name>-love`) and a caller `app-<name>-love.yml` (tag `<name>-love-v*` releases one `.love` per runtime).
+  It needs only python3 and luajit, no container. It does not run the app under real LÖVE (the runtimes are built by the firmware workflow); the app's fake-LÖVE tests stand in for that.
+  `configure_rootfs.sh` only copies the built `.love` files into the image.
 - Not tried yet: the workflows themselves (they run on GitHub; first push will show) and `build_native_app.sh` in a Debian 12 container (no Docker here).
 
 ## Trying them on a Mac

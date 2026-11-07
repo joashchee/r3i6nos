@@ -24,7 +24,8 @@ document that has the detail. Nothing here has run on a real R36S yet.
 - [x] **Per-app build workflows, apart from the firmware** (2026-11-07; `apps/README.md`, "Adding an app"): `app.conf` + `scripts/build_native_app.sh` + reusable `native-app.yml` + `app-commander.yml`
   (tag `commander-v*` releases the `.deb`). **Untested:** the workflows on GitHub and the build script in a Debian 12 container.
   - [x] `app-input-checker-native.yml` added the same way (tag `input-checker-native-v*`).
-  - [ ] The LÖVE apps' equivalent (a reusable pack-and-test workflow producing a `.love`), when the first port or LÖVE app beyond the defaults lands.
+  - [x] **LÖVE apps' equivalent** (`TYPE=love`, `build_love_app.sh`, `love-app.yml`, `app-input-checker-love.yml`). **Untested:** on GitHub; the `.love` is not run under real LÖVE by it.
+  - [ ] Ports (prebuilt or cross-built ARM64 games) have no workflow yet: decide their shape (a `TYPE=port` manifest that builds or fetches, then packs a `.deb`) when the first one lands.
 - [x] **Settings dialog with Shutdown** (2026-11-07; Start / S opens it, Shutdown asks "Yes / No" with No preselected, then the session
   leaves a flag, exits 0, and `loveos.service`'s root `ExecStopPost` runs `r3i6nos-poweroff` -> `systemctl --no-block poweroff`).
   Logic, session and poweroff script are tested on the laptop. **Untested on the R36S:** that the Start button (raw 14) opens it, that

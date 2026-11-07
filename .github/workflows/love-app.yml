@@ -1,0 +1,45 @@
+name: LÖVE app (reusable)
+
+# Builds ONE LÖVE app from apps/<app>/: syntax check, the app's own tests, and a .love per LÖVE version.
+# Called by each app's own workflow (app-<name>.yml) and by build.yml for the apps in the firmware image.
+# How an app builds is in its apps/<app>/app.conf and scripts/build_love_app.sh; nothing here names an app.
+# It does not run the app under LÖVE (that needs the runtimes, which build.yml builds).
+
+on:
+  workflow_call:
+    inputs:
+      app:
+        description: "Folder under apps/ (with an app.conf of TYPE=love)"
+        required: true
+        type: string
+    outputs:
+      artifact:
+        description: "Name of the uploaded artifact (Love <version>/<NAME>.love)"
+        value: ${{ jobs.build.outputs.artifact }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    outputs:
+      artifact: loveapp-${{ inputs.app }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install luajit
+        run: sudo apt-get update && sudo apt-get install -y luajit
+
+      - name: Check, test and pack
+        env:
+          APP: ${{ inputs.app }}
+        run: scripts/build_love_app.sh "$APP"
+
+      # build/love-apps/Love <version>/<NAME>.love, kept as folders so the firmware can merge them
+      - uses: actions/upload-artifact@v7
+        with:
+          name: loveapp-${{ inputs.app }}
+          path: build/love-apps
+          retention-days: 7

@@ -29,9 +29,10 @@ SMOKE=""
 CONF="$REPO/apps/$APP_DIR/app.conf"
 [ -f "$CONF" ] || { echo "build_native_app: no $CONF" >&2; exit 1; }
 
-NAME="" BIN="" PKG="" SRC="" THEME=0 DESC=""
+TYPE=native NAME="" BIN="" PKG="" SRC="" THEME=0 DESC=""
 # shellcheck disable=SC1090  # the app's own manifest
 . "$CONF"
+[ "$TYPE" = native ] || { echo "build_native_app: $CONF is not TYPE=native (a LÖVE app: scripts/build_love_app.sh)" >&2; exit 1; }
 for v in NAME BIN PKG SRC DESC; do
     [ -n "${!v}" ] || { echo "build_native_app: $CONF does not set $v" >&2; exit 1; }
 done

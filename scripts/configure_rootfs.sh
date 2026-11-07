@@ -40,13 +40,23 @@ fi
 
 # Default apps, built into the image so the menu is never empty (the games card's own files are listed beside
 # them, and replace one of the same name): the input checker as a LÖVE 11.5 app, a LÖVE 12.0 app and a native
-# ARM64 .deb (built by build_native_apps.sh; deb_watcher.py installs it at boot).
+# ARM64 .deb (built by build_native_apps.sh; deb_watcher.py installs it at boot). None is built here: each app has its own build.
 DEFAULTS="$ROOTFS/opt/loveos/defaults"
 rm -rf "$DEFAULTS"
 mkdir -p "$DEFAULTS/Love 11.5" "$DEFAULTS/Love 12.0" "$DEFAULTS/native_deb"
-for v in 11.5 12.0; do
-    python3 -I "$REPO/scripts/pack_love.py" "$REPO/apps/input-checker-love" "$DEFAULTS/Love $v/Input_Checker.love"
+# The LÖVE default apps are built by scripts/build_love_app.sh (build/love-apps/Love <version>/<NAME>.love); this only copies them.
+LOVE_APPS_BUILD="${R3I6NOS_LOVE_APPS_BUILD:-$REPO/build/love-apps}"
+have_love_apps=""
+for love in "$LOVE_APPS_BUILD"/Love\ */*.love; do
+    if [ -f "$love" ]; then
+        mkdir -p "$DEFAULTS/$(basename "$(dirname "$love")")"
+        cp "$love" "$DEFAULTS/$(basename "$(dirname "$love")")/"
+        have_love_apps=1
+    fi
 done
+if [ -z "$have_love_apps" ]; then
+    echo "[!] No LÖVE default app in $LOVE_APPS_BUILD: run scripts/build_love_app.sh input-checker-love (the image will have no LÖVE app)" >&2
+fi
 NATIVE_BUILD="${R3I6NOS_NATIVE_BUILD:-$REPO/build/native}"
 have_native=""
 for deb in "$NATIVE_BUILD"/*.deb; do

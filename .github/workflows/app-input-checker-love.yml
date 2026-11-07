@@ -1,0 +1,61 @@
+name: App - Input Checker (LÖVE)
+
+# The LÖVE input checker's own build, apart from the firmware's. Runs when it changes, by hand, or on an
+# `input-checker-love-v*` tag, which also publishes a GitHub release with the .love. The firmware build (build.yml)
+# bundles the same app through the same reusable workflow.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "apps/input-checker-love/**"
+      - "tests/test_input_checker.lua"
+      - "scripts/build_love_app.sh"
+      - "scripts/pack_love.py"
+      - ".github/workflows/love-app.yml"
+      - ".github/workflows/app-input-checker-love.yml"
+    tags: ["input-checker-love-v*"]
+  pull_request:
+    paths:
+      - "apps/input-checker-love/**"
+      - "tests/test_input_checker.lua"
+      - "scripts/build_love_app.sh"
+      - "scripts/pack_love.py"
+      - ".github/workflows/love-app.yml"
+      - ".github/workflows/app-input-checker-love.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/love-app.yml
+    with:
+      app: input-checker-love
+
+  release:
+    needs: build
+    if: ${{ startsWith(github.ref, 'refs/tags/input-checker-love-v') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+          path: out
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # one file per LÖVE version, named so they do not collide: Input_Checker_Love_11.5.love
+          mkdir assets
+          for d in out/Love\ *; do
+            v="${d#out/Love }"
+            for f in "$d"/*.love; do cp "$f" "assets/$(basename "$f" .love)_Love_$v.love"; done
+          done
+          (cd assets && sha256sum ./*.love | tee SHA256SUMS)
+          gh release create "${{ github.ref_name }}" assets/* \
+            --repo "${{ github.repository }}" --title "Input Checker (LÖVE) ${{ github.ref_name }}" \
+            --notes "The R36S input checker as a .love for LÖVE 11.5 and 12.0: drop the one for your runtime in \`Love 11.5/\` or \`Love 12.0/\` on the games card. Not run on a real R36S since its last layout change."

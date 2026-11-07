@@ -59,8 +59,19 @@ jobs:
     with:
       app: ${{ matrix.app }}
 
+  loveapps:
+    # The LÖVE default apps, each built (checked, tested, packed) by its own reusable workflow, the same one its
+    # app-<name>.yml uses; the firmware only bundles the .love files.
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [input-checker-love]
+    uses: ./.github/workflows/love-app.yml
+    with:
+      app: ${{ matrix.app }}
+
   rootfs:
-    needs: [love, native]
+    needs: [love, native, loveapps]
     # Build the rootfs with whatever runtimes were built, so a failing 12.0 does
     # not hide the rest. The run is still red: the love job failed.
     if: ${{ !cancelled() }}
@@ -78,6 +89,12 @@ jobs:
         with:
           pattern: native-*-arm64
           path: build/native
+          merge-multiple: true
+
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: loveapp-*
+          path: build/love-apps
           merge-multiple: true
 
       - name: Unpack LÖVE

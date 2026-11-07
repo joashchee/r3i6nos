@@ -19,7 +19,7 @@ built=0
 for conf in "$REPO"/apps/*/app.conf; do
     [ -f "$conf" ] || continue
     # shellcheck disable=SC1090  # the app's own manifest
-    if (DEFAULT=0; . "$conf"; [ "$DEFAULT" = 1 ]); then
+    if (TYPE=native DEFAULT=0; . "$conf"; [ "$TYPE" = native ] && [ "$DEFAULT" = 1 ]); then
         "$REPO/scripts/build_native_app.sh" "$(basename "$(dirname "$conf")")"
         built=$((built + 1))
     fi

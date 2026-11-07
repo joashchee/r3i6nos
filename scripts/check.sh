@@ -54,7 +54,8 @@ if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     for conf in apps/*/app.conf; do
         [ -f "$conf" ] || continue
         # shellcheck disable=SC1090  # the app's own manifest
-        read -r name src < <(. "$conf"; echo "$BIN $(dirname "$conf")/$SRC")
+        read -r name src < <(TYPE=native; . "$conf"; [ "$TYPE" = native ] && echo "$BIN $(dirname "$conf")/$SRC")
+        [ -n "$name" ] || continue          # a LÖVE app (checked below)
         native_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-native.XXXXXX")"
         # shellcheck disable=SC2046  # sdl2-config prints separate flags
         if cc -std=c11 -Wall -Wextra $werror -O2 -I theme $(sdl2-config --cflags) -o "$native_bin" "$src" $(sdl2-config --libs) -lm; then
@@ -67,6 +68,19 @@ if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
         rm -f "$native_bin"
     done
 else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
+
+step "LÖVE apps (check, test, pack)"
+if command -v luajit >/dev/null; then
+    love_out="$(mktemp -d "${TMPDIR:-/tmp}/r3i6nos-loveapps.XXXXXX")"
+    for conf in apps/*/app.conf; do
+        [ -f "$conf" ] || continue
+        # shellcheck disable=SC1090  # the app's own manifest
+        if (TYPE=native; . "$conf"; [ "$TYPE" = love ]); then
+            R3I6NOS_LOVE_APPS_OUT="$love_out" scripts/build_love_app.sh "$(basename "$(dirname "$conf")")" || fail=1
+        fi
+    done
+    rm -rf "$love_out"
+else echo "NOT RUN: no luajit"; fi
 
 step "shell tests"
 bash tests/test_configure_rootfs.sh || fail=1
