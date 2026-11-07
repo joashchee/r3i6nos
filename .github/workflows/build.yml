@@ -24,9 +24,9 @@ jobs:
       matrix:
         version: ["11.5", "12.0"]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         id: cache
         with:
           path: build/love/${{ matrix.version }}
@@ -42,7 +42,7 @@ jobs:
       - name: Pack
         run: tar -C build/love -cf love-${{ matrix.version }}.tar ${{ matrix.version }}
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: love-${{ matrix.version }}-arm64
           path: love-${{ matrix.version }}.tar
@@ -54,9 +54,9 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         id: cache
         with:
           path: build/native
@@ -68,7 +68,7 @@ jobs:
           docker run --rm -v "$PWD":/src -w /src debian:bookworm \
             scripts/build_native_apps.sh
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: native-apps-arm64
           path: build/native/*.deb
@@ -82,14 +82,14 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: love-*-arm64
           merge-multiple: true
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: native-apps-arm64
           path: build/native
@@ -160,7 +160,7 @@ jobs:
           sudo tar --numeric-owner -C build/rootfs -cf - . | zstd -T0 -10 -o r3i6nos-rootfs.tar.zst
           sha256sum r3i6nos-rootfs.tar.zst | tee r3i6nos-rootfs.tar.zst.sha256
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: r3i6nos-rootfs
           path: |
@@ -174,7 +174,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install image tools
         run: |
@@ -184,7 +184,7 @@ jobs:
       - name: Image script tests (tiny fake image)
         run: sudo bash tests/test_image.sh
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: r3i6nos-rootfs
 
@@ -206,7 +206,7 @@ jobs:
           sha256sum r36s-loveos.img.gz | sudo tee r36s-loveos.img.gz.sha256
           ls -lh r36s-loveos.img.gz
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: r3i6nos-image
           path: |
