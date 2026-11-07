@@ -44,4 +44,6 @@ Layout and rules are in `CLAUDE.md`; what's next is in `ROADMAP.md`.
 
 ## Licence
 
-MIT, see `LICENSE`. LÖVE is zlib-licensed; the base system and runtimes keep their own licences.
+MIT, see `LICENSE`, **except the theme's font** (`theme/font/`, `theme/vga8x16.lua`, `theme/r3i6nos_vga8x16.h`), which is VileR's
+IBM VGA 8x16 under CC BY-SA 4.0 (credit: *The Ultimate Oldschool PC Font Pack*, <https://int10h.org/oldschool-pc-fonts/>; see `NOTICE`).
+LÖVE is zlib-licensed; the base system and runtimes keep their own licences.

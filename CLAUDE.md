@@ -16,6 +16,7 @@ is blocked and on what.
   (`usr/local/bin/`, `etc/systemd/system/`). Paths mirror the device.
 - `menu/`: the boot menu, a LÖVE 11.5 app installed at `/opt/loveos/menu`.
 - `apps/`: the default apps built into the image (`/opt/loveos/defaults`): the input checker as LÖVE 11.5, LÖVE 12.0 and native ARM64. See `apps/README.md`.
+- `theme/`: the r3i6nos-ansiapps text-mode theme (font, screen, list dialogs); installed at `/opt/loveos/theme`. See `docs/R3I6NOS-ANSIAPPS-THEME.md`.
 - `scripts/`: host-side tools. `check.sh` runs everything CI runs.
 - `tests/`: Python (`unittest`) and Lua tests; no hardware needed.
 - `vendor/`, `build/`, `local_hardware_assets/`: fetched, built or captured, gitignored.
@@ -42,6 +43,11 @@ is blocked and on what.
 6. **No telemetry, no network at boot, no accounts.**
 7. **Keep the user's data safe:** the games card (`EASYROMS`) is theirs. Boot
    scripts only read it; never format, repartition or delete from it.
+8. **Every app made for r3i6nos starts from the r3i6nos-ansiapps theme** (`theme/`, `docs/R3I6NOS-ANSIAPPS-THEME.md`): the IBM VGA
+   8x16 font scaled to 10x20, **64 columns by 24 rows** on the 640x480 screen, row 0 the reserved top bar, rows 1-20 the display view, rows 21-23
+   the three-row command line (reply, prompt, status), list dialogs and their button rules as KlamANSI does them, only the 16 VGA colours in
+   pairs that pass 4.5:1, nothing scrolls. New apps, LÖVE or native, copy the menu's structure; an app that cannot follow it says why in its README.
+   The font is CC BY-SA 4.0: keep `NOTICE`, `theme/font/` (licence, credit, changes) and the headers of the generated font files intact.
 
 ## Check before committing
 

@@ -5,6 +5,19 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **Font licence terms done** (2026-11-07), keeping VileR's IBM VGA 8x16 (CC BY-SA 4.0): new root `NOTICE` (credit, licence link, what changed, and that the two
+  generated font files are CC BY-SA, not MIT); `README.md`'s licence section says so; `theme/font/README.txt` rewritten (the old one claimed the font was never
+  converted, which stopped being true); both generated files now carry the full credit, licence link, change statement and warranty notice
+  (`build_vga_font.py` writes them); a test checks the notices, the licence text and `NOTICE`. Not legal advice: it follows CC's attribution and ShareAlike terms.
+- **The r3i6nos-ansiapps theme, and the menu on it** (2026-11-07). New rule (CLAUDE.md 8): every app made for r3i6nos starts from it. `theme/`:
+  the IBM VGA 8x16 font (WebPlus, VileR's pack, CC BY-SA 4.0; original and licence in `theme/font/`) rasterised by `scripts/build_vga_font.py`
+  into `vga8x16.lua` and `r3i6nos_vga8x16.h` and scaled to **10x20** by nearest neighbour; a **64x24-cell** screen on 640x480 with the top row
+  reserved for a bar, rows 1-20 the display view and rows 21-23 the three-row command line (reply, prompt, status) as in KlamANSI; box and list
+  dialogs with whole pages (`Page x/y`), KlamANSI's list rule on the R36S's buttons (D-pad select, L1/R1 or left/right page, L2/R2 top/end, A
+  accept, B back, Start more); 16 VGA colours only, every pair checked at 4.5:1. The menu (`menu/main.lua`, new `menu/view.lua`) and the Settings and
+  Shutdown dialogs are drawn with it: 18 games a page instead of 12. The menu now reads **raw buttons only** (its SDL gamepad mapping did not match this pad).
+  `configure_rootfs.sh` installs `theme/` at `/opt/loveos/theme`; CI installs Pillow so the generated font is compared with the font.
+  Tests: `tests/test_theme.lua`, `tests/test_menu_view.lua`. **`theme.init`/`theme.draw` have not run with a display, nor on an R36S.** The input checkers do not use it yet.
 - **Power pill moved left of the volume pills** (2026-11-07), both checkers: PWR, VOL-, VOL+ (power is on the left of the R36S, volume on the right).
   L1/R1/L2/R2 (5-8) and the power/volume key names are confirmed correct on the unit, so they are no longer "assumed".
 - **Button layout corrected from the R36S** (2026-11-07): D-pad up 9, down 10, left 11, right 12; Select 13, Start 14, Fn 17; **A is 2 and B is 1**

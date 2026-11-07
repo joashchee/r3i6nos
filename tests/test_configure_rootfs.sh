@@ -21,6 +21,8 @@ R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/native" scripts/configure_
 [ -x "$R/usr/local/bin/run_app.sh" ]            || fail "run_app.sh not installed executable"
 [ -x "$R/usr/local/bin/loveos-session" ]        || fail "loveos-session not installed executable"
 [ -f "$R/opt/loveos/menu/main.lua" ]            || fail "menu not installed"
+[ -f "$R/opt/loveos/theme/r3i6nos_ansiapps.lua" ] && [ -f "$R/opt/loveos/theme/vga8x16.lua" ] || fail "theme not installed"
+[ -f "$R/opt/loveos/theme/font/LICENSE.TXT" ]    || fail "the font's licence must ship with the theme"
 [ "$(cat "$R/etc/hostname")" = r3i6nos ]        || fail "hostname"
 grep -q 'LABEL=EASYROMS /roms' "$R/etc/fstab"   || fail "fstab games card"
 grep -q 'nofail' "$R/etc/fstab"                 || fail "fstab nofail"

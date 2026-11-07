@@ -17,6 +17,10 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
     fi
 else echo "NOT RUN: not a git checkout"; fi
 
+step "theme font up to date"
+if python3 -c "import PIL" 2>/dev/null; then python3 scripts/build_vga_font.py --check || fail=1
+else echo "NOT RUN: Pillow is not installed (the generated font files were not compared with the font)"; fi
+
 step "python tests"
 python3 -I -m unittest discover -s tests -v || fail=1
 
@@ -24,16 +28,20 @@ step "lua tests"
 if command -v luajit >/dev/null; then
     luajit tests/test_scan.lua || fail=1
     luajit tests/test_settings.lua || fail=1
+    luajit tests/test_theme.lua || fail=1
+    luajit tests/test_menu_view.lua || fail=1
     luajit tests/test_input_checker.lua || fail=1
 elif command -v lua >/dev/null; then
     lua tests/test_scan.lua || fail=1
     lua tests/test_settings.lua || fail=1
+    lua tests/test_theme.lua || fail=1
+    lua tests/test_menu_view.lua || fail=1
     lua tests/test_input_checker.lua || fail=1
 else echo "NOT RUN: no lua/luajit"; fi
 
 step "lua syntax"
 if command -v luajit >/dev/null; then
-    for f in menu/*.lua apps/*/*.lua scripts/preview/*.lua tests/smoke/love/*.lua; do
+    for f in menu/*.lua theme/*.lua apps/*/*.lua scripts/preview/*.lua tests/smoke/love/*.lua; do
         luajit -bl "$f" >/dev/null || fail=1
     done
 else echo "NOT RUN: no luajit"; fi

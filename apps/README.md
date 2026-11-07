@@ -1,5 +1,7 @@
 # Default apps
 
+> New apps start from the r3i6nos-ansiapps theme (`docs/R3I6NOS-ANSIAPPS-THEME.md`). These input checkers predate it and draw their own screen.
+
 Built into every image (`/opt/loveos/defaults`), so the menu is never empty. Anything on the games card
 (`EASYROMS`) is listed beside them, and a file of the same name there replaces the built-in one.
 

@@ -1,0 +1,12 @@
+r3i6nos: third-party material with its own licence
+
+The repository's own code is MIT (LICENSE). These parts are not:
+
+IBM VGA 8x16 font (theme/font/, theme/vga8x16.lua, theme/r3i6nos_vga8x16.h)
+  "WebPlus IBM VGA 8x16" from The Ultimate Oldschool PC Font Pack v2.2 by VileR,
+  https://int10h.org/oldschool-pc-fonts/ , (c) 2016-2020 VileR.
+  Licence: CC BY-SA 4.0, https://creativecommons.org/licenses/by-sa/4.0/ (theme/font/LICENSE.TXT).
+  Changed: rasterised to 8x16 bitmaps (the two generated files) and scaled to 10x20 at run time.
+  The generated files are adaptations and stay under CC BY-SA 4.0. Details: theme/font/README.txt.
+
+LÖVE is zlib-licensed; the base system and runtimes keep their own licences.

@@ -18,6 +18,9 @@ cp -a "$REPO/overlay/." "$ROOTFS/"
 mkdir -p "$ROOTFS/opt/loveos"
 rm -rf "$ROOTFS/opt/loveos/menu"
 cp -a "$REPO/menu" "$ROOTFS/opt/loveos/menu"
+# The r3i6nos-ansiapps theme, shared by the menu and every LÖVE app (they add /opt/loveos/theme to package.path).
+rm -rf "$ROOTFS/opt/loveos/theme"
+cp -a "$REPO/theme" "$ROOTFS/opt/loveos/theme"
 chmod 755 "$ROOTFS"/usr/local/bin/*
 
 # LÖVE runtimes built by build_love.sh (build/love/<version>/) go to /opt/love/<version>/.

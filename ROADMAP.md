@@ -9,6 +9,14 @@ document that has the detail. Nothing here has run on a real R36S yet.
 - [x] **Overlay scripts:** `deb_watcher.py` (tested), `run_app.sh`,
   `loveos-session` in `overlay/`, rewritten from the spec's drafts (see CHANGELOG for what changed).
 - [x] **Menu:** LÖVE 11.5 launcher in `menu/`, paged list, scan tested.
+- [x] **r3i6nos-ansiapps theme** (2026-11-07, `docs/R3I6NOS-ANSIAPPS-THEME.md`, CLAUDE.md rule 8): VGA 8x16 scaled to 10x20, 64x24 cells on 640x480,
+  reserved top bar, 20-row display view, three-row command line, KlamANSI list dialogs on the pad's buttons. The menu and its Settings
+  dialog use it. Font data and layout, list logic and the menu's screen are tested with luajit. **Untested:** `theme.init`/`theme.draw` under LÖVE
+  with a display (the sandbox has none) and everything on the R36S: that `require` finds `/opt/loveos/theme` through `package.path` under LÖVE,
+  that the canvas and sprite batch draw on the Mali blob's GLES, and how the 10x20 glyphs look on the panel.
+  - [ ] **Look at it on a Mac first:** run the menu under `vendor/love-mac` with `R3I6NOS_THEME=theme` and `R3I6NOS_ROMS` set to a folder of dummy games, and check the glyphs.
+  - [ ] **Move the input checkers onto the theme** (LÖVE and the C app) when next changed; they keep their own pad picture for now.
+  - [ ] **A C version of the theme** (cells, list dialog, command line over SDL2) for native apps; today only the font header exists.
 - [x] **Settings dialog with Shutdown** (2026-11-07; Start / S opens it, Shutdown asks "Yes / No" with No preselected, then the session
   leaves a flag, exits 0, and `loveos.service`'s root `ExecStopPost` runs `r3i6nos-poweroff` -> `systemctl --no-block poweroff`).
   Logic, session and poweroff script are tested on the laptop. **Untested on the R36S:** that the Start button (raw 14) opens it, that

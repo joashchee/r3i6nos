@@ -5,7 +5,7 @@ local APP, OUT = os.getenv("CHECKER_DIR"), os.getenv("CHECKER_OUT")
 assert(APP and OUT, "CHECKER_DIR and CHECKER_OUT must be set (use scripts/preview_input_checker.sh)")
 package.path = APP .. "/?.lua;" .. package.path
 
-local raw = { [11] = true, [12] = true, [15] = true, [13] = true, [1] = true, [5] = true } -- up, right, L3, Fn, A, L1
+local raw = { [9] = true, [12] = true, [15] = true, [17] = true, [2] = true, [5] = true } -- up, right, L3, Fn, A, L1
 local pad = {
   getName = function() return "retrogame_joypad (fake)" end,
   getGUID = function() return "190000004b4800000010000001010000" end,
@@ -24,8 +24,8 @@ local appLoad, appDraw = love.load, love.draw
 local frames = 0
 function love.load()
   appLoad()
-  love.joystickpressed(pad, 11); love.joystickpressed(pad, 15); love.joystickaxis(pad, 1, 0.9)
-  love.joystickreleased(pad, 5); love.keypressed("volumeup"); love.joystickpressed(pad, 1)
+  love.joystickpressed(pad, 9); love.joystickpressed(pad, 15); love.joystickaxis(pad, 1, 0.9)
+  love.joystickreleased(pad, 5); love.keypressed("volumeup"); love.joystickpressed(pad, 2)
 end
 function love.draw()
   appDraw()
