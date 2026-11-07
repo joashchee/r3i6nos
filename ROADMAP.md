@@ -182,6 +182,13 @@ All of it goes in the gitignored `local_hardware_assets/`.
   The manifest checks and the fetch, pin and patch steps are tested offline; **untested:** the container build and the workflow on GitHub (no port exists yet to run them on).
 - [ ] **KlamANSI, the first port** (plan: `docs/KLAMANSI-PORT.md`; plan only, nothing built). A native SDL2 host with QuickJS running KlamANSI's pure modules; 48 x 24 display flush
   top-left, a 16-column side column (line, status, radial legend, panels), no tool bar or command-line rows (a documented departure from rule 8); pad mapping per the plan.
-  - [ ] **Decide** where the code lives (recommended: the private KlamANSI repo, since this repo is MIT and takes no proprietary code), how it is released (free with notices, or paid), and the typed line's place in the side column.
+  - [x] **Decided** (2026-11-08, `docs/KLAMANSI-PORT.md` section 0): code in the private KlamANSI repo; free, no shareware notices; the typed line is the three-row command line, floating flush to the bottom only while typing or showing a message, toggled with Fn together with the virtual keyboard.
   - [ ] **Spike:** QuickJS cross-built; load `klam.js` and `screens.js`, draw an example `.kan` and compare with Node. Go/no-go on browser-only APIs, speed and memory.
+    - [x] **Static audit of browser-only APIs** (2026-11-08): across `klam.js`, `screens.js`, `ansi.js`, `vinput.js`, `listdlg.js` and their imports, the only real hit is
+      `screens.js:50` (`new URL(import.meta.url).searchParams.get('v')`, the build tag); QuickJS has no `URL`, so the host must define a tiny `URL` shim or that line must
+      guard it. Nothing else touches `document`, `window`, `performance`, timers, `fetch`, audio or `localStorage`. **Not run:** nothing has executed in QuickJS yet.
+    - [x] **Spike, on a Mac (2026-11-08): GO on loading and drawing.** QuickJS 2024-01-13 (sha256 `3c4bf8f8...8212e03`) built natively; `klam.js` and `screens.js` load once a
+      `URL` shim exists (a 1-line class in the host) and `?v=124` is stripped from imports; for all 7 `examples/*.kan`, `load` + `viewScreen` + `cmdScreen` give
+      **byte-identical text to Node** (hash 183434222). All 7 files plus load took 23 ms in QuickJS on the Mac (29 ms in Node). **Untested:** speed on the 1.3 GHz
+      Cortex-A35 (expect roughly 10x slower; a drawn frame must be timed there), peak memory (not measured), the `qjsc` bytecode path, colours (only the characters were compared), `route` and key input, and the aarch64 cross-build. A statically imported module that throws shows no error under `qjs -m`: the host must report load errors on the splash.
   - [ ] Host, controls (pointer, radial, virtual keyboard overlay, Start menu), files and settings, package and smoke test, a try on the R36S.

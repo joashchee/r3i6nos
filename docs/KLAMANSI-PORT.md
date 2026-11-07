@@ -4,19 +4,18 @@ Status: **plan only, nothing built** (2026-11-07). The first port to the R36S. K
 (`~/Coding/klamansi`, private, proprietary, a paid native app with a free shareware web version). This file decides the shape, the screen,
 the controls and the order of work; `ROADMAP.md` section 8 tracks it.
 
-## 0. Decisions that are the maintainer's (they change where the code lives)
+## 0. Decisions (made by the maintainer, 2026-11-08)
 
-1. **Where the port's code lives.** KlamANSI is private and proprietary; this repo is MIT and its rule 2 forbids proprietary content. The
-   generic port workflow (`scripts/build_port.sh`, `port-app.yml`) fetches **public, hash-pinned upstream source** and takes no credentials, so
-   it does not build KlamANSI. Recommended: **the R36S host and its `.deb` build live in the KlamANSI repo** (an `r36s/` folder and its own
-   workflow), reading this repo's public theme (`theme/r3i6nos_ansiapps.h`, CC BY-SA font credit shipped in the deb). This repo keeps the
-   plan, the theme, the pad mapping and a `ROADMAP.md` pointer, and never any KlamANSI code. If this repo is public, this file only describes
-   the port; say so if you would rather it live in the KlamANSI repo too.
-2. **How it is released.** KlamANSI is paid on native platforms and free on the web with every feature plus shareware notices. Which is the R36S
-   build: free with the notices (`public/edition.js`), or a paid `.deb` (itch.io, like the paid macOS apps)? The notices already work from the
-   pure modules, so either is possible.
-3. **The typed line's place** (section 2): KlamANSI is a command-line app and you asked for no command-line rows, so the line lives in the side
-   column. Confirm that, or say where else.
+1. **Where the code lives: the private KlamANSI repo** (an `r36s/` folder and its own workflow). This repo keeps the plan, the theme, the pad
+   mapping and a `ROADMAP.md` pointer, and never any KlamANSI code (rule 2). The host reads this repo's public theme
+   (`theme/r3i6nos_ansiapps.h`; the CC BY-SA font credit ships in the deb).
+2. **Release: free, with no shareware notices**, a gift for r3i6nos users. The R36S build disables the notices (`public/edition.js`) and
+   is not sold.
+3. **The typed line is the usual three-row command line** (reply, prompt, status), not a side-column box. It **floats over the bottom three rows
+   of the display, flush to the bottom, and appears only while something is typed**. When a message must be shown, the line appears with it
+   ("press any key to continue...") and hides on the next interaction. **Fn shows and hides it together with the virtual keyboard.**
+   This replaces the LINE box of section 2: the side column keeps STATUS, RADIAL and PANELS, with the freed rows to be reassigned by looking
+   at pictures.
 
 ## 1. Shape: a native host around KlamANSI's pure modules
 

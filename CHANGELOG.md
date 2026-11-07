@@ -5,6 +5,7 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **KlamANSI port: decisions and spike** (2026-11-08; `docs/KLAMANSI-PORT.md` section 0, `ROADMAP.md` section 8). Code lives in the private KlamANSI repo; the R36S build is free with no shareware notices; the typed line is the three-row command line, floating flush to the bottom only while typing or showing a message, toggled with Fn with the virtual keyboard. Spike on a Mac: KlamANSI's pure modules run in QuickJS and match Node cell for cell on all example drawings (one `URL` shim needed). Nothing yet on the R36S or an aarch64 build.
 - **Battery indicator and Settings > Battery** (2026-11-08; `docs/BATTERY.md`). The launcher's top bar shows the charge at the right (`BAT █████ 87%`; `CHG` green while charging, `FULL`, white on red at 15 % or less),
   and the app count moved to the left (`r3i6nos  40 apps`). Settings gains Battery: Status (charge, voltage, temperature, health against design capacity, charge cycles, average drain, time left, abrupt ends), Use by app,
   History and Clear history (No first). A new `r3i6nos-battery` (Python stdlib, runs as `loveos`) appends a sample to `/var/lib/r3i6nos-battery/history.tsv` (a `StateDirectory`; about 1500 lines kept) and
