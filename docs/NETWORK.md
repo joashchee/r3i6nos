@@ -5,7 +5,7 @@ driver in the stock 4.4.189 kernel, whether the commands behave on that userland
 
 ## What the person sees
 
-Start opens Settings: **Network**, **SSH**, **Shutdown**, **Back**. Everything is a screen on the pad, never scrolling, with whole pages.
+Start opens Settings: **Network**, **SSH**, **Battery** (`docs/BATTERY.md`), **Shutdown**, **Back**. Everything is a screen on the pad, never scrolling, with whole pages.
 
 - **Network:** Status (adapters, address, gateway, DNS, the joined Wi-Fi, MAC), Wired setup, Wi-Fi setup (scan, list by signal, pick, type the
   password on the on-screen keyboard, or *Other network...* for a name that is not listed), Wi-Fi: join saved, Forget saved Wi-Fi, Test connection,

@@ -4,6 +4,7 @@
 local theme = require("r3i6nos_ansiapps")
 local settings = require("settings")
 local osk = require("osk")
+local battery = require("battery")
 
 local view = {}
 
@@ -108,12 +109,23 @@ function view.dialog(scr, d)
   return hint, table.concat(titles, " > "):lower()
 end
 
+--- The battery at the top right (state.battery is a reading from battery.read(), nil when there is none). Low and discharging: white on red.
+function view.battery(scr, reading)
+  local text, kind = battery.indicator(reading)
+  if not text then return end
+  local fg, bg = theme.STYLE.bar.fg, theme.STYLE.bar.bg
+  if kind == "low" then fg, bg = theme.WHITE, theme.RED
+  elseif kind == "charging" then fg = theme.LIGHT_GREEN end
+  scr:textRight(theme.COLS - 2, theme.TOP_ROW, text, fg, bg)
+end
+
 --- Draw the whole screen. state: entries, selected (1-based), dialog (settings state), reply (optional { text, kind }).
 function view.render(scr, state)
   scr:clear()
   local entries, sel = state.entries, state.selected
   local n = #entries
-  theme.topBar(scr, "r3i6nos", ("%d %s"):format(n, n == 1 and "app" or "apps"))
+  theme.topBar(scr, ("r3i6nos  %d %s"):format(n, n == 1 and "app" or "apps"))
+  view.battery(scr, state.battery)
 
   local items = {}
   for i, e in ipairs(entries) do items[i] = { label = e.title, value = typeLabel(e) } end

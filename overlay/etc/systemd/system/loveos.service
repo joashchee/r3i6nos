@@ -12,6 +12,8 @@ User=loveos
 Group=loveos
 SupplementaryGroups=video audio input render
 RuntimeDirectory=loveos
+# The battery history (Settings > Battery): /var/lib/r3i6nos-battery, owned by loveos, kept across reboots.
+StateDirectory=r3i6nos-battery
 Environment=SDL_VIDEODRIVER=kmsdrm
 Environment=SDL_NOMOUSE=1
 Environment=HOME=/home/loveos

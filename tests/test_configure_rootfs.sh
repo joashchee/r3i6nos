@@ -27,6 +27,8 @@ R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/native" R3I6NOS_LOVE_APPS_
 [ ! -e "$R/opt/love/notaruntime" ]              || fail "a folder without bin/love was installed"
 [ -x "$R/usr/local/bin/run_app.sh" ]            || fail "run_app.sh not installed executable"
 [ -x "$R/usr/local/bin/loveos-session" ]        || fail "loveos-session not installed executable"
+[ -x "$R/usr/local/bin/r3i6nos-battery" ]       || fail "r3i6nos-battery not installed executable"
+[ -f "$R/opt/loveos/menu/battery.lua" ]         || fail "the menu's battery module not installed"
 [ -f "$R/opt/loveos/menu/main.lua" ]            || fail "menu not installed"
 [ -f "$R/opt/loveos/theme/r3i6nos_ansiapps.lua" ] || fail "theme not installed"
 [ -f "$R/opt/loveos/theme/vga8x16.lua" ]        || fail "theme font data not installed"
@@ -115,6 +117,34 @@ R3I6NOS_RUN_APP="$T/run_app" R3I6NOS_WATCHER="$T/watcher" \
 [ -d "$T/run/net" ] || fail "the session did not make the folder Settings > Network leaves its requests in"
 [ "$(cat "$T/env")" = '|' ] || fail "no GPU dir, yet the session set GPU env: $(cat "$T/env")"
 
+# Battery history: a sample at the session start, around each app (with the app's name), every interval while it runs, and at shutdown.
+printf '#!/bin/bash\necho "$*" >> "%s/bat"\n' "$T" > "$T/battery"; chmod +x "$T/battery"
+cat > "$T/run_slow" <<EOF
+#!/bin/bash
+printf '%s|%s\n' "\$1" "\$2" > "$T/got"
+sleep 2.5
+EOF
+chmod +x "$T/run_slow"
+rm -f "$T/bat"
+R3I6NOS_ONCE=1 R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_MENU_LOVE="$T/menu" R3I6NOS_RUN_APP="$T/run_slow" R3I6NOS_WATCHER="$T/watcher" \
+R3I6NOS_BATTERY="$T/battery" R3I6NOS_BATTERY_INTERVAL=1 overlay/usr/local/bin/loveos-session
+[ "$(sed -n 1p "$T/bat")" = "sample session" ]                    || fail "no session sample first: $(cat "$T/bat")"
+[ "$(sed -n 2p "$T/bat")" = "sample app-start a game" ]           || fail "no app-start sample with the app's name: $(cat "$T/bat")"
+[ "$(grep -c '^sample tick a game$' "$T/bat")" -ge 1 ]            || fail "no tick while the app ran: $(cat "$T/bat")"
+[ "$(tail -n 1 "$T/bat")" = "sample app-end a game" ]             || fail "the last sample is not the app-end: $(cat "$T/bat")"
+sleep 1.2
+[ "$(tail -n 1 "$T/bat")" = "sample app-end a game" ]             || fail "the ticker kept sampling after the app ended: $(cat "$T/bat")"
+# a missing or failing sampler never stops a game
+printf '#!/bin/bash\nexit 1\n' > "$T/battery_bad"; chmod +x "$T/battery_bad"
+rm -f "$T/got"
+R3I6NOS_ONCE=1 R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_MENU_LOVE="$T/menu" R3I6NOS_RUN_APP="$T/run_app" R3I6NOS_WATCHER="$T/watcher" \
+R3I6NOS_BATTERY="$T/battery_bad" overlay/usr/local/bin/loveos-session
+[ -e "$T/got" ] || fail "a failing battery sampler stopped the app from starting"
+rm -f "$T/got"
+R3I6NOS_ONCE=1 R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_MENU_LOVE="$T/menu" R3I6NOS_RUN_APP="$T/run_app" R3I6NOS_WATCHER="$T/watcher" \
+R3I6NOS_BATTERY="$T/nonexistent" overlay/usr/local/bin/loveos-session
+[ -e "$T/got" ] || fail "a missing battery sampler stopped the app from starting"
+
 # With the Mali blob dir present: it goes first on LD_LIBRARY_PATH and LÖVE is told to use GLES.
 mkdir -p "$T/libmali"
 LD_LIBRARY_PATH=/other R3I6NOS_ONCE=1 R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_MENU_LOVE="$T/menu" \
@@ -129,8 +159,8 @@ cat > "$T/menu_off" <<EOF2
 printf 'system\tpoweroff\n' > "\$R3I6NOS_NEXT"
 EOF2
 chmod +x "$T/menu_off"
-rm -f "$T/got" "$T/run/poweroff"
-env R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_MENU_LOVE="$T/menu_off" \
+rm -f "$T/got" "$T/run/poweroff" "$T/bat"
+env R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_MENU_LOVE="$T/menu_off" R3I6NOS_BATTERY="$T/battery" \
 R3I6NOS_RUN_APP="$T/run_app" R3I6NOS_WATCHER="$T/watcher" overlay/usr/local/bin/loveos-session &
 sess=$!
 ( sleep 10; kill "$sess" 2>/dev/null ) &
@@ -138,6 +168,7 @@ wd=$!
 wait "$sess" || fail "session did not exit 0 on a poweroff request"
 kill "$wd" 2>/dev/null
 [ -e "$T/run/poweroff" ] || fail "no poweroff flag left"
+[ "$(tail -n 1 "$T/bat")" = "sample shutdown" ] || fail "no shutdown sample before the power-off: $(cat "$T/bat")"
 [ ! -e "$T/got" ] || fail "a poweroff request ran an app"
 printf '#!/bin/bash\necho "$*" > "%s/ctl"\n' "$T" > "$T/systemctl"; chmod +x "$T/systemctl"
 R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_SYSTEMCTL="$T/systemctl" overlay/usr/local/bin/r3i6nos-poweroff
@@ -147,6 +178,7 @@ rm -f "$T/ctl"
 R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_SYSTEMCTL="$T/systemctl" overlay/usr/local/bin/r3i6nos-poweroff
 [ ! -e "$T/ctl" ] || fail "powered off without the flag"
 grep -q '^ExecStopPost=+/usr/local/bin/r3i6nos-poweroff' overlay/etc/systemd/system/loveos.service || fail "unit lacks ExecStopPost"
+grep -q '^StateDirectory=r3i6nos-battery' overlay/etc/systemd/system/loveos.service || fail "unit has no state folder for the battery history"
 grep -q '^Restart=on-failure' overlay/etc/systemd/system/loveos.service || fail "unit would restart after a clean shutdown exit"
 
 echo "configure_rootfs and session: ok"

@@ -5,10 +5,13 @@
 # "<type><TAB><path>" and quits; this loop runs it through run_app.sh, so
 # the menu's memory is free while a game runs, then shows the menu again.
 #
+# Battery history (Settings > Battery): r3i6nos-battery records a sample at the start of the session (boot), when an app starts and
+# ends, every R3I6NOS_BATTERY_INTERVAL seconds (300) while an app runs, and just before a shutdown. It never fails the session.
+#
 # A "system<TAB>poweroff" request (Settings > Shutdown) ends the loop; see r3i6nos-poweroff.
 #
 # Overrides, for tests on a laptop: R3I6NOS_NEXT_DIR, R3I6NOS_MENU,
-# R3I6NOS_MENU_LOVE, R3I6NOS_RUN_APP, R3I6NOS_WATCHER, R3I6NOS_GPU_DIR, and R3I6NOS_ONCE=1
+# R3I6NOS_MENU_LOVE, R3I6NOS_RUN_APP, R3I6NOS_WATCHER, R3I6NOS_GPU_DIR, R3I6NOS_BATTERY, R3I6NOS_BATTERY_INTERVAL, and R3I6NOS_ONCE=1
 # (one pass, then exit).
 
 set -u
@@ -20,6 +23,14 @@ RUN_APP="${R3I6NOS_RUN_APP:-/usr/local/bin/run_app.sh}"
 WATCHER="${R3I6NOS_WATCHER:-/usr/local/bin/deb_watcher.py}"
 
 GPU_DIR="${R3I6NOS_GPU_DIR:-/opt/libmali}"
+BATTERY="${R3I6NOS_BATTERY:-/usr/local/bin/r3i6nos-battery}"
+BATTERY_INTERVAL="${R3I6NOS_BATTERY_INTERVAL:-300}"
+
+# battery_sample EVENT [DETAIL]: one sample into the history; a missing or failing sampler is ignored.
+battery_sample() {
+    [ -x "$BATTERY" ] && "$BATTERY" sample "$@" 2>/dev/null
+    return 0
+}
 
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
 export SDL_NOMOUSE=1
@@ -36,6 +47,8 @@ fi
 
 mkdir -p "$NEXT_DIR" "$NEXT_DIR/net"   # net: where Settings > Network leaves its requests for the root helper
 
+battery_sample session
+
 while true; do
     # Pick up any .deb dropped on the card since the last pass.
     "$WATCHER" || echo "loveos-session: deb_watcher failed" >&2
@@ -49,6 +62,7 @@ while true; do
             # Settings > Shutdown. This user cannot power off; leave a flag and exit cleanly, and
             # loveos.service's ExecStopPost (root) runs r3i6nos-poweroff, which acts on it.
             if [ "$target" = poweroff ]; then
+                battery_sample shutdown
                 : > "$NEXT_DIR/poweroff"
                 exit 0
             fi
@@ -56,7 +70,15 @@ while true; do
             sleep 1
             continue
         fi
+        # The app's name for the history: its file name without the folder and the extension.
+        app="${target##*/}"; app="${app%.*}"
+        battery_sample app-start "$app"
+        ( while sleep "$BATTERY_INTERVAL"; do battery_sample tick "$app"; done ) &
+        ticker=$!
         "$RUN_APP" "$type" "$target" || echo "loveos-session: $type $target exited $?" >&2
+        kill "$ticker" 2>/dev/null
+        wait "$ticker" 2>/dev/null
+        battery_sample app-end "$app"
     else
         # Menu quit or crashed without choosing: don't spin.
         sleep 1

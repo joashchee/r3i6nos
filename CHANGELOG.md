@@ -5,6 +5,12 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **Battery indicator and Settings > Battery** (2026-11-08; `docs/BATTERY.md`). The launcher's top bar shows the charge at the right (`BAT █████ 87%`; `CHG` green while charging, `FULL`, white on red at 15 % or less),
+  and the app count moved to the left (`r3i6nos  40 apps`). Settings gains Battery: Status (charge, voltage, temperature, health against design capacity, charge cycles, average drain, time left, abrupt ends), Use by app,
+  History and Clear history (No first). A new `r3i6nos-battery` (Python stdlib, runs as `loveos`) appends a sample to `/var/lib/r3i6nos-battery/history.tsv` (a `StateDirectory`; about 1500 lines kept) and
+  `loveos-session` calls it at the session start (boot), around each app, every 300 s while an app runs and before a shutdown; a missing or failing sampler never stops an app. `menu/battery.lua` reads the
+  supply and works the figures out. Tests: `test_r3i6nos_battery.py` (10), `test_battery.lua`, plus the Settings, view (contrast, colours) and session tests. **Not run on a real R36S:** which supply and values the unit reports.
+  `shellcheck` not installed here.
 - **Settings > Network and Settings > SSH** (2026-11-07; `docs/NETWORK.md`). Start's Settings list is now Network, SSH, Shutdown, Back, on a stack of screens (menus, pages, a wait, an
   on-screen keyboard, the confirmation). Network: Status, Wired setup, Wi-Fi setup (scan, pick, password, or a typed name), join or forget the saved network, Test connection (link, address,
   gateway, DNS, internet, each `[ok]`/`[FAIL]` with a fix), Disconnect, Instructions. SSH: Status, Set SSH password (twice), Start, Stop, Instructions. The menu is unprivileged, so it leaves a request

@@ -37,6 +37,11 @@ document that has the detail. Nothing here has run on a real R36S yet.
   - [ ] `wpa_supplicant`, `udhcpc` (does it fill `/etc/resolv.conf`?), `usermod` and `chpasswd` on the rootfs; the path unit under systemd 252; the rootfs CI build with the new packages.
   - [ ] Decide whether a game being able to ask for SSH is acceptable, or build a confirmation it cannot fake.
   - [ ] Optional, rule 6 permitting: auto-join the saved network at boot (not done: ask first).
+- [x] **Battery indicator and Settings > Battery** (2026-11-08, `docs/BATTERY.md`): the charge at the launcher's top right (low turns red, charging green), and a history sampled at boot, app start and end,
+  every 5 minutes in an app and at shutdown, with Status (health, drain, time left, abrupt ends), Use by app, History and Clear history. Tested on the laptop with a fake supply. **Untested on the R36S:**
+  - [ ] Which `power_supply` the fuel gauge is and what it reports (`scripts/device-info.sh` should list `/sys/class/power_supply`); check the indicator, health and cycle figures against it.
+  - [ ] That `StateDirectory=r3i6nos-battery` gives `loveos` a writable folder under systemd 252, and that the ticker does not disturb a game.
+  - [ ] Whether an app's name (its file name) is a good enough label for `.deb` apps.
 - [x] **First push** to GitHub (`joashchee/r3i6nos`, 2026-11-06).
 
 ## 2. Phase 1: ground truth from the working card (needs the R36S and a Mac)

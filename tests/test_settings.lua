@@ -40,6 +40,7 @@ end
 -- ---- the list and Shutdown (as before)
 local s = new()
 eq(title(s), "Settings"); eq(settings.node(s).items[1].label, "Network"); eq(settings.node(s).items[2].label, "SSH")
+eq(settings.node(s).items[3].label, "Battery"); eq(settings.node(s).items[4].label, "Shutdown")
 choose(s, "Shutdown")
 eq(kind(s), "confirm"); eq(settings.node(s).sel, 2, "the confirmation starts on No")
 assert(settings.press(s, "accept") == nil and kind(s) == "menu", "accepting the default (No) must not power off")
@@ -56,6 +57,40 @@ s = new(); settings.press(s, "up"); eq(settings.node(s).items[settings.node(s).s
 s = settings.new(fake()); assert(settings.press(s, "accept") == nil and not settings.isOpen(s), "a closed dialog ignores input")
 -- "poweroff" is only ever the answer to a confirmed shutdown, never to opening a screen
 s = new(); assert(settings.press(s, "accept") == nil, "Network opens, it does not power off")
+
+-- ---- Battery: Status, Use by app, History and Clear history, with a fake battery
+do
+  local calls, cleared = {}, false
+  local fakebat = {
+    read = function() calls[#calls + 1] = "read"; return { pct = 50, status = "Discharging" } end,
+    history = function() calls[#calls + 1] = "history"; return { "h" } end,
+    statusLines = function(r, h) return { "status " .. r.pct .. " " .. #h } end,
+    appLines = function(h) return { "apps " .. #h } end,
+    recentLines = function(h, n) return { "recent " .. #h .. " " .. n } end,
+    clear = function() cleared = true; return true end,
+  }
+  local b = settings.new(fake(), fakebat); settings.open(b)
+  choose(b, "Battery")
+  eq(title(b), "Battery"); eq(kind(b), "menu")
+  local labels = {}
+  for i, it in ipairs(settings.node(b).items) do labels[i] = it.label end
+  eq(table.concat(labels, ","), "Status,Use by app,History,Clear history,Back")
+  choose(b, "Status"); eq(kind(b), "pages"); eq(settings.node(b).pages[1][1], "status 50 1")
+  settings.press(b, "back"); eq(kind(b), "menu")
+  choose(b, "Use by app"); eq(settings.node(b).pages[1][1], "apps 1"); settings.press(b, "back")
+  choose(b, "History"); eq(settings.node(b).pages[1][1], "recent 1 60"); settings.press(b, "back")
+  choose(b, "Clear history")
+  eq(kind(b), "confirm"); eq(settings.node(b).sel, 2, "the confirmation starts on No")
+  assert(settings.press(b, "accept") == nil and kind(b) == "menu" and not cleared, "accepting the default (No) must not clear anything")
+  choose(b, "Clear history"); settings.press(b, "up")
+  assert(settings.press(b, "accept") == nil, "clearing is not a shutdown")
+  assert(cleared, "Yes clears"); eq(kind(b), "pages"); eq(settings.node(b).pages[1][1], "The battery history is cleared.")
+  settings.press(b, "back"); eq(kind(b), "menu"); choose(b, "Back"); eq(title(b), "Settings")
+  -- a failed clear says so
+  fakebat.clear = function() return false end
+  choose(b, "Battery"); choose(b, "Clear history"); settings.press(b, "up"); settings.press(b, "accept")
+  assert(settings.node(b).bad, "a failed clear is shown as a failure")
+end
 
 -- ---- Network > Status: a request, a wait, an answer shown, B back
 local io_ = fake()

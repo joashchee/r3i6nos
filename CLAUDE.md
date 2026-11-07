@@ -14,7 +14,7 @@ is blocked and on what.
 
 - `overlay/`: files copied onto the image's root filesystem as-is
   (`usr/local/bin/`, `etc/systemd/system/`). Paths mirror the device.
-- `menu/`: the boot menu, a LÖVE 11.5 app installed at `/opt/loveos/menu`; its Settings has Network and SSH (a root helper, `overlay/usr/local/bin/r3i6nos-net`, does the work).
+- `menu/`: the boot menu, a LÖVE 11.5 app installed at `/opt/loveos/menu`; its Settings has Network and SSH (a root helper, `overlay/usr/local/bin/r3i6nos-net`, does the work) and Battery (`docs/BATTERY.md`; its top bar shows the charge).
 - `apps/`: the apps (each has an `app.conf`, native or LÖVE, and its own workflow, `.github/workflows/app-<name>.yml`; only `DEFAULT=1` apps enter the image). The default apps built into the image (`/opt/loveos/defaults`): the input checker as LÖVE 11.5, LÖVE 12.0 and native ARM64, and Commander (a native ARM64 file manager). See `apps/README.md`.
 - `theme/`: the r3i6nos-ansiapps text-mode theme for LÖVE (`.lua`) and C/SDL2 (`.h`): font, screen, list dialogs; installed at `/opt/loveos/theme`. See `docs/R3I6NOS-ANSIAPPS-THEME.md`.
 - `scripts/`: host-side tools. `check.sh` runs everything CI runs.

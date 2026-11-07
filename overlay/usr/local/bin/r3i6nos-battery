@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""r3i6nos-battery - append one battery sample to the history that Settings > Battery reads.
+
+    r3i6nos-battery sample EVENT [DETAIL...]
+
+EVENT is what just happened: session (the session started, i.e. boot), app-start, app-end, tick (a periodic sample
+while an app runs), shutdown. DETAIL is the app's name for the app events. It runs as the session user, so it needs
+no root: the history is a state folder that loveos.service owns (StateDirectory=r3i6nos-battery). It only reads
+/sys/class/power_supply and writes its own log; it never touches the games card and never uses the network.
+
+One tab-separated line per sample, "-" for anything the battery does not report:
+    1  boot-id  uptime-s  epoch  event  detail  percent  status  mV  full  design  deci-C  cycles
+`full` and `design` are the battery's charge (or energy) when full now and when new, in the same unit, so only their
+ratio means anything. The clock may be wrong (the board has no battery-backed clock), so readers order by boot and
+uptime, not by epoch.
+
+Never fails the caller: any problem is reported on stderr and the exit status is still 0 for a sample that could not
+be taken, so a missing battery or a full disk can never stop a game from starting.
+
+Standard library only (it runs on a 1 GB board). Overrides, for tests: R3I6NOS_POWER_SUPPLY (default
+/sys/class/power_supply), R3I6NOS_BATTERY_DIR (default /var/lib/r3i6nos-battery), R3I6NOS_PROC (default /proc),
+R3I6NOS_BATTERY_KEEP (lines kept when the log is trimmed).
+"""
+import fcntl
+import os
+import sys
+import time
+from pathlib import Path
+
+POWER = Path(os.environ.get("R3I6NOS_POWER_SUPPLY", "/sys/class/power_supply"))
+LOG_DIR = Path(os.environ.get("R3I6NOS_BATTERY_DIR", "/var/lib/r3i6nos-battery"))
+PROC = Path(os.environ.get("R3I6NOS_PROC", "/proc"))
+LOG = LOG_DIR / "history.tsv"
+KEEP = int(os.environ.get("R3I6NOS_BATTERY_KEEP", "1500"))   # lines kept after a trim
+LIMIT = KEEP + 500                                            # trim when the log is longer than this
+EVENTS = {"session", "app-start", "app-end", "tick", "shutdown"}
+
+
+def read(path):
+    try:
+        return path.read_text(errors="replace").strip()
+    except OSError:
+        return None
+
+
+def number(path):
+    v = read(path)
+    try:
+        return int(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def find_battery():
+    """The first supply whose type is Battery (the fuel gauge), else one whose name has "bat" in it (rk817-battery, BAT0) or starts with bms."""
+    try:
+        names = sorted(p.name for p in POWER.iterdir())
+    except OSError:
+        return None
+    for n in names:
+        if (read(POWER / n / "type") or "").lower() == "battery":
+            return POWER / n
+    for n in names:
+        if "bat" in n.lower() or n.lower().startswith("bms"):
+            return POWER / n
+    return None
+
+
+def clean(text, limit=60):
+    """A field on one line: tabs and line breaks become spaces."""
+    return " ".join(str(text).split())[:limit] or "-"
+
+
+def pair(b):
+    """The first full/design pair the battery reports (charge, else energy)."""
+    for full, design in (("charge_full", "charge_full_design"), ("energy_full", "energy_full_design")):
+        f, d = number(b / full), number(b / design)
+        if f and d:
+            return f, d
+    return None, None
+
+
+def sample(event, detail):
+    b = find_battery()
+    if b is None:
+        return None
+    pct = number(b / "capacity")
+    if pct is None:
+        return None
+    uv = number(b / "voltage_now")
+    full, design = pair(b)
+    uptime = (read(PROC / "uptime") or "0").split()[0]
+    boot = (read(PROC / "sys/kernel/random/boot_id") or "unknown").replace("-", "")[:8]
+    fields = [
+        "1", boot, str(int(float(uptime))), str(int(time.time())), event, clean(detail), str(max(0, min(100, pct))),
+        clean(read(b / "status") or "-", 20),
+        str(uv // 1000) if uv else "-",
+        str(full) if full else "-", str(design) if design else "-",
+        str(number(b / "temp")) if number(b / "temp") is not None else "-",
+        str(number(b / "cycle_count")) if number(b / "cycle_count") is not None else "-",
+    ]
+    return "\t".join(fields) + "\n"
+
+
+def append(line):
+    LOG_DIR.mkdir(parents=True, exist_ok=True)
+    with open(LOG, "a+", encoding="utf-8") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)           # the periodic sampler and the session may write together
+        f.write(line)
+        f.flush()
+        f.seek(0)
+        lines = f.readlines()
+        if len(lines) > LIMIT:                  # keep the newest, in place under the lock (the file is small)
+            f.truncate(0)
+            f.write("".join(lines[-KEEP:]))
+
+
+def main(argv):
+    if len(argv) < 3 or argv[1] != "sample" or argv[2] not in EVENTS:
+        print("usage: r3i6nos-battery sample {%s} [detail]" % "|".join(sorted(EVENTS)), file=sys.stderr)
+        return 2
+    try:
+        line = sample(argv[2], " ".join(argv[3:]))
+        if line is None:
+            print("r3i6nos-battery: no battery reported; nothing recorded", file=sys.stderr)
+            return 0
+        append(line)
+    except OSError as e:
+        print(f"r3i6nos-battery: {e}", file=sys.stderr)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

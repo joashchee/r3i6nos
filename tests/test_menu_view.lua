@@ -19,6 +19,22 @@ eq(#rows, 24)
 -- the reserved top row
 has(rows[1], "r3i6nos"); has(rows[1], "40 apps")
 for c = 1, 64 do eq(scr.bg[c], theme.BLUE, "top bar is blue") end
+-- the battery sits at the top right and the bar's own colours hold
+view.render(scr, { entries = entries, selected = 1, dialog = dialog, battery = { pct = 62, status = "Discharging" } })
+rows = scr:dump()
+assert(rows[1]:match("BAT .+ 62%%%s$"), "battery at the right edge of the top bar: " .. rows[1])
+has(rows[1], "r3i6nos"); has(rows[1], "40 apps")
+eq(scr.bg[64 - 3], theme.BLUE, "a normal battery keeps the bar's blue")
+view.render(scr, { entries = entries, selected = 1, dialog = dialog, battery = { pct = 9, status = "Discharging" } })
+eq(scr.bg[64 - 3], theme.RED, "low: red"); eq(scr.fg[64 - 3], theme.WHITE)
+assert(theme.contrast(theme.WHITE, theme.RED) >= 4.5)
+view.render(scr, { entries = entries, selected = 1, dialog = dialog, battery = { pct = 9, status = "Charging" } })
+has(scr:dump()[1], "CHG"); eq(scr.bg[64 - 3], theme.BLUE, "charging is not low")
+assert(theme.contrast(theme.LIGHT_GREEN, theme.BLUE) >= 4.5)
+view.render(scr, { entries = entries, selected = 1, dialog = dialog })
+assert(not scr:dump()[1]:find("BAT", 1, true), "no battery, no indicator")
+view.render(scr, { entries = entries, selected = 1, dialog = dialog })
+rows = scr:dump()
 -- the list: rows 1-20, 18 games a page, the page in the top edge (the dump shows non-ASCII as ?)
 eq(view.PER_PAGE, 18)
 has(rows[2], "Games and apps"); has(rows[2], "Page 1/3")
@@ -54,7 +70,7 @@ local joined = table.concat(rows, "\n")
 has(joined, "Settings"); has(joined, "Network"); has(joined, "SSH"); has(joined, "Shutdown"); has(joined, "Back"); has(joined, "A Choose  B Back")
 has(rows[22], "Wired and Wi-Fi"); has(rows[23], "> settings")
 has(rows[1], "r3i6nos")
-settings.press(dialog, "down"); settings.press(dialog, "down")
+settings.press(dialog, "down"); settings.press(dialog, "down"); settings.press(dialog, "down")
 view.render(scr, { entries = entries, selected = 1, dialog = dialog })
 has(scr:dump()[22], "Power the device off")
 settings.press(dialog, "accept")
@@ -114,6 +130,30 @@ has(table.concat(rows, "\n"), "> *******")
 settings.press(dialog, "y"); rows = draw(); has(table.concat(rows, "\n"), "Keys: ABC"); has(table.concat(rows, "\n"), "Q   W   E")
 settings.press(dialog, "y"); rows = draw(); has(table.concat(rows, "\n"), "Keys: #+=")
 snap("keyboard symbols")
+
+-- ---- Settings > Battery: the menu and its pages draw in the same style
+do
+  local bat = require("battery")
+  local fake = {
+    read = function() return { pct = 40, status = "Discharging", mv = 3800, full = 90, design = 100 } end,
+    history = function() return {} end, clear = function() return true end,
+    statusLines = bat.statusLines, appLines = bat.appLines, recentLines = bat.recentLines,
+  }
+  dialog = settings.new(io_, fake); settings.open(dialog)
+  pick("Battery"); rows = draw()
+  local all = table.concat(rows, "\n")
+  has(all, "Battery"); has(all, "Use by app"); has(all, "Clear history"); has(rows[23], "> settings > battery")
+  has(rows[22], "Charge, voltage, health")
+  snap("battery menu")
+  pick("Status"); rows = draw(); all = table.concat(rows, "\n")
+  has(rows[2], "Battery"); has(all, "40 %  (Discharging)"); has(all, "3.80 V"); has(all, "90 % of its design capacity")
+  snap("battery status")
+  settings.press(dialog, "back"); pick("Use by app"); rows = draw(); has(table.concat(rows, "\n"), "Nothing recorded yet.")
+  snap("battery apps")
+  settings.press(dialog, "back"); pick("Clear history"); rows = draw(); has(table.concat(rows, "\n"), "Clear the battery history?")
+  has(table.concat(rows, "\n"), "Yes, clear it"); has(rows[22], "Deletes only the recorded battery samples")
+  snap("battery clear")
+end
 
 -- every cell is a code page 437 index, every colour a palette colour, every pair passes 4.5:1, on every screen above
 for _, sc in ipairs(screens) do

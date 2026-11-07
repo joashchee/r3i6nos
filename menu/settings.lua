@@ -5,15 +5,16 @@
 
 local osk = require("osk")
 local pages = require("netpages")
+local battery = require("battery")
 
 local settings = {}
 
 --- Seconds to wait for the helper before giving up, by verb (a scan or a Wi-Fi join is slow).
 settings.TIMEOUT = { default = 30, scan = 45, wifi = 75, wired = 60, test = 60, ["ssh-enable"] = 45 }
 
---- A closed dialog. io is the helper's client (menu/netclient.lua); tests pass a fake.
-function settings.new(io)
-  return { stack = {}, io = io }
+--- A closed dialog. io is the helper's client (menu/netclient.lua); bat the battery module (menu/battery.lua). Tests pass fakes.
+function settings.new(io, bat)
+  return { stack = {}, io = io, bat = bat or battery }
 end
 
 local function top(s) return s.stack[#s.stack] end
@@ -143,10 +144,33 @@ local function sshMenu(s)
   }, 56))
 end
 
+local function batteryMenu(s)
+  local b = s.bat
+  push(s, menu("Battery", {
+    { label = "Status", hint = "Charge, voltage, health, average drain, time left", run = function(sx)
+        show(sx, "Battery", b.statusLines(b.read(), b.history()))
+      end },
+    { label = "Use by app", hint = "How fast each app drains the battery", run = function(sx)
+        show(sx, "Battery use by app", b.appLines(b.history()))
+      end },
+    { label = "History", hint = "The latest samples: start, apps, shutdown", run = function(sx)
+        show(sx, "Battery history", b.recentLines(b.history(), 60))
+      end },
+    { label = "Clear history", hint = "Forget the recorded samples (nothing else)", run = function(sx)
+        confirm(sx, "Clear the battery history?", "Yes, clear it", "Deletes only the recorded battery samples", function(sy)
+          if b.clear() then show(sy, "Battery", { "The battery history is cleared.", "", "It starts again at the next app or shutdown." })
+          else show(sy, "Battery", { "Could not clear the history." }, false) end
+        end)
+      end },
+    { label = "Back", hint = "Return to Settings", run = function(sx) pop(sx) end },
+  }, 48))
+end
+
 local function root(s)
   return menu("Settings", {
     { label = "Network", hint = "Wired and Wi-Fi: status, setup, test, instructions", run = networkMenu },
     { label = "SSH", hint = "Log in from a computer (off until you start it)", run = sshMenu },
+    { label = "Battery", hint = "Charge, health and how much each app uses", run = batteryMenu },
     { label = "Shutdown", hint = "Power the device off", run = function(sx)
         confirm(sx, "Shut down the device?", "Yes, shut down", "Powers the device off", function() return "poweroff" end)
       end },

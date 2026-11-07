@@ -1,11 +1,12 @@
 -- r3i6nos menu: one list of every LÖVE game and native app on the card, in the r3i6nos-ansiapps theme
 -- (theme/, docs/R3I6NOS-ANSIAPPS-THEME.md): 64x24 text cells, a top bar, the list, a three-row command line.
 -- D-pad up/down move, A launches, L1/R1 (or left/right) turn a page, L2/R2 jump to the top/end, Start opens
--- Settings (S / F1 on a keyboard): Network, SSH and Shutdown. Never scrolls.
+-- Settings (S / F1 on a keyboard): Network, SSH, Battery and Shutdown. The battery shows at the top right. Never scrolls.
 
 package.path = (os.getenv("R3I6NOS_THEME") or "/opt/loveos/theme") .. "/?.lua;" .. package.path
 
 local scan = require("scan")
+local battery = require("battery")
 local netclient = require("netclient")
 local settings = require("settings")
 local theme = require("r3i6nos_ansiapps")
@@ -17,14 +18,17 @@ local DEFAULTS = os.getenv("R3I6NOS_DEFAULTS") or "/opt/loveos/defaults"
 local NEXT = os.getenv("R3I6NOS_NEXT") or "/run/loveos/next"
 
 local entries, selected = {}, 1
-local dialog = settings.new(netclient)
+local dialog = settings.new(netclient, battery)
 local screen
+local power, powerAge = nil, 0 -- the battery reading for the top bar, re-read every few seconds
+local POWER_EVERY = 10
 
 function love.load()
   love.mouse.setVisible(false)
   theme.init()
   screen = theme.screen()
   entries = scan.entries(ROMS, LAUNCHERS, DEFAULTS)
+  power = battery.read()
 end
 
 local function request(line)
@@ -41,7 +45,11 @@ local function launch()
   if e then request(e.type .. "\t" .. e.target) end
 end
 
-function love.update(dt) settings.tick(dialog, dt) end
+function love.update(dt)
+  settings.tick(dialog, dt)
+  powerAge = powerAge + dt
+  if powerAge >= POWER_EVERY then powerAge, power = 0, battery.read() end
+end
 
 local function typing()
   local n = settings.isOpen(dialog) and settings.node(dialog)
@@ -84,6 +92,6 @@ function love.joystickpressed(_, button)
 end
 
 function love.draw()
-  view.render(screen, { entries = entries, selected = selected, dialog = dialog })
+  view.render(screen, { entries = entries, selected = selected, dialog = dialog, battery = power })
   theme.draw(screen)
 end
