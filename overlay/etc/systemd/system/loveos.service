@@ -23,8 +23,11 @@ TTYVHangup=yes
 StandardOutput=journal
 StandardError=journal
 ExecStart=/usr/local/bin/loveos-session
-Restart=always
+# on-failure, not always: Settings > Shutdown ends the session with exit 0 and must stay stopped.
+Restart=on-failure
 RestartSec=2
+# "+" = runs as root: powers the device off when the session left the poweroff flag.
+ExecStopPost=+/usr/local/bin/r3i6nos-poweroff
 
 [Install]
 WantedBy=multi-user.target

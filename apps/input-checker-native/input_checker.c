@@ -34,8 +34,8 @@
 
 /* The R36S's raw button indices (SDL, from 0), measured on a real unit on 2026-11-07: the D-pad is four
  * buttons, not a hat, and the pad has no SDL gamepad mapping. Shoulders and triggers (4-7) are a guess. */
-enum { B_A = 0, B_B = 1, B_X = 2, B_Y = 3, B_L1 = 4, B_R1 = 5, B_L2 = 6, B_R2 = 7,
-       B_LEFT = 8, B_DOWN = 9, B_UP = 10, B_RIGHT = 11, B_FN = 12, B_SELECT = 13, B_L3 = 14, B_R3 = 15, B_START = 16 };
+enum { B_B = 0, B_A = 1, B_X = 2, B_Y = 3, B_L1 = 4, B_R1 = 5, B_L2 = 6, B_R2 = 7,
+       B_UP = 8, B_DOWN = 9, B_LEFT = 10, B_RIGHT = 11, B_SELECT = 12, B_START = 13, B_L3 = 14, B_R3 = 15, B_FN = 16 };
 
 typedef struct { Uint8 r, g, b; } Col;
 static const Col BG = {24, 24, 27}, PANEL = {36, 36, 46}, DIM = {76, 76, 84}, ACTIVE = {34, 197, 94},
@@ -209,9 +209,9 @@ static void draw(SDL_Renderer *r, State *s, Uint32 now, int have_pad) {
         rect(r, rt_ ? ACTIVE : DIM, 107, 162, 32, 26);
         disc(r, PANEL, 250, 175, 52);
         round_btn(r, 250, 143, "X", held(s, B_X), 17);
-        round_btn(r, 250, 207, "A", held(s, B_A), 17);
+        round_btn(r, 282, 175, "A", held(s, B_A), 17);
         round_btn(r, 218, 175, "Y", held(s, B_Y), 17);
-        round_btn(r, 282, 175, "B", held(s, B_B), 17);
+        round_btn(r, 250, 207, "B", held(s, B_B), 17);
         stick(r, 95, 300, s->axis[0], s->axis[1], held(s, B_L3), ACCENT, "L STICK");
         stick(r, 250, 300, s->axis[2], s->axis[3], held(s, B_R3), WARM, "R STICK");
         /* left to right: Select, Fn, Start */
@@ -269,9 +269,9 @@ static void draw(SDL_Renderer *r, State *s, Uint32 now, int have_pad) {
         }
     }
     /* power and the volume keys (they come as keys, not joystick buttons) */
-    pill(r, 59, 408, 64, "VOL-", s->key_vol_down);
-    pill(r, 133, 408, 64, "VOL+", s->key_vol_up);
-    pill(r, 207, 408, 64, "PWR", s->key_power);
+    pill(r, 133, 408, 64, "VOL-", s->key_vol_down);
+    pill(r, 207, 408, 64, "VOL+", s->key_vol_up);
+    pill(r, 59, 408, 64, "PWR", s->key_power);
 
     rect(r, FOOT, 0, 440, W, 40);
     Uint32 idle = now - s->idle_since;

@@ -1,0 +1,13 @@
+#!/bin/bash
+# r3i6nos-poweroff - run as root by loveos.service's ExecStopPost.
+# If the session left the poweroff flag (Settings > Shutdown), shut the device down gracefully:
+# systemd stops the services, syncs and unmounts the filesystems, then powers off.
+# Overrides, for tests: R3I6NOS_NEXT_DIR, R3I6NOS_SYSTEMCTL.
+
+FLAG="${R3I6NOS_NEXT_DIR:-/run/loveos}/poweroff"
+SYSTEMCTL="${R3I6NOS_SYSTEMCTL:-systemctl}"
+
+[ -e "$FLAG" ] || exit 0
+rm -f "$FLAG"
+# --no-block: this runs while loveos.service is stopping, so waiting for the job would deadlock.
+exec "$SYSTEMCTL" --no-block poweroff

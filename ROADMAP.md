@@ -9,6 +9,10 @@ document that has the detail. Nothing here has run on a real R36S yet.
 - [x] **Overlay scripts:** `deb_watcher.py` (tested), `run_app.sh`,
   `loveos-session` in `overlay/`, rewritten from the spec's drafts (see CHANGELOG for what changed).
 - [x] **Menu:** LÖVE 11.5 launcher in `menu/`, paged list, scan tested.
+- [x] **Settings dialog with Shutdown** (2026-11-07; Start / S opens it, Shutdown asks "Yes / No" with No preselected, then the session
+  leaves a flag, exits 0, and `loveos.service`'s root `ExecStopPost` runs `r3i6nos-poweroff` -> `systemctl --no-block poweroff`).
+  Logic, session and poweroff script are tested on the laptop. **Untested on the R36S:** that the Start button (raw 14) opens it, that
+  systemd 252 on kernel 4.4 powers the board off (and not just halts), and that the games card is unmounted cleanly.
 - [x] **First push** to GitHub (`joashchee/r3i6nos`, 2026-11-06).
 
 ## 2. Phase 1: ground truth from the working card (needs the R36S and a Mac)

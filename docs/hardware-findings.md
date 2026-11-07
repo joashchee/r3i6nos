@@ -82,13 +82,13 @@ Raw button numbers as LÖVE reports them (counting from 1; SDL's own index is on
 
 | Input | Button |
 |---|---|
-| A, B, X, Y | 1, 2, 3, 4 |
-| D-pad left, down, up, right | 9, 10, 11, 12 (**buttons, not a hat**) |
-| Fn, Select | 13, 14 |
+| B, A, X, Y | 1, 2, 3, 4 (A is 2 and B is 1; corrected 2026-11-07) |
+| D-pad up, down, left, right | 9, 10, 11, 12 (**buttons, not a hat**; corrected 2026-11-07) |
+| Select, Start | 13, 14 |
 | Left stick press (L3), right stick press (R3) | 15, 16 |
-| Start | 17 |
-| L1, R1, L2, R2 | **not measured** (the checker assumes 5, 6, 7, 8) |
-| Power, volume up, volume down | not on the joystick (17 buttons, all used): expected as keyboard keys; **not yet seen** |
+| Fn | 17 |
+| L1, R1, L2, R2 | 5, 6, 7, 8 (confirmed by the maintainer, 2026-11-07) |
+| Power, volume up, volume down | not on the joystick (17 buttons, all used): keyboard keys; the checker's key names are confirmed correct (2026-11-07). Physically, Power is on the left side and the volume keys are on the right |
 
 - The joystick has 4 axes (left stick 1-2, right stick 3-4) and no hat in use.
 - SDL's gamepad mapping for this pad does not match the raw layout above (Select, Fn and Start did not light when

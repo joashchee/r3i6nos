@@ -149,8 +149,8 @@ local function visual()
 
   dpad(95, 175)
   color(C.panel); love.graphics.circle("fill", 250, 175, 52)
-  round(250, 143, "X", down(L.x), 17); round(250, 207, "A", down(L.a), 17)
-  round(218, 175, "Y", down(L.y), 17); round(282, 175, "B", down(L.b), 17)
+  round(250, 143, "X", down(L.x), 17); round(282, 175, "A", down(L.a), 17)
+  round(218, 175, "Y", down(L.y), 17); round(250, 207, "B", down(L.b), 17)
 
   local n = joystick:getAxisCount()
   local function ax(i) return (i <= n) and joystick:getAxis(i) or 0 end
@@ -162,9 +162,9 @@ local function visual()
 end
 
 local function sideKeys()
-  pill(59, 408, 64, "VOL-", model.keyHeld(keysDown, "vol_down"))
-  pill(133, 408, 64, "VOL+", model.keyHeld(keysDown, "vol_up"))
-  pill(207, 408, 64, "PWR", model.keyHeld(keysDown, "power"))
+  pill(133, 408, 64, "VOL-", model.keyHeld(keysDown, "vol_down"))
+  pill(207, 408, 64, "VOL+", model.keyHeld(keysDown, "vol_up"))
+  pill(59, 408, 64, "PWR", model.keyHeld(keysDown, "power"))
 end
 
 local function telemetry()

@@ -37,20 +37,21 @@ idle:update(16); assert(idle:expired())
 
 -- the layout measured on a real R36S (LÖVE numbering, from 1)
 local Lt = model.LAYOUT
-eq(Lt.up, 11); eq(Lt.left, 9); eq(Lt.down, 10); eq(Lt.right, 12)
-eq(Lt.select, 14); eq(Lt.fn, 13); eq(Lt.start, 17); eq(Lt.l3, 15); eq(Lt.r3, 16)
+eq(Lt.up, 9); eq(Lt.left, 11); eq(Lt.down, 10); eq(Lt.right, 12)
+eq(Lt.a, 2); eq(Lt.b, 1)
+eq(Lt.select, 13); eq(Lt.start, 14); eq(Lt.fn, 17); eq(Lt.l3, 15); eq(Lt.r3, 16)
 
 local function held(...)
   local set = {}
   for _, i in ipairs({ ... }) do set[i] = true end
   return function(i) return set[i] == true end
 end
-local d = model.dpad("c", held(11, 12))
-assert(d.up and d.right and not d.down and not d.left, "D-pad from buttons 11 and 12")
+local d = model.dpad("c", held(9, 12))
+assert(d.up and d.right and not d.down and not d.left, "D-pad from buttons 9 and 12")
 d = model.dpad("dl", held())
 assert(d.down and d.left and not d.up, "D-pad from a hat still works")
-assert(model.exitHeld(held(14, 17)), "Select+Start raw")
-assert(not model.exitHeld(held(14)) and not model.exitHeld(held(17)), "one of them is not enough")
+assert(model.exitHeld(held(13, 14)), "Select+Start raw")
+assert(not model.exitHeld(held(13)) and not model.exitHeld(held(14)), "one of them is not enough")
 assert(model.exitHeld(held(), function(n) return n == "back" or n == "start" end), "SDL mapping also counts")
 assert(not model.exitHeld(held(), nil), "no mapping, nothing held")
 assert(model.keyHeld({ volumeup = true }, "vol_up") and not model.keyHeld({ volumeup = true }, "vol_down"))
@@ -102,7 +103,7 @@ local function load_main()
 end
 
 -- 1. a pad: draws, logs events, no errors; the real D-pad buttons, sticks pressed and Fn light up without a mapping
-local quit = fake_love({ fake_pad(false, nil, nil, { 11, 15, 13, 1 }) })
+local quit = fake_love({ fake_pad(false, nil, nil, { 9, 15, 17, 2 }) })
 load_main()
 love.load(); love.update(0.016); love.draw()
 love.joystickpressed(nil, 3); love.joystickhat(nil, 1, "u"); love.joystickaxis(nil, 1, 0.9); love.joystickaxis(nil, 1, 0)
@@ -114,8 +115,8 @@ assert(not quit(), "must not quit by itself")
 quit = fake_love({ fake_pad(true, nil, 0) })
 load_main(); love.load(); love.update(0.016); love.draw()
 
--- 2. Select+Start (raw 14 and 17, the pad has no mapping) held for a second leaves
-quit = fake_love({ fake_pad(false, nil, nil, { 14, 17 }) })
+-- 2. Select+Start (raw 13 and 14, the pad has no mapping) held for a second leaves
+quit = fake_love({ fake_pad(false, nil, nil, { 13, 14 }) })
 load_main(); love.load()
 for _ = 1, 15 do love.update(0.05); love.draw() end
 assert(not quit(), "0.75 s is not enough")
@@ -125,8 +126,8 @@ assert(quit(), "Select+Start held 1.5 s should quit")
 quit = fake_love({ fake_pad(true, { "back", "start" }) })
 load_main(); love.load(); for _ = 1, 30 do love.update(0.05) end
 assert(quit(), "mapped Select+Start quits")
-quit = fake_love({ fake_pad(false, nil, nil, { 14 }) })
-load_main(); love.load(); for _ = 1, 100 do love.update(0.05); love.joystickpressed(nil, 14) end
+quit = fake_love({ fake_pad(false, nil, nil, { 13 }) })
+load_main(); love.load(); for _ = 1, 100 do love.update(0.05); love.joystickpressed(nil, 13) end
 assert(not quit(), "Select alone does not quit (and activity keeps the idle timer reset)")
 quit = fake_love({ fake_pad(false) }); load_main(); love.load(); love.keypressed("escape")
 assert(quit(), "escape quits")

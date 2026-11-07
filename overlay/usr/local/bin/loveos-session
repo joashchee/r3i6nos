@@ -5,6 +5,8 @@
 # "<type><TAB><path>" and quits; this loop runs it through run_app.sh, so
 # the menu's memory is free while a game runs, then shows the menu again.
 #
+# A "system<TAB>poweroff" request (Settings > Shutdown) ends the loop; see r3i6nos-poweroff.
+#
 # Overrides, for tests on a laptop: R3I6NOS_NEXT_DIR, R3I6NOS_MENU,
 # R3I6NOS_MENU_LOVE, R3I6NOS_RUN_APP, R3I6NOS_WATCHER, R3I6NOS_GPU_DIR, and R3I6NOS_ONCE=1
 # (one pass, then exit).
@@ -43,6 +45,17 @@ while true; do
 
     if [ -f "$R3I6NOS_NEXT" ]; then
         IFS=$'\t' read -r type target < "$R3I6NOS_NEXT"
+        if [ "$type" = system ]; then
+            # Settings > Shutdown. This user cannot power off; leave a flag and exit cleanly, and
+            # loveos.service's ExecStopPost (root) runs r3i6nos-poweroff, which acts on it.
+            if [ "$target" = poweroff ]; then
+                : > "$NEXT_DIR/poweroff"
+                exit 0
+            fi
+            echo "loveos-session: unknown system request: $target" >&2
+            sleep 1
+            continue
+        fi
         "$RUN_APP" "$type" "$target" || echo "loveos-session: $type $target exited $?" >&2
     else
         # Menu quit or crashed without choosing: don't spin.

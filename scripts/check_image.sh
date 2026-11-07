@@ -59,10 +59,11 @@ e2fsck -fn "$ROOT_DEV" >/dev/null || fail "e2fsck"
 
 mount -o ro "$ROOT_DEV" "$MNT"
 for f in etc/fstab etc/systemd/system/loveos.service usr/local/bin/loveos-session \
-         usr/local/bin/run_app.sh usr/local/bin/deb_watcher.py opt/loveos/menu/main.lua; do
+         usr/local/bin/run_app.sh usr/local/bin/deb_watcher.py usr/local/bin/r3i6nos-poweroff \
+         opt/loveos/menu/main.lua opt/loveos/menu/settings.lua; do
     [ -e "$MNT/$f" ] || fail "missing in rootfs: /$f"
 done
-for f in usr/local/bin/loveos-session usr/local/bin/run_app.sh; do
+for f in usr/local/bin/loveos-session usr/local/bin/run_app.sh usr/local/bin/r3i6nos-poweroff; do
     [ -x "$MNT/$f" ] || fail "not executable: /$f"
 done
 [ -L "$MNT/etc/systemd/system/multi-user.target.wants/loveos.service" ] || fail "loveos.service not enabled"

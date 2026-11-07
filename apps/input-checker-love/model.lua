@@ -12,10 +12,10 @@ M.IDLE_WARN = 10        -- ... and starts counting down on screen
 -- a real unit on 2026-11-07: the D-pad is four buttons, not a hat, and the pad has no SDL gamepad mapping.
 -- l1, r1, l2, r2 are a guess (the numbers left over): the telemetry shows the truth.
 M.LAYOUT = {
-  a = 1, b = 2, x = 3, y = 4,
-  l1 = 5, r1 = 6, l2 = 7, r2 = 8,          -- assumed
-  left = 9, down = 10, up = 11, right = 12,
-  fn = 13, select = 14, l3 = 15, r3 = 16, start = 17,
+  a = 2, b = 1, x = 3, y = 4,
+  l1 = 5, r1 = 6, l2 = 7, r2 = 8,          -- confirmed on the unit
+  up = 9, down = 10, left = 11, right = 12,
+  select = 13, start = 14, l3 = 15, r3 = 16, fn = 17,
 }
 
 -- Power and the volume keys are not on the joystick (17 buttons, all taken): they arrive as keyboard keys.

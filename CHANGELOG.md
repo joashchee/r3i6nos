@@ -5,6 +5,18 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **Power pill moved left of the volume pills** (2026-11-07), both checkers: PWR, VOL-, VOL+ (power is on the left of the R36S, volume on the right).
+  L1/R1/L2/R2 (5-8) and the power/volume key names are confirmed correct on the unit, so they are no longer "assumed".
+- **Button layout corrected from the R36S** (2026-11-07): D-pad up 9, down 10, left 11, right 12; Select 13, Start 14, Fn 17; **A is 2 and B is 1**
+  (they were the other way round), and A and B swap places on the drawn pad (A right, B bottom). Changed in both LÖVE checkers (`model.lua`,
+  `main.lua`), the native C checker (`B_*`), the menu's raw buttons, `docs/hardware-findings.md` and the tests; the exit chord is now raw 13+14.
+  L1/R1/L2/R2 and the power/volume keys are still unmeasured. Not re-run on the device.
+- **Settings dialog with Shutdown** (2026-11-07). Start (raw button 14) or S/F1 opens it from the menu; items are Shutdown and Back, and
+  Shutdown asks for confirmation with "No" preselected (B steps back). Confirming writes `system<TAB>poweroff`; `loveos-session` leaves
+  `/run/loveos/poweroff` and exits 0, and the new root `ExecStopPost` (`r3i6nos-poweroff`) runs `systemctl --no-block poweroff`, so systemd
+  stops services and unmounts the filesystems. No sudo or polkit needed. `loveos.service` is now `Restart=on-failure` (a clean exit stays
+  stopped). The menu also reads raw joystick buttons (D-pad up 9, down 10, left 11, right 12, A 2, B 1; L1/R1 5/6, confirmed), de-duplicated against the gamepad mapping.
+  Tests: `tests/test_settings.lua`, and the session/poweroff cases in `test_configure_rootfs.sh`. **Not run on a real R36S.**
 - **LÖVE for the Mac, to try apps before they go on the card** (2026-11-07). `scripts/fetch_love_mac.sh`: 11.5 is the official release,
   checked against a pinned sha256 (tried: downloads, verifies, `LOVE 11.5 (Mysterious Mysteries)`, universal arm64 and x86_64, ad-hoc signed
   as upstream ships it); 12.0 has no release, so it comes from the CI artifact `love-macos` of the run for the commit `build_love.sh` pins

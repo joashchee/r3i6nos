@@ -23,9 +23,11 @@ python3 -I -m unittest discover -s tests -v || fail=1
 step "lua tests"
 if command -v luajit >/dev/null; then
     luajit tests/test_scan.lua || fail=1
+    luajit tests/test_settings.lua || fail=1
     luajit tests/test_input_checker.lua || fail=1
 elif command -v lua >/dev/null; then
     lua tests/test_scan.lua || fail=1
+    lua tests/test_settings.lua || fail=1
     lua tests/test_input_checker.lua || fail=1
 else echo "NOT RUN: no lua/luajit"; fi
 

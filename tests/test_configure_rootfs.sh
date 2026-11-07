@@ -90,4 +90,31 @@ R3I6NOS_RUN_APP="$T/run_app" R3I6NOS_WATCHER="$T/watcher" R3I6NOS_GPU_DIR="$T/li
     overlay/usr/local/bin/loveos-session
 [ "$(cat "$T/env")" = "$T/libmali:/other|1" ] || fail "GPU env wrong: $(cat "$T/env")"
 
+# Settings > Shutdown: the menu asks for "system<TAB>poweroff"; the session leaves the flag, exits
+# (even without ONCE), and runs no app; r3i6nos-poweroff acts on the flag once, and only on it.
+cat > "$T/menu_off" <<EOF2
+#!/bin/bash
+printf 'system\tpoweroff\n' > "\$R3I6NOS_NEXT"
+EOF2
+chmod +x "$T/menu_off"
+rm -f "$T/got" "$T/run/poweroff"
+env R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_MENU_LOVE="$T/menu_off" \
+R3I6NOS_RUN_APP="$T/run_app" R3I6NOS_WATCHER="$T/watcher" overlay/usr/local/bin/loveos-session &
+sess=$!
+( sleep 10; kill "$sess" 2>/dev/null ) &
+wd=$!
+wait "$sess" || fail "session did not exit 0 on a poweroff request"
+kill "$wd" 2>/dev/null
+[ -e "$T/run/poweroff" ] || fail "no poweroff flag left"
+[ ! -e "$T/got" ] || fail "a poweroff request ran an app"
+printf '#!/bin/bash\necho "$*" > "%s/ctl"\n' "$T" > "$T/systemctl"; chmod +x "$T/systemctl"
+R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_SYSTEMCTL="$T/systemctl" overlay/usr/local/bin/r3i6nos-poweroff
+[ "$(cat "$T/ctl")" = "--no-block poweroff" ] || fail "poweroff ran: $(cat "$T/ctl" 2>/dev/null)"
+[ ! -e "$T/run/poweroff" ] || fail "flag not consumed"
+rm -f "$T/ctl"
+R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_SYSTEMCTL="$T/systemctl" overlay/usr/local/bin/r3i6nos-poweroff
+[ ! -e "$T/ctl" ] || fail "powered off without the flag"
+grep -q '^ExecStopPost=+/usr/local/bin/r3i6nos-poweroff' overlay/etc/systemd/system/loveos.service || fail "unit lacks ExecStopPost"
+grep -q '^Restart=on-failure' overlay/etc/systemd/system/loveos.service || fail "unit would restart after a clean shutdown exit"
+
 echo "configure_rootfs and session: ok"
