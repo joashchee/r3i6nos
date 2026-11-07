@@ -5,8 +5,13 @@ Runs at boot (loveos-session). Every *.deb in the native_deb folder is extracted
 with `dpkg-deb -x` (no dpkg database, no locks) into /opt/native_apps/<name>/
 and gets a launcher script in /opt/launchers/native/<name>.sh.
 
+The system image also carries built-in debs (the input checker) in /opt/loveos/defaults/native_deb;
+they are handled the same way, and a deb of the same name on the card replaces the built-in one.
+An app whose deb is gone is removed only when the card's folder is there to say so: a card that is
+not mounted must never uninstall anything.
+
 Paths can be overridden with environment variables so the tests run anywhere:
-R3I6NOS_DEB_DIR, R3I6NOS_APP_ROOT, R3I6NOS_LAUNCHER_DIR.
+R3I6NOS_DEB_DIR, R3I6NOS_DEFAULT_DEB_DIR, R3I6NOS_APP_ROOT, R3I6NOS_LAUNCHER_DIR.
 """
 
 import os
@@ -16,6 +21,7 @@ import sys
 from pathlib import Path
 
 DEB_DIR = Path(os.environ.get("R3I6NOS_DEB_DIR", "/roms/native_deb"))
+DEFAULT_DEB_DIR = Path(os.environ.get("R3I6NOS_DEFAULT_DEB_DIR", "/opt/loveos/defaults/native_deb"))
 APP_ROOT = Path(os.environ.get("R3I6NOS_APP_ROOT", "/opt/native_apps"))
 LAUNCHER_DIR = Path(os.environ.get("R3I6NOS_LAUNCHER_DIR", "/opt/launchers/native"))
 STAMP = ".r3i6nos-deb"  # records which deb (size:mtime) an extraction came from
@@ -76,10 +82,12 @@ def write_launcher(launcher: Path, app_dir: Path, executable: Path) -> None:
 def process_debs() -> int:
     APP_ROOT.mkdir(parents=True, exist_ok=True)
     LAUNCHER_DIR.mkdir(parents=True, exist_ok=True)
-    if not DEB_DIR.is_dir():
-        return 0
+    card_present = DEB_DIR.is_dir()
 
-    debs = {d.stem: d for d in sorted(DEB_DIR.glob("*.deb"))}
+    debs = {}
+    for folder in (DEFAULT_DEB_DIR, DEB_DIR):      # later wins: the card replaces a built-in
+        if folder.is_dir():
+            debs.update({d.stem: d for d in sorted(folder.glob("*.deb"))})
     installed = 0
 
     for name, deb in debs.items():
@@ -103,7 +111,7 @@ def process_debs() -> int:
         installed += 1
 
     # A deb that was removed from the card takes its app and launcher with it.
-    for app in APP_ROOT.iterdir():
+    for app in (APP_ROOT.iterdir() if card_present else ()):
         if app.is_dir() and (app / STAMP).is_file() and app.name not in debs:
             shutil.rmtree(app)
             (LAUNCHER_DIR / f"{app.name}.sh").unlink(missing_ok=True)

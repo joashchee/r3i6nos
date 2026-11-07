@@ -35,6 +35,25 @@ else
     echo "[!] No LÖVE runtimes in $LOVE_BUILD: the menu cannot start until phase 3 builds them" >&2
 fi
 
+# Default apps, built into the image so the menu is never empty (the games card's own files are listed beside
+# them, and replace one of the same name): the input checker as a LÖVE 11.5 app, a LÖVE 12.0 app and a native
+# ARM64 .deb (built by build_native_apps.sh; deb_watcher.py installs it at boot).
+DEFAULTS="$ROOTFS/opt/loveos/defaults"
+rm -rf "$DEFAULTS"
+mkdir -p "$DEFAULTS/Love 11.5" "$DEFAULTS/Love 12.0" "$DEFAULTS/native_deb"
+for v in 11.5 12.0; do
+    python3 -I "$REPO/scripts/pack_love.py" "$REPO/apps/input-checker-love" "$DEFAULTS/Love $v/Input_Checker.love"
+done
+NATIVE_BUILD="${R3I6NOS_NATIVE_BUILD:-$REPO/build/native}"
+have_native=""
+for deb in "$NATIVE_BUILD"/*.deb; do
+    if [ -f "$deb" ]; then cp "$deb" "$DEFAULTS/native_deb/"; have_native=1; fi
+done
+if [ -z "$have_native" ]; then
+    echo "[!] No native default app in $NATIVE_BUILD: run scripts/build_native_apps.sh (the image will have no native app)" >&2
+fi
+find "$DEFAULTS" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
+
 # Mount points and places the boot scripts write to.
 mkdir -p "$ROOTFS"/{roms,boot,opt/love,opt/native_apps,opt/launchers/native}
 

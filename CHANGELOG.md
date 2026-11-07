@@ -5,6 +5,20 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **Default apps: the R36S Input Checker, three ways** (2026-11-07), from `docs/R36S_Input_Checker_Specification.md`. `apps/input-checker-love`
+  (LÖVE 11.5 and 12.0: the same code packed into `Love 11.5/` and `Love 12.0/`, prints its runtime) and `apps/input-checker-native`
+  (C and SDL2 with its own 5x7 font, cross-built into `Input_Checker_Native.deb`). Built into the image at `/opt/loveos/defaults`, so the
+  menu is never empty: `menu/scan.lua` lists that folder beside `/roms` (the card wins on a name clash), `deb_watcher.py` installs built-in
+  debs too (and never uninstalls anything when the card is missing). Beyond the spec: it shows SDL's gamepad mapping, a seen-buttons
+  checklist and the last six events; fonts are made once (the spec's sample made new ones every frame); it leaves by Select+Start held 1 s,
+  Esc, or 2 minutes without input, so an unmapped pad cannot trap the user. New: `scripts/pack_love.py`, `build_native_apps.sh`,
+  `smoke_native.sh`, a `native` CI job and a qemu smoke step, `check.sh` compiles and self-tests the C app. Tests: 48 Python, scan and checker
+  Lua (the checker's `main.lua` runs against a fake LÖVE; the fake rejects invalid gamepad button names). **Not run on a real R36S.**
+- **The menu runs on the R36S** (2026-11-07): the rebuilt image with the stock card's matching Mali blob and the Python fix
+  boots to the r3i6nos menu on the panel. It showed "Nothing here yet" because the card had no games partition.
+  Added `flash-macos.sh --games`: partition 3 (exFAT, `EASYROMS`) from just after ROOTFS to the end of the card, formatted by macOS,
+  with `Love 11.5/`, `Love 12.0/`, `native_deb/`. The MBR edit is `scripts/add_games_partition.py` (refuses foreign or already-
+  partitioned disks and cards with under 1 GiB free; 6 tests; tried against the real MBR). The macOS half (diskutil) is untried.
 - **First boot log read; two bugs** (2026-11-07). (1) The injected Mali blob was the wrong one: the stock card keeps an older
   wayland-gbm blob in `/usr/lib` (userspace API 10.6) and the one it really uses in `/usr/local/lib/aarch64-linux-gnu`
   (r13p0, first in `ld.so.conf`); the kernel's driver is 11.7, so LÖVE failed with "file /dev/mali0 is not of a compatible

@@ -5,6 +5,7 @@ local scan = require("scan")
 
 local ROMS = os.getenv("R3I6NOS_ROMS") or "/roms"
 local LAUNCHERS = os.getenv("R3I6NOS_LAUNCHERS") or "/opt/launchers/native"
+local DEFAULTS = os.getenv("R3I6NOS_DEFAULTS") or "/opt/loveos/defaults"
 local NEXT = os.getenv("R3I6NOS_NEXT") or "/run/loveos/next"
 local PER_PAGE = 12
 
@@ -15,7 +16,7 @@ function love.load()
   love.mouse.setVisible(false)
   font = love.graphics.newFont(20)
   love.graphics.setFont(font)
-  entries = scan.entries(ROMS, LAUNCHERS)
+  entries = scan.entries(ROMS, LAUNCHERS, DEFAULTS)
 end
 
 local function launch()

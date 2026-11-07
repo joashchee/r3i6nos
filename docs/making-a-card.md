@@ -18,7 +18,33 @@ One-off: `brew install mtools e2fsprogs`.
    Run it once per fresh image.
 5. **Flash it** to a different microSD card:
    `scripts/flash-macos.sh r36s-loveos.img disk5 --dry-run`, then without `--dry-run`.
-6. Put the card in TF1, a games card labelled `EASYROMS` in TF2, and power on.
+   Add `--games` to use the rest of the card as the games partition (below).
+6. Put the card in TF1 and power on.
+
+## Built-in apps
+
+Every image carries the **R36S Input Checker** three ways (LÖVE 11.5, LÖVE 12.0, native ARM64; `apps/README.md`), so the menu
+is never empty and you can test the pad before adding any games. They live on the system partition, not on `EASYROMS`.
+
+## Where the games go
+
+The menu lists what it finds under `/roms`, the partition labelled `EASYROMS`:
+
+| Folder | What goes in it |
+|---|---|
+| `Love 11.5/` | `.love` files, or game folders with a `main.lua` |
+| `Love 12.0/` | the same, for games that need LÖVE 12 |
+| `native_deb/` | ARM64 `.deb` packages; they are installed on the next boot |
+
+Two ways to have that partition:
+
+- **One card:** `scripts/flash-macos.sh r36s-loveos.img disk5 --games` makes everything after the
+  system partition an exFAT partition named `EASYROMS` and creates the three folders. A Mac or Windows PC
+  can write to it. The card must be at least about 4 GB.
+- **Two cards:** a second card in TF2, formatted FAT32 or exFAT, labelled `EASYROMS`, with the folders above.
+
+The games partition is never formatted by the device: only `flash-macos.sh --games` creates it, once, on a
+card it has just erased. Without one, boot still works; the menu is just empty.
 
 **Never share the result.** The image contains the vendor's Mali blob, kernel
 modules and bootloader. Share the repo, not the card image.

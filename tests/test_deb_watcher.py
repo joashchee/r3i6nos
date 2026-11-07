@@ -34,6 +34,7 @@ class DebWatcher(unittest.TestCase):
         self.debs.mkdir()
         self.mod = load({
             "R3I6NOS_DEB_DIR": str(self.debs),
+            "R3I6NOS_DEFAULT_DEB_DIR": str(root / "defaults"),
             "R3I6NOS_APP_ROOT": str(root / "apps"),
             "R3I6NOS_LAUNCHER_DIR": str(root / "launchers"),
         })
@@ -85,6 +86,34 @@ class DebWatcher(unittest.TestCase):
     def test_missing_deb_folder_is_fine(self):
         self.debs.rmdir()
         self.assertEqual(self.mod.process_debs(), 0)
+
+    def test_built_in_deb_installs_without_a_card(self):
+        defaults = Path(self.tmp.name) / "defaults"
+        defaults.mkdir()
+        (defaults / "checker.deb").write_bytes(b"x")
+        self.debs.rmdir()                                  # no games card at all
+        self.assertEqual(self.mod.process_debs(), 1)
+        self.assertTrue((self.launchers / "checker.sh").exists())
+
+    def test_card_deb_replaces_a_built_in_of_the_same_name(self):
+        defaults = Path(self.tmp.name) / "defaults"
+        defaults.mkdir()
+        (defaults / "checker.deb").write_bytes(b"builtin")
+        (self.debs / "checker.deb").write_bytes(b"the card's, longer")
+        self.assertEqual(self.mod.process_debs(), 1)
+        self.assertEqual((self.apps / "checker/.r3i6nos-deb").read_text().split(":")[0], str(len(b"the card's, longer")))
+
+    def test_unmounted_card_never_uninstalls_apps(self):
+        (self.debs / "game.deb").write_bytes(b"x")
+        self.mod.process_debs()
+        (self.debs / "game.deb").unlink()
+        self.debs.rmdir()                                  # card gone, a built-in is still there
+        defaults = Path(self.tmp.name) / "defaults"
+        defaults.mkdir()
+        (defaults / "checker.deb").write_bytes(b"x")
+        self.mod.process_debs()
+        self.assertTrue((self.apps / "game").exists())
+        self.assertTrue((self.launchers / "game.sh").exists())
 
 
 if __name__ == "__main__":

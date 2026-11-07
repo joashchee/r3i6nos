@@ -21,16 +21,36 @@ step "python tests"
 python3 -I -m unittest discover -s tests -v || fail=1
 
 step "lua tests"
-if command -v luajit >/dev/null; then luajit tests/test_scan.lua || fail=1
-elif command -v lua >/dev/null; then lua tests/test_scan.lua || fail=1
+if command -v luajit >/dev/null; then
+    luajit tests/test_scan.lua || fail=1
+    luajit tests/test_input_checker.lua || fail=1
+elif command -v lua >/dev/null; then
+    lua tests/test_scan.lua || fail=1
+    lua tests/test_input_checker.lua || fail=1
 else echo "NOT RUN: no lua/luajit"; fi
 
 step "lua syntax"
 if command -v luajit >/dev/null; then
-    for f in menu/*.lua tests/smoke/love/*.lua; do
+    for f in menu/*.lua apps/*/*.lua tests/smoke/love/*.lua; do
         luajit -bl "$f" >/dev/null || fail=1
     done
 else echo "NOT RUN: no luajit"; fi
+
+step "native app (C, SDL2)"
+if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
+    native_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-native.XXXXXX")"
+    # Warnings are errors under clang (what this was written with); another compiler's new warnings are shown, not fatal.
+    werror=""; cc --version 2>/dev/null | grep -qi clang && werror="-Werror"
+    # shellcheck disable=SC2046  # sdl2-config prints separate flags
+    if cc -std=c11 -Wall -Wextra $werror -O2 $(sdl2-config --cflags) -o "$native_bin" apps/input-checker-native/input_checker.c $(sdl2-config --libs) -lm; then
+        out="$(SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy "$native_bin" --selftest 2>&1)"
+        echo "$out"
+        grep -q '^R3I6NOS_SMOKE ok input-checker-native=' <<<"$out" || { echo "FAIL: native selftest"; fail=1; }
+    else
+        echo "FAIL: native app does not compile"; fail=1
+    fi
+    rm -f "$native_bin"
+else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
 
 step "shell tests"
 bash tests/test_configure_rootfs.sh || fail=1

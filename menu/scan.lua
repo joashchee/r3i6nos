@@ -28,21 +28,28 @@ local function title(name)
 end
 
 --- Returns a sorted list of { title, type, target }.
-function scan.entries(roms, launchers)
-  local list = {}
-  for _, root in ipairs(ROOTS) do
-    for _, name in ipairs(ls(roms .. "/" .. root.dir)) do
-      local path = roms .. "/" .. root.dir .. "/" .. name:gsub("/$", "")
-      local isdir = name:sub(-1) == "/"
-      if (isdir and exists(path .. "/main.lua")) or name:match("%.love$") then
-        list[#list + 1] = { title = title(name), type = root.type, target = path }
+--- roms: the games card. launchers: native app launchers. defaults (optional): the same
+--- "Love 11.5" / "Love 12.0" folders, built into the system image; a game of the same file name on
+--- the card replaces the built-in one.
+function scan.entries(roms, launchers, defaults)
+  local list, have = {}, {}
+  for _, base in ipairs({ roms, defaults }) do
+    for _, root in ipairs(ROOTS) do
+      for _, name in ipairs(ls(base .. "/" .. root.dir)) do
+        local path = base .. "/" .. root.dir .. "/" .. name:gsub("/$", "")
+        local isdir = name:sub(-1) == "/"
+        local key = root.type .. ":" .. name
+        if not have[key] and ((isdir and exists(path .. "/main.lua")) or name:match("%.love$")) then
+          have[key] = true
+          list[#list + 1] = { title = title(name), type = root.type, target = path }
+        end
       end
     end
   end
   for _, name in ipairs(ls(launchers)) do
     if name:match("%.sh$") then
       list[#list + 1] = {
-        title = name:gsub("%.sh$", ""),
+        title = title((name:gsub("%.sh$", ""))),
         type = "native",
         target = launchers .. "/" .. name,
       }

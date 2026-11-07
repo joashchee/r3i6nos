@@ -45,8 +45,34 @@ jobs:
           path: love-${{ matrix.version }}.tar
           retention-days: 7
 
+  native:
+    # The native default app (C and SDL2), cross-compiled in a Debian 12 container like LÖVE and packed
+    # as a .deb. Cached on its script and source, so only edits rebuild it.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/cache@v4
+        id: cache
+        with:
+          path: build/native
+          key: native-${{ hashFiles('scripts/build_native_apps.sh', 'apps/input-checker-native/**', 'LICENSE') }}
+
+      - name: Build native apps (arm64)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          docker run --rm -v "$PWD":/src -w /src debian:bookworm \
+            scripts/build_native_apps.sh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-apps-arm64
+          path: build/native/*.deb
+          retention-days: 7
+
   rootfs:
-    needs: love
+    needs: [love, native]
     # Build the rootfs with whatever runtimes were built, so a failing 12.0 does
     # not hide the rest. The run is still red: the love job failed.
     if: ${{ !cancelled() }}
@@ -59,6 +85,11 @@ jobs:
         with:
           pattern: love-*-arm64
           merge-multiple: true
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: native-apps-arm64
+          path: build/native
 
       - name: Unpack LÖVE
         run: |
@@ -74,7 +105,7 @@ jobs:
 
       - name: Fast checks first
         run: |
-          sudo apt-get install -y shellcheck luajit
+          sudo apt-get install -y shellcheck luajit libsdl2-dev
           scripts/check.sh
 
       - name: Build rootfs
@@ -87,6 +118,10 @@ jobs:
             sudo scripts/smoke_love.sh build/rootfs "$(basename "$dir")"
           done
 
+      - name: Smoke test the native app under qemu
+        # Dummy video: proves the arm64 binary runs against the rootfs's SDL2, not that it draws or sees a pad.
+        run: scripts/smoke_native.sh build/rootfs build/rootfs/opt/loveos/defaults/native_deb/Input_Checker_Native.deb
+
       - name: Sanity check the tree
         run: |
           set -e
@@ -97,6 +132,10 @@ jobs:
           # every module the boot scripts import must exist in the rootfs (python3-minimal lacks shutil)
           sudo python3 -I scripts/check_py_imports.py $R overlay/usr/local/bin/deb_watcher.py
           sudo test -x $R/opt/love/11.5/bin/love
+          # the built-in default apps (the input checker three ways)
+          sudo test -f "$R/opt/loveos/defaults/Love 11.5/Input_Checker.love"
+          sudo test -f "$R/opt/loveos/defaults/Love 12.0/Input_Checker.love"
+          sudo test -f "$R/opt/loveos/defaults/native_deb/Input_Checker_Native.deb"
           sudo grep -q '^loveos:x:1000:' $R/etc/passwd
           sudo grep -q '^root:!' $R/etc/shadow
           sudo find $R/usr/share/doc -name copyright | head -3

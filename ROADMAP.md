@@ -51,8 +51,9 @@ All of it goes in the gitignored `local_hardware_assets/`.
   - [ ] **Legal note** for the README: images with the blob are not redistributable; say so wherever images are mentioned. (Written in `docs/making-a-card.md`.)
 - [x] **Getting the card's modules and blob into the image:** `debugfs` on the Mac (`docs/making-a-card.md`), no Linux needed.
 - [ ] **systemd 252 on kernel 4.4:** unknown until it boots (phase 5). Watch for cgroup, seccomp and `/proc` errors in the journal.
-- [ ] **Games card:** stock has `/roms` on partition 3 of the same card; ours expects TF2 by label. Add an optional
-  partition 3 (EASYROMS exFAT) to the image, or document TF2 only.
+- [x] **Games card:** `flash-macos.sh --games` (2026-11-07) adds partition 3 (exFAT, `EASYROMS`, the stock card used exfat too) in the
+  space after ROOTFS and creates `Love 11.5/`, `Love 12.0/`, `native_deb/`; the MBR edit is tested (`add_games_partition.py`). **Untried on a real
+  card.** Without `--games`, use a second card labelled `EASYROMS` in TF2 (`docs/making-a-card.md`).
 
 ## 3. Phase 2: rootfs in CI (no hardware)
 
@@ -109,7 +110,14 @@ All of it goes in the gitignored `local_hardware_assets/`.
 
 ## 6. Phase 5: bring-up on the R36S (needs the unit)
 
-- [ ] **First boot:** reaches the menu; panel, backlight, D-pad and buttons, audio, TF2 mount.
+- [x] **First boot reaches the menu** (2026-11-07, one R36S, 128 GB card, rebuilt image with the matching Mali blob): the menu is drawn on the panel. Still to check on hardware: backlight, D-pad and buttons, audio, a game, `.deb`, reboot.
+- [x] **Default apps** (2026-11-07): the R36S Input Checker (spec: `docs/R36S_Input_Checker_Specification.md`) as a LÖVE 11.5 app, a LÖVE 12.0 app
+  and a native ARM64 `.deb` (C, SDL2), built into the image at `/opt/loveos/defaults`; the menu and `deb_watcher.py` list them beside the card's
+  files. Tested on a laptop (logic, fake LÖVE, native draw and self-test); the `native` CI job and qemu smoke are new and **not yet green**.
+  **Not yet seen on a real R36S.** The checker is how the real button layout gets recorded (below).
+- [ ] **Record the real input layout:** run the checker on the unit, write down which button numbers, axes and hat directions are which,
+  and whether SDL has a gamepad mapping ("Gamepad map: yes/NO"). Then fix `SDL_GAMECONTROLLERCONFIG` in `run_app.sh` and the menu's controls.
+- [ ] **First boot (full):** reaches the menu; panel, backlight, D-pad and buttons, audio, TF2 mount.
   - Done (2026-11-07, one R36S, Panel 4 DTB from the stock card): ArkOS splash, kernel, initramfs, root by UUID, systemd to
     the end of boot, text console on the panel. `EASYROMS` timeout is expected (no such partition).
   - **Open:** after that nothing is drawn. Blocked on the log: flash an image injected with `R3I6NOS_BOOT_DEBUG=1`, boot, read

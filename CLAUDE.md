@@ -15,6 +15,7 @@ is blocked and on what.
 - `overlay/`: files copied onto the image's root filesystem as-is
   (`usr/local/bin/`, `etc/systemd/system/`). Paths mirror the device.
 - `menu/`: the boot menu, a LÖVE 11.5 app installed at `/opt/loveos/menu`.
+- `apps/`: the default apps built into the image (`/opt/loveos/defaults`): the input checker as LÖVE 11.5, LÖVE 12.0 and native ARM64. See `apps/README.md`.
 - `scripts/`: host-side tools. `check.sh` runs everything CI runs.
 - `tests/`: Python (`unittest`) and Lua tests; no hardware needed.
 - `vendor/`, `build/`, `local_hardware_assets/`: fetched, built or captured, gitignored.
