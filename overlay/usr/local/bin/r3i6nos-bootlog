@@ -1,0 +1,50 @@
+#!/bin/bash
+# r3i6nos-bootlog - write what happened this boot to the BOOT partition, so it can be read
+# on a Mac or PC with the card in a reader (the device has no keyboard or serial console).
+#
+# Runs only when a file named r3i6nos-bootlog exists on BOOT (see r3i6nos-bootlog.service):
+# create it by hand to debug a boot, delete it afterwards. Writes r3i6nos-bootlog.txt twice,
+# after 25 s and after 60 s, so a crash loop shows up in the second copy.
+#
+# Overrides, for tests: R3I6NOS_BOOTLOG_OUT, R3I6NOS_BOOTLOG_DELAYS ("25 35" = seconds to
+# wait before each write).
+
+set -u
+
+OUT="${R3I6NOS_BOOTLOG_OUT:-/boot/r3i6nos-bootlog.txt}"
+DELAYS="${R3I6NOS_BOOTLOG_DELAYS:-25 35}"
+
+section() { printf '\n===== %s =====\n' "$*"; }
+run() { section "$*"; "$@" 2>&1; }
+
+snapshot() {
+    {
+        echo "r3i6nos boot log, $(date -u +%FT%TZ), up $(cut -d' ' -f1 /proc/uptime)s"
+        run uname -a
+        section "cmdline"; cat /proc/cmdline
+        run systemctl --no-pager --failed
+        run systemctl --no-pager -l status loveos.service
+        section "loveos journal (last 120)"; journalctl -b --no-pager -u loveos.service -n 120 -o short-monotonic 2>&1
+        section "kernel: graphics, panel and GPU lines"
+        dmesg 2>&1 | grep -iE 'drm|mali|vop|panel|dsi|gpu|fb0|fbcon|backlight' | tail -n 80
+        section "kernel: warnings and errors (last 60)"; dmesg --level=err,warn 2>&1 | tail -n 60
+        run ls -l /dev/dri /dev/fb0 /dev/input /dev/snd
+        section "groups of loveos"; id loveos 2>&1
+        section "GPU blob"; ls -l /opt/libmali 2>&1 | head -n 12
+        section "unresolved libraries"
+        for bin in /opt/love/*/bin/love; do
+            echo "$bin:"; LD_LIBRARY_PATH=/opt/libmali ldd "$bin" 2>&1 | grep -E 'not found' || echo "  none"
+        done
+        section "modules loaded"; lsmod 2>&1 | head -n 40
+        section "mounts"; findmnt -rn -o TARGET,SOURCE,FSTYPE 2>&1
+        section "memory"; free -m 2>&1
+        section "journal (all units, last 150)"; journalctl -b --no-pager -n 150 -o short-monotonic 2>&1
+    } > "$OUT.tmp" 2>&1
+    mv -f "$OUT.tmp" "$OUT"
+    sync
+}
+
+for d in $DELAYS; do
+    sleep "$d"
+    snapshot
+done

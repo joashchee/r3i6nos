@@ -16,6 +16,8 @@
 # ROOTFS UUID (scripts/image-layout.sh), in a temporary copy: the files in
 # assets-dir are never modified.
 #
+# Set R3I6NOS_BOOT_DEBUG=1 to see the boot on screen and get a boot log file on BOOT (below).
+#
 # The sector-64 start matches the stock card (captured 2026-11-06). The
 # image's MBR (sectors 0 to 63) is never touched.
 
@@ -89,6 +91,30 @@ print(f"    rewrote {total} root= entries")
 if total == 0:
     sys.exit("no root= found in any .ini or .conf: the image would not find its root")
 PY
+
+# R3I6NOS_BOOT_DEBUG=1: show the console on the screen (the stock line sends it to the serial port with
+# `quiet splash`) and ask the image to write r3i6nos-bootlog.txt onto BOOT after booting.
+if [ "${R3I6NOS_BOOT_DEBUG:-}" = 1 ]; then
+    echo "[*] Debug boot: console on screen, bootlog on BOOT..."
+    python3 -I - "$STAGE" <<'PY'
+import os, sys
+old = " console=/dev/ttyFIQ0 quiet splash plymouth.ignore-serial-consoles"
+new = " console=tty1 loglevel=3 systemd.show_status=1"
+total = 0
+for d, _, names in os.walk(sys.argv[1]):
+    for n in names:
+        if n.lower().endswith((".ini", ".conf")):
+            p = os.path.join(d, n)
+            text = open(p, encoding="utf-8", errors="surrogateescape", newline="").read()
+            if old in text:
+                total += text.count(old)
+                open(p, "w", encoding="utf-8", errors="surrogateescape", newline="").write(text.replace(old, new))
+print(f"    changed {total} console settings")
+if total == 0:
+    sys.exit("the boot.ini has no stock console= line to change")
+PY
+    : > "$STAGE/r3i6nos-bootlog"
+fi
 
 # Nothing is written to the image until the boot files are staged and patched.
 echo "[*] Bootloader: $size bytes at sector $LOADER_SECTOR..."

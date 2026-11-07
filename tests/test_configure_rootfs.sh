@@ -24,6 +24,18 @@ R3I6NOS_LOVE_BUILD="$T/love" scripts/configure_rootfs.sh "$R" >/dev/null
 grep -q 'LABEL=EASYROMS /roms' "$R/etc/fstab"   || fail "fstab games card"
 grep -q 'nofail' "$R/etc/fstab"                 || fail "fstab nofail"
 [ -L "$R/etc/systemd/system/multi-user.target.wants/loveos.service" ] || fail "unit not enabled"
+[ -x "$R/usr/local/bin/r3i6nos-bootlog" ]        || fail "r3i6nos-bootlog not installed executable"
+[ -L "$R/etc/systemd/system/multi-user.target.wants/r3i6nos-bootlog.service" ] || fail "bootlog unit not enabled"
+grep -q '^ConditionPathExists=/boot/r3i6nos-bootlog' overlay/etc/systemd/system/r3i6nos-bootlog.service \
+    || fail "bootlog must stay opt-in"
+
+# bootlog writes its file (delays 0 so the test is instant); nothing else on the card
+b="$(mktemp -d "${TMPDIR:-/tmp}/bootlog.XXXXXX")"
+R3I6NOS_BOOTLOG_OUT="$b/log.txt" R3I6NOS_BOOTLOG_DELAYS="0 0" overlay/usr/local/bin/r3i6nos-bootlog \
+    || fail "bootlog exited non-zero"
+grep -q '===== cmdline =====' "$b/log.txt" || fail "bootlog wrote no cmdline section"
+[ ! -e "$b/log.txt.tmp" ] || fail "bootlog left its temp file"
+rm -rf "$b"
 [ -f "$R/usr/share/doc/foo/copyright" ]         || fail "copyright was trimmed"
 [ ! -e "$R/usr/share/doc/foo/changelog.gz" ]    || fail "doc not trimmed"
 [ ! -e "$R/usr/share/man" ]                     || fail "man not trimmed"

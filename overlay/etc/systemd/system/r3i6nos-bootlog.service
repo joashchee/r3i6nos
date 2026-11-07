@@ -1,0 +1,12 @@
+[Unit]
+Description=Write the boot log to the BOOT partition (debugging only)
+# Opt-in: create an empty file named r3i6nos-bootlog on the BOOT partition.
+ConditionPathExists=/boot/r3i6nos-bootlog
+After=local-fs.target boot.mount
+
+[Service]
+Type=simple
+ExecStart=/usr/local/bin/r3i6nos-bootlog
+
+[Install]
+WantedBy=multi-user.target

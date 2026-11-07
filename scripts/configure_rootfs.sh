@@ -67,6 +67,8 @@ echo "[*] Enabling loveos.service..."
 mkdir -p "$ROOTFS/etc/systemd/system/multi-user.target.wants"
 ln -sfn /etc/systemd/system/loveos.service \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/loveos.service"
+ln -sfn /etc/systemd/system/r3i6nos-bootlog.service \
+    "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-bootlog.service"
 ln -sfn /lib/systemd/system/multi-user.target "$ROOTFS/etc/systemd/system/default.target"
 for unit in apt-daily.timer apt-daily-upgrade.timer; do
     ln -sfn /dev/null "$ROOTFS/etc/systemd/system/$unit"

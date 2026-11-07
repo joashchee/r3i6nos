@@ -106,6 +106,11 @@ All of it goes in the gitignored `local_hardware_assets/`.
 ## 6. Phase 5: bring-up on the R36S (needs the unit)
 
 - [ ] **First boot:** reaches the menu; panel, backlight, D-pad and buttons, audio, TF2 mount.
+  - Done (2026-11-07, one R36S, Panel 4 DTB from the stock card): ArkOS splash, kernel, initramfs, root by UUID, systemd to
+    the end of boot, text console on the panel. `EASYROMS` timeout is expected (no such partition).
+  - **Open:** after that nothing is drawn. Blocked on the log: flash an image injected with `R3I6NOS_BOOT_DEBUG=1`, boot, read
+    `r3i6nos-bootlog.txt` from BOOT on the Mac. Suspects: `loveos.service` (SDL kmsdrm vs the Mali wayland-gbm blob).
+  - **macOS will not mount BOOT** (`fsck_msdos` is clean). Suspect: FAT hidden-sectors field is 0 (`mkfs.fat -h`). Not yet fixed.
 - [ ] **A LÖVE 11.5 game and a 12.0 game** run and return to the menu.
 - [ ] **A `.deb`** installs, launches and uninstalls by removal.
 - [ ] **Fix** what hardware shows; record each unit tested in the README.

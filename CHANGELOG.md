@@ -5,6 +5,12 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **First boot on hardware** (2026-11-07): ArkOS splash, kernel, initramfs and systemd all ran from the new card (root found by
+  UUID); `EASYROMS` timed out as expected (no such partition on this card, `nofail`). Boot stopped after
+  `systemd-update-utmp` with nothing on screen: `loveos.service` output goes to the journal. Added **`r3i6nos-bootlog`**
+  (opt-in: a file named `r3i6nos-bootlog` on BOOT makes it write `r3i6nos-bootlog.txt` there at 25 s and 60 s: loveos journal,
+  DRM/panel/GPU kernel lines, device nodes, unresolved libraries) and `R3I6NOS_BOOT_DEBUG=1` for `inject-boot.sh` (console on
+  screen instead of serial, plus the marker file). The stock `boot.ini` loads the panel DTB from BOOT; the stock card's was Panel 4's.
 - **`inject-rootfs` read-back fooled by macOS's case-insensitive disk** (2026-11-07, first real run): `libmali.so` and
   `libMali.so` are different links on ext4 but the same name in a Mac dump folder, so one read back wrong. Symlink targets
   are now read from the filesystem with `debugfs stat`, not from the dump (files are still compared from the dump). Run
