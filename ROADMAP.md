@@ -189,6 +189,6 @@ All of it goes in the gitignored `local_hardware_assets/`.
       guard it. Nothing else touches `document`, `window`, `performance`, timers, `fetch`, audio or `localStorage`. **Not run:** nothing has executed in QuickJS yet.
     - [x] **Spike, on a Mac (2026-11-08): GO on loading and drawing.** QuickJS 2024-01-13 (sha256 `3c4bf8f8...8212e03`) built natively; `klam.js` and `screens.js` load once a
       `URL` shim exists (a 1-line class in the host) and `?v=124` is stripped from imports; for all 7 `examples/*.kan`, `load` + `viewScreen` + `cmdScreen` give
-      **byte-identical text to Node** (hash 183434222). All 7 files plus load took 23 ms in QuickJS on the Mac (29 ms in Node). **Untested:** speed on the 1.3 GHz
+      **byte-identical text to Node** (hash 183434222). All 7 files plus load took 23 ms in QuickJS on the Mac (29 ms in Node). **Also builds and matches on aarch64 Debian 12 in Docker (Colima, 2026-11-08). **Untested:** speed on the 1.3 GHz
       Cortex-A35 (expect roughly 10x slower; a drawn frame must be timed there), peak memory (not measured), the `qjsc` bytecode path, colours (only the characters were compared), `route` and key input, and the aarch64 cross-build. A statically imported module that throws shows no error under `qjs -m`: the host must report load errors on the splash.
   - [ ] Host, controls (pointer, radial, virtual keyboard overlay, Start menu), files and settings, package and smoke test, a try on the R36S.
