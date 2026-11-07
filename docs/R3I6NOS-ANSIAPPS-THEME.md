@@ -58,6 +58,9 @@ Dialogs (Settings, Shut down?) are the same list in a smaller box centred in the
 | back | B (1) | Esc, X | a step back; closes as Cancel |
 | more | Start (14) | Tab, F1, S | More... on the selection (the menu: Settings) |
 
+A list that fits one page shows no `Page` number. An app with more than one list may use left/right to switch lists (Commander does; L1/R1 still
+turn pages), and X, Y and Select for its own commands (`theme.PAD` names them `x`, `y`, `select`).
+
 Apps read the pad's **raw joystick buttons** (`theme.PAD`), not SDL's gamepad mapping, which does not match this pad
 (`docs/hardware-findings.md`). `theme.KEYS` is the keyboard for laptops.
 
@@ -75,9 +78,13 @@ local theme = require("r3i6nos_ansiapps")
 Keep the screen composition in a pure module (the menu's `view.lua`) so luajit can test it, and test it as `tests/test_menu_view.lua` does.
 `theme.init` and `theme.draw` are the only LÖVE calls.
 
-**Native (C, SDL2)**: `theme/r3i6nos_vga8x16.h` has the 256 glyphs (`r3i6nos_vga8x16[i][row]`, top bit leftmost) and the Unicode of each
+**Native (C, SDL2)**: `theme/r3i6nos_ansiapps.h` is the C twin of the Lua theme (single header, compile with `-I theme` and SDL2's flags): the
+screen (`R3Screen`), text and boxes, the top bar, the command line, the list dialog, the button and key maps, and `R3Video`, which paints
+the cells into a texture and lets SDL scale it by a whole number. `apps/commander-native/commander.c` is the reference app. The two themes
+cannot drift on the font: both hash all 256 scaled glyphs and the same number is in `tests/test_theme.lua` and in `r3i6nos_ansiapps.h`.
+The font data it builds on: `theme/r3i6nos_vga8x16.h` has the 256 glyphs (`r3i6nos_vga8x16[i][row]`, top bit leftmost) and the Unicode of each
 (`r3i6nos_cp437[i]`). Use the same 64x24 grid of 10x20 cells, the same row roles, colours and mapping from 8x16 to 10x20 as above.
-There is no C library for the theme yet (ROADMAP).
+(The C header includes it; the app's `.deb` carries `NOTICE` and the font licence in its doc folder.)
 
 ## What the theme does not cover
 

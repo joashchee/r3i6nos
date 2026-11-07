@@ -37,6 +37,42 @@ PWR pills light from keyboard key events, if the system delivers them (not yet s
 Tested here: the logic, the LÖVE code against a fake LÖVE, the native app's draw and self-test on a Mac (dummy video).
 The LÖVE layout itself has only been drawn by LÖVE on the device; the native one is checked by screenshot here.
 
+## Commander, the file manager
+
+`native_deb/Commander.deb` (`commander-native/`, C and SDL2): a two-panel file manager in the style of Norton Commander and Midnight
+Commander, and the first app on the **r3i6nos-ansiapps theme** (`docs/R3I6NOS-ANSIAPPS-THEME.md`, C header `theme/r3i6nos_ansiapps.h`).
+Row 0 is the top bar (free space), rows 1-20 are two 32-column panels (the active one double-framed, 18 entries a page, `Page` as `n/m` in
+its edge), rows 21-23 are the command line: a tip or the last result, the folder as the prompt (or the line being typed), and the selected
+file's mode, size and date with its place in the list (a progress bar while it works). The left panel starts on the games card (`/roms`), the right on `$HOME`.
+
+| Button | Does |
+|---|---|
+| D-pad up / down | move |
+| D-pad left / right | switch panel (the left panel is active after left) |
+| L1 / R1, L2 / R2 | page up / down, top / bottom |
+| A | open a folder, or view a file (text, or hex for binary; whole pages, 4 MiB at most) |
+| B | parent folder (the folder you came from stays selected); cancels a running job |
+| X | tag / untag the entry and move down; **Y** tags all or none |
+| Start | the menu: View, Copy, Move, Rename, Make directory, Delete, Tag all, Untag all, Sort by, Hidden files, Swap panels, Other panel = this folder, Quit |
+| Select + Start | quit to the menu |
+
+A keyboard works too: F2 rename, F3 view, F5 copy, F6 move, F7 new folder, F8 delete, F10 quit, Tab switch panel, Insert/Space tag.
+Rename and new folder use the command line: Up/Down step the last letter through a list, Right adds a letter, Left deletes one, A accepts,
+B cancels (a keyboard just types).
+
+**What it will and won't do:** copy and move go to the other panel's folder and **never overwrite**: a name that already exists is skipped and
+counted in the result. Delete asks first with **No** preselected, says when folders are included, and never follows a link (a link is
+copied as a link and deleted as a link). A folder cannot be copied into itself, and `/` is never moved or deleted. Work runs in
+slices from the main loop with a progress bar, so B can cancel it (the half-written file is removed). A move on one filesystem is a rename; across
+filesystems it copies, then deletes each item only after that item copied without error. Tagged entries are what an action works on; with none
+tagged, it is the entry under the cursor. It runs as the `loveos` user, so system folders are read-only to it.
+
+**Checked here** (by `commander --selftest`, run by `scripts/check.sh` and in CI under qemu): the file operations against a temporary folder
+(copy, links, skipped names, copy-into-itself, move by rename and by copy, a failed copy keeping its source, delete not following links, cancel,
+rename, new folder), the panels (sorting, hidden files, paging), every dialog and the viewer's text. Looked at as pictures
+(`R3I6NOS_FM_SHOTS=dir commander --selftest` saves each screen). **Not run on a real R36S:** the buttons, how it looks on the panel, speed on the
+SD card, and exFAT quirks (no permissions or links there, so copies of links to the card fail and say so).
+
 ## Trying them on a Mac
 
 ```sh

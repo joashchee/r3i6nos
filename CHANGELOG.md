@@ -5,6 +5,14 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **Commander, a file manager in the style of mc, as a default app** (2026-11-07). `apps/commander-native/commander.c`, C and SDL2, built into the image as
+  `native_deb/Commander.deb` (`build_native_apps.sh` now makes two debs). Two 32-column panels, tag, sort, hidden files, view (text and hex, whole pages),
+  copy, move, rename, new folder, delete, with a menu on Start and a progress bar with cancel; it never overwrites, never follows links, asks before deleting
+  with No preselected, and never touches `/`. Rename and new folder take a line from the pad (Up/Down step the last letter) or a keyboard. It is the first app on the theme in C:
+  new `theme/r3i6nos_ansiapps.h` (the C twin of the Lua theme; both hash all 256 scaled glyphs and agree). `theme.PAD` gains `x`, `y`, `select`, and a list with one page no
+  longer says `Page 1/1`; box titles no longer run into the page number. `commander --selftest` runs ~100 checks against a temporary folder (also under qemu in CI, with no shell
+  needed); `R3I6NOS_FM_SHOTS=dir` saves each screen as a picture. `check.sh` and the CI cache, smoke and sanity steps cover both apps; `smoke_native.sh` takes the binary name.
+  The font's CC BY-SA credit and licence ship in the deb's doc folder. **Not run on a real R36S.**
 - **`flash-macos.sh`: games partition by default, and every failure explained** (2026-11-07). The rest of the card becomes `EASYROMS` unless `--no-games`
   (`--games` is still accepted); new `--games-only DISK` adds it to a card that is already flashed (found when a card flashed without `--games` showed 125.7 GB
   free and no `/roms`). Each failure (unreadable MBR, not an r3i6nos card, partition 3 already there, under 1 GiB free, write-protected card, macOS not

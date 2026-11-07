@@ -58,6 +58,9 @@ local any = 0
 for y = 0, 19 do for x = 0, 9 do any = any + a[y][x] end end
 assert(any > 20, "A has pixels")
 
+-- the C theme (theme/r3i6nos_ansiapps.h) scales the font the same way: both hash every 10x20 pixel and must agree
+eq(T.glyphHash(), 0x71e726c8, "glyph hash (update r3i6nos_ansiapps.h's R3_GLYPH_HASH too if the font or scaling changes)")
+
 -- UTF-8 to code page 437
 local function idx(s) return table.concat(T.decode(s), ",") end
 eq(idx("Az"), "65,122"); eq(idx("Ö"), "153"); eq(idx("é"), "130"); eq(idx("─│█"), "196,179,219")
@@ -115,6 +118,11 @@ eq(s.bg[2 * 64 + 5], T.CYAN, "selected row is on cyan"); eq(s.fg[2 * 64 + 5], T.
 eq(s.bg[3 * 64 + 5], T.BLACK, "the next row is not")
 for r = 1, 20 do eq(s.ch[r * 64 + 1] ~= 32, true, "the frame's left edge, row " .. r) end
 
+-- a list that fits one page has no page number
+s = T.screen()
+T.listDialog(s, { col = 0, row = 1, w = 40, h = 6, title = "Small", items = { { label = "a" }, { label = "b" } }, sel = 1 })
+assert(not table.concat(s:dump(), "\n"):find("Page", 1, true), "no Page x/y for one page")
+
 -- the list rule
 local sel, ev = T.listKey(1, 40, 18, "down"); eq(sel, 2); eq(ev, nil)
 sel = T.listKey(1, 40, 18, "up"); eq(sel, 40, "up wraps")
@@ -133,6 +141,7 @@ sel, ev = T.listKey(0, 0, 18, "more"); eq(ev, "more", "More works on an empty li
 -- the R36S's buttons (measured; docs/hardware-findings.md)
 eq(T.PAD[9], "up"); eq(T.PAD[10], "down"); eq(T.PAD[11], "left"); eq(T.PAD[12], "right")
 eq(T.PAD[2], "accept", "A is 2"); eq(T.PAD[1], "back", "B is 1"); eq(T.PAD[14], "more", "Start is 14")
+eq(T.PAD[3], "x"); eq(T.PAD[4], "y"); eq(T.PAD[13], "select")
 eq(T.PAD[5], "pageup"); eq(T.PAD[6], "pagedown"); eq(T.PAD[7], "home"); eq(T.PAD[8], "end")
 eq(T.KEYS["return"], "accept"); eq(T.KEYS.escape, "back")
 

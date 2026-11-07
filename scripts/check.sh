@@ -46,20 +46,23 @@ if command -v luajit >/dev/null; then
     done
 else echo "NOT RUN: no luajit"; fi
 
-step "native app (C, SDL2)"
+step "native apps (C, SDL2)"
 if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
-    native_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-native.XXXXXX")"
-    # Warnings are errors under clang (what this was written with); another compiler's new warnings are shown, not fatal.
+    # Warnings are errors under clang (what these were written with); another compiler's new warnings are shown, not fatal.
     werror=""; cc --version 2>/dev/null | grep -qi clang && werror="-Werror"
-    # shellcheck disable=SC2046  # sdl2-config prints separate flags
-    if cc -std=c11 -Wall -Wextra $werror -O2 $(sdl2-config --cflags) -o "$native_bin" apps/input-checker-native/input_checker.c $(sdl2-config --libs) -lm; then
-        out="$(SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy "$native_bin" --selftest 2>&1)"
-        echo "$out"
-        grep -q '^R3I6NOS_SMOKE ok input-checker-native=' <<<"$out" || { echo "FAIL: native selftest"; fail=1; }
-    else
-        echo "FAIL: native app does not compile"; fail=1
-    fi
-    rm -f "$native_bin"
+    for app in "input-checker-native:apps/input-checker-native/input_checker.c" "commander:apps/commander-native/commander.c"; do
+        name="${app%%:*}"; src="${app#*:}"
+        native_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-native.XXXXXX")"
+        # shellcheck disable=SC2046  # sdl2-config prints separate flags
+        if cc -std=c11 -Wall -Wextra $werror -O2 -I theme $(sdl2-config --cflags) -o "$native_bin" "$src" $(sdl2-config --libs) -lm; then
+            out="$(SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy "$native_bin" --selftest 2>&1)"
+            echo "$out"
+            grep -q "^R3I6NOS_SMOKE ok $name=" <<<"$out" || { echo "FAIL: $name selftest"; fail=1; }
+        else
+            echo "FAIL: $name does not compile"; fail=1
+        fi
+        rm -f "$native_bin"
+    done
 else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
 
 step "shell tests"

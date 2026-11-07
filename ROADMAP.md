@@ -16,7 +16,11 @@ document that has the detail. Nothing here has run on a real R36S yet.
   that the canvas and sprite batch draw on the Mali blob's GLES, and how the 10x20 glyphs look on the panel.
   - [ ] **Look at it on a Mac first:** run the menu under `vendor/love-mac` with `R3I6NOS_THEME=theme` and `R3I6NOS_ROMS` set to a folder of dummy games, and check the glyphs.
   - [ ] **Move the input checkers onto the theme** (LÖVE and the C app) when next changed; they keep their own pad picture for now.
-  - [ ] **A C version of the theme** (cells, list dialog, command line over SDL2) for native apps; today only the font header exists.
+  - [x] **A C version of the theme** (2026-11-07): `theme/r3i6nos_ansiapps.h`, checked against the Lua one by a glyph hash and used by Commander.
+- [x] **Commander, a two-panel file manager** (2026-11-07, `apps/commander-native/`, default app `native_deb/Commander.deb`; see `apps/README.md`): browse, view (text and hex),
+  copy, move, rename, new folder, delete, tag, sort, hidden files; no overwrite, no links followed, delete asks with No first, work in slices with a progress bar and cancel.
+  File operations, panels, dialogs and the viewer are tested on the laptop and under qemu; screens were looked at as pictures. **Untested on the R36S:** the buttons, the look on the panel,
+  speed on the SD card, exFAT (no links or permissions). Not done: overwrite choices, a text-mode picker for long names, opening a `.love` from the list.
 - [x] **Settings dialog with Shutdown** (2026-11-07; Start / S opens it, Shutdown asks "Yes / No" with No preselected, then the session
   leaves a flag, exits 0, and `loveos.service`'s root `ExecStopPost` runs `r3i6nos-poweroff` -> `systemctl --no-block poweroff`).
   Logic, session and poweroff script are tested on the laptop. **Untested on the R36S:** that the Start button (raw 14) opens it, that

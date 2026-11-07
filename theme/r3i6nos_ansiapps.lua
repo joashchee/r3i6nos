@@ -137,6 +137,22 @@ function T.glyph10x20(index)
   return out
 end
 
+--- FNV-1a over every pixel (0 or 1) of every 10x20 glyph, in the order ch, y, x. The C theme computes the same number
+--- (r3_glyph_hash in r3i6nos_ansiapps.h), so the two implementations cannot drift apart unnoticed.
+function T.glyphHash()
+  local h = 2166136261
+  for ch = 0, 255 do
+    local g = T.glyph10x20(ch)
+    for y = 0, T.CELL_H - 1 do
+      for x = 0, T.CELL_W - 1 do
+        if g[y][x] == 1 then h = h + ((h % 2 == 0) and 1 or -1) end -- xor with 1 flips bit 0
+        h = ((h % 256) * 16777216 + h * 403) % 4294967296            -- times 16777619 (2^24 + 403) mod 2^32, exact in a double
+      end
+    end
+  end
+  return h
+end
+
 -- ---- the screen: 64 x 24 cells -----------------------------------------------------------------------------------------------------
 
 local Screen = {}
@@ -201,7 +217,7 @@ function Screen:box(col, row, w, h, o)
   self:put(col, row + h - 1, L[5], fg, bg); self:put(col + w - 1, row + h - 1, L[6], fg, bg)
   local room = w - 6
   if o.title then
-    local g = T.fit(o.title, room - 2)
+    local g = T.fit(o.title, room - 2 - (o.right and (T.width(o.right) + 1) or 0)) -- never runs into the right-hand text
     self:put(col + 2, row, 32, fg, bg)
     self:text(col + 3, row, g, o.titleFg or st.strong.fg, bg)
     self:put(col + 3 + #g, row, 32, fg, bg)
@@ -286,7 +302,7 @@ function T.listDialog(scr, o)
   local per = T.listRows(o.h)
   local items = o.items or {}
   local page, pages, first, last = T.listWindow(#items, o.sel or 1, per)
-  scr:box(o.col, o.row, o.w, o.h, { title = o.title, right = ("Page %d/%d"):format(page, pages), foot = o.foot })
+  scr:box(o.col, o.row, o.w, o.h, { title = o.title, right = pages > 1 and ("Page %d/%d"):format(page, pages) or nil, foot = o.foot })  -- "Page x/y" only when there is more than one page
   if #items == 0 then
     for i, line in ipairs(o.empty or {}) do scr:text(o.col + 2, o.row + i, T.fit(line, o.w - 4), st.body.fg, st.body.bg) end
     return page, pages
@@ -327,6 +343,7 @@ T.PAD = {
   [5] = "pageup", [6] = "pagedown",             -- L1, R1
   [7] = "home", [8] = "end",                    -- L2, R2
   [14] = "more",                                -- Start
+  [3] = "x", [4] = "y", [13] = "select",        -- X, Y, Select: for apps that need them (a file manager tags with X)
 }
 T.KEYS = {
   up = "up", down = "down", left = "left", right = "right", pageup = "pageup", pagedown = "pagedown",

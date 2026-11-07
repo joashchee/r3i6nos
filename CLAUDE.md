@@ -15,8 +15,8 @@ is blocked and on what.
 - `overlay/`: files copied onto the image's root filesystem as-is
   (`usr/local/bin/`, `etc/systemd/system/`). Paths mirror the device.
 - `menu/`: the boot menu, a LÖVE 11.5 app installed at `/opt/loveos/menu`.
-- `apps/`: the default apps built into the image (`/opt/loveos/defaults`): the input checker as LÖVE 11.5, LÖVE 12.0 and native ARM64. See `apps/README.md`.
-- `theme/`: the r3i6nos-ansiapps text-mode theme (font, screen, list dialogs); installed at `/opt/loveos/theme`. See `docs/R3I6NOS-ANSIAPPS-THEME.md`.
+- `apps/`: the default apps built into the image (`/opt/loveos/defaults`): the input checker as LÖVE 11.5, LÖVE 12.0 and native ARM64, and Commander (a native ARM64 file manager). See `apps/README.md`.
+- `theme/`: the r3i6nos-ansiapps text-mode theme for LÖVE (`.lua`) and C/SDL2 (`.h`): font, screen, list dialogs; installed at `/opt/loveos/theme`. See `docs/R3I6NOS-ANSIAPPS-THEME.md`.
 - `scripts/`: host-side tools. `check.sh` runs everything CI runs.
 - `tests/`: Python (`unittest`) and Lua tests; no hardware needed.
 - `vendor/`, `build/`, `local_hardware_assets/`: fetched, built or captured, gitignored.
