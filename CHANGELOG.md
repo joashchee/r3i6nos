@@ -5,6 +5,8 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **Dependabot for the GitHub Actions** (2026-11-07): `.github/dependabot.yml`, weekly, one grouped pull request for all the actions the workflows use.
+  The scripts' pinned downloads (LÖVE, SDL3) are not covered and stay pinned by hand.
 - **Font licence terms done** (2026-11-07), keeping VileR's IBM VGA 8x16 (CC BY-SA 4.0): new root `NOTICE` (credit, licence link, what changed, and that the two
   generated font files are CC BY-SA, not MIT); `README.md`'s licence section says so; `theme/font/README.txt` rewritten (the old one claimed the font was never
   converted, which stopped being true); both generated files now carry the full credit, licence link, change statement and warranty notice

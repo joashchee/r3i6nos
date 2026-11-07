@@ -1,0 +1,13 @@
+# Keeps the GitHub Actions the workflows use (actions/checkout, cache, upload-artifact ...) current.
+# Nothing else has a package manifest: the Python is standard library only, and the build downloads
+# (LÖVE, SDL3) are pinned by hand with a sha256 in scripts/build_love.sh.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    open-pull-requests-limit: 3
