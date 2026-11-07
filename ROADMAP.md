@@ -95,7 +95,7 @@ All of it goes in the gitignored `local_hardware_assets/`.
 - [x] **`.github/workflows/build.yml`** (was `rootfs.yml`): manual or `v*` tags; an `image` job runs the image tests,
   assembles, checks, compresses and uploads `r36s-loveos.img.gz` with a checksum.
 - [x] **First green `image` job** (2026-11-07): `tests/test_image.sh` (assemble, check, inject-boot, inject-rootfs against real `debugfs`) and the image build pass in CI. Still never booted on hardware.
-- [x] **Refusal tried** (2026-11-07, on the maintainer's Mac): `flash-macos.sh <image> disk0 --dry-run` says "disk0 is an INTERNAL disk. Refusing." The happy path on a real removable card is still untried.
+- [x] **Refusal tried** (2026-11-07, on the maintainer's Mac): `flash-macos.sh <image> disk0 --dry-run` says "disk0 is an INTERNAL disk. Refusing." The happy path then ran on a real 128 GB card (2026-11-07): 2.4 GB written in 38 s, ejected. Whether that card boots is not yet known.
 - [x] **`scripts/capture-card.sh`** (2026-11-06, **never run on a card**; the MBR parsing is unit-tested on synthetic cards):
   read-only copy of the bootloader, BOOT files, modules and firmware into `local_hardware_assets/`, plus a report.
   `scripts/device-info.sh` runs on the R36S itself for the real kernel command line and controller mapping.

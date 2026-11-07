@@ -91,7 +91,10 @@ for p in /usr/lib/modules /usr/lib/firmware /opt/libmali; do
         "$DEBUGFS" -R "rdump $p $DUMP$(dirname "$p")" "$PART" >/dev/null 2>&1
     fi
 done
-if ! python3 -I "$REPO/scripts/inject_rootfs.py" verify "$ASSETS" "$DUMP"; then
+# Symlink targets are read from the filesystem itself: a Mac's dump folder is case-insensitive
+# and cannot hold both libmali.so and libMali.so.
+"$DEBUGFS" -f "$TMP/commands.links" "$PART" >"$TMP/links.log" 2>&1 || true
+if ! python3 -I "$REPO/scripts/inject_rootfs.py" verify "$ASSETS" "$DUMP" "$TMP/links.log"; then
     echo "debugfs said (without the routine lines):" >&2
     grep -vE '^debugfs |^Allocated inode|already exists' "$TMP/debugfs.log" | head -10 >&2
     fail "read-back differs (the image is untouched)"

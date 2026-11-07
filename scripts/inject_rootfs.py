@@ -2,7 +2,11 @@
 """inject_rootfs.py - plan and verify what goes from the user's card into the image's root.
 
   inject_rootfs.py plan   <assets-dir> <debugfs-commands-out>   write a debugfs script, print a summary
-  inject_rootfs.py verify <assets-dir> <dump-dir>               compare a debugfs rdump with the plan
+  inject_rootfs.py verify <assets-dir> <dump-dir> [stat-log]    compare a debugfs rdump with the plan;
+                                                                symlink targets come from the stat log
+                                                                (debugfs stat of each link), because a
+                                                                case-insensitive host (macOS) cannot hold
+                                                                both libmali.so and libMali.so in a dump
 
 What is injected (all from capture-card.sh's local_hardware_assets/, none of it in the repo):
   rootfs/lib/modules, rootfs/lib/firmware  ->  /usr/lib/modules, /usr/lib/firmware
@@ -18,6 +22,7 @@ Standard library only.
 
 import hashlib
 import os
+import re
 import sys
 
 REQUIRED_GPU_NAMES = ("libEGL.so.1", "libGLESv2.so.2", "libgbm.so.1")
@@ -183,9 +188,32 @@ def _sha(path):
     return h.digest()
 
 
-def verify(ops, dump_dir: str):
-    """Returns a list of problems (empty when the dump matches the plan)."""
+def link_commands(ops) -> str:
+    """debugfs commands that print every planned symlink's target."""
+    return "".join(f"stat {_quote(o[1])}\n" for o in ops if o[0] == "symlink")
+
+
+def parse_stat_log(text: str):
+    """{path: target} from the output of debugfs running link_commands()."""
+    targets, path = {}, None
+    for line in text.splitlines():
+        m = re.match(r'debugfs: stat "(.*)"$', line)
+        if m:
+            path = m.group(1)
+            continue
+        m = re.match(r'Fast link dest: "(.*)"$', line)
+        if m and path is not None:
+            targets[path] = m.group(1)
+    return targets
+
+
+def verify(ops, dump_dir: str, link_targets=None):
+    """Returns a list of problems (empty when the dump matches the plan).
+
+    link_targets (from parse_stat_log) overrides the dump for symlinks it knows; a long
+    target (60 characters or more) is not printed by debugfs, so those use the dump."""
     problems = []
+    link_targets = link_targets or {}
     for op in ops:
         dest = dump_dir.rstrip("/") + (op[2] if op[0] == "write" else op[1])
         if op[0] == "mkdir":
@@ -196,6 +224,9 @@ def verify(ops, dump_dir: str):
                 problems.append(f"missing file {op[2]}")
             elif _sha(dest) != _sha(op[1]):
                 problems.append(f"content differs: {op[2]}")
+        elif op[0] == "symlink" and op[1] in link_targets:
+            if link_targets[op[1]] != op[2]:
+                problems.append(f"symlink {op[1]} points to {link_targets[op[1]]}, expected {op[2]}")
         elif op[0] == "symlink":
             if not os.path.islink(dest):
                 problems.append(f"missing symlink {op[1]}")
@@ -217,6 +248,8 @@ def main(argv) -> int:
     if argv[1] == "plan":
         with open(argv[3], "w", encoding="utf-8") as f:
             f.write(to_commands(ops))
+        with open(argv[3] + ".links", "w", encoding="utf-8") as f:
+            f.write(link_commands(ops))
         n_files = sum(1 for o in ops if o[0] == "write")
         size = sum(os.path.getsize(o[1]) for o in ops if o[0] == "write")
         for o in ops:
@@ -230,7 +263,11 @@ def main(argv) -> int:
               f"{sum(1 for o in ops if o[0] == 'symlink')} symlinks, "
               f"{sum(1 for o in ops if o[0] == 'mkdir')} directories")
         return 0
-    problems = verify(ops, argv[3])
+    targets = None
+    if len(argv) > 4:
+        with open(argv[4], encoding="utf-8", errors="replace") as f:
+            targets = parse_stat_log(f.read())
+    problems = verify(ops, argv[3], targets)
     for p in problems[:20]:
         print(f"inject_rootfs: {p}", file=sys.stderr)
     if problems:

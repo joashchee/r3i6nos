@@ -5,6 +5,13 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **`inject-rootfs` read-back fooled by macOS's case-insensitive disk** (2026-11-07, first real run): `libmali.so` and
+  `libMali.so` are different links on ext4 but the same name in a Mac dump folder, so one read back wrong. Symlink targets
+  are now read from the filesystem with `debugfs stat`, not from the dump (files are still compared from the dump). Run
+  end to end on a scratch copy of the CI image with the maintainer's real assets: 2881 entries verified, fsck clean.
+- **`inject-boot` tripped on Finder's `.DS_Store`** (2026-11-07, first run on the maintainer's Mac): the copy glob skipped the
+  dotfile but the read-back found it. Finder litter (`.DS_Store`, `._*`) is now removed from the staged copy and top-level
+  entries are copied one by one with overwrite (`-D o`), so no hidden file is skipped and a re-run over a half-injected image works. Tested on a copy of the CI image with fake assets, not yet with your real ones.
 - **`inject-rootfs` found its first real bug in CI** (2026-11-06): debugfs's exit status and error text cannot be
   trusted (it exits 0 on failure and its missing-parent message matched none of my patterns), so the read-back compare is
   the real check. The test rootfs has no `/usr/lib`, so the module directories silently failed to be created. The plan now

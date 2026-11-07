@@ -170,6 +170,8 @@ class Verify(unittest.TestCase):
                 Path(dump + op[2]).write_bytes(Path(op[1]).read_bytes())
             else:
                 os.makedirs(os.path.dirname(dump + op[1]), exist_ok=True)
+                if os.path.lexists(dump + op[1]):      # a case-insensitive host: last writer wins
+                    os.remove(dump + op[1])
                 os.symlink(op[2], dump + op[1])
         return dump
 
@@ -185,6 +187,24 @@ class Verify(unittest.TestCase):
         problems = inj.verify(inj.build_plan(assets), dump)
         self.assertTrue(any("content differs" in p for p in problems))
         self.assertTrue(any("missing symlink /opt/libmali/libMali.so" in p for p in problems))
+
+    def test_symlink_targets_come_from_the_stat_log_not_the_dump(self):
+        # A case-insensitive dump folder: libmali.so overwrote libMali.so's link.
+        assets = make_assets(RealListing.FIXTURE.read_text())
+        gpu = Path(assets) / "rootfs/gpu"
+        (gpu / "libmali-bifrost-g31-rxp0-gbm.so").rename(gpu / "libmali-bifrost-g31-rxp0-wayland-gbm.so")
+        ops = inj.build_plan(assets)
+        dump = self.dump_of(assets)
+        os.remove(dump + "/opt/libmali/libmali.so")
+        os.symlink("libmali-bifrost-g31-rxp0-wayland-gbm.so", dump + "/opt/libmali/libmali.so")
+        self.assertTrue(inj.verify(ops, dump))                       # the dump alone is fooled
+        log = "".join(f'debugfs: stat "{o[1]}"\nInode: 1\nFast link dest: "{o[2]}"\n'
+                      for o in ops if o[0] == "symlink")
+        self.assertEqual(inj.verify(ops, dump, inj.parse_stat_log(log)), [])
+        wrong = log.replace('stat "/opt/libmali/libEGL.so"\nInode: 1\nFast link dest: "libMali.so"',
+                            'stat "/opt/libmali/libEGL.so"\nInode: 1\nFast link dest: "nope"')
+        self.assertTrue(any("libEGL.so points to nope" in p
+                            for p in inj.verify(ops, dump, inj.parse_stat_log(wrong))))
 
 
 if __name__ == "__main__":

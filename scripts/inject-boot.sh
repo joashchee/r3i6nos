@@ -63,6 +63,8 @@ read -r sig first_start <<<"$layout"
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/r3i6nos-boot.XXXXXX")"
 trap 'rm -rf "$STAGE"' EXIT
 cp -R "$ASSETS/boot/." "$STAGE/"
+# Finder litter is not a boot file (and a dotfile the copy glob below would skip).
+find "$STAGE" \( -name .DS_Store -o -name '._*' \) -exec rm -rf {} +
 
 echo "[*] Pointing root= at UUID $ROOT_UUID..."
 python3 -I - "$STAGE" "$ROOT_UUID" <<'PY'
@@ -96,7 +98,9 @@ dd if="$IMG" bs=512 skip="$LOADER_SECTOR" count=$(( (size + 511) / 512 )) 2>/dev
 
 echo "[*] Boot files..."
 FAT="$IMG@@$((BOOT_START * 512))"
-mcopy -i "$FAT" -s -p -Q -n "$STAGE"/* ::
+while IFS= read -r -d '' top; do
+    mcopy -i "$FAT" -s -p -Q -n -D o "$top" ::
+done < <(find "$STAGE" -mindepth 1 -maxdepth 1 -print0)
 # Read every file back out of the image and compare.
 count=0
 while IFS= read -r -d '' f; do
