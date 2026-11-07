@@ -23,7 +23,7 @@ MIRROR="${R3I6NOS_MIRROR:-https://deb.debian.org/debian/}"
 # Needed on the device. Comments say why, so nothing gets removed by accident.
 PACKAGES=(
     systemd systemd-sysv udev kmod       # boot
-    dpkg python3-minimal                 # deb_watcher.py (stdlib only)
+    dpkg python3-minimal libpython3-stdlib  # deb_watcher.py (stdlib only; -minimal alone has no shutil)
     libsdl2-2.0-0                        # native apps and LÖVE
     libdrm2 libgbm1 libegl1 libgles2     # SDL's KMS/DRM driver
     libgl1-mesa-dri                      # Mesa panfrost for the Mali-G31

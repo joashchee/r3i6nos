@@ -5,6 +5,13 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **First boot log read; two bugs** (2026-11-07). (1) The injected Mali blob was the wrong one: the stock card keeps an older
+  wayland-gbm blob in `/usr/lib` (userspace API 10.6) and the one it really uses in `/usr/local/lib/aarch64-linux-gnu`
+  (r13p0, first in `ld.so.conf`); the kernel's driver is 11.7, so LÖVE failed with "file /dev/mali0 is not of a compatible
+  version". `capture-card.sh` now prefers `/usr/local/lib`; new fixture and tests; `docs/hardware-findings.md` records both.
+  (2) `deb_watcher.py` crashed on `import shutil`: `python3-minimal` has no `shutil`. The rootfs now installs
+  `libpython3-stdlib`, and `scripts/check_py_imports.py` (run in the build workflow, tested) fails CI if a boot script imports a
+  module the rootfs lacks. The bootlog's `free` (not installed) became `/proc/meminfo`.
 - **First boot on hardware** (2026-11-07): ArkOS splash, kernel, initramfs and systemd all ran from the new card (root found by
   UUID); `EASYROMS` timed out as expected (no such partition on this card, `nofail`). Boot stopped after
   `systemd-update-utmp` with nothing on screen: `loveos.service` output goes to the journal. Added **`r3i6nos-bootlog`**

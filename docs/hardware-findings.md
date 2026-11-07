@@ -49,3 +49,30 @@ This matters more than anything else on this page:
   systemd 252 is the question. Unknown until it boots.
 - The stock `fstab` mounts `exfat` through the kernel, so the kernel has
   an exFAT driver.
+
+## The stock card has two Mali blobs; only one matches the kernel
+
+Found on the first boot (2026-11-07), by reading the root partition of a full backup of the stock card:
+
+| Where | Blob | Userspace API | Used by stock? |
+|---|---|---|---|
+| `/usr/lib/aarch64-linux-gnu` | `libmali-bifrost-g31-rxp0-wayland-gbm.so` (r6p0, 2020) | 10.6 | no |
+| `/usr/local/lib/aarch64-linux-gnu` | `libmali-bifrost-g31-rxp0-gbm.so` (r13p0, 2021) | matches | **yes** |
+
+- `/etc/ld.so.conf.d/libc.conf` lists `/usr/local/lib` first, and the `/usr/local` directory has its own
+  `libEGL`, `libGLESv1_CM`, `libGLESv2`, `libgbm`, `libOpenCL` and `libmali.so` links to the gbm blob.
+- With the wrong (`/usr/lib`) blob every GL program fails with
+  `file /dev/mali0 is not of a compatible version (user 10.6, kernel 11.7)`, then
+  `Can't load EGL/GL library on window creation`. The kernel's Mali driver (built in, `/dev/mali0`) speaks 11.7.
+- The gbm blob needs only libc-family libraries and `libdrm.so.2`; no Wayland.
+- `capture-card.sh` now prefers `/usr/local/lib/aarch64-linux-gnu`. Fixtures: `tests/fixtures/stock-gpu-libs.txt`
+  (the old `/usr/lib` listing) and `stock-gpu-libs-usr-local.txt` (the right one).
+
+## Boot on the real panel (first boot)
+
+- The stock `boot.ini` loads the panel DTB from `ScreenFiles/Panel N/` when `PanelNum` is saved in U-Boot's
+  environment, else from the BOOT root. The stock card's root DTB equals Panel 4's, and a card with no saved
+  `PanelNum` booted with it (`panel=unset` on the command line) and drew the console.
+- The kernel prints `/dsi@ff450000/panel@0/display-timings: could not find phandle` about three times
+  every time a program opens the display. It is noise: the console and display work.
+

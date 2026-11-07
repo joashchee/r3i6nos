@@ -7,7 +7,9 @@
 #   bootloader.bin     raw bootloader sectors (from sector 64 to the first partition)
 #   boot/              the files of the card's BOOT partition (kernel, DTBs, boot config)
 #   rootfs/lib/modules the kernel modules (and rootfs/lib/firmware) from its root partition
-#   rootfs/gpu/        the stock GPU userland (libmali*): the card's kernel is 4.x, so Mesa's panfrost cannot be used
+#   rootfs/gpu/        the stock GPU userland (libmali*, from /usr/local/lib if the card has one there, else /usr/lib):
+#                      the card's kernel is 4.x, so Mesa's panfrost cannot be used; a blob that does not match the
+#                      kernel ("not of a compatible version") will not open the GPU
 #   info/              partition table, stock fstab and os-release, a capture report, the raw first 16 MiB
 #
 # READ-ONLY on the card: it only reads the raw device, mounts BOOT read-only,
@@ -136,12 +138,21 @@ else
         done
         [ -d "$OUT/rootfs/lib/firmware" ] || echo "    (no /lib/firmware on the card: fine for many boards)"
         # The GPU userland the stock OS uses (Mali blob). The kernel is 4.x, so Mesa's panfrost cannot be used.
+        # ArkOS keeps two blobs: an older wayland-gbm one in /usr/lib (its userspace API does not match the
+        # card's own kernel) and the matching one in /usr/local/lib, which the stock ld.so.conf lists first.
+        # Take the first directory that holds a real libmali file, /usr/local/lib first.
         LIBDIR=/usr/lib/aarch64-linux-gnu
-        listing="$($SUDO "$DEBUGFS" -c -R "ls -p $LIBDIR" "$(part_dev "$ROOTPART")" 2>/dev/null || true)"
+        listing=""
+        for cand in /usr/local/lib/aarch64-linux-gnu /usr/lib/aarch64-linux-gnu; do
+            listing="$($SUDO "$DEBUGFS" -c -R "ls -p $cand" "$(part_dev "$ROOTPART")" 2>/dev/null || true)"
+            if printf '%s\n' "$listing" | awk -F/ 'tolower($6) ~ /^libmali/ && $3 ~ /^100/ {found=1} END {exit !found}'; then
+                LIBDIR="$cand"; break
+            fi
+        done
         mkdir -p "$OUT/rootfs/gpu"
-        : > "$OUT/info/stock-gpu-libs.txt"
+        echo "# $LIBDIR" > "$OUT/info/stock-gpu-libs.txt"
         # ls -p lines: /inode/mode/uid/gid/name/size/ ; mode 100xxx is a file, 120xxx a symlink.
-        printf '%s\n' "$listing" | awk -F/ 'tolower($6) ~ /mali|libgbm|libegl|libgles|libopencl|libdrm/ {print $3 " " $6}' \
+        printf '%s\n' "$listing" | awk -F/ 'tolower($6) ~ /mali|libgbm|libegl|libgles|libopencl/ {print $3 " " $6}' \
         | while read -r mode name; do
             case "$mode" in
                 100*) dump "$LIBDIR/$name" "$OUT/rootfs/gpu/$name" || true; echo "file $name" >> "$OUT/info/stock-gpu-libs.txt" ;;

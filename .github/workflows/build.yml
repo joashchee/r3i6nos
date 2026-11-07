@@ -94,6 +94,8 @@ jobs:
           sudo test -L $R/etc/systemd/system/multi-user.target.wants/loveos.service
           sudo test -x $R/usr/local/bin/loveos-session
           sudo test -f $R/opt/loveos/menu/main.lua
+          # every module the boot scripts import must exist in the rootfs (python3-minimal lacks shutil)
+          sudo python3 -I scripts/check_py_imports.py $R overlay/usr/local/bin/deb_watcher.py
           sudo test -x $R/opt/love/11.5/bin/love
           sudo grep -q '^loveos:x:1000:' $R/etc/passwd
           sudo grep -q '^root:!' $R/etc/shadow

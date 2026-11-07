@@ -41,7 +41,11 @@ All of it goes in the gitignored `local_hardware_assets/`.
   - [x] **Stock listing read** (2026-11-06; kept as `tests/fixtures/stock-gpu-libs.txt`): one blob, `libmali-bifrost-g31-rxp0-wayland-gbm.so`,
     reached by `libMali.so`; `libEGL.so.1`, `libGLESv2.so.2` and `libgbm.so.1` all link to it, so the planner's assumption holds (tested on the real listing).
     Stock Mesa/libdrm leftovers on that card are correctly left out.
-  - [ ] **Blob dependencies:** the wayland build links `libwayland-client`/`-server` (added to the rootfs, a guess). `inject-rootfs.sh` now prints the blob's
+  - [x] **Wrong blob found on hardware** (2026-11-07): that listing was the `/usr/lib` blob (r6p0, API 10.6); the kernel wants 11.x
+    (`file /dev/mali0 is not of a compatible version`). The stock card also has `/usr/local/lib/aarch64-linux-gnu/libmali-bifrost-g31-rxp0-gbm.so`
+    (r13p0), first in its `ld.so.conf`, with its own EGL/GLES/gbm links. `capture-card.sh` now prefers it; the maintainer's local assets were
+    re-pulled from the backup. **Untested:** whether this blob opens the GPU and SDL's kmsdrm then works (next boot). See `docs/hardware-findings.md`.
+  - [x] (superseded) **Blob dependencies:** the wayland build links `libwayland-client`/`-server` (added to the rootfs, a guess). `inject-rootfs.sh` now prints the blob's
     real `needs:` list: compare it with the rootfs packages the first time you run it.
   - [ ] **Does SDL's KMS/DRM driver work with the blob's gbm/EGL?** Only a boot answers that (phase 5). Fallback **B** (Mesa llvmpipe, remove `/opt/libmali`) stays available and shippable.
   - [ ] **Legal note** for the README: images with the blob are not redistributable; say so wherever images are mentioned. (Written in `docs/making-a-card.md`.)
@@ -109,7 +113,9 @@ All of it goes in the gitignored `local_hardware_assets/`.
   - Done (2026-11-07, one R36S, Panel 4 DTB from the stock card): ArkOS splash, kernel, initramfs, root by UUID, systemd to
     the end of boot, text console on the panel. `EASYROMS` timeout is expected (no such partition).
   - **Open:** after that nothing is drawn. Blocked on the log: flash an image injected with `R3I6NOS_BOOT_DEBUG=1`, boot, read
-    `r3i6nos-bootlog.txt` from BOOT on the Mac. Suspects: `loveos.service` (SDL kmsdrm vs the Mali wayland-gbm blob).
+    `r3i6nos-bootlog.txt` from BOOT on the Mac. Result of that boot (2026-11-07): `loveos.service` ran and looped; LÖVE could not create a window (wrong Mali blob, see 1b)
+    and `deb_watcher.py` crashed (`No module named 'shutil'`: `python3-minimal` has none; fixed with `libpython3-stdlib` and a CI check).
+    Next: rebuild, inject the right blob, flash, boot again.
   - **macOS will not mount BOOT** (`fsck_msdos` is clean). Suspect: FAT hidden-sectors field is 0 (`mkfs.fat -h`). Not yet fixed.
 - [ ] **A LÖVE 11.5 game and a 12.0 game** run and return to the menu.
 - [ ] **A `.deb`** installs, launches and uninstalls by removal.

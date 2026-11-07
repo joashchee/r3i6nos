@@ -1,0 +1,16 @@
+# /usr/local/lib/aarch64-linux-gnu (first in the stock ld.so.conf, so what the stock system really uses)
+link libEGL.so -> libmali-bifrost-g31-rxp0-gbm.so
+link libEGL.so.1 -> libmali-bifrost-g31-rxp0-gbm.so
+link libEGL.so.1.0.0 -> libmali-bifrost-g31-rxp0-gbm.so
+link libGLESv1_CM.so -> libmali-bifrost-g31-rxp0-gbm.so
+link libGLESv1_CM.so.1 -> libmali-bifrost-g31-rxp0-gbm.so
+link libGLESv1_CM.so.1.0.0 -> libmali-bifrost-g31-rxp0-gbm.so
+link libGLESv2.so -> libmali-bifrost-g31-rxp0-gbm.so
+link libGLESv2.so.2 -> libmali-bifrost-g31-rxp0-gbm.so
+link libGLESv2.so.2.0.0 -> libmali-bifrost-g31-rxp0-gbm.so
+link libOpenCL.so -> libmali-bifrost-g31-rxp0-gbm.so
+link libgbm.so -> libmali-bifrost-g31-rxp0-gbm.so
+link libgbm.so.1 -> libmali-bifrost-g31-rxp0-gbm.so
+link libgbm.so.1.0.0 -> libmali-bifrost-g31-rxp0-gbm.so
+link libmali.so -> libmali-bifrost-g31-rxp0-gbm.so
+file libmali-bifrost-g31-rxp0-gbm.so

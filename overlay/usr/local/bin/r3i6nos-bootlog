@@ -37,7 +37,7 @@ snapshot() {
         done
         section "modules loaded"; lsmod 2>&1 | head -n 40
         section "mounts"; findmnt -rn -o TARGET,SOURCE,FSTYPE 2>&1
-        section "memory"; free -m 2>&1
+        section "memory"; head -n 3 /proc/meminfo 2>&1
         section "journal (all units, last 150)"; journalctl -b --no-pager -n 150 -o short-monotonic 2>&1
     } > "$OUT.tmp" 2>&1
     mv -f "$OUT.tmp" "$OUT"

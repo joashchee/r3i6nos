@@ -120,6 +120,32 @@ class RealListing(unittest.TestCase):
         self.assertFalse([d for d in dests if "drm" in d or "mesa" in d.lower()])
 
 
+class UsrLocalListing(unittest.TestCase):
+    """The blob that matches the card's own kernel (/usr/local/lib on the stock card, 2026-11-07).
+
+    The older wayland-gbm blob in /usr/lib speaks Mali interface 10.6; the 4.4.189 kernel wants 11.x,
+    and LÖVE failed with "file /dev/mali0 is not of a compatible version"."""
+
+    FIXTURE = Path(__file__).resolve().parent / "fixtures/stock-gpu-libs-usr-local.txt"
+
+    def test_every_required_library_links_straight_to_the_blob(self):
+        a = make_assets(self.FIXTURE.read_text())
+        gpu = Path(a) / "rootfs/gpu"
+        (gpu / "libmali-bifrost-g31-rxp0-gbm.so").write_bytes(b"BLOB")
+        (gpu / "libdrm.so.2.4.0").unlink()
+        ops = inj.build_plan(a)
+        links = {o[1]: o[2] for o in ops if o[0] == "symlink" and o[1].startswith("/opt/libmali")}
+        for name in inj.REQUIRED_GPU_NAMES:
+            self.assertEqual(links["/opt/libmali/" + name], "libmali-bifrost-g31-rxp0-gbm.so")
+        self.assertEqual(links["/opt/libmali/libmali.so"], "libmali-bifrost-g31-rxp0-gbm.so")
+
+    def test_comment_line_in_the_listing_is_ignored(self):
+        self.assertTrue(self.FIXTURE.read_text().startswith("# /usr/local/lib"))
+        files, links = inj._read_listing(str(self.FIXTURE))
+        self.assertIn("libEGL.so.1", links)
+        self.assertIn("libmali-bifrost-g31-rxp0-gbm.so", files)
+
+
 class Elf(unittest.TestCase):
     @staticmethod
     def elf(names):
