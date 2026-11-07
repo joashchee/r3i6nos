@@ -1,0 +1,583 @@
+#!/usr/bin/env python3
+"""r3i6nos-net - the root helper behind Settings > Network and SSH.
+
+The menu runs as the unprivileged `loveos` user and cannot touch interfaces or services, so it leaves a request in
+/run/loveos/net/request and the root unit r3i6nos-net.path starts r3i6nos-net.service, which runs this once, deletes the
+request, does ONE allowlisted verb and writes /run/r3i6nos-net/result for the menu to read. Nothing here runs at boot and
+nothing connects by itself (CLAUDE.md rule 6): every action is a person choosing it in Settings.
+
+The request folder belongs to `loveos`, which also runs games nobody has audited, so this treats everything in it as hostile:
+the request is opened without following links and must be a small regular file, only an allowlist of verbs is run, every argument
+is checked, and the answer is written only into a root-owned folder (never beside the request, where a planted link could make
+root overwrite or re-own another file). What it cannot stop: any `loveos` process can still ask for any allowlisted verb, SSH
+included (docs/NETWORK.md says so).
+
+Request: lines `key=value` (`id`, `verb`, then the verb's arguments; `\\` and `\\n` escape a backslash and a newline).
+Result:  (in R3I6NOS_NET_OUT, /run/r3i6nos-net) `id=..`, `ok=1|0`, then `L<TAB>text` display lines, `N<TAB>ssid<TAB>signal<TAB>security` scan rows.
+
+Verbs: status scan wired wifi disconnect test forget ssh-status ssh-password ssh-enable ssh-disable.
+Standard library only (it runs on a 1 GB board). Overrides, for tests: R3I6NOS_NET_DIR, R3I6NOS_NET_OUT, R3I6NOS_SYS_NET, R3I6NOS_NET_STATE,
+R3I6NOS_RESOLV, R3I6NOS_SSH_ETC, R3I6NOS_SSH_KEYS_SRC, R3I6NOS_SSH_HOME, .
+"""
+
+import hashlib
+import json
+import os
+import pwd
+import re
+import socket
+import stat
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+NET_DIR = Path(os.environ.get("R3I6NOS_NET_DIR", "/run/loveos/net"))          # the request: loveos writes here
+OUT_DIR = Path(os.environ.get("R3I6NOS_NET_OUT", "/run/r3i6nos-net"))          # the result: only root writes here
+SECRETS = OUT_DIR / "private"                                                    # Wi-Fi configs: root only (0700)
+MAX_REQUEST = 16384
+SYS_NET = Path(os.environ.get("R3I6NOS_SYS_NET", "/sys/class/net"))
+STATE_DIR = Path(os.environ.get("R3I6NOS_NET_STATE", "/var/lib/r3i6nos"))
+RESOLV = Path(os.environ.get("R3I6NOS_RESOLV", "/etc/resolv.conf"))
+SSH_ETC = Path(os.environ.get("R3I6NOS_SSH_ETC", "/etc/ssh"))
+SSHD_CONF = SSH_ETC / "sshd_config.d" / "r3i6nos.conf"
+KEYS_SRC = Path(os.environ.get("R3I6NOS_SSH_KEYS_SRC", "/roms/ssh/authorized_keys"))
+SSH_HOME = Path(os.environ.get("R3I6NOS_SSH_HOME", "/home/loveos/.ssh"))
+USER = "loveos"
+
+TEST_HOST = "deb.debian.org"   # DNS test: the name the rootfs itself came from
+TEST_PING = "1.1.1.1"          # internet test: shown to the person on screen
+NOT_REAL = re.compile(r"^(lo|dummy|sit|tun|tap|veth|docker|br-|virbr|bond|ifb|ip6|gre|erspan|teql)")
+
+
+# ---- plumbing (tests replace run and nap) -------------------------------------------------------------------------------------
+
+def run(cmd, timeout=15, text=None):
+    """Run a command: (return code, stdout + stderr). Missing programs and timeouts are results, not crashes."""
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, input=text)
+    except FileNotFoundError:
+        return 127, f"{cmd[0]}: not installed"
+    except subprocess.TimeoutExpired:
+        return 124, "timed out"
+    return p.returncode, (p.stdout or "") + (p.stderr or "")
+
+
+def nap(seconds):
+    time.sleep(seconds)
+
+
+def wait_for(pred, seconds, step=0.5):
+    end = time.monotonic() + seconds
+    while True:
+        if pred():
+            return True
+        if time.monotonic() >= end:
+            return False
+        nap(step)
+
+
+class Result:
+    def __init__(self, ok, lines=(), nets=()):
+        self.ok, self.lines, self.nets = ok, list(lines), list(nets)
+
+
+class Refused(Exception):
+    """A request that is not allowed or not valid: shown to the person as the reason."""
+
+
+def clean(s, limit=200):
+    """Display text: printable only, so nothing in a result can move the cursor or start a new row."""
+    return "".join(c if 32 <= ord(c) < 127 or ord(c) > 159 else "?" for c in str(s))[:limit]
+
+
+# ---- request and result files -------------------------------------------------------------------------------------------------
+
+def unescape(v):
+    out, i = [], 0
+    while i < len(v):
+        if v[i] == "\\" and i + 1 < len(v):
+            out.append("\n" if v[i + 1] == "n" else v[i + 1])
+            i += 2
+        else:
+            out.append(v[i])
+            i += 1
+    return "".join(out)
+
+
+def parse_request(text):
+    req = {}
+    for line in text.split("\n"):
+        if "=" in line:
+            k, v = line.split("=", 1)
+            req[k.strip()] = unescape(v)
+    return req
+
+
+def format_result(rid, res):
+    out = [f"id={rid}", f"ok={1 if res.ok else 0}"]
+    out += ["L\t" + clean(l) for l in res.lines]
+    out += ["N\t" + "\t".join(clean(x, 64) for x in n) for n in res.nets]
+    return "\n".join(out) + "\n"
+
+
+def write_result(rid, res):
+    """Into OUT_DIR, which only root can write: created here, 0755 so the menu can read the answer."""
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(OUT_DIR, 0o755)
+    tmp = OUT_DIR / f"result.{os.getpid()}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    with os.fdopen(fd, "w") as f:
+        f.write(format_result(rid, res))
+    os.replace(tmp, OUT_DIR / "result")
+
+
+def read_request():
+    """The request text, or None. Opened without following a link or waiting on a pipe, and it must be a small regular file."""
+    try:
+        fd = os.open(NET_DIR / "request", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)   # NONBLOCK: a planted FIFO must not hang root
+    except OSError:
+        return None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_REQUEST:
+            return ""
+        return os.read(fd, MAX_REQUEST).decode("utf-8", "replace")
+    finally:
+        os.close(fd)
+
+
+# ---- what the system reports --------------------------------------------------------------------------------------------------
+
+def interfaces():
+    """[(name, "wired" | "wifi")] of the real network interfaces."""
+    out = []
+    if not SYS_NET.is_dir():
+        return out
+    for p in sorted(SYS_NET.iterdir()):
+        n = p.name
+        if NOT_REAL.match(n):
+            continue
+        if (p / "wireless").exists() or (p / "phy80211").exists():
+            out.append((n, "wifi"))
+        elif (p / "device").exists() or n.startswith(("eth", "en")):
+            out.append((n, "wired"))
+    return out
+
+
+def pick(kind, wanted=None):
+    ifs = [n for n, k in interfaces() if k == kind]
+    if wanted:
+        if wanted not in ifs:
+            raise Refused(f"{wanted} is not a {kind} interface")
+        return wanted
+    if not ifs:
+        raise Refused("No wired network adapter found." if kind == "wired" else "No Wi-Fi adapter found.")
+    return ifs[0]
+
+
+def sysfile(name, leaf):
+    try:
+        return (SYS_NET / name / leaf).read_text().strip()
+    except OSError:
+        return ""
+
+
+def ipv4(name):
+    rc, out = run(["ip", "-4", "-o", "addr", "show", "dev", name])
+    m = re.search(r"inet (\d+\.\d+\.\d+\.\d+/\d+)", out) if rc == 0 else None
+    return m.group(1) if m else ""
+
+
+def gateway(name):
+    rc, out = run(["ip", "-4", "route", "show", "default", "dev", name])
+    m = re.search(r"default via (\d+\.\d+\.\d+\.\d+)", out) if rc == 0 else None
+    return m.group(1) if m else ""
+
+
+def nameservers():
+    try:
+        return re.findall(r"^nameserver\s+(\S+)", RESOLV.read_text(), re.M)
+    except OSError:
+        return []
+
+
+def wifi_link(name):
+    """(ssid, signal) when associated, else ("", "")."""
+    rc, out = run(["iw", "dev", name, "link"])
+    if rc != 0 or "Connected to" not in out:
+        return "", ""
+    ssid = re.search(r"SSID: (.*)", out)
+    sig = re.search(r"signal: (-?\d+) dBm", out)
+    return (ssid.group(1).strip() if ssid else "", (sig.group(1) + " dBm") if sig else "")
+
+
+def saved_wifi():
+    try:
+        d = json.loads((STATE_DIR / "wifi.json").read_text())
+        return d if d.get("ssid") else None
+    except (OSError, ValueError):
+        return None
+
+
+# ---- argument checks ----------------------------------------------------------------------------------------------------------
+
+def check_ssid(v):
+    if not v or len(v.encode("utf-8", "replace")) > 32 or any(ord(c) < 32 or ord(c) == 127 for c in v):
+        raise Refused("A Wi-Fi name is 1 to 32 characters.")
+    return v
+
+
+def check_psk(v):
+    if v == "":
+        return ""
+    if re.fullmatch(r"[0-9a-fA-F]{64}", v):
+        return v.lower()
+    if 8 <= len(v) <= 63 and all(32 <= ord(c) < 127 for c in v):
+        return v
+    raise Refused("A Wi-Fi password is 8 to 63 letters, digits and symbols.")
+
+
+def psk_hex(ssid, psk):
+    if re.fullmatch(r"[0-9a-f]{64}", psk):
+        return psk
+    return hashlib.pbkdf2_hmac("sha1", psk.encode(), ssid.encode("utf-8"), 4096, 32).hex()
+
+
+def check_password(v):
+    if not (8 <= len(v) <= 64) or not all(32 <= ord(c) < 127 for c in v):
+        raise Refused("A password is 8 to 64 letters, digits and symbols.")
+    return v
+
+
+# ---- verbs --------------------------------------------------------------------------------------------------------------------
+
+def v_status(req):
+    lines = []
+    ifs = interfaces()
+    if not ifs:
+        lines += ["No network adapter found.", "", "This unit has none built in: plug in a USB Ethernet adapter",
+                  "or a USB Wi-Fi dongle (needs USB host mode), then look again.", "See Instructions."]
+        return Result(True, lines)
+    for n, kind in ifs:
+        state = sysfile(n, "operstate") or "?"
+        lines.append(f"{n}  {'Wi-Fi' if kind == 'wifi' else 'wired'}  {state}")
+        if kind == "wifi":
+            ssid, sig = wifi_link(n)
+            lines.append(f"  network  {ssid + '  ' + sig if ssid else 'not connected'}")
+        else:
+            lines.append(f"  cable    {'plugged in' if sysfile(n, 'carrier') == '1' else 'no link'}")
+        addr, gw = ipv4(n), gateway(n)
+        lines.append(f"  address  {addr or 'none'}")
+        if gw:
+            lines.append(f"  gateway  {gw}")
+        mac = sysfile(n, "address")
+        if mac:
+            lines.append(f"  mac      {mac}")
+    ns = nameservers()
+    lines.append(f"DNS: {', '.join(ns) if ns else 'none'}")
+    s = saved_wifi()
+    lines.append(f"Saved Wi-Fi: {s['ssid'] if s else 'none'}")
+    return Result(True, lines)
+
+
+def v_scan(req):
+    n = pick("wifi", req.get("iface"))
+    run(["ip", "link", "set", n, "up"])
+    nap(1)
+    rc, out = run(["iw", "dev", n, "scan"], timeout=30)
+    if rc != 0:
+        raise Refused("The scan failed: " + clean(out.strip().splitlines()[-1] if out.strip() else "no answer", 60))
+    best = {}
+    for block in re.split(r"(?m)^BSS ", out)[1:]:
+        ssid = re.search(r"\tSSID: (.*)", block)
+        sig = re.search(r"signal: (-?[\d.]+) dBm", block)
+        if not ssid or not ssid.group(1).strip() or "\\x00" in ssid.group(1):
+            continue
+        name = ssid.group(1).strip()
+        sec = "WPA" if re.search(r"\tRSN:|\tWPA:", block) else ("WEP" if "Privacy" in block else "open")
+        val = float(sig.group(1)) if sig else -100.0
+        if name not in best or val > best[name][0]:
+            best[name] = (val, sec)
+    nets = [(k, f"{int(v[0])} dBm", v[1]) for k, v in sorted(best.items(), key=lambda kv: -kv[1][0])][:36]
+    return Result(True, [f"{len(nets)} networks"] if nets else ["No networks found."], nets)
+
+
+def dhcp(n):
+    run(["ip", "link", "set", n, "up"])
+    rc, out = run(["udhcpc", "-i", n, "-n", "-q", "-t", "4", "-T", "3"], timeout=40)
+    return rc == 0 and bool(ipv4(n)), out
+
+
+def summary(n):
+    lines = [f"Address  {ipv4(n) or 'none'}"]
+    gw = gateway(n)
+    if gw:
+        lines.append(f"Gateway  {gw}")
+    ns = nameservers()
+    if ns:
+        lines.append(f"DNS      {', '.join(ns)}")
+    return lines
+
+
+def v_wired(req):
+    n = pick("wired", req.get("iface"))
+    run(["ip", "link", "set", n, "up"])
+    if not wait_for(lambda: sysfile(n, "carrier") == "1", 8):
+        return Result(False, [f"{n}: no cable link.", "", "Check the cable is plugged into the adapter and the",
+                              "router or switch, and that the adapter is seated."])
+    ok, out = dhcp(n)
+    if not ok:
+        return Result(False, [f"{n}: link is up but no address was given.", "", "The router's DHCP did not answer. Try again, or",
+                              "check the router hands out addresses.", clean(out.strip().splitlines()[-1], 60) if out.strip() else ""])
+    return Result(True, [f"Connected: {n}", ""] + summary(n))
+
+
+def stop_wifi(n):
+    pidfile = SECRETS / f"wpa-{n}.pid"
+    try:
+        os.kill(int(pidfile.read_text()), 15)
+    except (OSError, ValueError):
+        pass
+    try:
+        pidfile.unlink()
+    except OSError:
+        pass
+
+
+def v_wifi(req):
+    n = pick("wifi", req.get("iface"))
+    if req.get("ssid"):
+        ssid = check_ssid(req["ssid"])
+        psk = check_psk(req.get("psk", ""))
+        key = psk_hex(ssid, psk) if psk else ""
+    else:
+        s = saved_wifi()
+        if not s:
+            raise Refused("No saved Wi-Fi network. Choose Wi-Fi setup first.")
+        ssid, key = s["ssid"], s.get("psk", "")
+    SECRETS.mkdir(parents=True, exist_ok=True)
+    os.chmod(SECRETS, 0o700)
+    conf = SECRETS / f"wpa-{n}.conf"
+    block = ["ctrl_interface=DIR=/run/wpa_supplicant GROUP=root", "network={", f"  ssid={ssid.encode('utf-8').hex()}"]
+    block += [f"  psk={key}", "  key_mgmt=WPA-PSK"] if key else ["  key_mgmt=NONE"]
+    block += ["}"]
+    fd = os.open(conf, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write("\n".join(block) + "\n")
+    stop_wifi(n)
+    run(["ip", "link", "set", n, "up"])
+    rc, out = run(["wpa_supplicant", "-B", "-i", n, "-c", str(conf), "-P", str(SECRETS / f"wpa-{n}.pid")], timeout=20)
+    if rc != 0:
+        return Result(False, ["Could not start the Wi-Fi client.", clean(out.strip().splitlines()[-1] if out.strip() else "", 60)])
+    if not wait_for(lambda: bool(wifi_link(n)[0]), 20):
+        stop_wifi(n)
+        return Result(False, [f"Could not join {ssid}.", "", "Wrong password, out of range, or the access point",
+                              "refuses new devices. 5 GHz-only networks need a dual-band adapter."])
+    ok, out = dhcp(n)
+    if not ok:
+        return Result(False, [f"Joined {ssid} but got no address.", "", "The router's DHCP did not answer. Try again."])
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    fd = os.open(STATE_DIR / "wifi.json", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump({"ssid": ssid, "psk": key}, f)
+    ssid_now, sig = wifi_link(n)
+    return Result(True, [f"Connected: {ssid_now or ssid}  {sig}", ""] + summary(n))
+
+
+def v_forget(req):
+    try:
+        (STATE_DIR / "wifi.json").unlink()
+    except OSError:
+        pass
+    return Result(True, ["Saved Wi-Fi network forgotten."])
+
+
+def v_disconnect(req):
+    done = []
+    for n, kind in interfaces():
+        if kind == "wifi":
+            stop_wifi(n)
+        run(["ip", "addr", "flush", "dev", n])
+        run(["ip", "link", "set", n, "down"])
+        done.append(n)
+    return Result(True, [f"Disconnected: {', '.join(done)}" if done else "Nothing to disconnect."])
+
+
+def v_test(req):
+    ifs = [(n, k) for n, k in interfaces() if ipv4(n) or sysfile(n, "operstate") == "up"]
+    lines, ok = [], True
+
+    def step(good, label, fix=None):
+        nonlocal ok
+        lines.append(f"[{'ok' if good else 'FAIL'}] {label}")
+        if not good:
+            ok = False
+            if fix:
+                lines.append("       " + fix)
+        return good
+
+    if not interfaces():
+        return Result(False, ["[FAIL] Adapter: none found", "       Plug in a USB Ethernet adapter or Wi-Fi dongle."])
+    if not ifs:
+        return Result(False, ["[FAIL] Link: nothing is connected", "       Use Wired setup or Wi-Fi setup first."])
+    n = ifs[0][0]
+    step(True, f"Link: {n} is up")
+    addr = ipv4(n)
+    if not step(bool(addr), f"Address: {addr or 'none'}", "No address: run the setup again."):
+        return Result(False, lines)
+    gw = gateway(n)
+    if step(bool(gw), f"Gateway: {gw or 'none'}", "No default route: run the setup again."):
+        rc, _ = run(["ping", "-c", "2", "-W", "2", "-I", n, gw], timeout=10)
+        step(rc == 0, f"Ping the gateway {gw}", "The router does not answer: weak signal or wrong network?")
+    try:
+        ip = socket.gethostbyname(TEST_HOST)
+        step(True, f"DNS: {TEST_HOST} is {ip}")
+    except OSError:
+        step(False, f"DNS: cannot look up {TEST_HOST}", "Router's DNS not given. Is /etc/resolv.conf empty?")
+    rc, _ = run(["ping", "-c", "2", "-W", "2", "-I", n, TEST_PING], timeout=10)
+    step(rc == 0, f"Internet: ping {TEST_PING}", "No route out: the router may have no internet.")
+    lines.append("")
+    lines.append("All tests passed." if ok else "Some tests failed.")
+    return Result(ok, lines)
+
+
+# ---- SSH ----------------------------------------------------------------------------------------------------------------------
+
+def password_set():
+    rc, out = run(["passwd", "-S", USER])
+    parts = out.split()
+    return rc == 0 and len(parts) > 1 and parts[1] == "P"
+
+
+def keys_ready():
+    try:
+        return (SSH_HOME / "authorized_keys").stat().st_size > 0
+    except OSError:
+        return False
+
+
+def sshd_active():
+    rc, out = run(["systemctl", "is-active", "ssh"])
+    return out.strip() == "active"
+
+
+def v_ssh_status(req):
+    lines = [f"SSH server: {'running' if sshd_active() else 'stopped'}  (it never starts by itself)",
+             f"Login user: {USER}",
+             f"Password:   {'set' if password_set() else 'not set'}",
+             f"Keys:       {'authorized_keys installed' if keys_ready() else 'none'}"
+             + ("" if keys_ready() or not KEYS_SRC.exists() else "  (found on the card; copied when you start SSH)")]
+    for n, _ in interfaces():
+        a = ipv4(n)
+        if a:
+            lines.append(f"Address:    {a.split('/')[0]}  ({n})")
+    if sshd_active():
+        rc, out = run(["ssh-keygen", "-lf", str(SSH_ETC / "ssh_host_ed25519_key.pub")])
+        fields = out.split()
+        if rc == 0 and len(fields) > 1:
+            lines.append("Host key:   " + fields[1])
+    return Result(True, lines)
+
+
+def v_ssh_password(req):
+    pw = check_password(req.get("password", ""))
+    rc, out = run(["chpasswd"], text=f"{USER}:{pw}\n")
+    if rc != 0:
+        return Result(False, ["The password was not changed.", clean(out.strip().splitlines()[-1] if out.strip() else "", 60)])
+    return Result(True, ["SSH password set for " + USER + ".", "", "Start SSH to use it."])
+
+
+def install_keys():
+    """Copy authorized_keys from the games card (read only there) into the login user's own folder."""
+    if not KEYS_SRC.is_file():
+        return False
+    data = KEYS_SRC.read_bytes()
+    if not data.strip() or len(data) > 65536 or b"\x00" in data:
+        raise Refused("ssh/authorized_keys on the card is empty or not a text file.")
+    SSH_HOME.mkdir(parents=True, exist_ok=True)
+    os.chmod(SSH_HOME, 0o700)
+    dest = SSH_HOME / "authorized_keys"
+    fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    try:
+        u = pwd.getpwnam(USER)
+        for p in (SSH_HOME, dest):
+            os.chown(p, u.pw_uid, u.pw_gid)
+    except (KeyError, PermissionError):
+        pass
+    return True
+
+
+def v_ssh_enable(req):
+    if not any(ipv4(n) for n, _ in interfaces()):
+        raise Refused("Connect to a network first (Network menu).")
+    install_keys()
+    pw, keys = password_set(), keys_ready()
+    if not pw and not keys:
+        raise Refused("Set an SSH password first, or put your public key in ssh/authorized_keys on the games card.")
+    SSHD_CONF.parent.mkdir(parents=True, exist_ok=True)
+    SSHD_CONF.write_text("\n".join([
+        "# written by r3i6nos-net (Settings > SSH); removed when SSH is stopped",
+        f"AllowUsers {USER}", "PermitRootLogin no", "PubkeyAuthentication yes",
+        f"PasswordAuthentication {'yes' if pw else 'no'}", "KbdInteractiveAuthentication no",
+        "X11Forwarding no", "AllowTcpForwarding no", "MaxAuthTries 3", "LoginGraceTime 30", ""]))
+    if not list(SSH_ETC.glob("ssh_host_*_key")):
+        run(["ssh-keygen", "-A"])                      # each card makes its own host keys, the first time SSH is turned on
+    run(["usermod", "-s", "/bin/bash", USER])            # the account is nologin until SSH is on
+    rc, out = run(["systemctl", "start", "ssh"], timeout=30)
+    if rc != 0:
+        return Result(False, ["SSH did not start.", clean(out.strip().splitlines()[-1] if out.strip() else "", 60)])
+    addrs = [ipv4(n).split("/")[0] for n, _ in interfaces() if ipv4(n)]
+    return Result(True, ["SSH is running until you stop it or reboot.", "",
+                         f"ssh {USER}@{addrs[0]}" if addrs else f"ssh {USER}@<address>",
+                         f"Login: {'password' if pw else 'key only'}{' and key' if pw and keys else ''}"])
+
+
+def v_ssh_disable(req):
+    run(["systemctl", "stop", "ssh"], timeout=30)
+    run(["usermod", "-s", "/usr/sbin/nologin", USER])
+    try:
+        SSHD_CONF.unlink()
+    except OSError:
+        pass
+    return Result(True, ["SSH stopped. The login shell is off again."])
+
+
+VERBS = {
+    "status": v_status, "scan": v_scan, "wired": v_wired, "wifi": v_wifi, "disconnect": v_disconnect, "test": v_test,
+    "forget": v_forget, "ssh-status": v_ssh_status, "ssh-password": v_ssh_password, "ssh-enable": v_ssh_enable,
+    "ssh-disable": v_ssh_disable,
+}
+
+
+def handle(req):
+    verb = req.get("verb", "")
+    fn = VERBS.get(verb)
+    if fn is None:
+        return Result(False, ["Unknown request."])
+    try:
+        return fn(req)
+    except Refused as e:
+        return Result(False, [str(e)])
+    except Exception as e:   # a helper that dies silently leaves the menu waiting: say what happened
+        return Result(False, ["Internal error: " + clean(f"{type(e).__name__}: {e}", 80)])
+
+
+def main():
+    text = read_request()
+    if text is None:
+        return 0
+    try:
+        (NET_DIR / "request").unlink()   # first: a failure below must not make the path unit loop
+    except OSError:
+        pass
+    req = parse_request(text)
+    rid = re.sub(r"[^0-9A-Za-z._-]", "", req.get("id", "0"))[:40] or "0"
+    write_result(rid, handle(req))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

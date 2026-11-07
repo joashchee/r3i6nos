@@ -5,6 +5,15 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **Settings > Network and Settings > SSH** (2026-11-07; `docs/NETWORK.md`). Start's Settings list is now Network, SSH, Shutdown, Back, on a stack of screens (menus, pages, a wait, an
+  on-screen keyboard, the confirmation). Network: Status, Wired setup, Wi-Fi setup (scan, pick, password, or a typed name), join or forget the saved network, Test connection (link, address,
+  gateway, DNS, internet, each `[ok]`/`[FAIL]` with a fix), Disconnect, Instructions. SSH: Status, Set SSH password (twice), Start, Stop, Instructions. The menu is unprivileged, so it leaves a request
+  in `/run/loveos/net` for a new root helper, `r3i6nos-net` (Python stdlib), started per request by `r3i6nos-net.path` (it only watches; nothing runs at boot, rule 6). Wi-Fi passphrases are stored as
+  derived keys (0600). SSH is off in the image: the service is not enabled and the build's host keys are removed so each card makes its own on first start; only `loveos` can log in, key or password. The helper treats
+  the request folder as hostile (no links, no pipes, size limit, allowlisted verbs, validated arguments, answers only into a root-owned folder: a first draft that wrote beside the request was a privilege-escalation
+  hole and was fixed before it landed). New rootfs packages: iproute2, iw, wpasupplicant, udhcpc, iputils-ping, openssh-server. Tests: `test_r3i6nos_net.py` (33), `test_settings.lua`, `test_net_menu.lua`,
+  `test_menu_view.lua` (every screen drawn, contrast checked), `test_configure_rootfs.sh` (units, SSH off, no shared host keys). **Not run on a real R36S:** adapters and drivers, the helper's commands on that userland,
+  the path unit under systemd 252, the rootfs build with the new packages; `shellcheck` not installed here. **Not defended:** any process running as `loveos` (a game) can still ask for SSH to start.
 - **`run_app.sh`'s pad mapping fixed to the measured layout** (2026-11-07). The default `SDL_GAMECONTROLLERCONFIG` had X and Y swapped, the D-pad as a hat and Select/Start on the wrong buttons;
   it now has B 0, A 1, X 2, Y 3, L1/R1 4-5, L2/R2 as triggers 6-7, D-pad buttons 8-11, Select 12, Start 13, L3/R3 14-15, Fn 16 and axes 0-3, and `tests/test_configure_rootfs.sh` checks the tokens.
   **The GUID is still the spec's guess** (never read from a unit), so SDL may not apply it; ROADMAP has the follow-up. Not run on a real R36S.

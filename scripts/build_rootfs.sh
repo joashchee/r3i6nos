@@ -34,6 +34,8 @@ PACKAGES=(
     libharfbuzz0b                        # LÖVE 12 text shaping
     libwayland-client0 libwayland-server0  # the stock Mali blob is the wayland-gbm build and links them
     exfatprogs                           # a likely games-card filesystem
+    iproute2 iw wpasupplicant udhcpc iputils-ping  # Settings > Network (r3i6nos-net): addresses, Wi-Fi scan and join, DHCP, tests
+    openssh-server                       # Settings > SSH; its service is NOT enabled and its host keys are made on first start (configure_rootfs.sh)
 )
 
 if [ "$(id -u)" -ne 0 ]; then

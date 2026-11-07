@@ -140,7 +140,7 @@ jobs:
           sudo test -x $R/usr/local/bin/loveos-session
           sudo test -f $R/opt/loveos/menu/main.lua
           # every module the boot scripts import must exist in the rootfs (python3-minimal lacks shutil)
-          sudo python3 -I scripts/check_py_imports.py $R overlay/usr/local/bin/deb_watcher.py
+          sudo python3 -I scripts/check_py_imports.py $R overlay/usr/local/bin/deb_watcher.py overlay/usr/local/bin/r3i6nos-net
           sudo test -x $R/opt/love/11.5/bin/love
           # the built-in default apps (the input checker three ways)
           sudo test -f "$R/opt/loveos/defaults/Love 11.5/Input_Checker.love"

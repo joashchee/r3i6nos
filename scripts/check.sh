@@ -28,12 +28,14 @@ step "lua tests"
 if command -v luajit >/dev/null; then
     luajit tests/test_scan.lua || fail=1
     luajit tests/test_settings.lua || fail=1
+    luajit tests/test_net_menu.lua || fail=1
     luajit tests/test_theme.lua || fail=1
     luajit tests/test_menu_view.lua || fail=1
     luajit tests/test_input_checker.lua || fail=1
 elif command -v lua >/dev/null; then
     lua tests/test_scan.lua || fail=1
     lua tests/test_settings.lua || fail=1
+    lua tests/test_net_menu.lua || fail=1
     lua tests/test_theme.lua || fail=1
     lua tests/test_menu_view.lua || fail=1
     lua tests/test_input_checker.lua || fail=1

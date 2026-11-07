@@ -30,6 +30,13 @@ document that has the detail. Nothing here has run on a real R36S yet.
   leaves a flag, exits 0, and `loveos.service`'s root `ExecStopPost` runs `r3i6nos-poweroff` -> `systemctl --no-block poweroff`).
   Logic, session and poweroff script are tested on the laptop. **Untested on the R36S:** that the Start button (raw 14) opens it, that
   systemd 252 on kernel 4.4 powers the board off (and not just halts), and that the games card is unmounted cleanly.
+- [x] **Settings > Network and SSH** (2026-11-07, `docs/NETWORK.md`): status, wired and Wi-Fi setup with an on-screen keyboard, tests, instructions, SSH start/stop/password; a root helper per request, nothing at boot.
+  Tested on the laptop with a fake system. **Untested on the R36S:**
+  - [ ] Does the stock kernel have a driver for any USB Ethernet or Wi-Fi adapter? Which ones? (Status lists none when it does not; write the working models in `docs/NETWORK.md`.)
+  - [ ] Does the unit's USB port work as a host?
+  - [ ] `wpa_supplicant`, `udhcpc` (does it fill `/etc/resolv.conf`?), `usermod` and `chpasswd` on the rootfs; the path unit under systemd 252; the rootfs CI build with the new packages.
+  - [ ] Decide whether a game being able to ask for SSH is acceptable, or build a confirmation it cannot fake.
+  - [ ] Optional, rule 6 permitting: auto-join the saved network at boot (not done: ask first).
 - [x] **First push** to GitHub (`joashchee/r3i6nos`, 2026-11-06).
 
 ## 2. Phase 1: ground truth from the working card (needs the R36S and a Mac)

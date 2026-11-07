@@ -14,6 +14,12 @@ touch "$R/usr/share/doc/foo/copyright" "$R/usr/share/doc/foo/changelog.gz" "$R/u
 mkdir -p "$T/love/11.5/bin" "$T/love/notaruntime"
 printf '#!/bin/sh\n' > "$T/love/11.5/bin/love"; chmod +x "$T/love/11.5/bin/love"
 mkdir -p "$T/native"; printf 'not a real deb' > "$T/native/Input_Checker_Native.deb"
+# What the openssh-server package leaves in a fresh rootfs: an enabled service and the build's own host keys.
+mkdir -p "$R/etc/systemd/system/multi-user.target.wants" "$R/etc/systemd/system/sockets.target.wants" "$R/etc/ssh"
+ln -s /lib/systemd/system/ssh.service "$R/etc/systemd/system/multi-user.target.wants/ssh.service"
+ln -s /lib/systemd/system/ssh.service "$R/etc/systemd/system/sshd.service"
+ln -s /lib/systemd/system/ssh.socket "$R/etc/systemd/system/sockets.target.wants/ssh.socket"
+touch "$R/etc/ssh/ssh_host_ed25519_key" "$R/etc/ssh/ssh_host_ed25519_key.pub" "$R/etc/ssh/ssh_host_rsa_key" "$R/etc/ssh/sshd_config"
 for v in 11.5 12.0; do mkdir -p "$T/loveapps/Love $v"; python3 -I scripts/pack_love.py apps/input-checker-love "$T/loveapps/Love $v/Input_Checker.love" >/dev/null; done
 R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/native" R3I6NOS_LOVE_APPS_BUILD="$T/loveapps" scripts/configure_rootfs.sh "$R" >/dev/null
 
@@ -76,6 +82,17 @@ R3I6NOS_LOVE_BUILD="$T/love" scripts/configure_rootfs.sh "$R" >/dev/null
 exec_start="$(sed -n 's/^ExecStart=//p' overlay/etc/systemd/system/loveos.service)"
 [ -x "overlay$exec_start" ] || fail "ExecStart $exec_start is not in the overlay"
 
+# Settings > Network and SSH: the helper and its two units are installed, only the watcher is enabled, and SSH is off with no shared host keys
+[ -x "$R/usr/local/bin/r3i6nos-net" ]                || fail "r3i6nos-net not installed executable"
+[ -L "$R/etc/systemd/system/multi-user.target.wants/r3i6nos-net.path" ] || fail "the net path unit is not enabled"
+[ ! -e "$R/etc/systemd/system/multi-user.target.wants/r3i6nos-net.service" ] || fail "the helper service must not be wanted by a target (rule 6: nothing at boot)"
+grep -q '^PathExists=/run/loveos/net/request' "$R/etc/systemd/system/r3i6nos-net.path" || fail "the path unit watches the wrong file"
+! grep -q '^\[Install\]' "$R/etc/systemd/system/r3i6nos-net.service" || fail "the helper service must have no [Install]"
+[ ! -e "$R/etc/systemd/system/multi-user.target.wants/ssh.service" ] || fail "ssh.service is enabled at boot"
+[ ! -e "$R/etc/systemd/system/sshd.service" ] && [ ! -e "$R/etc/systemd/system/sockets.target.wants/ssh.socket" ] || fail "ssh is still wired to start"
+[ -z "$(ls "$R"/etc/ssh/ssh_host_* 2>/dev/null)" ] || fail "host keys from the build are in the image: every card would share them"
+[ -f "$R/etc/ssh/sshd_config" ] && [ -d "$R/etc/ssh/sshd_config.d" ] || fail "sshd config was touched or its drop-in folder is missing"
+
 # --- loveos-session: menu picks, run_app gets the type and target, then exits (ONCE)
 cat > "$T/menu" <<EOF
 #!/bin/bash
@@ -93,6 +110,7 @@ R3I6NOS_ONCE=1 R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_MENU_LOVE="$T/menu" \
 R3I6NOS_RUN_APP="$T/run_app" R3I6NOS_WATCHER="$T/watcher" \
     overlay/usr/local/bin/loveos-session
 [ "$(cat "$T/got")" = 'love115|/roms/Love 11.5/a game.love' ] || fail "session passed: $(cat "$T/got")"
+[ -d "$T/run/net" ] || fail "the session did not make the folder Settings > Network leaves its requests in"
 [ "$(cat "$T/env")" = '|' ] || fail "no GPU dir, yet the session set GPU env: $(cat "$T/env")"
 
 # With the Mali blob dir present: it goes first on LD_LIBRARY_PATH and LÖVE is told to use GLES.

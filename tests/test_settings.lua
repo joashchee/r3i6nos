@@ -1,46 +1,182 @@
 -- Run with: luajit tests/test_settings.lua   (from the repo root)
+-- Settings: the list, Shutdown's confirmation, and the Network and SSH screens, driven with a fake helper client.
 package.path = "menu/?.lua;" .. package.path
 local settings = require("settings")
 
-local function new()
-  local s = settings.new()
+local function eq(a, b, m) assert(a == b, (m or "") .. (" want %s, got %s"):format(tostring(b), tostring(a))) end
+
+-- A fake client: records requests, answers from a table keyed by the request id.
+local function fake()
+  local io_ = { sent = {}, answers = {}, n = 0 }
+  function io_.request(verb, args)
+    io_.n = io_.n + 1
+    local id = "id" .. io_.n
+    io_.sent[#io_.sent + 1] = { verb = verb, args = args, id = id }
+    return id
+  end
+  function io_.poll(id) return io_.answers[id] end
+  function io_.answer(res) io_.answers[io_.sent[#io_.sent].id] = res end
+  function io_.last() return io_.sent[#io_.sent] end
+  return io_
+end
+
+local function new(io_)
+  local s = settings.new(io_ or fake())
   assert(not settings.isOpen(s))
   settings.open(s)
-  assert(settings.isOpen(s) and s.view == "list" and s.selected == 1)
   return s
 end
 
--- Shutdown needs a confirmation, and the confirmation starts on "No".
+local function kind(s) local n = settings.node(s); return n and n.kind end
+local function title(s) return settings.node(s).title end
+--- Move to the menu item with this label and accept it.
+local function choose(s, label)
+  local n = settings.node(s)
+  assert(n.kind == "menu", "not on a menu: " .. tostring(n.kind))
+  for i, it in ipairs(n.items) do if it.label == label then n.sel = i; return settings.press(s, "accept") end end
+  error("no item " .. label)
+end
+
+-- ---- the list and Shutdown (as before)
 local s = new()
-assert(settings.press(s, "accept") == nil and s.view == "confirm")
-assert(settings.press(s, "accept") == nil and s.view == "list", "accepting the default (No) must not power off")
+eq(title(s), "Settings"); eq(settings.node(s).items[1].label, "Network"); eq(settings.node(s).items[2].label, "SSH")
+choose(s, "Shutdown")
+eq(kind(s), "confirm"); eq(settings.node(s).sel, 2, "the confirmation starts on No")
+assert(settings.press(s, "accept") == nil and kind(s) == "menu", "accepting the default (No) must not power off")
+choose(s, "Shutdown"); settings.press(s, "up")
+eq(settings.node(s).sel, 1)
+eq(settings.press(s, "accept"), "poweroff"); assert(not settings.isOpen(s))
 
--- Yes powers off and closes the dialog.
-settings.press(s, "accept")
-settings.press(s, "up")
-assert(s.confirm == 1)
-assert(settings.press(s, "accept") == "poweroff" and not settings.isOpen(s))
+s = new(); choose(s, "Shutdown")
+assert(settings.press(s, "back") == nil and kind(s) == "menu"); settings.press(s, "back")
+assert(not settings.isOpen(s), "B backs out one level at a time")
 
--- B steps back one level at a time; nothing powers off.
-s = new()
-settings.press(s, "accept")
-assert(settings.press(s, "back") == nil and s.view == "list")
-assert(settings.press(s, "back") == nil and not settings.isOpen(s))
+s = new(); choose(s, "Back"); assert(not settings.isOpen(s))
+s = new(); settings.press(s, "up"); eq(settings.node(s).items[settings.node(s).sel].label, "Back", "the list wraps")
+s = settings.new(fake()); assert(settings.press(s, "accept") == nil and not settings.isOpen(s), "a closed dialog ignores input")
+-- "poweroff" is only ever the answer to a confirmed shutdown, never to opening a screen
+s = new(); assert(settings.press(s, "accept") == nil, "Network opens, it does not power off")
 
--- The list wraps, and "Back" closes.
-s = new()
-settings.press(s, "up")
-assert(settings.ITEMS[s.selected].id == "back")
-assert(settings.press(s, "accept") == nil and not settings.isOpen(s))
-s = new(); settings.press(s, "down"); settings.press(s, "down")
-assert(s.selected == 1)
+-- ---- Network > Status: a request, a wait, an answer shown, B back
+local io_ = fake()
+s = new(io_)
+choose(s, "Network"); eq(title(s), "Network")
+choose(s, "Status")
+eq(kind(s), "busy"); eq(io_.last().verb, "status")
+settings.tick(s, 0.5); eq(kind(s), "busy", "no answer yet")
+io_.answer({ ok = true, lines = { "eth0  wired  up", "  address  192.168.1.20/24" }, nets = {} })
+settings.tick(s, 0.5)
+eq(kind(s), "pages"); eq(settings.node(s).pages[1][1], "eth0  wired  up")
+settings.press(s, "back"); eq(title(s), "Network"); settings.press(s, "back"); eq(title(s), "Settings")
 
--- A closed dialog ignores input.
-s = settings.new()
-assert(settings.press(s, "accept") == nil and not settings.isOpen(s))
+-- giving up: the wait ends with a reason, not a frozen screen
+io_ = fake(); s = new(io_); choose(s, "Network"); choose(s, "Test connection")
+eq(io_.last().verb, "test")
+settings.tick(s, 59); eq(kind(s), "busy"); settings.tick(s, 2)
+eq(kind(s), "pages"); assert(settings.node(s).pages[1][1]:find("No answer", 1, true)); assert(settings.node(s).bad)
 
--- Reopening starts fresh on "Shutdown" with "No" ahead of "Yes".
-s = new(); settings.press(s, "down"); settings.press(s, "back"); settings.open(s)
-assert(s.selected == 1)
+-- B stops waiting; a late answer is ignored
+io_ = fake(); s = new(io_); choose(s, "Network"); choose(s, "Wired setup")
+settings.press(s, "back"); eq(title(s), "Network")
+io_.answer({ ok = true, lines = { "late" }, nets = {} }); settings.tick(s, 1); eq(title(s), "Network")
+
+-- no client, or a client that cannot write
+s = settings.new(nil); settings.open(s); choose(s, "Network"); choose(s, "Status")
+eq(kind(s), "pages"); assert(settings.node(s).pages[1][1]:find("not available", 1, true))
+local broken = { request = function() return nil, "cannot write" end, poll = function() end }
+s = new(broken); choose(s, "Network"); choose(s, "Status"); eq(kind(s), "pages")
+assert(settings.node(s).pages[1][2]:find("cannot write", 1, true))
+
+-- each plain action sends its own verb
+for label, verb in pairs({ ["Wired setup"] = "wired", ["Wi-Fi: join saved"] = "wifi", ["Forget saved Wi-Fi"] = "forget",
+                           ["Test connection"] = "test", ["Disconnect"] = "disconnect" }) do
+  io_ = fake(); s = new(io_); choose(s, "Network"); choose(s, label)
+  eq(io_.last().verb, verb, label)
+end
+
+-- ---- Wi-Fi: scan, pick, password, join
+local nets = {
+  { ssid = "Home", signal = "-40 dBm", security = "WPA" },
+  { ssid = "Guest", signal = "-70 dBm", security = "open" },
+  { ssid = "Old", signal = "-75 dBm", security = "WEP" },
+}
+io_ = fake(); s = new(io_); choose(s, "Network"); choose(s, "Wi-Fi setup")
+eq(io_.last().verb, "scan")
+io_.answer({ ok = true, lines = { "3 networks" }, nets = nets }); settings.tick(s, 1)
+eq(kind(s), "menu"); eq(#settings.node(s).items, 4, "three networks and Other network")
+eq(settings.node(s).items[1].label, "Home"); assert(settings.node(s).items[1].value:find("WPA", 1, true))
+
+choose(s, "Home"); eq(kind(s), "osk")
+settings.text(s, "short"); settings.press(s, "more")
+eq(kind(s), "osk", "a too-short password is not accepted"); assert(settings.node(s).osk.error:find("At least 8", 1, true))
+settings.text(s, "ish pass"); settings.press(s, "more")
+eq(kind(s), "busy"); eq(io_.last().verb, "wifi"); eq(io_.last().args.ssid, "Home"); eq(io_.last().args.psk, "shortish pass")
+io_.answer({ ok = true, lines = { "Connected: Home" }, nets = {} }); settings.tick(s, 1)
+eq(kind(s), "pages"); assert(settings.node(s).pages[1][1]:find("Connected", 1, true))
+
+-- B in the keyboard cancels, back to the list
+io_ = fake(); s = new(io_); choose(s, "Network"); choose(s, "Wi-Fi setup")
+io_.answer({ ok = true, lines = {}, nets = nets }); settings.tick(s, 1)
+choose(s, "Home"); settings.press(s, "back"); eq(kind(s), "menu"); eq(#io_.sent, 1, "nothing was sent")
+-- open network: no password asked
+choose(s, "Guest"); eq(kind(s), "busy"); eq(io_.last().args.ssid, "Guest"); eq(io_.last().args.psk, "")
+-- WEP: refused with a reason, nothing sent
+io_ = fake(); s = new(io_); choose(s, "Network"); choose(s, "Wi-Fi setup")
+io_.answer({ ok = true, lines = {}, nets = nets }); settings.tick(s, 1)
+choose(s, "Old"); eq(kind(s), "pages"); eq(#io_.sent, 1); assert(settings.node(s).pages[1][1]:find("WEP", 1, true))
+-- a hidden network: name, then password (empty is allowed)
+io_ = fake(); s = new(io_); choose(s, "Network"); choose(s, "Wi-Fi setup")
+io_.answer({ ok = true, lines = {}, nets = nets }); settings.tick(s, 1)
+choose(s, "Other network..."); eq(kind(s), "osk")
+settings.press(s, "more"); eq(kind(s), "osk", "an empty name is not accepted")
+settings.text(s, "Hidden"); settings.press(s, "more"); eq(kind(s), "osk")
+settings.press(s, "more"); eq(kind(s), "busy"); eq(io_.last().args.ssid, "Hidden"); eq(io_.last().args.psk, "")
+-- a scan that failed shows why and offers nothing to pick
+io_ = fake(); s = new(io_); choose(s, "Network"); choose(s, "Wi-Fi setup")
+io_.answer({ ok = false, lines = { "No Wi-Fi adapter found." }, nets = {} }); settings.tick(s, 1)
+eq(kind(s), "pages"); assert(settings.node(s).bad)
+-- a long list pages with L1/R1
+local many = {}
+for i = 1, 40 do many[i] = { ssid = "net" .. i, signal = "-50 dBm", security = "WPA" } end
+io_ = fake(); s = new(io_); choose(s, "Network"); choose(s, "Wi-Fi setup")
+io_.answer({ ok = true, lines = {}, nets = many }); settings.tick(s, 1)
+settings.press(s, "pagedown"); eq(settings.node(s).sel, 19); settings.press(s, "end"); eq(settings.node(s).sel, 41)
+
+-- ---- Instructions and long answers page
+s = new(); choose(s, "Network"); choose(s, "Instructions")
+eq(kind(s), "pages"); local pgs = #settings.node(s).pages; assert(pgs >= 3)
+settings.press(s, "right"); eq(settings.node(s).page, 2); settings.press(s, "end"); eq(settings.node(s).page, pgs)
+settings.press(s, "right"); eq(settings.node(s).page, pgs, "no page past the last")
+settings.press(s, "home"); eq(settings.node(s).page, 1); settings.press(s, "left"); eq(settings.node(s).page, 1)
+local lines = {}
+for i = 1, 40 do lines[i] = "line " .. i end
+io_ = fake(); s = new(io_); choose(s, "Network"); choose(s, "Status")
+io_.answer({ ok = true, lines = lines, nets = {} }); settings.tick(s, 1)
+eq(#settings.node(s).pages, 3); eq(#settings.node(s).pages[1], 18); eq(settings.node(s).pages[3][4], "line 40")
+
+-- ---- SSH
+io_ = fake(); s = new(io_); choose(s, "SSH"); eq(title(s), "SSH")
+choose(s, "Status"); eq(io_.last().verb, "ssh-status"); settings.press(s, "back")
+choose(s, "Start SSH"); eq(io_.last().verb, "ssh-enable"); settings.press(s, "back")
+choose(s, "Stop SSH"); eq(io_.last().verb, "ssh-disable"); settings.press(s, "back")
+choose(s, "Instructions"); eq(kind(s), "pages"); settings.press(s, "back")
+
+-- the password is typed twice and must match
+choose(s, "Set SSH password"); eq(kind(s), "osk")
+settings.text(s, "open sesame"); settings.press(s, "more")
+eq(kind(s), "osk"); eq(settings.node(s).title, "Type it again")
+settings.text(s, "open sesamX"); local before = #io_.sent; settings.press(s, "more")
+eq(kind(s), "pages", "a mismatch is explained"); eq(#io_.sent, before, "and nothing is sent")
+settings.press(s, "back")
+choose(s, "Set SSH password"); settings.text(s, "open sesame"); settings.press(s, "more")
+settings.text(s, "open sesame"); settings.press(s, "more")
+eq(kind(s), "busy"); eq(io_.last().verb, "ssh-password"); eq(io_.last().args.password, "open sesame")
+-- B in the second entry cancels the whole change
+io_ = fake(); s = new(io_); choose(s, "SSH"); choose(s, "Set SSH password")
+settings.text(s, "open sesame"); settings.press(s, "more"); settings.press(s, "back")
+eq(title(s), "SSH"); eq(#io_.sent, 0)
+
+-- a real keyboard types text only on the keyboard screen
+s = new(); settings.text(s, "abc"); eq(title(s), "Settings")
 
 print("settings: ok")

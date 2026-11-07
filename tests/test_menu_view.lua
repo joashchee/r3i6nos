@@ -51,9 +51,12 @@ settings.open(dialog)
 view.render(scr, { entries = entries, selected = 1, dialog = dialog })
 rows = scr:dump()
 local joined = table.concat(rows, "\n")
-has(joined, "Settings"); has(joined, "Shutdown"); has(joined, "Back"); has(joined, "A Choose  B Back")
-has(rows[22], "Power the device off"); has(rows[23], "> settings")
+has(joined, "Settings"); has(joined, "Network"); has(joined, "SSH"); has(joined, "Shutdown"); has(joined, "Back"); has(joined, "A Choose  B Back")
+has(rows[22], "Wired and Wi-Fi"); has(rows[23], "> settings")
 has(rows[1], "r3i6nos")
+settings.press(dialog, "down"); settings.press(dialog, "down")
+view.render(scr, { entries = entries, selected = 1, dialog = dialog })
+has(scr:dump()[22], "Power the device off")
 settings.press(dialog, "accept")
 view.render(scr, { entries = entries, selected = 1, dialog = dialog })
 rows = scr:dump()
@@ -63,6 +66,64 @@ has(joined, "Shut down the device?"); has(joined, "Yes, shut down"); has(joined,
 local no_row
 for r, line in ipairs(rows) do if line:find("No ", 1, true) and line:find("|", 1, true) == nil and r > 1 and r < 21 and scr.bg[(r - 1) * 64 + 24] == theme.CYAN then no_row = r end end
 assert(no_row, "No is highlighted when the confirmation opens")
+
+-- ---- every Network and SSH screen draws, in the same style, and passes the contrast rule
+local io_ = { sent = {}, answers = {} }
+function io_.request(verb, args) io_.sent[#io_.sent + 1] = { verb = verb, id = "i" .. #io_.sent + 1 }; return "i" .. #io_.sent end
+function io_.poll(id) return io_.answers[id] end
+local function pick(label)
+  local n = settings.node(dialog)
+  for i, it in ipairs(n.items) do if it.label == label then n.sel = i end end
+  settings.press(dialog, "accept")
+end
+local function draw() view.render(scr, { entries = entries, selected = 1, dialog = dialog }); return scr:dump() end
+local screens = {}
+local function copy(t) local c = {} for i = 1, 64 * 24 do c[i] = t[i] end return c end
+local function snap(name) screens[#screens + 1] = { name = name, rows = draw(), bg = copy(scr.bg), fg = copy(scr.fg), ch = copy(scr.ch) } end
+
+dialog = settings.new(io_); settings.open(dialog)
+pick("Network"); rows = draw()
+has(table.concat(rows, "\n"), "Network"); has(table.concat(rows, "\n"), "Wired setup"); has(table.concat(rows, "\n"), "Test connection"); has(rows[23], "> settings > network")
+snap("network menu")
+pick("Status"); rows = draw()                                   -- waiting
+has(table.concat(rows, "\n"), "Waiting for the network helper"); has(table.concat(rows, "\n"), "B Stop waiting"); has(rows[22], "Working")
+snap("busy")
+io_.answers.i1 = { ok = true, lines = { "eth0  wired  up", "  cable    plugged in", "[ok] looks like a test line", "[FAIL] and a failed one" }, nets = {} }
+settings.tick(dialog, 1); rows = draw()
+has(rows[3], "eth0  wired  up"); has(rows[5], "[ok]"); has(rows[6], "[FAIL]")
+assert(not rows[2]:find("Page", 1, true), "one page shows no Page number")
+snap("result page")
+settings.press(dialog, "back")
+pick("Instructions"); rows = draw()
+has(rows[2], "Network help"); has(rows[2], "Page 1/4"); has(rows[3], "no network built in"); has(rows[21], "L1/R1 Page")
+snap("instructions")
+settings.press(dialog, "back")
+pick("Wi-Fi setup")
+io_.answers.i2 = { ok = true, lines = {}, nets = { { ssid = "Home", signal = "-40 dBm", security = "WPA" }, { ssid = "Guest", signal = "-70 dBm", security = "open" } } }
+settings.tick(dialog, 1); rows = draw()
+has(table.concat(rows, "\n"), "Home"); has(table.concat(rows, "\n"), "-40 dBm WPA"); has(table.concat(rows, "\n"), "Other network...")
+snap("wifi list")
+pick("Home"); settings.text(dialog, "my pass"); rows = draw()
+has(rows[2], "Password for Home"); has(table.concat(rows, "\n"), "> my pass"); has(table.concat(rows, "\n"), "7/63"); has(table.concat(rows, "\n"), "Keys: abc")
+has(table.concat(rows, "\n"), "q"); has(rows[21], "Start Done")
+settings.press(dialog, "more"); rows = draw()                   -- too short? "my pass" is 7
+has(table.concat(rows, "\n"), "At least 8")
+snap("keyboard with an error")
+settings.press(dialog, "select"); rows = draw()
+has(table.concat(rows, "\n"), "> *******")
+settings.press(dialog, "y"); rows = draw(); has(table.concat(rows, "\n"), "Keys: ABC"); has(table.concat(rows, "\n"), "Q   W   E")
+settings.press(dialog, "y"); rows = draw(); has(table.concat(rows, "\n"), "Keys: #+=")
+snap("keyboard symbols")
+
+-- every cell is a code page 437 index, every colour a palette colour, every pair passes 4.5:1, on every screen above
+for _, sc in ipairs(screens) do
+  for i = 1, 64 * 24 do
+    assert(sc.ch[i] >= 0 and sc.ch[i] <= 255 and theme.RGB[sc.fg[i]] and theme.RGB[sc.bg[i]], sc.name .. " cell " .. i)
+    if sc.ch[i] ~= 32 and sc.ch[i] ~= 0 then
+      assert(theme.contrast(sc.fg[i], sc.bg[i]) >= 4.5, ("%s: low contrast at cell %d"):format(sc.name, i))
+    end
+  end
+end
 
 -- every cell is a code page 437 index, every colour a palette colour
 for i = 1, 64 * 24 do

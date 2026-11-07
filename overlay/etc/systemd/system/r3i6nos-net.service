@@ -1,0 +1,9 @@
+[Unit]
+Description=r3i6nos network helper (Settings > Network and SSH)
+# Started by r3i6nos-net.path when the menu leaves a request; never wanted by a target. It deletes the request first, then does
+# one allowlisted verb and writes /run/r3i6nos-net/result. systemd's default start limit stops a helper that keeps failing.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/r3i6nos-net
+TimeoutStartSec=150

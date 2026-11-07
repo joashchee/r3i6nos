@@ -1,11 +1,12 @@
 -- r3i6nos menu: one list of every LÖVE game and native app on the card, in the r3i6nos-ansiapps theme
 -- (theme/, docs/R3I6NOS-ANSIAPPS-THEME.md): 64x24 text cells, a top bar, the list, a three-row command line.
 -- D-pad up/down move, A launches, L1/R1 (or left/right) turn a page, L2/R2 jump to the top/end, Start opens
--- Settings (S / F1 on a keyboard). Never scrolls.
+-- Settings (S / F1 on a keyboard): Network, SSH and Shutdown. Never scrolls.
 
 package.path = (os.getenv("R3I6NOS_THEME") or "/opt/loveos/theme") .. "/?.lua;" .. package.path
 
 local scan = require("scan")
+local netclient = require("netclient")
 local settings = require("settings")
 local theme = require("r3i6nos_ansiapps")
 local view = require("view")
@@ -16,7 +17,7 @@ local DEFAULTS = os.getenv("R3I6NOS_DEFAULTS") or "/opt/loveos/defaults"
 local NEXT = os.getenv("R3I6NOS_NEXT") or "/run/loveos/next"
 
 local entries, selected = {}, 1
-local dialog = settings.new()
+local dialog = settings.new(netclient)
 local screen
 
 function love.load()
@@ -40,6 +41,13 @@ local function launch()
   if e then request(e.type .. "\t" .. e.target) end
 end
 
+function love.update(dt) settings.tick(dialog, dt) end
+
+local function typing()
+  local n = settings.isOpen(dialog) and settings.node(dialog)
+  return n and n.kind == "osk"
+end
+
 -- Ask the session loop to power the device off: it runs "system<TAB>poweroff", then exits cleanly.
 local function poweroff() request("system\tpoweroff") end
 
@@ -56,7 +64,18 @@ local function act(action)
 end
 
 function love.keypressed(key)
+  if typing() then -- letters are text here, not commands
+    if key == "backspace" then settings.backspace(dialog)
+    elseif key == "return" or key == "kpenter" then act("more")
+    elseif key == "escape" then act("back")
+    elseif key == "up" or key == "down" or key == "left" or key == "right" then act(key) end
+    return
+  end
   if theme.KEYS[key] then act(theme.KEYS[key]) end
+end
+
+function love.textinput(text)
+  if typing() then settings.text(dialog, text) end
 end
 
 -- Raw buttons only: this pad's SDL gamepad mapping does not match its real layout (docs/hardware-findings.md).

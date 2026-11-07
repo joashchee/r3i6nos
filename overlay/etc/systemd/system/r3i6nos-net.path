@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch for Settings > Network and SSH requests
+# This only WATCHES a file. It starts nothing until a person asks for something in Settings (CLAUDE.md rule 6: no network at boot).
+
+[Path]
+PathExists=/run/loveos/net/request
+Unit=r3i6nos-net.service
+
+[Install]
+WantedBy=multi-user.target
