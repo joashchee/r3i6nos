@@ -73,6 +73,20 @@ rename, new folder), the panels (sorting, hidden files, paging), every dialog an
 (`R3I6NOS_FM_SHOTS=dir commander --selftest` saves each screen). **Not run on a real R36S:** the buttons, how it looks on the panel, speed on the
 SD card, and exFAT quirks (no permissions or links there, so copies of links to the card fail and say so).
 
+## Adding an app: its own build, apart from the firmware
+
+Each native app builds on its own; the firmware only bundles the results.
+
+- `apps/<name>-native/app.conf` is the app's manifest (deb name, binary, package, source file, `THEME=1` to compile against `theme/`,
+  `DEFAULT=1` to put it in the image, description). `scripts/build_native_app.sh <name>-native [--smoke]` builds that one app in a Debian 12 container
+  into `build/native/<NAME>.deb`, and `--smoke` runs its `--selftest` under qemu. `scripts/check.sh` compiles and self-tests every `app.conf`.
+- `.github/workflows/native-app.yml` is the reusable build (cache keyed on that app's files, smoke test, artifact `native-<name>-native-arm64`).
+  An app's own `.github/workflows/app-<name>.yml` calls it on changes to that app (paths filter), by hand, and on a `<name>-v*` tag, which also publishes
+  a GitHub release with the `.deb`. Copy `app-commander.yml` for a new app.
+- The firmware (`build.yml`, `scripts/build_native_apps.sh`) builds only the `DEFAULT=1` apps, through the same reusable workflow. An app that is
+  not a default (a port, an extra) is released by its own workflow and never enters the image; the user drops its `.deb` in `native_deb/`.
+- Not tried yet: the workflows themselves (they run on GitHub; first push will show) and `build_native_app.sh` in a Debian 12 container (no Docker here).
+
 ## Trying them on a Mac
 
 ```sh

@@ -1,0 +1,59 @@
+name: Native app (reusable)
+
+# Builds ONE native app (C and SDL2) from apps/<app>/ as an arm64 .deb and smoke-tests it under qemu.
+# Called by each app's own workflow (app-<name>.yml) and by build.yml for the apps in the firmware image.
+# How an app builds is in its apps/<app>/app.conf and scripts/build_native_app.sh; nothing here names an app.
+
+on:
+  workflow_call:
+    inputs:
+      app:
+        description: "Folder under apps/ (with an app.conf)"
+        required: true
+        type: string
+      version:
+        description: "Package version"
+        required: false
+        default: "1.0"
+        type: string
+    outputs:
+      artifact:
+        description: "Name of the uploaded artifact (the .deb)"
+        value: ${{ jobs.build.outputs.artifact }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    outputs:
+      artifact: native-${{ inputs.app }}-arm64
+    steps:
+      - uses: actions/checkout@v7
+
+      # Cached on this app's own inputs, so editing another app does not rebuild it. A cache hit skips the
+      # smoke test too: it passed when the .deb was built from the same bytes.
+      - uses: actions/cache@v6
+        id: cache
+        with:
+          path: build/native
+          key: native-${{ inputs.app }}-${{ inputs.version }}-${{ hashFiles('scripts/build_native_app.sh', 'scripts/smoke_native.sh', format('apps/{0}/**', inputs.app), 'theme/**', 'NOTICE', 'LICENSE') }}
+
+      - name: Build and smoke test (arm64, Debian 12)
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          APP: ${{ inputs.app }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          # a tag name like commander-v1.2 gives 1.2; a plain version is kept
+          VERSION="${VERSION#*-v}"
+          docker run --rm -e R3I6NOS_NATIVE_VERSION="$VERSION" -v "$PWD":/src -w /src debian:bookworm \
+            scripts/build_native_app.sh "$APP" --smoke
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-${{ inputs.app }}-arm64
+          path: build/native/*.deb
+          retention-days: 7

@@ -49,30 +49,15 @@ jobs:
           retention-days: 7
 
   native:
-    # The native default apps (the input checker and Commander; C and SDL2), cross-compiled in a Debian 12 container like LÖVE and packed
-    # as a .deb. Cached on its script and source, so only edits rebuild it.
-    runs-on: ubuntu-24.04
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/cache@v6
-        id: cache
-        with:
-          path: build/native
-          key: native-${{ hashFiles('scripts/build_native_apps.sh', 'apps/input-checker-native/**', 'apps/commander-native/**', 'theme/**', 'NOTICE', 'LICENSE') }}
-
-      - name: Build native apps (arm64)
-        if: steps.cache.outputs.cache-hit != 'true'
-        run: |
-          docker run --rm -v "$PWD":/src -w /src debian:bookworm \
-            scripts/build_native_apps.sh
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: native-apps-arm64
-          path: build/native/*.deb
-          retention-days: 7
+    # The native default apps (apps/*/app.conf with DEFAULT=1), each built by its own reusable workflow, the same one
+    # its app-<name>.yml uses, so the firmware only bundles the .deb files and owns no app's build.
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [input-checker-native, commander-native]
+    uses: ./.github/workflows/native-app.yml
+    with:
+      app: ${{ matrix.app }}
 
   rootfs:
     needs: [love, native]
@@ -91,8 +76,9 @@ jobs:
 
       - uses: actions/download-artifact@v8
         with:
-          name: native-apps-arm64
+          pattern: native-*-arm64
           path: build/native
+          merge-multiple: true
 
       - name: Unpack LÖVE
         run: |

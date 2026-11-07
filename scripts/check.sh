@@ -50,8 +50,11 @@ step "native apps (C, SDL2)"
 if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     # Warnings are errors under clang (what these were written with); another compiler's new warnings are shown, not fatal.
     werror=""; cc --version 2>/dev/null | grep -qi clang && werror="-Werror"
-    for app in "input-checker-native:apps/input-checker-native/input_checker.c" "commander:apps/commander-native/commander.c"; do
-        name="${app%%:*}"; src="${app#*:}"
+    # every native app is listed by its app.conf (scripts/build_native_app.sh builds from the same file)
+    for conf in apps/*/app.conf; do
+        [ -f "$conf" ] || continue
+        # shellcheck disable=SC1090  # the app's own manifest
+        name="$( . "$conf"; echo "$BIN")"; src="$(dirname "$conf")/$( . "$conf"; echo "$SRC")"
         native_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-native.XXXXXX")"
         # shellcheck disable=SC2046  # sdl2-config prints separate flags
         if cc -std=c11 -Wall -Wextra $werror -O2 -I theme $(sdl2-config --cflags) -o "$native_bin" "$src" $(sdl2-config --libs) -lm; then

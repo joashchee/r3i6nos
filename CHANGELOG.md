@@ -5,6 +5,11 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **Each native app builds on its own, apart from the firmware** (2026-11-07), starting with Commander. New `apps/*/app.conf` manifests and
+  `scripts/build_native_app.sh <app> [--smoke]` (one app to one `.deb`, plus a qemu self-test); `build_native_apps.sh` now only loops over the
+  `DEFAULT=1` apps. New reusable `.github/workflows/native-app.yml` and `app-commander.yml` (runs on Commander's own paths, by hand, and on a `commander-v*` tag,
+  which publishes a release with `Commander.deb`); `build.yml`'s `native` job calls the same reusable workflow per default app. `check.sh` reads the
+  `app.conf` files instead of a hard-coded list. **Not run:** the workflows on GitHub and the script in a Debian 12 container (no Docker or `shellcheck` here); `check.sh` passes.
 - **Commander, a file manager in the style of mc, as a default app** (2026-11-07). `apps/commander-native/commander.c`, C and SDL2, built into the image as
   `native_deb/Commander.deb` (`build_native_apps.sh` now makes two debs). Two 32-column panels, tag, sort, hidden files, view (text and hex, whole pages),
   copy, move, rename, new folder, delete, with a menu on Start and a progress bar with cancel; it never overwrites, never follows links, asks before deleting
