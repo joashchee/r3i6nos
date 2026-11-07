@@ -2,7 +2,7 @@
 
 **Rule (CLAUDE.md, rule 8): every app made for r3i6nos starts from this theme**: the menu, the default apps, and any new LÖVE or
 native app. It is the text-mode look of the ansiapps family fitted to the R36S's 640x480 panel, and the screen of KlamANSI
-(`~/Coding/klamansi/docs/ANSI-TEXT-MODE.md`) is its reference for how the windows work. Code: `theme/`. The menu (`menu/main.lua`,
+(a text-mode ANSI art app by the same maintainer) is its reference for how the windows work. Code: `theme/`. The menu (`menu/main.lua`,
 `menu/view.lua`) is the reference app.
 
 ## The screen

@@ -10,6 +10,9 @@ on:
   push:
     tags: ["v*"]
 
+permissions:
+  contents: read
+
 jobs:
   love:
     # Cross-compiled in a Debian 12 container so it links against Bookworm's
