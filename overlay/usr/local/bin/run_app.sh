@@ -21,9 +21,12 @@ fi
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
 export SDL_NOMOUSE=1
 
-# UNVERIFIED: GUID and button order are from the spec, not tested on a unit.
-# Replace with the mapping captured from a real device (see ROADMAP).
-export SDL_GAMECONTROLLERCONFIG="${SDL_GAMECONTROLLERCONFIG:-03000000341200006048000000010000,R36S Handheld,a:b1,b:b0,x:b3,y:b2,leftshoulder:b4,rightshoulder:b5,back:b6,start:b7,dpup:h0.1,dpdown:h0.2,dpleft:h0.4,dpright:h0.8,platform:Linux,}"
+# Buttons and axes are MEASURED (input checker on a real R36S, 2026-11-07; docs/hardware-findings.md "Input layout"), 0-based as SDL
+# counts: B 0, A 1, X 2, Y 3, L1-R2 4-7, D-pad 8-11 (buttons, not a hat), Select 12, Start 13, L3 14, R3 15, Fn 16; axes 0-3.
+# UNVERIFIED: the GUID (03000000341200006048000000010000) is still the spec's guess, never read from a unit. SDL applies a mapping only
+# to a pad whose GUID matches, so if it does not, nothing here takes effect and apps must read raw buttons (as the checkers and Commander do).
+# Get the real one from `scripts/device-info.sh` ("input devices") or SDL's GetJoystickGUID, then put it here.
+export SDL_GAMECONTROLLERCONFIG="${SDL_GAMECONTROLLERCONFIG:-03000000341200006048000000010000,R36S Handheld,a:b1,b:b0,x:b2,y:b3,leftshoulder:b4,rightshoulder:b5,lefttrigger:b6,righttrigger:b7,dpup:b8,dpdown:b9,dpleft:b10,dpright:b11,back:b12,start:b13,leftstick:b14,rightstick:b15,guide:b16,leftx:a0,lefty:a1,rightx:a2,righty:a3,platform:Linux,}"
 
 KEYS_CFG="${R3I6NOS_KEYS_CFG:-/etc/love_keys.cfg}"
 GPTOKEYB_PID=""

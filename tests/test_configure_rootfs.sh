@@ -29,6 +29,13 @@ R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/native" R3I6NOS_LOVE_APPS_
 grep -q 'LABEL=EASYROMS /roms' "$R/etc/fstab"   || fail "fstab games card"
 grep -q 'nofail' "$R/etc/fstab"                 || fail "fstab nofail"
 [ -L "$R/etc/systemd/system/multi-user.target.wants/loveos.service" ] || fail "unit not enabled"
+# run_app.sh's default pad mapping carries the measured layout (docs/hardware-findings.md): buttons, not a hat
+M="$(grep '^export SDL_GAMECONTROLLERCONFIG' overlay/usr/local/bin/run_app.sh)"
+for tok in a:b1 b:b0 x:b2 y:b3 leftshoulder:b4 rightshoulder:b5 lefttrigger:b6 righttrigger:b7 dpup:b8 dpdown:b9 dpleft:b10 dpright:b11 back:b12 start:b13 leftstick:b14 rightstick:b15 leftx:a0 lefty:a1 rightx:a2 righty:a3; do
+    case ",$M" in *",$tok,"*) ;; *) fail "run_app.sh mapping lacks $tok" ;; esac
+done
+case "$M" in *h0.*) fail "run_app.sh mapping still has a hat D-pad" ;; esac
+
 # default apps: the checker in both LÖVE folders (a real zip with main.lua at the top) and the native deb
 for v in 11.5 12.0; do
     f="$R/opt/loveos/defaults/Love $v/Input_Checker.love"

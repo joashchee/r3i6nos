@@ -93,7 +93,8 @@ Raw button numbers as LÖVE reports them (counting from 1; SDL's own index is on
 - The joystick has 4 axes (left stick 1-2, right stick 3-4) and no hat in use.
 - SDL's gamepad mapping for this pad does not match the raw layout above (Select, Fn and Start did not light when
   the checker read them through the mapping), so anything that needs the real layout should read raw buttons or
-  set its own `SDL_GAMECONTROLLERCONFIG`.
+  set its own `SDL_GAMECONTROLLERCONFIG`. `run_app.sh` now carries this layout in its default mapping (2026-11-07), but its **GUID is still the
+  spec's guess**, never read from a unit, so SDL may not apply it: read the real one from `device-info.sh` ("input devices").
 - `apps/input-checker-love/model.lua` (`LAYOUT`) and `apps/input-checker-native/input_checker.c` (`B_*`) hold these numbers.
 - A report that the event lines looked inverted (UP on press, DOWN on release) was not reproduced by reading the code;
   the checker's event lines now say whether SDL reports the button held at that moment, so a real inversion shows.

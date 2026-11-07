@@ -41,7 +41,8 @@ All of it goes in the gitignored `local_hardware_assets/`.
 - [x] **`scripts/capture-card.sh`** written (see phase 4); **now run it on your card** (needs `brew install e2fsprogs` for the modules).
 - [ ] **Run `scripts/device-info.sh` on the R36S** (stock OS booted, over SSH) and keep the output in `local_hardware_assets/info/`.
 - [x] **Confirm the board** is RK3326 (spec section 1): yes, see Phase 1b.
-- [ ] **Capture the gamepad mapping** on a real unit; replace the unverified `SDL_GAMECONTROLLERCONFIG` in `run_app.sh`.
+- [x] **Capture the gamepad mapping** on a real unit (2026-11-07, `docs/hardware-findings.md` "Input layout"): `run_app.sh`'s `SDL_GAMECONTROLLERCONFIG` now has the measured buttons and axes (D-pad as buttons 8-11, not a hat; tested as text).
+  - [ ] **Read the pad's real GUID** (`scripts/device-info.sh`, "input devices") and put it in that mapping: it is still the spec's guess, so SDL may apply the mapping to nothing. **Untested on the R36S:** whether any SDL gamepad mapping takes effect.
 - [x] **Kernel:** reuse the stock 4.4.189 for now (it is what the DTBs and the Mali blob go with); mainline is phase C above.
 - [ ] **Decide gptokeyb:** keep or drop it, and `etc/love_keys.cfg` with it.
 

@@ -5,6 +5,9 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **`run_app.sh`'s pad mapping fixed to the measured layout** (2026-11-07). The default `SDL_GAMECONTROLLERCONFIG` had X and Y swapped, the D-pad as a hat and Select/Start on the wrong buttons;
+  it now has B 0, A 1, X 2, Y 3, L1/R1 4-5, L2/R2 as triggers 6-7, D-pad buttons 8-11, Select 12, Start 13, L3/R3 14-15, Fn 16 and axes 0-3, and `tests/test_configure_rootfs.sh` checks the tokens.
+  **The GUID is still the spec's guess** (never read from a unit), so SDL may not apply it; ROADMAP has the follow-up. Not run on a real R36S.
 - **A port workflow, and the plan for the first port, KlamANSI** (2026-11-07). `scripts/build_port.sh <app> [--validate | --prepare-only DIR | --smoke]`, a reusable `port-app.yml` and
   `apps/_port-template/` (manifest, `build.sh`, workflow and README templates; no `app.conf`, so nothing picks it up). A `TYPE=port` manifest pins public upstream source by sha256 (https only, no
   credentials), applies `patches/`, cross-builds in Debian 12, fails unless every library the binary needs is in the rootfs's `PACKAGES` (or bundled), puts the upstream licence, source URL, hash and patches
