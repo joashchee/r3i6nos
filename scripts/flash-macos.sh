@@ -120,8 +120,7 @@ games_partition() {
     sudo dd if="$tmp/mbr" of="/dev/r$DISK" bs=512 count=1 conv=notrunc 2>/dev/null || return 1
     rm -rf "$tmp"
     echo "Partition 3: start/size in sectors: $start_size"
-    local i
-    for i in $(seq 1 20); do
+    for _ in $(seq 1 20); do
         diskutil info "/dev/${DISK}s3" >/dev/null 2>&1 && break
         sleep 1
     done
