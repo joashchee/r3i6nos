@@ -312,7 +312,7 @@ static inline void r3_progress(R3Screen *s, int col, int row, int width, int per
 
 /* ---- list dialogs ---------------------------------------------------------------------------------------------- */
 
-typedef struct { char label[128]; char value[32]; } R3Item;
+typedef struct { char label[192]; char value[32]; } R3Item;
 
 typedef struct {
     int col, row, w, h;

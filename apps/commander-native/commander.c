@@ -493,7 +493,7 @@ static int job_summary(const Job *j, char *out, size_t cap) {
     if (ok < 0) ok = 0;
     if (j->cancelled) { snprintf(out, cap, "Cancelled after %d of %d items%s", ok, j->nitems, extra); return R3_ST_WARN; }
     if (j->errors) {
-        snprintf(out, cap, "%s %d of %d items; %d errors, first: %s%s", verb[j->kind], ok, j->nitems, j->errors, j->first_error, extra);
+        snprintf(out, cap, "%s %d of %d items; %d errors, first: %.160s%s", verb[j->kind], ok, j->nitems, j->errors, j->first_error, extra);
         return R3_ST_ERROR;
     }
     snprintf(out, cap, "%s %d item%s%s", verb[j->kind], ok, ok == 1 ? "" : "s", extra);
@@ -658,12 +658,12 @@ typedef struct {
     int act;
     Opts opt;
     int mode, quit;
-    char reply[320];
+    char reply[512];
     int reply_style;
     int menu_sel;
     /* confirmation */
     int conf_sel, conf_cmd;
-    char conf_title[128], conf_yes[160];
+    char conf_title[128], conf_yes[192];
     /* a line being typed */
     char buf[256];
     int in_cmd;
@@ -785,7 +785,7 @@ static void start_job(App *a, int kind) {
 }
 
 static void finish_job(App *a) {
-    char msg[320];
+    char msg[512];
     int style = job_summary(&a->job, msg, sizeof msg);
     say(a, style, "%s", msg);
     a->job_active = 0;
@@ -807,7 +807,7 @@ static void app_tick(App *a, unsigned budget_ms) {
 static void run_cmd(App *a, int cmd) {
     Pane *p = cur(a);
     Entry *e = (p->n > 0) ? &p->e[p->sel] : NULL;
-    char title[128], yes[160];
+    char title[128], yes[192];
     char **t;
     int n;
     switch (cmd) {
@@ -829,7 +829,7 @@ static void run_cmd(App *a, int cmd) {
         if (!strcmp(p->path, other(a)->path)) { say(a, R3_ST_WARN, "Both panels show the same folder: change the other one first"); break; }
         snprintf(title, sizeof title, "%s %d item%s?", cmd == C_COPY ? "Copy" : "Move", n, n == 1 ? "" : "s");
         {
-            char dest[320];
+            char dest[128];
             utf8_tail(other(a)->path, 26, dest, sizeof dest);
             snprintf(yes, sizeof yes, "Yes, %s to %s", cmd == C_COPY ? "copy" : "move", dest);
         }
@@ -851,7 +851,7 @@ static void run_cmd(App *a, int cmd) {
     }
     case C_RENAME:
         if (!e || !strcmp(e->name, "..")) { say(a, R3_ST_WARN, "Pick something to rename"); break; }
-        snprintf(title, sizeof title, "Rename %s to:", e->name);
+        snprintf(title, sizeof title, "Rename %.100s to:", e->name);
         open_input(a, cmd, title, e->name, e->name);
         break;
     case C_MKDIR:
@@ -1219,7 +1219,7 @@ static void app_compose(const App *a, R3Screen *s) {
 
     if (a->mode == M_JOB) {
         static const char *const verb[] = {"Copying", "Moving", "Deleting"};
-        snprintf(left, sizeof left, "%s %s", verb[a->job.kind], a->job.current);
+        snprintf(left, sizeof left, "%s %.100s", verb[a->job.kind], a->job.current);
         char pct[8];
         snprintf(pct, sizeof pct, "%d%%", job_percent(&a->job));
         r3_text_fit(s, 1, R3_COMMAND_TOP + 2, left, 26, R3_ST(R3_ST_BODY));

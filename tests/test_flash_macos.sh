@@ -2,7 +2,7 @@
 # scripts/flash-macos.sh against fake diskutil, plutil, sudo and dd: argument handling, the safety refusals, the games
 # partition on by default, and that every games-partition failure explains itself. Nothing touches a real disk.
 set -u
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")/.." || exit 1
 
 T="$(mktemp -d "${TMPDIR:-/tmp}/r3i6nos-flash.XXXXXX")"
 trap 'rm -rf "$T"' EXIT

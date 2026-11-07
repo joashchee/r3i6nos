@@ -157,6 +157,7 @@ games_partition() {
     tmp="$(mktemp -d "${TMPDIR:-/tmp}/r3i6nos-games.XXXXXX")" || { games_fail "making a temporary folder" "mktemp failed in ${TMPDIR:-/tmp}" "free some space or set TMPDIR to a writable folder, then run: $retry"; return 1; }
 
     # 1. Read sector 0 into a file this shell owns (python, not root, edits it next).
+    # shellcheck disable=SC2024  # on purpose: this shell opens the file, so it is ours and not root's
     sudo dd if="/dev/r$DISK" bs=512 count=1 2>/dev/null > "$tmp/mbr" \
         || { games_fail "reading the card's partition table" "could not read sector 0 of /dev/r$DISK with sudo" "check the sudo password, and that this terminal may read removable volumes (System Settings > Privacy & Security > Full Disk Access). Then run: $retry"; return 1; }
 
