@@ -115,8 +115,11 @@ All of it goes in the gitignored `local_hardware_assets/`.
   and a native ARM64 `.deb` (C, SDL2), built into the image at `/opt/loveos/defaults`; the menu and `deb_watcher.py` list them beside the card's
   files. Tested on a laptop (logic, fake LÖVE, native draw and self-test); the `native` CI job and qemu smoke are new and **not yet green**.
   **Not yet seen on a real R36S.** The checker is how the real button layout gets recorded (below).
-- [ ] **Record the real input layout:** run the checker on the unit, write down which button numbers, axes and hat directions are which,
-  and whether SDL has a gamepad mapping ("Gamepad map: yes/NO"). Then fix `SDL_GAMECONTROLLERCONFIG` in `run_app.sh` and the menu's controls.
+- [x] **Input layout measured** (2026-11-07, first run of the LÖVE 11.5 checker, one unit): A-Y 1-4, D-pad is buttons 9 left / 10 down / 11 up / 12 right
+  (no hat), Fn 13, Select 14, L3 15, R3 16, Start 17; table in `docs/hardware-findings.md`. The checker was fixed from it (raw buttons, whole-stick
+  highlight, SEL/FN/STA order, raw Select+Start exit, 15 s idle-out, 2x fonts, power/volume pills).
+- [ ] **Still to measure:** L1, R1, L2, R2 (checker assumes 5-8); what power and the volume keys send (keys? names?); whether event lines are really
+  inverted (the checker now prints held/free beside each event). Then fix `SDL_GAMECONTROLLERCONFIG` in `run_app.sh` and the menu's controls from the layout.
 - [ ] **First boot (full):** reaches the menu; panel, backlight, D-pad and buttons, audio, TF2 mount.
   - Done (2026-11-07, one R36S, Panel 4 DTB from the stock card): ArkOS splash, kernel, initramfs, root by UUID, systemd to
     the end of boot, text console on the panel. `EASYROMS` timeout is expected (no such partition).

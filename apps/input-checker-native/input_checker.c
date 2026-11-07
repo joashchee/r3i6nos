@@ -2,7 +2,8 @@
  *
  * Same job and layout as the LÖVE versions (docs/R36S_Input_Checker_Specification.md): every raw
  * button, axis and the hat as the pad reports them, plus SDL's gamepad mapping when it has one.
- * Exit: hold Select+Start for 1 s (gamepad mapping), Esc, or 120 s without input.
+ * Exit: hold Select+Start for 1 s, Esc, or 15 s without input.
+ * Button numbers on screen start at 1, as LÖVE counts them (SDL's own index is one less).
  *
  *   input-checker-native               run it
  *   input-checker-native --selftest    open SDL, draw one frame, print one line, exit 0 (CI, under qemu)
@@ -24,12 +25,17 @@
 #define H 480
 #define VERSION "1.0"
 #define EXIT_HOLD_MS 1000
-#define IDLE_LIMIT_MS 120000
-#define IDLE_WARN_MS 15000
+#define IDLE_LIMIT_MS 15000
+#define IDLE_WARN_MS 10000
 #define ZONE 16384 /* an axis counts as pushed past half travel */
 #define MAX_AXES 8
 #define MAX_BUTTONS 32
 #define LOG_LINES 6
+
+/* The R36S's raw button indices (SDL, from 0), measured on a real unit on 2026-11-07: the D-pad is four
+ * buttons, not a hat, and the pad has no SDL gamepad mapping. Shoulders and triggers (4-7) are a guess. */
+enum { B_A = 0, B_B = 1, B_X = 2, B_Y = 3, B_L1 = 4, B_R1 = 5, B_L2 = 6, B_R2 = 7,
+       B_LEFT = 8, B_DOWN = 9, B_UP = 10, B_RIGHT = 11, B_FN = 12, B_SELECT = 13, B_L3 = 14, B_R3 = 15, B_START = 16 };
 
 typedef struct { Uint8 r, g, b; } Col;
 static const Col BG = {24, 24, 27}, PANEL = {36, 36, 46}, DIM = {76, 76, 84}, ACTIVE = {34, 197, 94},
@@ -72,6 +78,8 @@ typedef struct {
     Uint8 button[MAX_BUTTONS], seen_button[MAX_BUTTONS];
     Uint8 hat;
     int seen_axes, seen_hat_dirs;
+    int key_vol_down, key_vol_up, key_power; /* power and the volume keys arrive as keyboard keys */
+    unsigned seq;
     char log[LOG_LINES][48];
     char last_key[24];
     Uint32 idle_since, chord_since;
@@ -83,6 +91,18 @@ static void logf_(State *s, const char *fmt, ...) {
     va_start(ap, fmt);
     vsnprintf(s->log[0], sizeof(s->log[0]), fmt, ap);
     va_end(ap);
+}
+
+/* One event line: a sequence number, what happened, and what the pad says right now. A DOWN that says
+ * "free" (or an UP that says "held") would mean the event stream and the state disagree. */
+static void event(State *s, int is_held, const char *fmt, ...) {
+    char what[32];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(what, sizeof what, fmt, ap);
+    va_end(ap);
+    if (is_held < 0) logf_(s, "#%u %s", ++s->seq, what); /* keys have no state to compare with */
+    else logf_(s, "#%u %s (%s)", ++s->seq, what, is_held ? "held" : "free");
 }
 
 /* ---- drawing ---- */
@@ -101,7 +121,7 @@ static void disc(SDL_Renderer *r, Col c, int cx, int cy, int rad) {
 }
 static void ring(SDL_Renderer *r, Col c, int cx, int cy, int rad) {
     color(r, c);
-    for (int a = 0; a < 360; a += 3)
+    for (int a = 0; a < 360; a += 2)
         SDL_RenderDrawPoint(r, cx + (int)lround(rad * cos(a * M_PI / 180)), cy + (int)lround(rad * sin(a * M_PI / 180)));
 }
 static int text_w(const char *t, int sc) { return (int)strlen(t) * 6 * sc; }
@@ -130,110 +150,135 @@ static void textc(SDL_Renderer *r, Col c, int cx, int y, int sc, const char *t) 
     text(r, c, cx - text_w(t, sc) / 2, y, sc, t);
 }
 
+static int held(const State *s, int i) { return i < MAX_BUTTONS && s->button[i]; }
 static int gcb(const State *s, SDL_GameControllerButton b) {
     return s->gc && SDL_GameControllerGetButton(s->gc, b);
 }
+/* Select+Start: the raw buttons (the pad has no mapping), or SDL's mapping if one exists. */
+static int exit_held(const State *s) {
+    return (held(s, B_SELECT) && held(s, B_START)) || (gcb(s, SDL_CONTROLLER_BUTTON_BACK) && gcb(s, SDL_CONTROLLER_BUTTON_START));
+}
+
 static void round_btn(SDL_Renderer *r, int x, int y, const char *label, int on, int rad) {
     disc(r, on ? ACTIVE : DIM, x, y, rad);
-    textc(r, on ? BG : TEXT, x, y - 3, 1, label);
+    textc(r, on ? BG : TEXT, x, y - 7, 2, label);
 }
+/* A stick: the whole circle lights up while it is pressed in (L3 / R3). */
 static void stick(SDL_Renderer *r, int cx, int cy, Sint16 ax, Sint16 ay, int pressed, Col tint, const char *label) {
-    disc(r, PANEL, cx, cy, 36);
-    ring(r, DIM, cx, cy, 36);
-    disc(r, pressed ? ACTIVE : tint, cx + (int)(ax / 32768.0 * 26), cy + (int)(ay / 32768.0 * 26), 10);
-    textc(r, MUTE, cx, cy + 44, 1, label);
+    disc(r, pressed ? ACTIVE : PANEL, cx, cy, 38);
+    ring(r, pressed ? ACTIVE : DIM, cx, cy, 38);
+    disc(r, pressed ? BG : tint, cx + (int)(ax / 32768.0 * 26), cy + (int)(ay / 32768.0 * 26), 10);
+    textc(r, pressed ? ACTIVE : MUTE, cx, cy + 42, 2, label);
+}
+static void pill(SDL_Renderer *r, int x, int y, int w, const char *label, int on) {
+    rect(r, on ? ACTIVE : DIM, x, y, w, 24);
+    textc(r, on ? BG : TEXT, x + w / 2, y + 4, 2, label);
 }
 
 static void draw(SDL_Renderer *r, State *s, Uint32 now, int have_pad) {
     color(r, BG);
     SDL_RenderClear(r);
     rect(r, HEAD, 0, 0, W, 45);
-    text(r, ACTIVE, 20, 14, 2, "R36S INPUT DIAGNOSTIC TOOL");
-    char rt[48];
+    text(r, ACTIVE, 16, 12, 3, "R36S INPUT CHECKER");
+    char rt[40], nm[32];
     SDL_version v;
     SDL_GetVersion(&v);
-    snprintf(rt, sizeof rt, "Native ARM64 build, SDL %d.%d.%d", v.major, v.minor, v.patch);
-    text(r, MUTE, W - 14 - text_w(rt, 1), 8, 1, rt);
-    text(r, MUTE, W - 14 - text_w(have_pad ? s->name : "no gamepad", 1), 26, 1, have_pad ? s->name : "no gamepad");
+    snprintf(rt, sizeof rt, "ARM64 SDL %d.%d.%d", v.major, v.minor, v.patch);
+    text(r, MUTE, W - 12 - text_w(rt, 2), 3, 2, rt);
+    snprintf(nm, sizeof nm, "%.24s", have_pad ? s->name : "no gamepad");
+    text(r, MUTE, W - 12 - text_w(nm, 2), 24, 2, nm);
 
     if (!have_pad) {
-        textc(r, BAD, W / 2, 200, 2, "NO GAMEPAD DETECTED");
-        textc(r, MUTE, W / 2, 236, 1, "The pad is not reaching SDL. Press a button; this page updates when one appears.");
+        textc(r, BAD, W / 2, 190, 3, "NO GAMEPAD DETECTED");
+        textc(r, MUTE, W / 2, 232, 2, "Press a button: this page");
+        textc(r, MUTE, W / 2, 252, 2, "updates when a pad appears.");
     } else {
         int h = s->hat;
-        /* shoulders and triggers: SDL's gamepad mapping, when the pad has one */
-        round_btn(r, 40, 70, "L1", gcb(s, SDL_CONTROLLER_BUTTON_LEFTSHOULDER), 15);
-        round_btn(r, 85, 70, "L2", s->gc && SDL_GameControllerGetAxis(s->gc, SDL_CONTROLLER_AXIS_TRIGGERLEFT) > ZONE, 15);
-        round_btn(r, 235, 70, "R2", s->gc && SDL_GameControllerGetAxis(s->gc, SDL_CONTROLLER_AXIS_TRIGGERRIGHT) > ZONE, 15);
-        round_btn(r, 280, 70, "R1", gcb(s, SDL_CONTROLLER_BUTTON_RIGHTSHOULDER), 15);
-        /* D-pad */
-        rect(r, PANEL, 57, 112, 96, 96);
-        rect(r, (h & SDL_HAT_UP) ? ACTIVE : DIM, 92, 116, 26, 32);
-        rect(r, (h & SDL_HAT_DOWN) ? ACTIVE : DIM, 92, 172, 26, 32);
-        rect(r, (h & SDL_HAT_LEFT) ? ACTIVE : DIM, 61, 147, 32, 26);
-        rect(r, (h & SDL_HAT_RIGHT) ? ACTIVE : DIM, 117, 147, 32, 26);
-        /* face buttons: raw 0..3 are A, B, X, Y in the spec (it counts from 1) */
-        disc(r, PANEL, 250, 160, 48);
-        round_btn(r, 250, 130, "X", s->button[2], 14);
-        round_btn(r, 250, 190, "A", s->button[0], 14);
-        round_btn(r, 220, 160, "Y", s->button[3], 14);
-        round_btn(r, 280, 160, "B", s->button[1], 14);
-        stick(r, 105, 290, s->axis[0], s->axis[1], gcb(s, SDL_CONTROLLER_BUTTON_LEFTSTICK), ACCENT, "Left stick (L3)");
-        stick(r, 250, 290, s->axis[2], s->axis[3], gcb(s, SDL_CONTROLLER_BUTTON_RIGHTSTICK), WARM, "Right stick (R3)");
-        round_btn(r, 120, 372, "SEL", gcb(s, SDL_CONTROLLER_BUTTON_BACK), 15);
-        round_btn(r, 170, 372, "STA", gcb(s, SDL_CONTROLLER_BUTTON_START), 15);
-        round_btn(r, 220, 372, "FN", gcb(s, SDL_CONTROLLER_BUTTON_GUIDE), 15);
-        if (s->chord_since) {
-            Uint32 held = now - s->chord_since;
-            rect(r, PANEL, 40, 404, 240, 10);
-            rect(r, WARM, 40, 404, (int)(240 * (held > EXIT_HOLD_MS ? 1.0 : (double)held / EXIT_HOLD_MS)), 10);
-        }
+        /* shoulders and triggers: buttons 5-8 are an assumption; the telemetry shows what really arrives */
+        round_btn(r, 36, 76, "L1", held(s, B_L1), 18);
+        round_btn(r, 84, 76, "L2", held(s, B_L2), 18);
+        round_btn(r, 246, 76, "R2", held(s, B_R2), 18);
+        round_btn(r, 294, 76, "R1", held(s, B_R1), 18);
+        /* D-pad: the four buttons, or a hat if the pad has one */
+        int up = held(s, B_UP) || (h & SDL_HAT_UP), dn = held(s, B_DOWN) || (h & SDL_HAT_DOWN);
+        int lf = held(s, B_LEFT) || (h & SDL_HAT_LEFT), rt_ = held(s, B_RIGHT) || (h & SDL_HAT_RIGHT);
+        rect(r, PANEL, 47, 127, 96, 96);
+        rect(r, up ? ACTIVE : DIM, 82, 131, 26, 32);
+        rect(r, dn ? ACTIVE : DIM, 82, 187, 26, 32);
+        rect(r, lf ? ACTIVE : DIM, 51, 162, 32, 26);
+        rect(r, rt_ ? ACTIVE : DIM, 107, 162, 32, 26);
+        disc(r, PANEL, 250, 175, 52);
+        round_btn(r, 250, 143, "X", held(s, B_X), 17);
+        round_btn(r, 250, 207, "A", held(s, B_A), 17);
+        round_btn(r, 218, 175, "Y", held(s, B_Y), 17);
+        round_btn(r, 282, 175, "B", held(s, B_B), 17);
+        stick(r, 95, 300, s->axis[0], s->axis[1], held(s, B_L3), ACCENT, "L STICK");
+        stick(r, 250, 300, s->axis[2], s->axis[3], held(s, B_R3), WARM, "R STICK");
+        /* left to right: Select, Fn, Start */
+        round_btn(r, 95, 380, "SEL", held(s, B_SELECT), 22);
+        round_btn(r, 165, 380, "FN", held(s, B_FN), 22);
+        round_btn(r, 235, 380, "STA", held(s, B_START), 22);
 
         /* telemetry */
         rect(r, PANEL, 340, 56, 284, 376);
-        int y = 66;
-        text(r, TEXT, 352, y, 2, "TELEMETRY");
+        int y = 60;
+        text(r, TEXT, 350, y, 2, "TELEMETRY");
+        y += 26;
+        char down[40] = "";
+        int nseen = 0;
+        for (int i = 0; i < s->nbuttons && i < MAX_BUTTONS; i++) {
+            if (s->button[i] && strlen(down) < 14) {
+                char one[8];
+                snprintf(one, sizeof one, "%d ", i + 1);
+                strncat(down, one, sizeof down - strlen(down) - 1);
+            }
+            nseen += s->seen_button[i];
+        }
+        textf(r, ACTIVE, 350, y, 2, "Down: %s", *down ? down : "none");
         y += 22;
         char hs[8] = ""; /* up to "udlr" */
         if (h & SDL_HAT_UP) strcat(hs, "u");
         if (h & SDL_HAT_DOWN) strcat(hs, "d");
         if (h & SDL_HAT_LEFT) strcat(hs, "l");
         if (h & SDL_HAT_RIGHT) strcat(hs, "r");
-        textf(r, ACCENT, 352, y, 1, "Hat 0 (D-pad): %s", *hs ? hs : "c");
-        y += 14;
-        for (int i = 0; i < s->naxes && i < 6; i++, y += 14)
-            textf(r, ACCENT, 352, y, 1, "Axis %d: %+.2f%s", i, s->axis[i] / 32768.0, (s->seen_axes >> i) & 1 ? "  seen" : "");
-        y += 4;
-        char down[96] = "";
-        int nseen = 0;
-        for (int i = 0; i < s->nbuttons && i < MAX_BUTTONS; i++) {
-            if (s->button[i]) {
-                char one[8];
-                snprintf(one, sizeof one, "%d ", i);
-                strncat(down, one, sizeof down - strlen(down) - 1);
-            }
-            nseen += s->seen_button[i];
+        textf(r, ACCENT, 350, y, 2, "Hat: %s", *hs ? hs : "c");
+        y += 22;
+        for (int i = 0; i < s->naxes && i < 4; i += 2, y += 22) {
+            if (i + 1 < s->naxes && i + 1 < 4)
+                textf(r, ACCENT, 350, y, 2, "A%d %+.2f A%d %+.2f", i + 1, s->axis[i] / 32768.0, i + 2, s->axis[i + 1] / 32768.0);
+            else
+                textf(r, ACCENT, 350, y, 2, "A%d %+.2f", i + 1, s->axis[i] / 32768.0);
         }
-        textf(r, ACTIVE, 352, y, 1, "Buttons down: %s", *down ? down : "none");
-        y += 14;
-        textf(r, MUTE, 352, y, 1, "Seen: %d of %d buttons, last key %s", nseen, s->nbuttons, s->last_key);
-        y += 12;
-        textf(r, s->gc ? MUTE : WARM, 352, y, 1, "Axes %d Buttons %d Hats %d Gamepad map: %s", s->naxes, s->nbuttons, s->nhats, s->gc ? "yes" : "NO");
-        y += 12;
-        textf(r, MUTE, 352, y, 1, "GUID %s", s->guid);
+        textf(r, MUTE, 350, y, 2, "Seen %d/%d buttons", nseen, s->nbuttons);
+        y += 22;
+        textf(r, s->gc ? MUTE : WARM, 350, y, 2, "Gamepad map: %s", s->gc ? "yes" : "NO");
+        y += 22;
+        textf(r, MUTE, 350, y, 1, "GUID %s", s->guid);
+        y += 16;
+        text(r, TEXT, 350, y, 2, "LAST EVENTS");
         y += 20;
-        text(r, TEXT, 352, y, 1, "LAST EVENTS");
-        y += 14;
-        for (int i = 0; i < LOG_LINES; i++, y += 12)
-            text(r, MUTE, 352, y, 1, s->log[i]);
+        for (int i = 0; i < LOG_LINES; i++, y += 18) {
+            char clip[23];
+            snprintf(clip, sizeof clip, "%s", s->log[i]);
+            text(r, MUTE, 350, y, 2, clip);
+        }
+        if (s->chord_since) {
+            Uint32 hold = now - s->chord_since;
+            rect(r, PANEL, 16, 472, 608, 6);
+            rect(r, WARM, 16, 472, (int)(608 * (hold > EXIT_HOLD_MS ? 1.0 : (double)hold / EXIT_HOLD_MS)), 6);
+        }
     }
+    /* power and the volume keys (they come as keys, not joystick buttons) */
+    pill(r, 59, 408, 64, "VOL-", s->key_vol_down);
+    pill(r, 133, 408, 64, "VOL+", s->key_vol_up);
+    pill(r, 207, 408, 64, "PWR", s->key_power);
 
     rect(r, FOOT, 0, 440, W, 40);
     Uint32 idle = now - s->idle_since;
     if (idle + IDLE_WARN_MS >= IDLE_LIMIT_MS)
-        textf(r, WARM, 20, 454, 1, "No input: leaving in %u s. Press anything to stay.", (IDLE_LIMIT_MS - (idle > IDLE_LIMIT_MS ? IDLE_LIMIT_MS : idle) + 999) / 1000);
+        textf(r, WARM, 16, 448, 2, "No input: leaving in %u s", (IDLE_LIMIT_MS - (idle > IDLE_LIMIT_MS ? IDLE_LIMIT_MS : idle) + 999) / 1000);
     else
-        text(r, TEXT, 20, 454, 1, "Exit: hold Select+Start for 1 s, or Esc. It also leaves after 2 minutes without input.");
+        text(r, TEXT, 16, 448, 2, "Hold SEL+STA 1 s to quit. 15 s idle quits.");
 }
 
 /* ---- joystick ---- */
@@ -258,15 +303,16 @@ static int open_pad(State *s, int index) {
 }
 
 static void demo_state(State *s) {
-    snprintf(s->name, sizeof s->name, "Demo pad (not a real device)");
+    snprintf(s->name, sizeof s->name, "Demo pad (not real)");
     snprintf(s->guid, sizeof s->guid, "03000000deadbeef0000000000000000");
-    s->naxes = 4; s->nbuttons = 17; s->nhats = 1;
+    s->naxes = 4; s->nbuttons = 17; s->nhats = 0;
     s->axis[0] = 22000; s->axis[1] = -9000; s->axis[2] = -3000; s->axis[3] = 17000;
-    s->button[0] = s->button[2] = 1;
-    s->seen_button[0] = s->seen_button[1] = s->seen_button[2] = 1;
-    s->hat = SDL_HAT_UP | SDL_HAT_LEFT;
+    s->button[B_UP] = s->button[B_RIGHT] = s->button[B_L3] = s->button[B_FN] = s->button[B_A] = s->button[B_L1] = 1;
+    s->seen_button[B_A] = s->seen_button[B_UP] = s->seen_button[B_L3] = 1;
+    s->key_vol_up = 1;
     s->seen_axes = 3;
-    logf_(s, "button 0 down"); logf_(s, "hat 0 ul"); logf_(s, "axis 0 +0.67"); logf_(s, "button 2 down");
+    event(s, 1, "btn 11 DOWN"); event(s, 0, "btn 11 UP"); event(s, 1, "btn 15 DOWN");
+    event(s, 1, "ax 1 pushed"); event(s, 1, "btn 11 DOWN"); event(s, -1, "key VolumeUp DOWN");
     snprintf(s->last_key, sizeof s->last_key, "-");
 }
 
@@ -351,11 +397,19 @@ int main(int argc, char **argv) {
             switch (e.type) {
             case SDL_QUIT: running = 0; break;
             case SDL_KEYDOWN:
-                snprintf(s.last_key, sizeof s.last_key, "%.20s", SDL_GetKeyName(e.key.keysym.sym));
-                logf_(&s, "key %.30s", s.last_key);
+            case SDL_KEYUP: {
+                int down = e.type == SDL_KEYDOWN;
+                SDL_Keycode k = e.key.keysym.sym;
+                if (e.key.repeat) break;
+                if (k == SDLK_VOLUMEDOWN) s.key_vol_down = down;
+                else if (k == SDLK_VOLUMEUP) s.key_vol_up = down;
+                else if (k == SDLK_POWER) s.key_power = down;
+                snprintf(s.last_key, sizeof s.last_key, "%.20s", SDL_GetKeyName(k));
+                event(&s, -1, "key %.12s %s", s.last_key, down ? "DOWN" : "UP");
                 s.idle_since = now;
-                if (e.key.keysym.sym == SDLK_ESCAPE) running = 0;
+                if (down && k == SDLK_ESCAPE) running = 0;
                 break;
+            }
             case SDL_JOYDEVICEADDED:
                 if (!s.js && open_pad(&s, e.jdevice.which)) logf_(&s, "pad added");
                 s.idle_since = now;
@@ -369,34 +423,36 @@ int main(int argc, char **argv) {
                 }
                 break;
             case SDL_JOYBUTTONDOWN:
-                if (e.jbutton.button < MAX_BUTTONS) { s.button[e.jbutton.button] = 1; s.seen_button[e.jbutton.button] = 1; }
-                logf_(&s, "button %d down", e.jbutton.button);
+            case SDL_JOYBUTTONUP: {
+                int down = e.type == SDL_JOYBUTTONDOWN, b = e.jbutton.button;
+                if (b < MAX_BUTTONS) {
+                    s.button[b] = down;
+                    if (down) s.seen_button[b] = 1;
+                }
+                /* the state as SDL reports it right now, to compare with the event */
+                event(&s, s.js && SDL_JoystickGetButton(s.js, b), "btn %d %s", b + 1, down ? "DOWN" : "UP");
                 s.idle_since = now;
                 break;
-            case SDL_JOYBUTTONUP:
-                if (e.jbutton.button < MAX_BUTTONS) s.button[e.jbutton.button] = 0;
-                logf_(&s, "button %d up", e.jbutton.button);
-                break;
+            }
             case SDL_JOYHATMOTION:
                 s.hat = e.jhat.value;
                 if (s.hat) { s.seen_hat_dirs++; s.idle_since = now; }
-                logf_(&s, "hat %d %s%s%s%s", e.jhat.hat, (s.hat & SDL_HAT_UP) ? "u" : "", (s.hat & SDL_HAT_DOWN) ? "d" : "",
-                      (s.hat & SDL_HAT_LEFT) ? "l" : "", (s.hat & SDL_HAT_RIGHT) ? "r" : "");
-                if (!s.hat) logf_(&s, "hat %d c", e.jhat.hat);
+                event(&s, s.hat != 0, "hat %d %s%s%s%s%s", e.jhat.hat, (s.hat & SDL_HAT_UP) ? "u" : "", (s.hat & SDL_HAT_DOWN) ? "d" : "",
+                      (s.hat & SDL_HAT_LEFT) ? "l" : "", (s.hat & SDL_HAT_RIGHT) ? "r" : "", s.hat ? "" : "c");
                 break;
             case SDL_JOYAXISMOTION:
                 if (e.jaxis.axis < MAX_AXES) {
                     int was = abs(s.axis[e.jaxis.axis]) >= ZONE, is = abs(e.jaxis.value) >= ZONE;
                     s.axis[e.jaxis.axis] = e.jaxis.value;
                     if (was != is) {
-                        logf_(&s, "axis %d %s", e.jaxis.axis, is ? "pushed" : "centre");
+                        event(&s, is, "ax %d %s", e.jaxis.axis + 1, is ? "pushed" : "centre");
                         if (is) { s.seen_axes |= 1 << e.jaxis.axis; s.idle_since = now; }
                     }
                 }
                 break;
             }
         }
-        if (gcb(&s, SDL_CONTROLLER_BUTTON_BACK) && gcb(&s, SDL_CONTROLLER_BUTTON_START)) {
+        if (exit_held(&s)) {
             if (!s.chord_since) s.chord_since = now;
             if (now - s.chord_since >= EXIT_HOLD_MS) running = 0;
         } else {

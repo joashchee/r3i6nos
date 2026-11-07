@@ -22,9 +22,15 @@ gamepad mapping in `run_app.sh` is unverified).
   dummy video driver. At boot `deb_watcher.py` installs it like any `.deb` on the card.
   `input-checker-native --screenshot out.bmp` draws a demo frame to a file, for looking at the layout.
 
-**Leaving:** hold Select+Start for a second (needs SDL's gamepad mapping for the pad), or Esc on a keyboard.
-Because that mapping is unverified, every version also leaves by itself after 2 minutes without input, with a
-countdown in the last 15 seconds, so an unmapped unit cannot get stuck in it.
+**Leaving:** hold Select+Start (raw buttons 14 and 17) for a second, or Esc on a keyboard. Every version also
+leaves by itself after **15 seconds** without input, with a countdown in the last 10, so nobody gets stuck in it.
 
-**Not yet run on a real R36S:** none of the three has been seen on the panel or with the pad. Tested here:
-the logic, the LÖVE code against a fake LÖVE, the native app's draw and self-test on a Mac (dummy video).
+**Button numbers** on screen count from 1, as LÖVE does. The layout is from a real unit (`docs/hardware-findings.md`):
+the D-pad is buttons 9-12, not a hat, and SDL has no matching gamepad mapping, so the checker reads raw buttons.
+L1/R1/L2/R2 (5-8) are a guess until measured. Power and the volume keys are not joystick buttons: the VOL-, VOL+ and
+PWR pills light from keyboard key events, if the system delivers them (not yet seen). Event lines are numbered
+(`#27 btn 11 DOWN (held)`) and say whether the button is actually held right then.
+
+**Run on a real R36S:** the first LÖVE 11.5 version (2026-11-07), which found its layout bugs. This revision has not been.
+Tested here: the logic, the LÖVE code against a fake LÖVE, the native app's draw and self-test on a Mac (dummy video).
+The LÖVE layout itself has only been drawn by LÖVE on the device; the native one is checked by screenshot here.

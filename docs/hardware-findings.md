@@ -76,3 +76,25 @@ Found on the first boot (2026-11-07), by reading the root partition of a full ba
 - The kernel prints `/dsi@ff450000/panel@0/display-timings: could not find phandle` about three times
   every time a program opens the display. It is noise: the console and display work.
 
+## Input layout (measured on one R36S, 2026-11-07, with the input checker)
+
+Raw button numbers as LÖVE reports them (counting from 1; SDL's own index is one less):
+
+| Input | Button |
+|---|---|
+| A, B, X, Y | 1, 2, 3, 4 |
+| D-pad left, down, up, right | 9, 10, 11, 12 (**buttons, not a hat**) |
+| Fn, Select | 13, 14 |
+| Left stick press (L3), right stick press (R3) | 15, 16 |
+| Start | 17 |
+| L1, R1, L2, R2 | **not measured** (the checker assumes 5, 6, 7, 8) |
+| Power, volume up, volume down | not on the joystick (17 buttons, all used): expected as keyboard keys; **not yet seen** |
+
+- The joystick has 4 axes (left stick 1-2, right stick 3-4) and no hat in use.
+- SDL's gamepad mapping for this pad does not match the raw layout above (Select, Fn and Start did not light when
+  the checker read them through the mapping), so anything that needs the real layout should read raw buttons or
+  set its own `SDL_GAMECONTROLLERCONFIG`.
+- `apps/input-checker-love/model.lua` (`LAYOUT`) and `apps/input-checker-native/input_checker.c` (`B_*`) hold these numbers.
+- A report that the event lines looked inverted (UP on press, DOWN on release) was not reproduced by reading the code;
+  the checker's event lines now say whether SDL reports the button held at that moment, so a real inversion shows.
+

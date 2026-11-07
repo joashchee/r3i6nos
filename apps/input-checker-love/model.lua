@@ -5,8 +5,25 @@ local M = {}
 
 M.ZONE = 0.5            -- an axis counts as "pushed" past this
 M.EXIT_HOLD = 1.0       -- seconds Select+Start must be held
-M.IDLE_LIMIT = 120      -- seconds without input before the app leaves by itself
-M.IDLE_WARN = 15        -- ... and starts counting down on screen
+M.IDLE_LIMIT = 15       -- seconds without input before the app leaves by itself
+M.IDLE_WARN = 10        -- ... and starts counting down on screen
+
+-- The R36S's raw button numbers as LÖVE reports them (1-based; SDL's own index is one less). Measured on
+-- a real unit on 2026-11-07: the D-pad is four buttons, not a hat, and the pad has no SDL gamepad mapping.
+-- l1, r1, l2, r2 are a guess (the numbers left over): the telemetry shows the truth.
+M.LAYOUT = {
+  a = 1, b = 2, x = 3, y = 4,
+  l1 = 5, r1 = 6, l2 = 7, r2 = 8,          -- assumed
+  left = 9, down = 10, up = 11, right = 12,
+  fn = 13, select = 14, l3 = 15, r3 = 16, start = 17,
+}
+
+-- Power and the volume keys are not on the joystick (17 buttons, all taken): they arrive as keyboard keys.
+M.KEYS = {
+  vol_down = { "volumedown", "audiolower" },
+  vol_up = { "volumeup", "audioraise" },
+  power = { "power", "sleep" },
+}
 
 --- Hat direction string ("u", "dl", "c", ...) to four booleans.
 function M.hat(dir)
@@ -17,6 +34,39 @@ function M.hat(dir)
     left = dir:find("l", 1, true) ~= nil,
     right = dir:find("r", 1, true) ~= nil,
   }
+end
+
+--- Which D-pad directions are pressed: the four buttons, or a hat if the pad has one.
+--- down(i) says whether raw button i is held.
+function M.dpad(hatDir, down)
+  local h = M.hat(hatDir)
+  local L = M.LAYOUT
+  return {
+    up = h.up or down(L.up), down = h.down or down(L.down),
+    left = h.left or down(L.left), right = h.right or down(L.right),
+  }
+end
+
+--- Is Select+Start held? Raw buttons first (the pad has no mapping); the SDL mapping also counts.
+--- gamepad(name) is optional: nil when the pad has no mapping.
+function M.exitHeld(down, gamepad)
+  if down(M.LAYOUT.select) and down(M.LAYOUT.start) then return true end
+  return gamepad ~= nil and gamepad("back") and gamepad("start") or false
+end
+
+--- Is one of these key names down? keys is the set of names currently held.
+function M.keyHeld(held, group)
+  for _, name in ipairs(M.KEYS[group]) do
+    if held[name] then return true end
+  end
+  return false
+end
+
+--- One line of the event log. isHeld is what the pad says right now: a DOWN event with "free" (or an UP
+--- with "held") would mean the event stream and the state disagree.
+function M.eventLine(seq, what, isHeld)
+  if isHeld == nil then return ("#%d %s"):format(seq, what) end   -- keys have no state to compare with
+  return ("#%d %s (%s)"):format(seq, what, isHeld and "held" or "free")
 end
 
 --- -1, 0 or 1: which side of the zone an axis value is on.

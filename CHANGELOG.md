@@ -5,6 +5,15 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **Input checker fixed from the first run on a real R36S** (2026-11-07). The unit's D-pad is four buttons (9 left, 10 down, 11 up, 12 right),
+  Fn 13, Select 14, L3 15, R3 16, Start 17, and SDL's gamepad mapping does not match, so the first version lit nothing for the D-pad, Select,
+  Fn and Start, and its Select+Start exit (which needed the mapping) never fired. Now: everything reads raw buttons from one `LAYOUT` table
+  (`model.lua`, `B_*` in the C app); the whole stick circle lights when L3/R3 is pressed; the row is SEL, FN, STA; the exit chord is raw 14+17;
+  idle-out is 15 s (countdown from 10); fonts are about twice as large and the screen re-laid out; VOL-, VOL+ and PWR pills light from key
+  events (the power and volume keys are not joystick buttons); event lines are numbered and say whether the button is held at that moment
+  (the report that UP/DOWN looked swapped could not be seen in the code: this makes a real inversion visible). Button numbers are 1-based
+  in both apps. Tests updated (D-pad from buttons, raw chord, one-button-no-quit, 15 s idle, keys; a deliberate break of the chord is caught).
+  `docs/hardware-findings.md` has the measured table. L1/R1/L2/R2 (assumed 5-8) and the power/volume key names are still unmeasured.
 - **Default apps: the R36S Input Checker, three ways** (2026-11-07), from `docs/R36S_Input_Checker_Specification.md`. `apps/input-checker-love`
   (LÖVE 11.5 and 12.0: the same code packed into `Love 11.5/` and `Love 12.0/`, prints its runtime) and `apps/input-checker-native`
   (C and SDL2 with its own 5x7 font, cross-built into `Input_Checker_Native.deb`). Built into the image at `/opt/loveos/defaults`, so the
