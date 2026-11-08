@@ -16,5 +16,10 @@ jobs:
       - uses: actions/checkout@v7
       - name: Install tools
         run: sudo apt-get update && sudo apt-get install -y shellcheck luajit libsdl2-dev python3-pil
+      - name: Fetch QuickJS (pinned; the toolchain test builds the sample CLI with it)
+        run: |
+          mkdir -p vendor
+          curl -fsSL -o vendor/quickjs-2024-01-13.tar.xz https://bellard.org/quickjs/quickjs-2024-01-13.tar.xz
+          echo "3c4bf8f895bfa54beb486c8d1218112771ecfc5ac3be1036851ef41568212e03  vendor/quickjs-2024-01-13.tar.xz" | sha256sum -c -
       - name: Run checks
         run: scripts/check.sh
