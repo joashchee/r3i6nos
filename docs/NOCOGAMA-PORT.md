@@ -1,6 +1,6 @@
 # NoCoGaMa on r3i6nos: status and what r3i6nos gives it
 
-Status (2026-11-08): **scaffold, spike and the data core written; never drawn by LÖVE with a display, never run on an R36S.** NoCoGaMa is the ansiapps **No Code Game Maker**: draw a level, place actors, give them
+Status (2026-11-08): **the editor, play, files, export and the release workflow are written and tested without a display (13 commits); never drawn by LÖVE with a display, never run on an R36S.** NoCoGaMa is the ansiapps **No Code Game Maker**: draw a level, place actors, give them
 behaviours, play it, all with the pad. The code, its plan and its tests live in the private repo `joashchee/nocogama` (`~/Coding/nocogama`); this repo never holds any of it (rule 2). Its plan is that repo's
 `docs/R3I6NOS-PORT-PLAN.md` (organised like `docs/KLAMANSI-PORT.md`); `ROADMAP.md` section 9 tracks it here, and the NoCoGaMa repo's `ROADMAP.md` is the order of work.
 
@@ -28,8 +28,14 @@ behaviours, play it, all with the pad. The code, its plan and its tests live in 
 | Scaffold, licence, private remote | done |
 | Spike, laptop: a fixed 60 Hz step of 200 actors | 0.003 ms with the JIT on, 0.084 ms off (Mac). The official macOS LÖVE 11.5 has the JIT **off**, 12.0 **on** (found headless, `vendor/love-mac`). Says nothing about drawing; the Cortex-A35 is a guess |
 | Spike, device: six pages, built per runtime | written and tested with luajit and headless LÖVE; **never drawn, never on a unit** |
-| Data core: `json`, `project` (atomic save), the 60 Hz world, six behaviours | written, tests pass (luajit, and real LÖVE 11.5 and 12.0 headless); **uncommitted in the NoCoGaMa repo when read** |
-| Editor, play and files, export, package | not started (roadmap sections 3-6) |
+| Data core: `json`, `project` (atomic save), the 60 Hz world, six behaviours | committed; tests pass (luajit, and real LÖVE 11.5 and 12.0 headless) |
+| Editor (Level, Actors, Logic, Play tabs; undo; several scenes with doors; naming; editing texts), as screen specs drawn with the theme | committed; tested on the rules and as text dumps; **no frame drawn by LÖVE** |
+| Games screen, on-screen keyboard, library, autosave (`/roms/NoCoGaMa/projects/`) | committed; tested with fakes and headless LÖVE. Listing uses `io.popen` + `ls`: **untested on the unit** (the spike's Card page tests it) |
+| Export: a game becomes `Love 11.5/<Name>/` and/or `Love 12.0/<Name>/` | committed; r3i6nos's own `menu/scan.lua` lists the result and a separate luajit process plays it. **Not played under LÖVE with a display** |
+| LÖVE API rule (every call on a list, checked against a strict stub and real 11.5/12.0) | committed; the `graphics` and `window` calls are **not checked against real LÖVE** (no window here) |
+| Release workflow (`v*` tag, two byte-identical `.love` files, checksums, draft release) and CI | written, tested locally (`scripts/test_release.sh`); **never run on GitHub** |
+| Its `scripts/check.sh` | passes (run again 2026-11-08, exit 0), including 11.5 headless (JIT **off** there, 0.078 ms for 200 actors) and 12.0 (JIT on, 0.0036 ms) |
+| Full try on a real R36S, both runtimes | not done |
 
 ## What r3i6nos has to settle for it (shared with KlamANSI and `ROADMAP.md` section 6)
 
@@ -39,7 +45,6 @@ behaviours, play it, all with the pad. The code, its plan and its tests live in 
 - **Whether the arm64 LÖVE has the LuaJIT JIT on.** r3i6nos links Debian's system `libluajit-5.1-2`, so it should (**expected, not seen**); the spike's Info page says. It is the difference between 0.003 and 0.084 ms a step.
 - **The theme drawn by LÖVE with a display** (`theme.init`, `theme.draw`): never run; the NoCoGaMa scaffold under `love` on a Mac is the first thing that will, and so is the menu's check in `ROADMAP.md` section 1.
 
-## Unconfirmed decisions
+## Decisions
 
-The NoCoGaMa plan's section 0 lists five decisions with defaults; the maintainer has confirmed the **licence and grant**. Still marked proposed there, and assumed here because NoCoGaMa was asked to be included like KlamANSI: code in its
-own private repo, `TYPE=love` for both runtimes, a free R36S release, rule 8 without a departure. Say if any of them changes.
+All five decisions in the NoCoGaMa plan's section 0 are **confirmed by the maintainer (2026-11-08)**: code in its own private repo, `TYPE=love` for both runtimes, the licence and grant (holder ansiapps), a free R36S release, rule 8 without a departure.
