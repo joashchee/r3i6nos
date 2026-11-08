@@ -14,6 +14,7 @@ touch "$R/usr/share/doc/foo/copyright" "$R/usr/share/doc/foo/changelog.gz" "$R/u
 mkdir -p "$T/love/11.5/bin" "$T/love/notaruntime"
 printf '#!/bin/sh\n' > "$T/love/11.5/bin/love"; chmod +x "$T/love/11.5/bin/love"
 mkdir -p "$T/native"; printf 'not a real deb' > "$T/native/Input_Checker_Native.deb"
+mkdir -p "$T/external"; for a in KlamANSI compose sprites animate; do printf 'x' > "$T/external/$a.deb"; done
 # What the openssh-server package leaves in a fresh rootfs: an enabled service and the build's own host keys.
 mkdir -p "$R/etc/systemd/system/multi-user.target.wants" "$R/etc/systemd/system/sockets.target.wants" "$R/etc/ssh"
 ln -s /lib/systemd/system/ssh.service "$R/etc/systemd/system/multi-user.target.wants/ssh.service"
@@ -21,7 +22,7 @@ ln -s /lib/systemd/system/ssh.service "$R/etc/systemd/system/sshd.service"
 ln -s /lib/systemd/system/ssh.socket "$R/etc/systemd/system/sockets.target.wants/ssh.socket"
 touch "$R/etc/ssh/ssh_host_ed25519_key" "$R/etc/ssh/ssh_host_ed25519_key.pub" "$R/etc/ssh/ssh_host_rsa_key" "$R/etc/ssh/sshd_config"
 for v in 11.5 12.0; do mkdir -p "$T/loveapps/Love $v"; python3 -I scripts/pack_love.py apps/input-checker-love "$T/loveapps/Love $v/Input_Checker.love" >/dev/null; done
-R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/native" R3I6NOS_LOVE_APPS_BUILD="$T/loveapps" scripts/configure_rootfs.sh "$R" >/dev/null
+R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/native" R3I6NOS_EXTERNAL_DEBS="$T/external" R3I6NOS_LOVE_APPS_BUILD="$T/loveapps" scripts/configure_rootfs.sh "$R" >/dev/null
 
 [ -x "$R/opt/love/11.5/bin/love" ]              || fail "LÖVE 11.5 not installed"
 [ ! -e "$R/opt/love/notaruntime" ]              || fail "a folder without bin/love was installed"
@@ -52,11 +53,13 @@ for v in 11.5 12.0; do
         || fail "default LÖVE $v app is not a love archive with main.lua, conf.lua, model.lua"
 done
 [ -f "$R/opt/loveos/defaults/native_deb/Input_Checker_Native.deb" ] || fail "default native deb not installed"
+for a in KlamANSI compose sprites animate; do [ -f "$R/opt/loveos/defaults/native_deb/$a.deb" ] || fail "released app $a.deb not in the image"; done
 [ "$(find "$R/opt/loveos/defaults" -type f ! -perm -444 | wc -l | tr -d ' ')" = 0 ] || fail "defaults must be world-readable"
 R2="$T/rootfs-no-native"; mkdir -p "$R2"
-R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/nothing-here" R3I6NOS_LOVE_APPS_BUILD="$T/nothing-here" scripts/configure_rootfs.sh "$R2" >/dev/null 2>"$T/warn.txt" \
+R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/nothing-here" R3I6NOS_EXTERNAL_DEBS="$T/nothing-here" R3I6NOS_LOVE_APPS_BUILD="$T/nothing-here" scripts/configure_rootfs.sh "$R2" >/dev/null 2>"$T/warn.txt" \
     || fail "a missing native app must be a warning, not an error"
 grep -q 'No native default app' "$T/warn.txt" || fail "no warning when the native app is missing"
+grep -q 'No released app' "$T/warn.txt" || fail "no warning when the released apps are missing"
 grep -q 'No LÖVE default app' "$T/warn.txt" || fail "no warning when the LÖVE app is missing"
 [ ! -e "$R2/opt/loveos/defaults/native_deb/Input_Checker_Native.deb" ] || fail "phantom native deb"
 [ -x "$R/usr/local/bin/r3i6nos-bootlog" ]        || fail "r3i6nos-bootlog not installed executable"

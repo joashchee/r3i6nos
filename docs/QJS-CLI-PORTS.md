@@ -77,7 +77,18 @@ Each repo (`~/Coding/composer`, `painter`, `animator`) has `r36s/` with `tool.co
 Composer's R36S package ships **KlamANSI's grant** (free to use on the R36S and pass on, complete and unmodified; source stays proprietary; holder ansiapps; confirmed by the maintainer 2026-11-08, marker deleted), and so do
 Painter's and Animator's, with their own names. Painter and Animator were **Apache-2.0** until then and are now proprietary like Composer: copies already distributed under Apache-2.0, such as the one Coupler ships, stay under it.
 Painter's CoffeeMUD data is Apache-2.0 third-party material (Bo Zimmerman), so its licence text is kept (`LICENSES/Apache-2.0.txt`) and appended to the package's `NOTICE`.
-**Open: Composer's `LICENSE` and `package.json` name Joash Chee as holder, while the grant (like KlamANSI's) and the other two apps name ansiapps.**
+Composer's `LICENSE` and README now name ansiapps too (2026-11-08), like the grant and the other two apps.
+
+## In every image (decided 2026-11-08)
+
+The latest released package of KlamANSI, compose, sprites and animate is part of **every firmware image**, so every flash carries them (`/opt/loveos/defaults/native_deb`, installed by `deb_watcher.py` at boot like the other defaults; a card's own deb of the same name replaces one).
+
+- **Release:** a tag `r36s-v*` in an app's repo runs its `r36s.yml` (gate on: a `DRAFT GRANT` marker fails the build), then publishes a GitHub release holding the `.deb` and `<name>.deb.sha256`.
+- **Fetch:** `apps/external-debs.txt` lists `<repo> <asset>`; `scripts/fetch_app_debs.sh` downloads the **latest release** of each into `build/external_deb/`, checks the sha256 and, with `scripts/check_deb.py`, that the file is a real package with a copyright file and no `DRAFT GRANT`. Any app that cannot be fetched fails the run: an image must not silently lack one. `configure_rootfs.sh` copies them into the image and warns if the folder is empty (a local build without `gh` access).
+- **CI:** `build.yml` runs the fetch before the rootfs; it needs the repository secret **`APP_DEBS_TOKEN`**, a fine-grained token with Contents: read on the four repos (the apps' repos are private or separate). Without it the build fails at that step. `build.yml` only runs by hand or on a `v*` tag, so fork pull requests never see the token.
+- **Local flash:** `gh auth login` once, `scripts/fetch_app_debs.sh`, then the usual build/flash scripts.
+- **Rule 2** of `CLAUDE.md` carries the exception, for these four only. Their source stays in their repos; the grant text ships inside each package.
+- **Tested:** the fetch against a fake `gh` and hand-made debs (`tests/test_fetch_app_debs.py`), the copy into the rootfs (`tests/test_configure_rootfs.sh`). **Not run:** a real fetch from GitHub (no release exists yet), and the full `build.yml` with these four.
 
 ## What is left
 

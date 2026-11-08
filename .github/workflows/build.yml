@@ -97,6 +97,13 @@ jobs:
           path: build/love-apps
           merge-multiple: true
 
+      - name: Fetch the latest released apps (KlamANSI, compose, sprites, animate)
+        # apps/external-debs.txt: each app's repo publishes a release (tag r36s-v*) with its .deb and sha256. APP_DEBS_TOKEN is a fine-grained token
+        # with Contents: read on those repos; without it this step fails, because an image must carry the latest of each.
+        env:
+          GH_TOKEN: ${{ secrets.APP_DEBS_TOKEN }}
+        run: scripts/fetch_app_debs.sh
+
       - name: Unpack LÖVE
         run: |
           mkdir -p build/love
@@ -152,6 +159,8 @@ jobs:
           sudo test -f "$R/opt/loveos/defaults/Love 12.0/Input_Checker.love"
           sudo test -f "$R/opt/loveos/defaults/native_deb/Input_Checker_Native.deb"
           sudo test -f "$R/opt/loveos/defaults/native_deb/Commander.deb"
+          # the apps released from their own repos (apps/external-debs.txt)
+          for a in KlamANSI compose sprites animate; do sudo test -f "$R/opt/loveos/defaults/native_deb/$a.deb"; done
           sudo grep -q '^loveos:x:1000:' $R/etc/passwd
           sudo grep -q '^root:!' $R/etc/shadow
           sudo find $R/usr/share/doc -name copyright | head -3

@@ -1,0 +1,7 @@
+# Apps built and released in their own repos that go into every firmware image (scripts/fetch_app_debs.sh downloads the LATEST release of each).
+# <GitHub repo> <release asset>. Each release carries the .deb and <asset>.sha256. They are free to use and pass on, complete and unmodified, on the R36S
+# under the grant in each package's copyright file (holder ansiapps); the source stays in those repos. Anything else here needs the same grant first.
+joashchee/KlamANSI KlamANSI.deb
+joashchee/composer compose.deb
+joashchee/Painter sprites.deb
+joashchee/Animator animate.deb

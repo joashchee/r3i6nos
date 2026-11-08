@@ -18,6 +18,7 @@ is blocked and on what.
 - `apps/`: the apps (each has an `app.conf`, native or LÖVE, and its own workflow, `.github/workflows/app-<name>.yml`; only `DEFAULT=1` apps enter the image). The default apps built into the image (`/opt/loveos/defaults`): the input checker as LÖVE 11.5, LÖVE 12.0 and native ARM64, and Commander (a native ARM64 file manager). See `apps/README.md`.
 - `theme/`: the r3i6nos-ansiapps text-mode theme for LÖVE (`.lua`) and C/SDL2 (`.h`): font, screen, list dialogs; installed at `/opt/loveos/theme`. See `docs/R3I6NOS-ANSIAPPS-THEME.md`.
 - `tools/qjs-node/`: the shims and builder that turn a Node-style CLI into one QuickJS executable (`docs/QJS-CLI-PORTS.md`); an app's folder is only ever read, never copied in.
+- `apps/external-debs.txt`: the apps released from their own repos that every image carries (`scripts/fetch_app_debs.sh` downloads their latest release; `docs/QJS-CLI-PORTS.md`, "In every image").
 - `scripts/`: host-side tools. `check.sh` runs everything CI runs.
 - `tests/`: Python (`unittest`) and Lua tests; no hardware needed.
 - `vendor/`, `build/`, `local_hardware_assets/`: fetched, built or captured, gitignored.
@@ -30,7 +31,9 @@ is blocked and on what.
    until ROADMAP section 2 says otherwise. The gamepad mapping in
    `run_app.sh` is unverified.
 2. **No copyrighted or proprietary content in the repo, in CI artifacts or in a release:** no ROMs, BIOS files,
-   or proprietary emulator assets. **The Mali GPU blob (`libmali`), kernel modules,
+   or proprietary emulator assets. **One exception, decided 2026-11-08:** the four ansiapps packages (`apps/external-debs.txt`: KlamANSI, compose,
+   sprites, animate) go into every image as the unmodified `.deb` files their own repos release, because each ships a confirmed grant to use and pass them on,
+   complete and unmodified, on the R36S (holder ansiapps). Their source never enters this repo; a new entry needs the same grant first. **The Mali GPU blob (`libmali`), kernel modules,
    bootloader and boot files come from the user's own card at flash time
    (`capture-card.sh`, `inject-boot.sh`, `inject-rootfs.sh`) and live only in
    the gitignored `local_hardware_assets/` and on that user's cards.** Record the licence and source of every
