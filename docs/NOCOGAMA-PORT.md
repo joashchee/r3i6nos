@@ -1,6 +1,6 @@
 # NoCoGaMa on r3i6nos: status and what r3i6nos gives it
 
-Status (2026-11-08): **scaffold and spike written, laptop spike done; never drawn by LÖVE with a display, never run on an R36S.** NoCoGaMa is the ansiapps **No Code Game Maker**: draw a level, place actors, give them
+Status (2026-11-08): **scaffold, spike and the data core written; never drawn by LÖVE with a display, never run on an R36S.** NoCoGaMa is the ansiapps **No Code Game Maker**: draw a level, place actors, give them
 behaviours, play it, all with the pad. The code, its plan and its tests live in the private repo `joashchee/nocogama` (`~/Coding/nocogama`); this repo never holds any of it (rule 2). Its plan is that repo's
 `docs/R3I6NOS-PORT-PLAN.md` (organised like `docs/KLAMANSI-PORT.md`); `ROADMAP.md` section 9 tracks it here, and the NoCoGaMa repo's `ROADMAP.md` is the order of work.
 
@@ -28,7 +28,8 @@ behaviours, play it, all with the pad. The code, its plan and its tests live in 
 | Scaffold, licence, private remote | done |
 | Spike, laptop: a fixed 60 Hz step of 200 actors | 0.003 ms with the JIT on, 0.084 ms off (Mac). The official macOS LÖVE 11.5 has the JIT **off**, 12.0 **on** (found headless, `vendor/love-mac`). Says nothing about drawing; the Cortex-A35 is a guess |
 | Spike, device: six pages, built per runtime | written and tested with luajit and headless LÖVE; **never drawn, never on a unit** |
-| Core, editor, play and files, export, package | not started (roadmap sections 2-6) |
+| Data core: `json`, `project` (atomic save), the 60 Hz world, six behaviours | written, tests pass (luajit, and real LÖVE 11.5 and 12.0 headless); **uncommitted in the NoCoGaMa repo when read** |
+| Editor, play and files, export, package | not started (roadmap sections 3-6) |
 
 ## What r3i6nos has to settle for it (shared with KlamANSI and `ROADMAP.md` section 6)
 
