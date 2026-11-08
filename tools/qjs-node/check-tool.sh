@@ -11,7 +11,7 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 NAME="" ENTRY="cli.js" COMMANDS=""
 # shellcheck disable=SC1090  # the app's own manifest
 . "$CONF"
-[ -n "$NAME" ] && [ -n "$COMMANDS" ] || { echo "check-tool: $CONF must set NAME and COMMANDS" >&2; exit 1; }
+if [ -z "$NAME" ] || [ -z "$COMMANDS" ]; then echo "check-tool: $CONF must set NAME and COMMANDS" >&2; exit 1; fi
 for tool in node cc python3; do command -v "$tool" >/dev/null || { echo "check-tool: needs $tool" >&2; exit 1; }; done
 major="$(node -p 'process.versions.node.split(".")[0]')"
 [ "$major" -ge 22 ] || { echo "check-tool: needs Node 22 or later (found $(node -v))" >&2; exit 1; }

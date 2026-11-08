@@ -57,7 +57,9 @@ if [ -n "$SMOKE" ]; then
         python3 "$R3/overlay/usr/local/bin/deb_watcher.py"
     [ -x "$T/bin/$NAME" ] || die "deb_watcher did not install the command $NAME"
     [ -z "$(ls "$T/launchers" 2>/dev/null)" ] || die "a tool must not get a menu launcher"
-    mkdir -p "$T/run/o"; first=""; [ -n "$COMMANDS" ] && [ -f "$APP/$COMMANDS" ] && first="$(grep -v '^[[:space:]]*\(#\|$\|!SLOW\)' "$APP/$COMMANDS" | head -1 || true)"
+    mkdir -p "$T/run/o"
+    first=""
+    if [ -n "$COMMANDS" ] && [ -f "$APP/$COMMANDS" ]; then first="$(grep -v '^[[:space:]]*\(#\|$\|!SLOW\)' "$APP/$COMMANDS" | head -1 || true)"; fi
     # the first command of the app's list, from a folder with an empty o/ (as the comparison runs them); it must succeed
     # shellcheck disable=SC2086  # $first is a command line's words
     out="$(cd "$T/run" && PATH="$T/bin:$PATH" "$NAME" $first 2>&1)" || die "\`$NAME $first\` failed after install: $out"

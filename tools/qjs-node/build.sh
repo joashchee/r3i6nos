@@ -45,6 +45,6 @@ awk '/^int main\(/{exit} {print}' "$WORK/gen.c" > "$WORK/$NAME.c"
 cat "$HERE/main_tail.c" >> "$WORK/$NAME.c"
 echo "[*] Linking $NAME ($CC)..."
 "$CC" -O2 -w "${DEFS[@]}" -I"$Q" "$WORK/$NAME.c" "${SRCS[@]}" -lm -ldl -lpthread -o "$OUT/$NAME"
-command -v "${CC%gcc}strip" >/dev/null 2>&1 && "${CC%gcc}strip" "$OUT/$NAME" || strip "$OUT/$NAME" 2>/dev/null || true
+if command -v "${CC%gcc}strip" >/dev/null 2>&1; then "${CC%gcc}strip" "$OUT/$NAME"; else strip "$OUT/$NAME" 2>/dev/null || true; fi
 rm -rf "$WORK"
 echo "[*] Done: $OUT/$NAME ($(du -k "$OUT/$NAME" | cut -f1) KiB)"

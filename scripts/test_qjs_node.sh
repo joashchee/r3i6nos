@@ -36,4 +36,4 @@ nonsense
 throws
 reject
 CASES
-[ "$fail" = 0 ] && echo "test_qjs_node: ok" || exit 1
+if [ "$fail" = 0 ]; then echo "test_qjs_node: ok"; else exit 1; fi
