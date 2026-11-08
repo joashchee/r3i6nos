@@ -65,16 +65,6 @@ done
 if [ -z "$have_native" ]; then
     echo "[!] No native default app in $NATIVE_BUILD: run scripts/build_native_apps.sh (the image will have no native app)" >&2
 fi
-# The apps released from their own repos (apps/external-debs.txt: KlamANSI, compose, sprites, animate), fetched by scripts/fetch_app_debs.sh. Every image
-# carries the latest of each; the build and the flash scripts warn loudly when they are absent (a local build without `gh` access).
-EXTERNAL_BUILD="${R3I6NOS_EXTERNAL_DEBS:-$REPO/build/external_deb}"
-have_external=""
-for deb in "$EXTERNAL_BUILD"/*.deb; do
-    if [ -f "$deb" ]; then cp "$deb" "$DEFAULTS/native_deb/"; have_external=1; fi
-done
-if [ -z "$have_external" ]; then
-    echo "[!] No released app .deb in $EXTERNAL_BUILD: run scripts/fetch_app_debs.sh (the image will lack KlamANSI, compose, sprites and animate)" >&2
-fi
 find "$DEFAULTS" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
 
 # Mount points and places the boot scripts write to.
