@@ -222,3 +222,15 @@ Command-line tools other apps can call (NoCoGaMa's sprites, jingles and animatio
 - [x] **Licences** (2026-11-08, maintainer's decisions): the three apps follow Composer's proprietary licence (Painter and Animator were Apache-2.0: relicensed, `UNLICENSED`, `private`; copies already out, such as Coupler's, stay Apache-2.0), and all three R36S packages ship **KlamANSI's grant** (confirmed by the maintainer 2026-11-08, markers deleted; the gates `COMPOSER_RELEASE`, `PAINTER_RELEASE`, `ANIMATOR_RELEASE` stay and their refusals stay tested). Holder is **ansiapps** everywhere (Composer's `LICENSE` and README said Joash Chee: changed). Painter keeps the CoffeeMUD attribution and its Apache-2.0 text in `NOTICE`.
 - [ ] **The maintainer confirms the grant** (KlamANSI's and these three share one wording) and settles whose name Composer's `LICENSE` and `package.json` carry (Joash Chee; the grants and the other apps say ansiapps).
 - [ ] Painter's ANSI-to-PNG render needs its VGA atlas embedded (CC BY-SA credit); a stronger deflate if PNG size matters; a `tools.lua` helper for LÖVE apps (quoting, exit status); the first real use in NoCoGaMa.
+
+## 11. Neumetik (a native port; code to live in the Neumetik repo, `joashchee/neumetik`, `r36s/`; plan and decisions: `docs/NEUMETIK-PORT.md`)
+
+- [ ] **Neumetik, ansiapps' synthesizer, as a player on the R36S.** A C and SDL2 host linking a Rust static library over Neumetik's crates (MIDI, tracker modules, BGN, Visual), on the r3i6nos-ansiapps theme with no departure (Visual's canvas is the 64 x 20 display view), user-installed (`native_deb/Neumetik.deb`), never in the image. **Nothing built; nothing run on a real R36S.**
+  - [x] **Plan** (2026-11-08, `docs/NEUMETIK-PORT.md`): shape, screen, pad, files, tests, phases.
+  - [ ] **Maintainer decides** (plan section 0, all five proposed): code in the Neumetik repo's `r36s/`; free under KlamANSI's grant wording; a player first; rule 8 with no departure; a C host over a Rust static library. Blocks everything below.
+  - [ ] **Spike:** `libneumetik_r36s.a` cross-built in Debian 12 arm64; `--bench` under Docker, then on the unit (times real time per engine with Visual at 30 fps; go/no-go at 2x). Also settles whether the unit's sound works through ALSA (`/proc/asound` never captured: `scripts/device-info.sh`).
+  - [ ] **Host:** window, audio callback, splash, Now Playing with Visual.
+  - [ ] **Controls and panels:** Music, BGN, Visual, the Start menu, the queue.
+  - [ ] **Files and settings** under `/roms/Neumetik/`.
+  - [ ] **Package** (`r36s-neumetik`, SDL2 and libc only), its workflow in the Neumetik repo, and a try on a real R36S.
+  - [ ] **Later:** Endless Mode (needs moving out of the Tauri app into a crate, a Neumetik-side change), Keys on the pad, WAV export, the Tracker's pattern view, SoundFonts, the editors.
