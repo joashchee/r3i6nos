@@ -127,7 +127,7 @@ cols 0-47                                      cols 48-63
   `pen`, `erase`, `line`, `box` are not valid Klam lines).
 - **R1** runs `at X Y` then `pick` (the plan marked it "to be confirmed"; not yet confirmed).
 - **Files** are real files and directories under `/roms/KlamANSI/drawings/`, with an autosave and a welcome back. The Files panel has the card's own wording
-  (no browser, download, export or import: `ctx.platform` in KlamANSI's `public/screens.js`); `download`, `export`, `import` say they are not on the R36S yet, and the
-  Help panel's About text still speaks of a browser.
+  (no browser, download, export or import: `ctx.platform` in KlamANSI's `public/screens.js`); `download`, `export`, `import` say they are not on the R36S yet. The Help panel lists
+  only the prompt commands the device runs, names the rest as not there yet, describes the pad in About and has no stroke chart (`helpLines(platform)`).
 - **Release:** free with no shareware notices (the host never loads the notice code). KlamANSI's licence grants no redistribution, so the package carries a draft
   grant that the maintainer must confirm before a release.
