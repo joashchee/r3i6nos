@@ -92,6 +92,7 @@ Each native app builds on its own; the firmware only bundles the results.
   `configure_rootfs.sh` only copies the built `.love` files into the image.
 - **Ports** (open-source programs built from pinned upstream source) have `TYPE=port`, `scripts/build_port.sh` and `port-app.yml`; `apps/_port-template/` says how. They are
   user-installed `.deb` files in `native_deb/`, never part of the image, and may link only what the rootfs has. The first planned one is KlamANSI (`docs/KLAMANSI-PORT.md`).
+- **NoCoGaMa** (`docs/NOCOGAMA-PORT.md`) is a user-installed **LÖVE** app of the maintainer's, built in its own private repo as one `.love` per runtime for `Love 11.5/` and `Love 12.0/`; nothing of it is in this repo.
 - Not tried yet: the workflows themselves (they run on GitHub; first push will show) and `build_native_app.sh` in a Debian 12 container (no Docker here).
 
 ## Trying them on a Mac
