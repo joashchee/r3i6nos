@@ -40,7 +40,8 @@ end
 -- ---- the list and Shutdown (as before)
 local s = new()
 eq(title(s), "Settings"); eq(settings.node(s).items[1].label, "Network"); eq(settings.node(s).items[2].label, "SSH")
-eq(settings.node(s).items[3].label, "Battery"); eq(settings.node(s).items[4].label, "Shutdown")
+eq(settings.node(s).items[3].label, "Battery"); eq(settings.node(s).items[4].label, "Device reports")
+eq(settings.node(s).items[5].label, "Shutdown")
 choose(s, "Shutdown")
 eq(kind(s), "confirm"); eq(settings.node(s).sel, 2, "the confirmation starts on No")
 assert(settings.press(s, "accept") == nil and kind(s) == "menu", "accepting the default (No) must not power off")
@@ -215,3 +216,29 @@ eq(title(s), "SSH"); eq(#io_.sent, 0)
 s = new(); settings.text(s, "abc"); eq(title(s), "Settings")
 
 print("settings: ok")
+
+-- ---- Device reports: the installed tools' reports, started in the background (menu/reports.lua has its own test)
+do
+  local started = {}
+  local fakerep = {
+    found = { { cmd = "compose-report", tool = "compose", app = "Composer" } },
+    ABOUT = { "about" }, NONE = { "none" },
+  }
+  function fakerep.list() return fakerep.found end
+  function fakerep.start(r) started[#started + 1] = r.cmd; return fakerep.ok ~= false, "busy" end
+  function fakerep.startedLines(r) return { r.app .. "'s report is running." } end
+  local d = settings.new(fake(), nil, fakerep); settings.open(d)
+  choose(d, "Device reports")
+  eq(title(d), "Device reports"); eq(settings.node(d).items[1].label, "Composer"); eq(settings.node(d).items[1].value, "compose-report")
+  choose(d, "Composer")
+  eq(started[1], "compose-report", "A starts the report"); eq(kind(d), "pages"); eq(settings.node(d).pages[1][1], "Composer's report is running.")
+  settings.press(d, "back"); eq(title(d), "Device reports", "B back to the list")
+  fakerep.ok = false; choose(d, "Composer"); assert(settings.node(d).bad, "a report that cannot start says so")
+  settings.press(d, "back"); choose(d, "What these are"); eq(settings.node(d).pages[1][1], "about")
+  settings.press(d, "back"); choose(d, "Back"); eq(title(d), "Settings")
+  fakerep.found = {}
+  choose(d, "Device reports"); eq(settings.node(d).items[1].label, "None installed")
+  choose(d, "None installed"); eq(settings.node(d).pages[1][1], "none")
+  print("settings device reports: ok")
+end
+

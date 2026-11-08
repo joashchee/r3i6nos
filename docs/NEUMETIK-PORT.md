@@ -82,13 +82,13 @@ the old file whole; nothing outside that folder is written (rule 7). A module's 
   render, sample for sample).
 - `neumetik --selftest [--shots DIR]` drives the host headless: every panel, a song played to the dummy audio driver for a few seconds, the pictures as BMP, the
   Select+Start chord. Under qemu in CI and in Debian 12 arm64 under Docker.
-- `neumetik --bench` renders each engine for 30 s with Visual on and writes the times-real-time to `/roms/Neumetik/bench.txt`: the only meaningful speed number,
+- The device report (`neumetik --report`, Start > Device report; `docs/DEVICE-REPORTS.md`) renders each engine for 30 s and writes the times-real-time to `/roms/Neumetik/r36s-report.txt`: the only meaningful speed number,
   and only on a unit.
 - **Not testable here, so "untested" until a card says otherwise:** sound out of the unit, speed and memory on the Cortex-A35, the pad, how Visual looks on the panel, exFAT.
 
 ## 6. Phases (mirrored in `ROADMAP.md` section 11)
 
-1. **Spike:** the static library cross-built in Debian 12 arm64; a headless `--bench` (MIDI, a module in each family, BGN, Visual) under Docker, then on the unit.
+1. **Spike:** the static library cross-built in Debian 12 arm64; a headless speed test (MIDI, a module in each family, BGN, Visual) under Docker, then on the unit.
    *Go/no-go:* every engine at least 2x real time at 44.1 kHz with Visual at 30 fps on the A35; if not, a lower output rate, a polyphony cap, or fewer engines.
 2. **Host:** SDL2 window and audio, the splash, the screen of section 2 with Now Playing and Visual; keys in, screens out.
 3. **Controls and panels:** the pad of section 3, Music, BGN, Visual, the Start menu, the queue.
@@ -103,7 +103,7 @@ the old file whole; nothing outside that folder is written (rule 7). A module's 
   Neumetik repo. Tests: the C API against Neumetik's own players (MIDI and a module equal sample for sample), every Visual kind drawing cells, and a host
   self-test of every panel with pictures. The `.deb` (4.1 MB; needs SDL2, libc, libgcc_s, libm; newest glibc symbol 2.34) was installed by this repo's
   `deb_watcher.py` in a clean Debian 12 arm64 under Docker and self-tested there. **The workflow has not run on GitHub; nothing has run on an R36S.**
-- **The speed test is in the app:** `neumetik --bench` and Start > Speed test write `/roms/Neumetik/bench.txt`, so the unit's numbers need no SSH. On the Mac
+- **The speed test is in the app,** in its device report (rule 9): `neumetik --report` and Start > Device report write `/roms/Neumetik/r36s-report.txt`, so the unit's numbers need no SSH. On the Mac
   the busiest engine (a generated 7-part GM song, about 30 notes at once) plays at 60x real time and a Visual frame takes 0.07 ms; the Cortex-A35 is far slower
   and unmeasured. Test music is generated in code (`lib/src/gen.rs`), so no one else's music is in the package (rule 2).
 - **Music as text** opens too (MusicXML, ABC, ChordPro, MML...), through Neumetik MIDI's `text` module, played as MIDI.
@@ -113,3 +113,4 @@ the old file whole; nothing outside that folder is written (rule 7). A module's 
 - **Release profile:** thin LTO, because full LTO of `neumetik-synth` with one codegen unit was killed for memory in a 2 GB build VM.
 - **The package's NOTICE** is generated from the desktop app's own list of ported code (`app/scripts/third-party-licenses.py`), plus Neumetik MIDI's MIT
   licence and this repo's theme and font notices.
+- **The device report** (2026-11-09, rule 9) replaced the speed test: Start > Device report and `neumetik --report` write `/roms/Neumetik/r36s-report.txt` (system and the pad's GUID, card, start-up, the sound device and whether its callback runs, screen paint, every engine's speed, Visual, memory).

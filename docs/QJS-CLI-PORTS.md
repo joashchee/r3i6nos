@@ -83,6 +83,16 @@ Painter's CoffeeMUD data is Apache-2.0 third-party material (Bo Zimmerman), so i
 
 The four packages (KlamANSI, compose, sprites, animate) are **not** bundled into the firmware image and nothing fetches them automatically (an automatic fetch of each app's latest release was built and then reverted at the maintainer's request). The maintainer downloads the latest `.deb` from each app's `r36s` workflow run (the artifact) and copies it to **`/roms/native_deb/`** on the games card; `deb_watcher.py` installs it at the next boot or when it sees it (tools go to `/opt/loveos/bin`, KlamANSI gets a menu entry). Rule 2 of `CLAUDE.md` is unchanged: no proprietary package is in this repo, in an image or in a release.
 
+## The device report (2026-11-09, CLAUDE.md rule 9)
+
+Each tool package also installs **`<command>-report`** (`compose-report`, `sprites-report`, `animate-report`), made by `package-tool.sh` from
+`report.py` (Python 3 standard library), with the app's `commands.txt` in `usr/share/<package>/`. On the unit it runs every command of that list
+in a fresh folder, timed, with each one's peak memory (`wait4`), checks the games card, and writes `/roms/<App>/r36s-report.txt` for Claude
+(`docs/DEVICE-REPORTS.md`; `!SLOW` lines are listed as SKIP unless `--all`). **Settings > Device reports** in the menu lists the installed ones and
+starts one in the background, so no SSH is needed. `<App>` is `DESC` up to its colon (`APP_NAME` in `tool.conf` overrides it). The smoke test runs
+it after `deb_watcher` installs the package. Tested by `tests/test_tool_report.py` (a fake tool: success, an error exit, a crash, a skipped slow
+line) and `tests/test_reports.lua`.
+
 ## What is left
 
 1. ~~The maintainer confirms the grant~~ (done 2026-11-08: KlamANSI's wording on four packages, markers deleted, holder ansiapps everywhere).

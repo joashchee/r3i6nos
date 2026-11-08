@@ -48,3 +48,7 @@ behaviours, play it, all with the pad. The code, its plan and its tests live in 
 ## Decisions
 
 All five decisions in the NoCoGaMa plan's section 0 are **confirmed by the maintainer (2026-11-08)**: code in its own private repo, `TYPE=love` for both runtimes, the licence and grant (holder ansiapps), a free R36S release, rule 8 without a departure.
+
+## The device report (2026-11-09, rule 9)
+
+The device spike's Report page writes `/roms/NoCoGaMa/r36s-report.txt` (was `spike-result.txt`) in `docs/DEVICE-REPORTS.md`'s grammar: system, pad (17 raw buttons seen or FAIL), card, bench (p99 goal 8 ms), draw (goal 60 fps). The app gets its own Device report before its release (NoCoGaMa's roadmap).

@@ -131,3 +131,4 @@ cols 0-47                                      cols 48-63
   only the prompt commands the device runs, names the rest as not there yet, describes the pad in About and has no stroke chart (`helpLines(platform)`).
 - **Release:** free with no shareware notices (the host never loads the notice code). KlamANSI's licence grants no redistribution, so the package carries a grant
   (free to use and pass on, unmodified; holder ansiapps), confirmed by the maintainer 2026-11-08.
+- **The device report** (2026-11-09, rule 9): Start > Device report on the canvas and `klamansi --report` write `/roms/KlamANSI/r36s-report.txt` (system and the pad's GUID, card, load time, typed lines, frames, paint, memory; timed in a throwaway runtime). The first thing to run on a unit.

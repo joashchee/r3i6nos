@@ -48,7 +48,14 @@ done
 } > "$OUT/NOTICE"
 # the copyright file that ships: the app's, then (if it names one) the full licence text
 { cat "$APP/$COPYRIGHT"; [ -n "$LICENSE_FILE" ] && { printf '\n\n---- %s ----\n\n' "$(basename "$LICENSE_FILE")"; cat "$APP/$LICENSE_FILE"; }; } > "$OUT/copyright"
-"$HERE/make-deb.sh" "$OUT/$NAME.deb" "$PKG" "$VERSION" "$DESC" "$OUT/copyright" "$OUT/NOTICE" "$OUT/bin/$NAME"
+# The device report (docs/DEVICE-REPORTS.md): <command>-report runs the command list on the unit and writes /roms/<App>/r36s-report.txt.
+# <App> is the app's name, DESC up to its colon ("Composer: ..."), unless tool.conf sets APP_NAME.
+APP_NAME="${APP_NAME:-${DESC%%:*}}"
+sed -e "s|@TOOL@|$NAME|; s|@APP@|$APP_NAME|; s|@VERSION@|$VERSION|; s|@PACKAGE@|$PKG|" "$HERE/report.py" > "$OUT/bin/$NAME-report"
+chmod 0755 "$OUT/bin/$NAME-report"
+share=""
+if [ -n "$COMMANDS" ] && [ -f "$APP/$COMMANDS" ]; then cp "$APP/$COMMANDS" "$OUT/commands.txt"; share="$OUT/commands.txt"; fi
+MAKE_DEB_SHARE="$share" "$HERE/make-deb.sh" "$OUT/$NAME.deb" "$PKG" "$VERSION" "$DESC" "$OUT/copyright" "$OUT/NOTICE" "$OUT/bin/$NAME" "$OUT/bin/$NAME-report"
 
 if [ -n "$SMOKE" ]; then
     T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
@@ -64,6 +71,11 @@ if [ -n "$SMOKE" ]; then
     # shellcheck disable=SC2086  # $first is a command line's words
     out="$(cd "$T/run" && PATH="$T/bin:$PATH" "$NAME" $first 2>&1)" || die "\`$NAME $first\` failed after install: $out"
     echo "[*] installed by deb_watcher (no menu entry); \`$NAME $first\` ran: $(printf '%s' "$out" | head -1)"
+    [ -x "$T/bin/$NAME-report" ] || die "deb_watcher did not install $NAME-report"
+    R3I6NOS_ROMS="$T/roms" "$T/bin/$NAME-report" --quiet || die "$NAME-report failed"
+    rep="$T/roms/$APP_NAME/r36s-report.txt"
+    [ "$(tail -1 "$rep" 2>/dev/null)" = end ] || die "$NAME-report wrote no whole report at $rep"
+    echo "[*] $NAME-report: $(grep -A1 '^== summary ==' "$rep" | tail -1) ($(grep -c '^PASS \|^FAIL ' "$rep") checks)"
     echo "package-tool: smoke ok"
 fi
 echo "package-tool: $OUT/$NAME.deb"

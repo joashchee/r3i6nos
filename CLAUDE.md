@@ -14,13 +14,14 @@ is blocked and on what.
 
 - `overlay/`: files copied onto the image's root filesystem as-is
   (`usr/local/bin/`, `etc/systemd/system/`). Paths mirror the device.
-- `menu/`: the boot menu, a LÖVE 11.5 app installed at `/opt/loveos/menu`; its Settings has Network and SSH (a root helper, `overlay/usr/local/bin/r3i6nos-net`, does the work) and Battery (`docs/BATTERY.md`; its top bar shows the charge).
+- `menu/`: the boot menu, a LÖVE 11.5 app installed at `/opt/loveos/menu`; its Settings has Network and SSH (a root helper, `overlay/usr/local/bin/r3i6nos-net`, does the work) Battery (`docs/BATTERY.md`; its top bar shows the charge) and Device reports (`menu/reports.lua`, rule 9).
 - `apps/`: the apps (each has an `app.conf`, native or LÖVE, and its own workflow, `.github/workflows/app-<name>.yml`; only `DEFAULT=1` apps enter the image). The default apps built into the image (`/opt/loveos/defaults`): the input checker as LÖVE 11.5, LÖVE 12.0 and native ARM64, and Commander (a native ARM64 file manager). See `apps/README.md`.
 - `theme/`: the r3i6nos-ansiapps text-mode theme for LÖVE (`.lua`) and C/SDL2 (`.h`): font, screen, list dialogs; installed at `/opt/loveos/theme`. See `docs/R3I6NOS-ANSIAPPS-THEME.md`.
 - `tools/qjs-node/`: the shims and builder that turn a Node-style CLI into one QuickJS executable (`docs/QJS-CLI-PORTS.md`); an app's folder is only ever read, never copied in.
 - `scripts/`: host-side tools. `check.sh` runs everything CI runs.
 - `tests/`: Python (`unittest`) and Lua tests; no hardware needed.
 - `vendor/`, `build/`, `local_hardware_assets/`: fetched, built or captured, gitignored.
+- `docs/DEVICE-REPORTS.md`: the device report every R36S port has (rule 9) and its file format.
 - `docs/hardware-findings.md`: what the stock card showed (kernel 4.4.189, no panfrost, boot flow). Read it before touching boot or graphics.
 
 ## Rules
@@ -49,6 +50,13 @@ is blocked and on what.
    the three-row command line (reply, prompt, status), list dialogs and their button rules as KlamANSI does them, only the 16 VGA colours in
    pairs that pass 4.5:1, nothing scrolls. New apps, LÖVE or native, copy the menu's structure; an app that cannot follow it says why in its README.
    The font is CC BY-SA 4.0: keep `NOTICE`, `theme/font/` (licence, credit, changes) and the headers of the generated font files intact.
+9. **Every R36S port has a device report** (`docs/DEVICE-REPORTS.md`): one action on the unit (an app's Start menu item
+   **Device report** and a `--report` flag; a command-line tool's `<command>-report`, which Settings > Device reports starts)
+   that checks and measures what only the R36S can answer (the system, the pad's GUID, sound, the games card and its filesystem,
+   speed against the app's goal, peak memory, every "untested on the unit" item a program can answer) and writes
+   **`/roms/<App>/r36s-report.txt`** for Claude to read: `STATUS key: value` lines (PASS, FAIL, INFO, SKIP), sections, a summary,
+   and `end` last. Native ports use `theme/r3i6nos_report.h`; tools get `tools/qjs-node/report.py` from `package-tool.sh`. A new port
+   is not done until its report exists and is tested; when a report comes back, update the port and both roadmaps from it.
 
 ## Check before committing
 

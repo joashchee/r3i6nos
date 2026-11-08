@@ -6,15 +6,17 @@
 local osk = require("osk")
 local pages = require("netpages")
 local battery = require("battery")
+local reports = require("reports")
 
 local settings = {}
 
 --- Seconds to wait for the helper before giving up, by verb (a scan or a Wi-Fi join is slow).
 settings.TIMEOUT = { default = 30, scan = 45, wifi = 75, wired = 60, test = 60, ["ssh-enable"] = 45 }
 
---- A closed dialog. io is the helper's client (menu/netclient.lua); bat the battery module (menu/battery.lua). Tests pass fakes.
-function settings.new(io, bat)
-  return { stack = {}, io = io, bat = bat or battery }
+--- A closed dialog. io is the helper's client (menu/netclient.lua); bat the battery module (menu/battery.lua); rep the device reports
+--- (menu/reports.lua). Tests pass fakes.
+function settings.new(io, bat, rep)
+  return { stack = {}, io = io, bat = bat or battery, rep = rep or reports }
 end
 
 local function top(s) return s.stack[#s.stack] end
@@ -166,11 +168,32 @@ local function batteryMenu(s)
   }, 48))
 end
 
+-- Device reports (docs/DEVICE-REPORTS.md): each installed tool's <command>-report, started in the background.
+local function reportsMenu(s)
+  local rep = s.rep
+  local found = rep.list()
+  local items = {}
+  for _, r in ipairs(found) do
+    items[#items + 1] = { label = r.app, value = r.cmd, hint = "Check " .. r.app .. " on this unit; writes " .. r.app .. "/r36s-report.txt", run = function(sx)
+      local ok, err = rep.start(r)
+      if ok then show(sx, r.app .. " report", rep.startedLines(r))
+      else show(sx, r.app .. " report", { "Could not start the report:", tostring(err) }, false) end
+    end }
+  end
+  if #found == 0 then
+    items[#items + 1] = { label = "None installed", hint = "No command-line tool with a report", run = function(sx) show(sx, "Device reports", rep.NONE) end }
+  end
+  items[#items + 1] = { label = "What these are", hint = "A file for Claude about this unit", run = function(sx) show(sx, "Device reports", rep.ABOUT) end }
+  items[#items + 1] = { label = "Back", hint = "Return to Settings", run = function(sx) pop(sx) end }
+  push(s, menu("Device reports", items, 48))
+end
+
 local function root(s)
   return menu("Settings", {
     { label = "Network", hint = "Wired and Wi-Fi: status, setup, test, instructions", run = networkMenu },
     { label = "SSH", hint = "Log in from a computer (off until you start it)", run = sshMenu },
     { label = "Battery", hint = "Charge, health and how much each app uses", run = batteryMenu },
+    { label = "Device reports", hint = "Check this unit for an app's maker (a file for Claude)", run = reportsMenu },
     { label = "Shutdown", hint = "Power the device off", run = function(sx)
         confirm(sx, "Shut down the device?", "Yes, shut down", "Powers the device off", function() return "poweroff" end)
       end },
