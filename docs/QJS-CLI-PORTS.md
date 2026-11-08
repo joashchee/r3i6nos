@@ -1,7 +1,7 @@
 # Lean CLI ports of Composer, Painter and Animator (QuickJS)
 
 Status (2026-11-08): **the shared toolchain is built and tested; the three tools run, on this Mac and in Debian 12 arm64 under Docker, with the same output as Node; each app's repo
-has its `r36s/` folder (manifest, command list, licence note, check and package scripts, workflow); nothing has run on a real R36S, and the GitHub workflows have never run.** The apps: Composer (`~/Coding/composer`, seeded music: MIDI, WAV, NTT),
+has its `r36s/` folder (manifest, command list, licence note, check and package scripts, workflow); nothing has run on a real R36S; the three GitHub workflows passed in manual runs (2026-11-08: `compare`, then the arm64 `package` and smoke under qemu).** The apps: Composer (`~/Coding/composer`, seeded music: MIDI, WAV, NTT),
 Painter (`~/Coding/painter`, sprites and ANSI art: PNG, ANS, TXT) and Animator (`~/Coding/animator`, motion clips: JSON). All three are dependency-free JavaScript libraries
 with a Node `cli.js` (`compose`, `sprites`, `animate`). The point of a port is that **other apps can use them**: NoCoGaMa's sprites, jingles and animations, KlamANSI's ANSI
 art, anything on the device, from a command line, with no Node on it.
@@ -65,7 +65,7 @@ on any LÖVE, with or without these packages.
 
 Each repo (`~/Coding/composer`, `painter`, `animator`) has `r36s/` with `tool.conf` (the command, the package, the licence that ships), `commands.txt` (compared with Node), `package/copyright`, `check.sh`
 (a native build compared with Node: needs Node 22+), `build-deb.sh` (an arm64 Debian 12 container: builds, packs, installs with r3i6nos's real `deb_watcher.py`, runs the first command) and a README, plus
-`.github/workflows/r36s.yml` (not yet run on GitHub) and a changelog entry. The scripts are r3i6nos's (`compare.py`, `check-tool.sh`, `package-tool.sh`); the repos hold no copy of them. No recipe or output changed, and no version was bumped.
+`.github/workflows/r36s.yml` (passed on GitHub in a manual run, 2026-11-08) and a changelog entry. The scripts are r3i6nos's (`compare.py`, `check-tool.sh`, `package-tool.sh`); the repos hold no copy of them. No recipe or output changed, and no version was bumped.
 
 | Repo | Command | Compared with Node | Package | Licence that ships |
 |---|---|---|---|---|
@@ -83,5 +83,4 @@ Painter's CoffeeMUD data is Apache-2.0 third-party material (Bo Zimmerman), so i
 
 1. **The maintainer confirms the grant** (KlamANSI's wording, now on four packages) and deletes the markers, and settles whose name Composer's `LICENSE` carries.
 2. A try on a real R36S, then `qjsc` startup and memory numbers on the Cortex-A35, and a LÖVE app's `io.popen` there.
-3. Run the three GitHub workflows once (they need this repo to be readable by theirs, and an arm64 build under qemu, which is slow).
-4. Optional: a better deflate; the VGA atlas for Painter's PNG render; a `tools.lua` helper for LÖVE apps; a `--help` that fits the 64-column screen.
+3. Optional: a better deflate; the VGA atlas for Painter's PNG render; a `tools.lua` helper for LÖVE apps; a `--help` that fits the 64-column screen.
