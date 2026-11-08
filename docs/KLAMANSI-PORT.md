@@ -126,7 +126,8 @@ cols 0-47                                      cols 48-63
 - **The radial's default slots** are Klam lines built when they run: `pen` and `erase` toggle, `line` and `box` go to the pointer's canvas cell (the plan's bare
   `pen`, `erase`, `line`, `box` are not valid Klam lines).
 - **R1** runs `at X Y` then `pick` (the plan marked it "to be confirmed"; not yet confirmed).
-- **Files** are real files and directories under `/roms/KlamANSI/drawings/`, with an autosave and a welcome back; the Files panel still shows the web app's
-  wording ("in this browser"), and `download`, `export`, `import` say they are not on the R36S yet.
+- **Files** are real files and directories under `/roms/KlamANSI/drawings/`, with an autosave and a welcome back. The Files panel has the card's own wording
+  (no browser, download, export or import: `ctx.platform` in KlamANSI's `public/screens.js`); `download`, `export`, `import` say they are not on the R36S yet, and the
+  Help panel's About text still speaks of a browser.
 - **Release:** free with no shareware notices (the host never loads the notice code). KlamANSI's licence grants no redistribution, so the package carries a draft
   grant that the maintainer must confirm before a release.
