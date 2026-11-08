@@ -1,17 +1,17 @@
 # Neumetik on the R36S: the plan
 
-Status (2026-11-08): **planned; nothing built, nothing run on a real R36S.** Neumetik is ansiapps' synthesizer (`~/Coding/neumetik`, `joashchee/neumetik`,
+Status (2026-11-08): **phases 2-5 built in the Neumetik repo's `r36s/` and tested without the unit (its README has the detail); never run on a real R36S.** Neumetik is ansiapps' synthesizer (`~/Coding/neumetik`, `joashchee/neumetik`,
 proprietary but for its MIT `neumetik-midi`): General MIDI and GS without a SoundFont, layered background noise (BGN), tracker modules in 112 formats played by
 their own replayers, the chips they need (OPL, SID, Paula, the 2A03, the YM chips...), and music seen as animated ANSI art (Visual). Its desktop app is Tauri,
 React and TypeScript. This file is the plan and the decisions, as `docs/KLAMANSI-PORT.md` is for KlamANSI; the code will live in the Neumetik repo (an `r36s/`
 folder), never here (rule 2). `ROADMAP.md` section 11 tracks it.
 
-## 0. Decisions (proposed; for the maintainer to confirm)
+## 0. Decisions (confirmed by the maintainer, 2026-11-08)
 
 1. **Where the code lives: the Neumetik repo**, an `r36s/` folder and its own workflow, as KlamANSI's `r36s/`. This repo keeps the plan, the theme, the pad mapping
    and the `ROADMAP.md` pointer.
 2. **Release: free for the R36S**, a gift for r3i6nos users, under the same grant wording as KlamANSI's (free to use and pass on, unmodified; holder ansiapps), in
-   `r36s/package/copyright` behind a `NEUMETIK_RELEASE=1` gate until confirmed. The MIT notice of `neumetik-midi` and the theme font's CC BY-SA credit ship in the package.
+   `r36s/package/copyright` (confirmed with the rest; `NEUMETIK_RELEASE=1` still refuses a copyright that carries a draft marker). The MIT notice of `neumetik-midi` and the theme font's CC BY-SA credit ship in the package.
 3. **A player first, editors later.** The handheld has a pad, no keyboard: the first version plays (MIDI, tracker modules, BGN scenes, Endless Mode) and shows
    (Visual). The Tracker editor, the Music Editor, Compose, Synth and the samples repository are later items; Keys comes back on the pad (section 3).
 4. **Rule 8 with no departure.** Visual already draws CP437 cells in the 16 VGA colours, the theme's own cells, so its display view is Visual's canvas at 64 x 20 and
@@ -96,3 +96,20 @@ the old file whole; nothing outside that folder is written (rule 7). A module's 
 5. **Package:** `Neumetik.deb` (`r36s-neumetik`, binary `usr/games/neumetik`, needs only SDL2 and libc), installed by `deb_watcher` in a clean Debian 12 under
    Docker; the workflow in the Neumetik repo; a try on a real R36S (rule 1).
 6. **Later:** Endless Mode (after it moves into a crate), Keys on the pad, WAV export, the Tracker's view of the playing pattern, SoundFonts, the editors.
+
+## 7. What changed from this plan while building it (2026-11-08)
+
+- **Built:** `r36s/lib` (`neumetik-r36s`: the C API, `neumetik_r36s.h`), `r36s/host/neumetik.c`, `r36s/package/` and `.github/workflows/r36s.yml` in the
+  Neumetik repo. Tests: the C API against Neumetik's own players (MIDI and a module equal sample for sample), every Visual kind drawing cells, and a host
+  self-test of every panel with pictures. The `.deb` (4.1 MB; needs SDL2, libc, libgcc_s, libm; newest glibc symbol 2.34) was installed by this repo's
+  `deb_watcher.py` in a clean Debian 12 arm64 under Docker and self-tested there. **The workflow has not run on GitHub; nothing has run on an R36S.**
+- **The speed test is in the app:** `neumetik --bench` and Start > Speed test write `/roms/Neumetik/bench.txt`, so the unit's numbers need no SSH. On the Mac
+  the busiest engine (a generated 7-part GM song, about 30 notes at once) plays at 60x real time and a Visual frame takes 0.07 ms; the Cortex-A35 is far slower
+  and unmeasured. Test music is generated in code (`lib/src/gen.rs`), so no one else's music is in the package (rule 2).
+- **Music as text** opens too (MusicXML, ABC, ChordPro, MML...), through Neumetik MIDI's `text` module, played as MIDI.
+- **Endless Mode is not in the first version** (section 1: it must move out of the desktop app first); it is a later item, with Keys.
+- **BGN** lists its 18 sections, then a section's scenes; the four layers' levels are not adjustable yet. **Visual:** choosing a kind shows Now Playing
+  (the list does not preview it live). There is no `export/` folder yet (WAV export is later).
+- **Release profile:** thin LTO, because full LTO of `neumetik-synth` with one codegen unit was killed for memory in a 2 GB build VM.
+- **The package's NOTICE** is generated from the desktop app's own list of ported code (`app/scripts/third-party-licenses.py`), plus Neumetik MIDI's MIT
+  licence and this repo's theme and font notices.
