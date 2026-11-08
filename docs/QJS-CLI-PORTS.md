@@ -79,6 +79,10 @@ Painter's and Animator's, with their own names. Painter and Animator were **Apac
 Painter's CoffeeMUD data is Apache-2.0 third-party material (Bo Zimmerman), so its licence text is kept (`LICENSES/Apache-2.0.txt`) and appended to the package's `NOTICE`.
 **Open: Composer's `LICENSE` and `package.json` name Joash Chee as holder, while the grant (like KlamANSI's) and the other two apps name ansiapps.**
 
+## Getting the packages onto a card (decided 2026-11-08)
+
+The four packages (KlamANSI, compose, sprites, animate) are **not** bundled into the firmware image and nothing fetches them automatically (an automatic fetch of each app's latest release was built and then reverted at the maintainer's request). The maintainer downloads the latest `.deb` from each app's `r36s` workflow run (the artifact) and copies it to **`/roms/native_deb/`** on the games card; `deb_watcher.py` installs it at the next boot or when it sees it (tools go to `/opt/loveos/bin`, KlamANSI gets a menu entry). Rule 2 of `CLAUDE.md` is unchanged: no proprietary package is in this repo, in an image or in a release.
+
 ## What is left
 
 1. ~~The maintainer confirms the grant~~ (done 2026-11-08: KlamANSI's wording on four packages, markers deleted, holder ansiapps everywhere).
