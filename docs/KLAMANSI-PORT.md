@@ -1,8 +1,10 @@
 # KlamANSI on the R36S: the plan
 
-Status: **plan only, nothing built** (2026-11-07). The first port to the R36S. KlamANSI is the ansiapps text-mode drawing REPL
-(`~/Coding/klamansi`, private, proprietary, a paid native app with a free shareware web version). This file decides the shape, the screen,
-the controls and the order of work; `ROADMAP.md` section 8 tracks it.
+Status (2026-11-08): **built and tested headless; never run on a real R36S.** The code lives in the private KlamANSI repo (`r36s/`, its README has the detail);
+this file is the plan and the decisions. Phases 1-5 below are done there: the QuickJS spike, the host, the controls, Files on the card and the package
+(`KlamANSI.deb`, installed by `deb_watcher` in a clean Debian 12 under Docker). What nobody has seen: the pad, the panel, a card, speed and memory. KlamANSI
+is the ansiapps text-mode drawing REPL (`~/Coding/klamansi`, private, proprietary, a paid native app with a free shareware web version). `ROADMAP.md`
+section 8 tracks it.
 
 ## 0. Decisions (made by the maintainer, 2026-11-08)
 
@@ -115,3 +117,16 @@ cols 0-47                                      cols 48-63
 5. **Package:** `.deb`, qemu smoke, the release workflow in the KlamANSI repo (calling this repo's reusable one only if the source is made public),
    a try on a real R36S (rule 1: say what was not run).
 6. **Later:** Convert, exports, sound, the explainers.
+
+## 6. What changed from this plan while building it (2026-11-08)
+
+- **The typed line** is the usual three-row command line, floated over the display's bottom rows only while typing or reading a reply (section 0 item 3),
+  not a box in the side column. The side column is STATUS, RADIAL and PANELS.
+- **The keyboard** (Fn) is on display rows 10-20, directly above the line, not rows 13-23 (which would have covered the line).
+- **The radial's default slots** are Klam lines built when they run: `pen` and `erase` toggle, `line` and `box` go to the pointer's canvas cell (the plan's bare
+  `pen`, `erase`, `line`, `box` are not valid Klam lines).
+- **R1** runs `at X Y` then `pick` (the plan marked it "to be confirmed"; not yet confirmed).
+- **Files** are real files and directories under `/roms/KlamANSI/drawings/`, with an autosave and a welcome back; the Files panel still shows the web app's
+  wording ("in this browser"), and `download`, `export`, `import` say they are not on the R36S yet.
+- **Release:** free with no shareware notices (the host never loads the notice code). KlamANSI's licence grants no redistribution, so the package carries a draft
+  grant that the maintainer must confirm before a release.
