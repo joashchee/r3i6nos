@@ -43,6 +43,12 @@ elif command -v lua >/dev/null; then
     lua tests/test_input_checker.lua || fail=1
 else echo "NOT RUN: no lua/luajit"; fi
 
+step "qjs-node shims (Node-style CLIs on QuickJS)"
+if command -v node >/dev/null; then
+    node tests/test_qjs_node.mjs || fail=1
+    scripts/test_qjs_node.sh || fail=1
+else echo "NOT RUN: no node (the QuickJS shims were not compared with Node's)"; fi
+
 step "lua syntax"
 if command -v luajit >/dev/null; then
     for f in menu/*.lua theme/*.lua apps/*/*.lua scripts/preview/*.lua tests/smoke/love/*.lua; do
@@ -102,13 +108,13 @@ bash tests/test_build_port.sh || fail=1
 bash tests/test_image.sh || fail=1
 
 step "shell syntax"
-for f in overlay/usr/local/bin/run_app.sh overlay/usr/local/bin/loveos-session scripts/*.sh tests/*.sh; do
+for f in overlay/usr/local/bin/run_app.sh overlay/usr/local/bin/loveos-session scripts/*.sh tests/*.sh tools/qjs-node/*.sh; do
     bash -n "$f" || fail=1
 done
 
 step "shellcheck"
 if command -v shellcheck >/dev/null; then
-    shellcheck overlay/usr/local/bin/run_app.sh overlay/usr/local/bin/loveos-session scripts/*.sh tests/*.sh || fail=1
+    shellcheck overlay/usr/local/bin/run_app.sh overlay/usr/local/bin/loveos-session overlay/etc/profile.d/*.sh scripts/*.sh tests/*.sh tools/qjs-node/*.sh || fail=1
 else echo "NOT RUN: shellcheck not installed"; fi
 
 exit $fail

@@ -4,6 +4,10 @@
 
 set -u
 
+# Command-line tools installed from native_deb (deb_watcher.py, a deb with usr/share/r3i6nos/tool) are on PATH for every app, so a LÖVE game's
+# os.execute and io.popen, or a native app's system(), find them by name.
+export PATH="${R3I6NOS_TOOLS_DIR:-/opt/loveos/bin}:$PATH"
+
 TYPE="${1:-}"
 TARGET="${2:-}"
 

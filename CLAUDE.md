@@ -17,6 +17,7 @@ is blocked and on what.
 - `menu/`: the boot menu, a LÖVE 11.5 app installed at `/opt/loveos/menu`; its Settings has Network and SSH (a root helper, `overlay/usr/local/bin/r3i6nos-net`, does the work) and Battery (`docs/BATTERY.md`; its top bar shows the charge).
 - `apps/`: the apps (each has an `app.conf`, native or LÖVE, and its own workflow, `.github/workflows/app-<name>.yml`; only `DEFAULT=1` apps enter the image). The default apps built into the image (`/opt/loveos/defaults`): the input checker as LÖVE 11.5, LÖVE 12.0 and native ARM64, and Commander (a native ARM64 file manager). See `apps/README.md`.
 - `theme/`: the r3i6nos-ansiapps text-mode theme for LÖVE (`.lua`) and C/SDL2 (`.h`): font, screen, list dialogs; installed at `/opt/loveos/theme`. See `docs/R3I6NOS-ANSIAPPS-THEME.md`.
+- `tools/qjs-node/`: the shims and builder that turn a Node-style CLI into one QuickJS executable (`docs/QJS-CLI-PORTS.md`); an app's folder is only ever read, never copied in.
 - `scripts/`: host-side tools. `check.sh` runs everything CI runs.
 - `tests/`: Python (`unittest`) and Lua tests; no hardware needed.
 - `vendor/`, `build/`, `local_hardware_assets/`: fetched, built or captured, gitignored.
