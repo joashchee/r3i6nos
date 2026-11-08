@@ -69,18 +69,18 @@ Each repo (`~/Coding/composer`, `painter`, `animator`) has `r36s/` with `tool.co
 
 | Repo | Command | Compared with Node | Package | Licence that ships |
 |---|---|---|---|---|
-| Composer | `compose` | **15 of 15 identical** (the `.wav` byte for byte) | `compose.deb`, 452 KiB | KlamANSI's free R36S grant, **a draft** (`COMPOSER_RELEASE=1` refuses a build while the `DRAFT GRANT` marker is there; checked) |
+| Composer | `compose` | **15 of 15 identical** (the `.wav` byte for byte) | `compose.deb`, 452 KiB | KlamANSI's free R36S grant, confirmed 2026-11-08 (the `DRAFT GRANT` gate stays for any future draft; checked) |
 | Painter | `sprites` | 11 of 11 identical, `.png` by pixels (`kits` is not run: minutes) | `sprites.deb`, 644 KiB | the same grant (`PAINTER_RELEASE`); `NOTICE` with the CoffeeMUD attribution and the Apache-2.0 text that must go with that data |
 | Animator | `animate` | **10 of 10 identical** | `animate.deb`, 388 KiB | the same grant (`ANIMATOR_RELEASE`) |
 
 **The licences (maintainer's decisions, 2026-11-08):** the three apps travel together, so all three follow Composer's: proprietary, all rights reserved (`LICENSE`), `package.json` `"license": "UNLICENSED"`, `private`.
-Composer's R36S package ships **KlamANSI's grant** (free to use on the R36S and pass on, complete and unmodified; source stays proprietary; holder ansiapps; a `DRAFT GRANT` marker blocks a release until the maintainer confirms it), and so do
+Composer's R36S package ships **KlamANSI's grant** (free to use on the R36S and pass on, complete and unmodified; source stays proprietary; holder ansiapps; confirmed by the maintainer 2026-11-08, marker deleted), and so do
 Painter's and Animator's, with their own names. Painter and Animator were **Apache-2.0** until then and are now proprietary like Composer: copies already distributed under Apache-2.0, such as the one Coupler ships, stay under it.
 Painter's CoffeeMUD data is Apache-2.0 third-party material (Bo Zimmerman), so its licence text is kept (`LICENSES/Apache-2.0.txt`) and appended to the package's `NOTICE`.
 **Open: Composer's `LICENSE` and `package.json` name Joash Chee as holder, while the grant (like KlamANSI's) and the other two apps name ansiapps.**
 
 ## What is left
 
-1. **The maintainer confirms the grant** (KlamANSI's wording, now on four packages) and deletes the markers, and settles whose name Composer's `LICENSE` carries.
+1. ~~The maintainer confirms the grant~~ (done 2026-11-08: KlamANSI's wording on four packages, markers deleted, holder ansiapps everywhere).
 2. A try on a real R36S, then `qjsc` startup and memory numbers on the Cortex-A35, and a LÖVE app's `io.popen` there.
 3. Optional: a better deflate; the VGA atlas for Painter's PNG render; a `tools.lua` helper for LÖVE apps; a `--help` that fits the 64-column screen.

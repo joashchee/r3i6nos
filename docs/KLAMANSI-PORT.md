@@ -129,5 +129,5 @@ cols 0-47                                      cols 48-63
 - **Files** are real files and directories under `/roms/KlamANSI/drawings/`, with an autosave and a welcome back. The Files panel has the card's own wording
   (no browser, download, export or import: `ctx.platform` in KlamANSI's `public/screens.js`); `export` (and `export ans|anim|txt|md|ascii`) writes to `/roms/KlamANSI/export/` with a real SAUCE record; `download`, `import`, `backup`, `share` and the other export kinds (xp, dur, gif, png, lapse) say they are not on the R36S yet. The Help panel lists
   only the prompt commands the device runs, names the rest as not there yet, describes the pad in About and has no stroke chart (`helpLines(platform)`).
-- **Release:** free with no shareware notices (the host never loads the notice code). KlamANSI's licence grants no redistribution, so the package carries a draft
-  grant that the maintainer must confirm before a release.
+- **Release:** free with no shareware notices (the host never loads the notice code). KlamANSI's licence grants no redistribution, so the package carries a grant
+  (free to use and pass on, unmodified; holder ansiapps), confirmed by the maintainer 2026-11-08.
