@@ -372,8 +372,8 @@ static void sound_status(App *a) {
         line[strcspn(line, "\r\n")] = 0;
         char *v;
         if (strstr(line, "playback path: ") && (v = strstr(line, ": ")) && !a->snd_path[0]) sscanf(v + 2, "%15s", a->snd_path);
-        else if (!strncmp(line, "jack: ", 6)) snprintf(a->snd_jack, sizeof a->snd_jack, "%s", line + 6);
-        else if (!strncmp(line, "headphones: ", 12)) snprintf(a->snd_hp, sizeof a->snd_hp, "%s", line + 12);
+        else if (!strncmp(line, "jack: ", 6)) snprintf(a->snd_jack, sizeof a->snd_jack, "%.63s", line + 6);
+        else if (!strncmp(line, "headphones: ", 12)) snprintf(a->snd_hp, sizeof a->snd_hp, "%.15s", line + 12);
     }
     pclose(f);
 }
@@ -920,7 +920,7 @@ static void page_video(R3Screen *s, const App *a) {
                               {"Frame rate", frames_line(a, fl, sizeof fl)}, {"Look for", PATTERNS[a->sel[P_VIDEO]].look}};
     for (int i = 0; i < 5 && top + 1 + i < R3_DISPLAY_TOP + R3_DISPLAY_ROWS - 1; i++)
         text_at(s, 2, top + 1 + i, R3_COLS - 4, R3_ST_BODY, "%-11s%s", rows[i][0], rows[i][1]);
-    char line[64], left[16];
+    char line[64], left[32];
     snprintf(line, sizeof line, "show %s", PATTERNS[a->sel[P_VIDEO]].label);
     snprintf(left, sizeof left, "%d of %d", a->sel[P_VIDEO] + 1, NPAT);
     cmdline(s, a, line, left);
@@ -949,7 +949,7 @@ static void page_sound(R3Screen *s, const App *a) {
     y++;
     r3_text(s, 2, y, "Play a tone, then press X if you heard it, Y if you did not.", R3_ST(R3_ST_HINT));
     r3_text(s, 2, y + 1, "Try the speaker first, then again with headphones in.", R3_ST(R3_ST_HINT));
-    char line[64], left[16];
+    char line[64], left[32];
     snprintf(line, sizeof line, "play %s", TONES[a->sel[P_SOUND]].label);
     snprintf(left, sizeof left, "%d of %d", a->sel[P_SOUND] + 1, NTONE);
     cmdline(s, a, line, left);
@@ -975,7 +975,7 @@ static void page_files(R3Screen *s, const App *a) {
     R3List l = {0, 1, R3_COLS, R3_DISPLAY_ROWS, "Files", "A test again  B back", items, a->nfiles, a->sel[P_FILES],
                 {"Press A to test every card: it writes, renames, reads and", "deletes small files in an IO_Checker folder, then times 8 MB.", NULL}};
     r3_list_dialog(s, &l);
-    char left[16];
+    char left[32];
     snprintf(left, sizeof left, "%d of %d", a->sel[P_FILES] + 1, a->nfiles);
     cmdline(s, a, "test every card", a->nfiles ? left : NULL);
 }
@@ -983,7 +983,7 @@ static void page_files(R3Screen *s, const App *a) {
 static void page_system(R3Screen *s, const App *a) {
     R3List l = {0, 1, R3_COLS, R3_DISPLAY_ROWS, "System", "B back", a->sys, a->nsys, a->sel[P_SYSTEM], {NULL}};
     r3_list_dialog(s, &l);
-    char left[16];
+    char left[32];
     snprintf(left, sizeof left, "%d of %d", a->sel[P_SYSTEM] + 1, a->nsys);
     cmdline(s, a, "", left);
 }
@@ -1101,7 +1101,7 @@ static void act(App *a, int act_, Uint32 now) {
         }
         return;
     }
-    if (page == P_INPUT) return;
+    if (page == P_INPUT || page < 0 || page >= P_COUNT) return;
     a->sel[page] = r3_list_key(a->sel[page], count_of(a, page), per_of(page), act_);
     int sel = a->sel[page];
     switch (page) {
@@ -1173,7 +1173,7 @@ static void handle(App *a, const SDL_Event *e, Uint32 now) {
     case SDL_QUIT: a->quit = 1; break;
     case SDL_WINDOWEVENT: a->force = 1; break;
     case SDL_JOYDEVICEADDED:
-        if (!a->js && open_pad(a, e->jdevice.which)) { char l[64]; snprintf(l, sizeof l, "pad added: %.40s", a->pad_name); add_log(a, l); }
+        if (!a->js && open_pad(a, e->jdevice.which)) { char l[48]; snprintf(l, sizeof l, "pad added: %.36s", a->pad_name); add_log(a, l); }
         a->idle_since = now;
         break;
     case SDL_JOYDEVICEREMOVED:

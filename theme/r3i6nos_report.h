@@ -105,7 +105,8 @@ static inline int r3_report_open_named(R3Report *r, const char *dir, const char 
     memset(r, 0, sizeof *r);
     r->quiet = quiet;
     if (r3_report_mkdirs(dir) != 0) return -1;
-    snprintf(r->path, sizeof r->path, "%s/%s", dir, file);
+    int pn = snprintf(r->path, sizeof r->path, "%s/%s", dir, file);
+    if (pn < 0 || (size_t)pn >= sizeof r->path) { errno = ENAMETOOLONG; return -1; }
     snprintf(r->tmp, sizeof r->tmp, "%s.tmp", r->path);
     r->f = fopen(r->tmp, "w");
     if (!r->f) return -1;
@@ -113,9 +114,10 @@ static inline int r3_report_open_named(R3Report *r, const char *dir, const char 
     time_t now = time(NULL);
     strftime(when, sizeof when, "%Y-%m-%d %H:%M:%S", localtime(&now));
     const char *base = strrchr(dir, '/');
-    snprintf(line, sizeof line,
+    int hn = snprintf(line, sizeof line,
              "# r3i6nos device report\napp: %s %s (%s)\nmade: %s\nhow: %s\nfor: Claude. Copy EASYROMS/%s/%s to a computer and give it to Claude in the %s repo.\n",
              app, version, package, when, how, base ? base + 1 : dir, file, repo ? repo : app);
+    if (hn < 0 || (size_t)hn >= sizeof line) line[sizeof line - 2] = '\n'; /* cut, but the last header line still ends */
     r3_report_raw(r, line);
     return 0;
 }
@@ -152,7 +154,11 @@ static inline int r3_report_field(const char *file, const char *key, char *out, 
         char *v = line + n;
         while (*v == ' ' || *v == '\t' || *v == ':') v++;
         v[strcspn(v, "\r\n")] = 0;
-        snprintf(out, cap, "%s", v);
+        size_t len = strlen(v);
+        if (cap == 0) break;
+        if (len >= cap) len = cap - 1; /* cut to fit, as snprintf would (copied by hand: GCC warns about the snprintf) */
+        memcpy(out, v, len);
+        out[len] = 0;
         found = 0;
         break;
     }

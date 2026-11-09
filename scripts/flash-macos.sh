@@ -70,10 +70,11 @@ newest() {  # the newest existing file of the arguments (a glob that matched not
 }
 note_stale() {  # <name> <repo> <file>
     local made last
-    made="$(stat -f %m "$3" 2>/dev/null || echo 0)"
+    # date -r FILE and git's own date format behave the same on macOS and Linux (the tests run on both); stat -f does not
+    made="$(date -r "$3" +%s 2>/dev/null || echo 0)"
     last="$(git -C "$2" log -1 --format=%ct 2>/dev/null || echo 0)"
     if [ "$last" -gt "$made" ]; then
-        PORT_STALE+=("$1: $(basename "$3") was built $(date -r "$made" '+%Y-%m-%d %H:%M'), before the repo's last commit ($(date -r "$last" '+%Y-%m-%d %H:%M')): it may not be the latest")
+        PORT_STALE+=("$1: $(basename "$3") was built $(date -r "$3" '+%Y-%m-%d %H:%M'), before the repo's last commit ($(git -C "$2" log -1 --format=%cd --date=format:'%Y-%m-%d %H:%M')): it may not be the latest")
     fi
 }
 find_ports() {
@@ -123,7 +124,8 @@ copy_ports() {  # <EASYROMS mount point>: never fails the flash; says what did n
     local line src dest bad=0
     for line in "${PORT_COPY[@]+"${PORT_COPY[@]}"}"; do
         src="${line%%	*}"; dest="$1/${line#*	}"
-        if ! { mkdir -p "$(dirname "$dest")" && cp -X "$src" "$dest"; }; then
+        # -X: no extended attributes, so macOS writes no ._ file beside it (BSD cp only; elsewhere a plain copy)
+        if ! { mkdir -p "$(dirname "$dest")" && { cp -X "$src" "$dest" 2>/dev/null || cp "$src" "$dest"; }; }; then
             echo "flash-macos: could not copy $src to $dest (copy it yourself)" >&2
             bad=1
         fi
