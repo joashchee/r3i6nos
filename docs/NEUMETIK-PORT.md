@@ -118,7 +118,8 @@ the old file whole; nothing outside that folder is written (rule 7). A module's 
 ## 8. First run on a real R36S (device report, 2026-11-10)
 
 Neumetik 0.1.0 ran on one unit under r3i6nos and wrote its device report: **18 PASS, 0 FAIL, go on speed.** The report is kept in the
-Neumetik repo (`r36s/reports/`); the unit's figures are in `docs/hardware-findings.md` ("First device report").
+Neumetik repo (`r36s/reports/`); the unit's figures are in `docs/hardware-findings.md` ("First device report"). A second report
+(2026-11-09 22:21) matched within 3%: MIDI 3.3x real time, Thunderstorm 5.6x, start-up 557 ms, peak 50 MB.
 
 | Engine (30 s each, 44100 Hz stereo) | Real time | Mac | Unit vs Mac |
 |---|---|---|---|

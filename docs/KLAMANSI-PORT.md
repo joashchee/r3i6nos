@@ -144,5 +144,6 @@ KlamANSI 0.1.0 ran on one unit under r3i6nos and wrote its device report: 19 PAS
   (`public/screens.js`), the rest the R36S host's own copying. **Fix (2026-11-10, KlamANSI repo `r36s/host/r36s-host.js`):** the clear is one
   copy, the blit hoists its lookups, and the side column is redrawn only when it changes. The cells are identical (601 frames of a random
   session compared with the old code); in QuickJS on the Mac a frame went from 1.6 to 1.3 ms, which would be about 27 ms on the unit.
-  **Not yet measured on the unit:** the next report says.
+  **Measured on the unit** (the second report, 2026-11-09 22:20): **26.8 ms on average, 27.8 ms at most, 20 PASS, 0 FAIL**; typed lines
+  31-45 ms (were 38-47), the rest as before.
 - **Still not tried on the unit:** the feel of the pad (keyboard, pointer, radial), sound being heard, a pulled or full card.
