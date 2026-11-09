@@ -61,6 +61,21 @@ class ToolReport(unittest.TestCase):
             self.assertFalse((roms / "Fake App/r36s-report.txt.tmp").exists())
             self.assertFalse((roms / "Fake App/.r36s-report-test").exists())
 
+    def test_progress_for_the_menu(self):
+        """With R3I6NOS_REPORT_PROGRESS (set by the menu), it says its steps: system, card, then one a command; the file it writes."""
+        with tempfile.TemporaryDirectory() as t:
+            rep = make(t)
+            roms, prog = Path(t) / "roms", Path(t) / "progress"
+            out = subprocess.run([sys.executable, str(rep), "--from-settings", "--quiet"],
+                                 env={**os.environ, "R3I6NOS_ROMS": str(roms), "R3I6NOS_REPORT_PROGRESS": str(prog)}, capture_output=True, text=True, timeout=60)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            kv = dict(l.split("=", 1) for l in prog.read_text().splitlines())
+            self.assertEqual(kv["steps"], "6", "system, card and the four commands")
+            self.assertEqual(kv["step"], "6")
+            self.assertEqual(kv["doing"], "done")
+            self.assertEqual(kv["file"], str(roms / "Fake App/r36s-report.txt"))
+            self.assertFalse(Path(str(prog) + ".tmp").exists())
+
     def test_no_command_list_is_a_fail_not_a_crash(self):
         with tempfile.TemporaryDirectory() as t:
             rep = make(t)

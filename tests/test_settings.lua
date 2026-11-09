@@ -217,23 +217,43 @@ s = new(); settings.text(s, "abc"); eq(title(s), "Settings")
 
 print("settings: ok")
 
--- ---- Device reports: the installed tools' reports, started in the background (menu/reports.lua has its own test)
+-- ---- Device reports: started in the background, then a wait with its progress, then its summary (menu/reports.lua has its own test)
 do
-  local started = {}
+  local started, prog, done, running = {}, {}, nil, nil
   local fakerep = {
     found = { { cmd = "compose-report", tool = "compose", app = "Composer" } },
-    ABOUT = { "about" }, NONE = { "none" },
+    ABOUT = { "about" }, NONE = { "none" }, WAIT = 100,
   }
   function fakerep.list() return fakerep.found end
-  function fakerep.start(r) started[#started + 1] = r.cmd; return fakerep.ok ~= false, "busy" end
-  function fakerep.startedLines(r) return { r.app .. "'s report is running." } end
+  function fakerep.running() return running end
+  function fakerep.start(r) started[#started + 1] = r.cmd; if fakerep.ok == false then return false, "busy" end running = r.cmd; return true end
+  function fakerep.poll() local p = { done = done ~= nil, exit = done, step = prog.step, steps = prog.steps, doing = prog.doing, file = "/roms/Composer/r36s-report.txt" }; return p end
+  function fakerep.summary(file) return fakerep.sum end
+  function fakerep.doneLines(r, res, sum) return { sum and (r.app .. "'s report is done.") or "stopped", res.file }, sum ~= nil end
   local d = settings.new(fake(), nil, fakerep); settings.open(d)
   choose(d, "Device reports")
   eq(title(d), "Device reports"); eq(settings.node(d).items[1].label, "Composer"); eq(settings.node(d).items[1].value, "compose-report")
   choose(d, "Composer")
-  eq(started[1], "compose-report", "A starts the report"); eq(kind(d), "pages"); eq(settings.node(d).pages[1][1], "Composer's report is running.")
-  settings.press(d, "back"); eq(title(d), "Device reports", "B back to the list")
-  fakerep.ok = false; choose(d, "Composer"); assert(settings.node(d).bad, "a report that cannot start says so")
+  eq(started[1], "compose-report", "A starts the report"); eq(kind(d), "busy", "then waits for it")
+  eq(settings.node(d).foot, "B Back (it keeps running)")
+  prog = { step = 2, steps = 5, doing = "the card" }
+  settings.tick(d, 1); eq(kind(d), "busy"); eq(settings.node(d).prog.step, 2, "the wait has the report's progress"); eq(settings.node(d).prog.doing, "the card")
+  -- B leaves the wait; the list says it is running; choosing it again comes back to the wait, without starting a second one
+  settings.press(d, "back"); eq(title(d), "Device reports")
+  settings.press(d, "back"); choose(d, "Device reports")
+  eq(settings.node(d).items[1].value, "running")
+  choose(d, "Composer"); eq(kind(d), "busy"); eq(#started, 1, "a running report is not started again")
+  -- it ends: the summary and where the file is
+  fakerep.sum = { pass = 18, fail = 0, info = 41, skip = 0, ended = true }
+  done = 0; running = nil
+  settings.tick(d, 1); eq(kind(d), "pages"); eq(settings.node(d).pages[1][1], "Composer's report is done."); assert(not settings.node(d).bad)
+  eq(settings.node(d).pages[1][2], "/roms/Composer/r36s-report.txt")
+  -- a report that stops without a whole file is shown as a failure
+  settings.press(d, "back"); done = nil; fakerep.sum = nil
+  choose(d, "Composer"); done = 1; running = nil; settings.tick(d, 1)
+  eq(settings.node(d).pages[1][1], "stopped"); assert(settings.node(d).bad)
+  -- one that cannot start says so
+  settings.press(d, "back"); done = nil; fakerep.ok = false; choose(d, "Composer"); assert(settings.node(d).bad, "a report that cannot start says so")
   settings.press(d, "back"); choose(d, "What these are"); eq(settings.node(d).pages[1][1], "about")
   settings.press(d, "back"); choose(d, "Back"); eq(title(d), "Settings")
   fakerep.found = {}

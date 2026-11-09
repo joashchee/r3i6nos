@@ -19,6 +19,7 @@ APP = "@APP@"            # the app's name and its folder on the card, e.g. Compo
 VERSION = "@VERSION@"
 PACKAGE = "@PACKAGE@"
 TIMEOUT = 300            # seconds a command may take before it counts as hung
+PROGRESS = os.environ.get("R3I6NOS_REPORT_PROGRESS")   # set by r3i6nos's menu: where to say how far it has got
 
 
 class Report:
@@ -29,11 +30,25 @@ class Report:
         self.path = os.path.join(folder, "r36s-report.txt")
         self.tmp = self.path + ".tmp"
         self.f = open(self.tmp, "w", encoding="ascii", errors="replace", newline="\n")
+        self.done_steps, self.steps = 0, 1
         self.raw("# r3i6nos device report\n"
                  f"app: {APP} {VERSION} ({PACKAGE})\n"
                  f"made: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
                  f"how: {how}\n"
                  f"for: Claude. Copy EASYROMS/{os.path.basename(folder)}/r36s-report.txt to a computer and give it to Claude in the {APP} repo.\n")
+
+    def step(self, doing):
+        """Say what is being checked now, for the menu's progress bar (r3i6nos docs/DEVICE-REPORTS.md, "Progress")."""
+        self.done_steps += 1
+        if not PROGRESS:
+            return
+        try:
+            tmp = PROGRESS + ".tmp"
+            with open(tmp, "w") as f:
+                f.write(f"step={min(self.done_steps, self.steps)}\nsteps={self.steps}\ndoing={' '.join(doing.split())}\nfile={self.path}\n")
+            os.replace(tmp, PROGRESS)
+        except OSError:
+            pass
 
     def raw(self, text):
         self.f.write(text)
@@ -154,6 +169,7 @@ def run_commands(r, tool, listed, run_slow):
     worst = (0, "")
     for line, slow in listed:
         key = f"{TOOL} {line}"
+        r.step(key[:60])
         if slow and not run_slow:
             r.line("SKIP", key, "slow under QuickJS on a laptop (minutes); run with --all to time it")
             continue
@@ -208,14 +224,19 @@ def main(argv):
     except OSError as e:
         print(f"{TOOL}-report: cannot write in {folder}: {e}", file=sys.stderr)
         return 1
+    listed = commands(listing) if os.path.exists(listing) else []
+    r.steps = 2 + len(listed)
+    r.step("the system")
     system(r)
+    r.step("the card")
     card(r, folder)
     if os.path.exists(listing):
-        run_commands(r, tool, commands(listing), run_slow)
+        run_commands(r, tool, listed, run_slow)
     else:
         r.section("commands")
         r.line("FAIL", "commands.txt", f"not found at {listing}")
     r.close()
+    r.step("done")
     if not quiet:
         print(f"\n{TOOL}-report: written to {r.path}")
     return 0

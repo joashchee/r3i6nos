@@ -77,13 +77,31 @@ local function drawOsk(scr, n)
   return o.error or "Type with the pad, or a keyboard"
 end
 
+-- A wait. With n.prog (a device report's progress): what it is doing, a bar when it says its steps, and the time so far.
 local function drawBusy(scr, n)
-  local w, h = 46, 7
+  local p = n.prog
+  local w, h = 50, p and 9 or 7
   local col, row = centered(w, h)
-  scr:box(col, row, w, h, { title = n.title, foot = "B Stop waiting" })
+  scr:box(col, row, w, h, { title = n.title, foot = n.foot or "B Stop waiting" })
   local st = theme.STYLE
   scr:text(col + 3, row + 2, n.waiting or "Waiting for the network helper...", st.body.fg, st.body.bg)
-  scr:text(col + 3, row + 4, ("%d s"):format(math.floor(n.elapsed)), st.hint.fg, st.hint.bg)
+  local secs = ("%d s"):format(math.floor(n.elapsed))
+  if not p then
+    scr:text(col + 3, row + 4, secs, st.hint.fg, st.hint.bg)
+    return "Working: " .. n.title
+  end
+  local doing = p.doing and p.doing ~= "done" and p.doing or "starting"
+  if #doing > w - 6 then doing = doing:sub(1, w - 7) .. "~" end
+  scr:text(col + 3, row + 3, doing, st.hint.fg, st.hint.bg)
+  local bw = w - 6
+  if p.step and p.steps then
+    local filled = math.floor(bw * p.step / p.steps + 0.5)
+    for i = 0, bw - 1 do scr:put(col + 3 + i, row + 5, i < filled and 219 or 176, st.body.fg, st.body.bg) end
+    scr:text(col + 3, row + 6, ("step %d of %d   %s"):format(p.step, p.steps, secs), st.hint.fg, st.hint.bg)
+  else
+    scr:text(col + 3, row + 5, "This report does not say its steps.", st.hint.fg, st.hint.bg)
+    scr:text(col + 3, row + 6, secs .. "; this screen changes when it is done.", st.hint.fg, st.hint.bg)
+  end
   return "Working: " .. n.title
 end
 

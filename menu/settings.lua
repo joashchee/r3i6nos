@@ -169,15 +169,39 @@ local function batteryMenu(s)
   }, 48))
 end
 
--- Device reports (docs/DEVICE-REPORTS.md): each installed tool's <command>-report, started in the background.
+-- Wait for a running report: its step and a bar when it says them, the time so far, then its summary and where the file is.
+-- B leaves the wait; the report goes on, and choosing it again comes back here.
+local function waitReport(s, r)
+  local rep = s.rep
+  push(s, {
+    kind = "busy", title = r.app .. " report", elapsed = 0, timeout = rep.WAIT, waiting = "Checking this unit...",
+    foot = "B Back (it keeps running)",
+    poll = function(n)
+      local p = rep.poll(r)
+      n.prog = p
+      if p.done then return p end
+    end,
+    lost = { "The report has run for 15 minutes and is not done.", "", "It may still be working. Choose it again later to see." },
+    on_result = function(sx, res)
+      local lines, ok = rep.doneLines(r, res, rep.summary(res.file))
+      show(sx, r.app .. " report", lines, ok)
+    end,
+  })
+end
+
+-- Device reports (docs/DEVICE-REPORTS.md): r3i6nos's own and each installed tool's <command>-report, started in the background.
 local function reportsMenu(s)
   local rep = s.rep
   local found = rep.list()
+  local running = rep.running and rep.running()
   local items = {}
   for _, r in ipairs(found) do
-    items[#items + 1] = { label = r.app, value = r.cmd, hint = "Check " .. r.app .. " on this unit; writes " .. r.app .. "/r36s-report.txt", run = function(sx)
+    local mine = running == r.cmd
+    items[#items + 1] = { label = r.app, value = mine and "running" or r.cmd,
+      hint = mine and "Running now: choose it to see how far it has got" or ("Check " .. r.app .. " on this unit, for Claude"), run = function(sx)
+      if rep.running and rep.running() == r.cmd then return waitReport(sx, r) end
       local ok, err = rep.start(r)
-      if ok then show(sx, r.app .. " report", rep.startedLines(r))
+      if ok then waitReport(sx, r)
       else show(sx, r.app .. " report", { "Could not start the report:", tostring(err) }, false) end
     end }
   end
@@ -297,7 +321,7 @@ function settings.tick(s, dt)
   if not n or n.kind ~= "busy" then return end
   n.elapsed = n.elapsed + dt
   local res
-  if n.poll then res = n.poll() else res = s.io and s.io.poll(n.id) end
+  if n.poll then res = n.poll(n) else res = s.io and s.io.poll(n.id) end
   if res then
     pop(s)
     n.on_result(s, res)

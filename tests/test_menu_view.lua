@@ -186,6 +186,34 @@ do
   snap("about licences 2")
 end
 
+-- Device reports: the wait shows what it is doing, a bar and the steps; a report that says no steps still shows the time
+do
+  local prog = { step = 2, steps = 5, doing = "the system card: speed (16 MB)", file = "/roms/r3i6nos/r36s-report.txt" }
+  local fakerep = {
+    WAIT = 900, ABOUT = { "about" }, NONE = { "none" },
+    list = function() return { { cmd = "r3i6nos-report", tool = "r3i6nos", app = "r3i6nos (this system)", system = true } } end,
+    running = function() return nil end, start = function() return true end,
+    poll = function() return prog end, summary = function() return nil end, doneLines = function() return { "done" }, true end,
+  }
+  dialog = settings.new(io_, nil, fakerep); settings.open(dialog)
+  pick("Device reports"); pick("r3i6nos (this system)"); settings.tick(dialog, 12)
+  rows = draw(); local j = table.concat(rows, "\n")
+  has(j, "Checking this unit..."); has(j, "the system card: speed (16 MB)"); has(j, "step 2 of 5   12 s"); has(j, "B Back (it keeps running)")
+  local steprow
+  for r, line in ipairs(rows) do if line:find("step 2 of 5", 1, true) then steprow = r end end
+  local full, empty = 0, 0
+  for c = 1, 64 do
+    local ch = scr.ch[(steprow - 2) * 64 + c]
+    if ch == 219 then full = full + 1 elseif ch == 176 then empty = empty + 1 end
+  end
+  assert(full == math.floor(44 * 2 / 5 + 0.5) and full + empty == 44, ("the bar is 2/5 full: %d full, %d empty"):format(full, empty))
+  snap("report wait")
+  prog = { doing = nil }
+  settings.tick(dialog, 1); rows = draw(); j = table.concat(rows, "\n")
+  has(j, "This report does not say its steps."); has(j, "13 s; this screen changes when it is done.")
+  snap("report wait, no steps")
+end
+
 -- every cell is a code page 437 index, every colour a palette colour, every pair passes 4.5:1, on every screen above
 for _, sc in ipairs(screens) do
   for i = 1, 64 * 24 do

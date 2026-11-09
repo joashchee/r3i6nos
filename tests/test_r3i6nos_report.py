@@ -116,6 +116,27 @@ class SystemReport(unittest.TestCase):
         self.report()
         self.assertIn("FAIL data card: /dev/mmcblk1p1 (ntfs) found but not mounted", self.text(self.t / "sys1/r3i6nos"))
 
+    def test_progress_for_the_menu(self):
+        prog = self.t / "progress"
+        seen = []
+        m = load(dict(self.env, R3I6NOS_REPORT_PROGRESS=str(prog)))
+        real = m.Report.step
+        def watch(r, doing):
+            real(r, doing)
+            seen.append(prog.read_text())
+        with mock.patch.object(m.Report, "step", watch), mock.patch.dict(os.environ, {"PATH": self.env["PATH"]}), mock.patch("sys.stdout", io.StringIO()):
+            self.assertEqual(m.main(["--from-settings", "--quiet"]), 0)
+        steps = [dict(l.split("=", 1) for l in text.splitlines()) for text in seen]
+        self.assertEqual([s["steps"] for s in steps], ["7"] * 8, "3 sections and 2 checks on each of the two cards, then done")
+        self.assertEqual([s["step"] for s in steps], ["1", "2", "3", "4", "5", "6", "7", "7"])
+        self.assertIn("speed", steps[4]["doing"])
+        self.assertEqual(steps[-1]["doing"], "done")
+        self.assertEqual(steps[-1]["file"], str(self.t / "sys2/r3i6nos/r36s-report.txt"))
+
+    def test_no_progress_file_unless_asked(self):
+        self.report()
+        self.assertFalse((self.t / "progress").exists())
+
     def test_the_menu_finds_its_name(self):
         head = SRC.read_text().splitlines()[:40]
         self.assertTrue(any(re.match(r'^APP\s*=\s*"r3i6nos"', ln) for ln in head), "menu/reports.lua reads APP = \"...\" in the first 40 lines")

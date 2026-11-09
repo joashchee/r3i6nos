@@ -69,6 +69,22 @@ maintainer says it in words.
   tool's own command list (`commands.txt`) on the unit, timed, with each command's peak memory, and writes `/roms/<Tool>/r36s-report.txt`.
   r3i6nos's **Settings > Device reports** lists every installed `*-report` command and starts one, so no SSH is needed.
 
+### Progress (reports started from Settings > Device reports)
+
+The menu (`menu/reports.lua`) starts one report at a time, in the background, and waits on a screen that shows how far it has got. It
+uses three files in `/run/loveos/report/`:
+
+- **`running`**: the command's name, written before the report starts. While it is there and `done` is not, the list says "running", and
+  choosing the report again goes back to its wait instead of starting a second one.
+- **`progress`**: written by the report itself, when `R3I6NOS_REPORT_PROGRESS` names it (the menu sets it), whole each time (a temporary
+  file renamed over it): `step=N`, `steps=M`, `doing=<what it is checking now>`, `file=<the report's path>`. The wait screen shows `doing`, a
+  bar of `step` out of `steps` and the time so far. `r3i6nos-report` and `tools/qjs-node/report.py` write it; a report that does not (a
+  tool packaged before 2026-11-10) still works: the wait shows the time and says it cannot show steps.
+- **`done`**: `exit=N`, written by the shell that started the report when it ends, so every report, old or new, says when it has finished.
+
+When `done` appears, the screen shows the report's own summary line (`PASS n  FAIL n  INFO n  SKIP n`) and which card the file is on, or,
+if the file is missing or has no `end`, that the report stopped and where its `.tmp` is. B leaves the wait; the report goes on.
+
 ## Shared code
 
 - **Native (C and SDL2):** `theme/r3i6nos_report.h` (open, sections, lines, the system and card sections, peak memory, close with the summary).
