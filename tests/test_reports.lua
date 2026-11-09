@@ -40,4 +40,19 @@ assert(text:find("Composer/r36s%-report%.txt"), "says where the file is")
 assert(not text:find("docs/") and not text:find("%.md"), "names no repository file")
 for _, l in ipairs(lines) do assert(#l <= 60, "fits the pages: " .. l) end
 for _, l in ipairs(reports.ABOUT) do assert(#l <= 60, "fits the pages: " .. l) end
+-- r3i6nos's own report (the system, both cards) comes first, under its own name, with its own words
+do
+  local f2 = {
+    ["/opt/loveos/bin/r3i6nos-report"] = { "#!/usr/bin/env python3", '"""doc"""', "import os", 'APP = "r3i6nos"          # read by the menu' },
+    ["/opt/loveos/bin/compose-report"] = files["/opt/loveos/bin/compose-report"],
+    ["/opt/native_apps/Composer/usr/bin/compose-report"] = files["/opt/native_apps/Composer/usr/bin/compose-report"],
+  }
+  local sys2 = { ls = function() return { "compose-report", "r3i6nos-report" } end, head = function(p) return f2[p] or {} end, exec = sys.exec }
+  local l2 = reports.list(sys2)
+  eq(#l2, 2); eq(l2[1].cmd, "r3i6nos-report"); eq(l2[1].app, "r3i6nos (this system)"); assert(l2[1].system); eq(l2[2].app, "Composer")
+  local w = reports.startedLines(l2[1])
+  eq(w[1], "The system report is running.")
+  assert(table.concat(w, "\n"):find("r3i6nos/r36s%-report%.txt"), "says where the file is")
+  for _, l in ipairs(w) do assert(#l <= 60, "fits the pages: " .. l) end
+end
 print("reports: ok")

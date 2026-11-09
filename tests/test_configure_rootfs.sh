@@ -37,8 +37,17 @@ R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/native" R3I6NOS_LOVE_APPS_
 [ -f "$R/opt/loveos/theme/vga8x16.lua" ]        || fail "theme font data not installed"
 [ -f "$R/opt/loveos/theme/font/LICENSE.TXT" ]    || fail "the font's licence must ship with the theme"
 [ "$(cat "$R/etc/hostname")" = r3i6nos ]        || fail "hostname"
-grep -q 'LABEL=EASYROMS /roms' "$R/etc/fstab"   || fail "fstab games card"
-grep -q 'nofail' "$R/etc/fstab"                 || fail "fstab nofail"
+# the games cards are mounted by role, not by label (docs/STORAGE.md): no fstab line, the service enabled, the session waits for it
+! grep -q 'EASYROMS' "$R/etc/fstab"             || fail "fstab still mounts a card by the EASYROMS label (two cards race for /roms)"
+grep -q 'LABEL=BOOT .*nofail' "$R/etc/fstab"    || fail "fstab BOOT nofail"
+[ -x "$R/usr/local/bin/r3i6nos-cards" ]         || fail "r3i6nos-cards not installed executable"
+[ -L "$R/etc/systemd/system/multi-user.target.wants/r3i6nos-cards.service" ] || fail "r3i6nos-cards.service not enabled"
+grep -q '^ExecStart=/usr/local/bin/r3i6nos-cards mount$' "$R/etc/systemd/system/r3i6nos-cards.service" || fail "the cards unit runs the wrong command"
+grep -q '^After=.*r3i6nos-cards.service' "$R/etc/systemd/system/loveos.service" || fail "the session does not wait for the cards"
+! grep -q 'roms.mount' "$R/etc/systemd/system/loveos.service" || fail "the session still waits for a roms.mount that no longer exists"
+[ -d "$R/roms" ] && [ -d "$R/roms2" ]            || fail "mount points /roms and /roms2 missing"
+[ "$(readlink "$R/opt/loveos/bin/r3i6nos-report")" = /usr/local/bin/r3i6nos-report ] || fail "the system report is not linked into the reports folder"
+[ -x "$R/usr/local/bin/r3i6nos-report" ]        || fail "r3i6nos-report not installed executable"
 [ -L "$R/etc/systemd/system/multi-user.target.wants/loveos.service" ] || fail "unit not enabled"
 # run_app.sh's default pad mapping carries the measured layout (docs/hardware-findings.md): buttons, not a hat
 # ... under the GUID read from the unit (KlamANSI's device report, 2026-11-10), with and without the name's CRC; and it reaches SDL as two lines

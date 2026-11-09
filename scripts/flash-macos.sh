@@ -13,7 +13,7 @@
 #
 # By default the rest of the card, whatever its size, then becomes an exFAT partition labelled EASYROMS
 # (the games partition: Love 11.5/, Love 12.0/, native_deb/), so one card holds system and games.
-#   --no-games    don't: leave the space unused and use a second card labelled EASYROMS in TF2.
+#   --no-games    don't: leave the space unused and use a second card in TF2 (exFAT or FAT32, any label).
 #   --games       the default (accepted so old command lines keep working).
 #   --games-only  add the games partition to a card that is ALREADY flashed, without writing the image
 #                 (existing partitions are kept; it refuses a card that is not an untouched r3i6nos card).
@@ -148,7 +148,7 @@ games_fail() {  # games_fail <step> <what happened> <what to do>
         echo "  What happened: $2"
         echo "  What to do:    $3"
         echo "  The system partitions on $DISK are intact and the card boots; only the games space is not usable yet."
-        echo "  Meanwhile you can use a second card labelled EASYROMS in TF2."
+        echo "  Meanwhile you can use a second card in TF2 (exFAT or FAT32, any label)."
     } >&2
     return 1
 }
@@ -166,7 +166,7 @@ games_partition() {
         case "$out" in
             *"disk signature differs"*) why="this card was not flashed by this script, so it is not an r3i6nos card; nothing was changed. Flash it first (without --games-only)." ;;
             *"already in use"*) why="the card already has a partition 3 or 4. If it is the games partition, you are done: see 'diskutil list $DISK'. If it exists but will not mount, format it: diskutil eraseVolume ExFAT EASYROMS $s3" ;;
-            *"not enough for a games partition"*) why="the free space after the system partition is under 1 GiB: use a bigger card, or a second card labelled EASYROMS in TF2." ;;
+            *"not enough for a games partition"*) why="the free space after the system partition is under 1 GiB: use a bigger card, or a second card in TF2 (exFAT or FAT32, any label)." ;;
             *"missing"*|*"not an MBR"*) why="the card's partition table is not the one this script wrote: re-flash the image, then add the games partition." ;;
             *) why="read the message above; if it is not clear, run 'diskutil list $DISK' and report it." ;;
         esac

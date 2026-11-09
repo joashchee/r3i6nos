@@ -1,7 +1,8 @@
 [Unit]
 Description=r3i6nos menu and game session
-After=local-fs.target roms.mount sound.target
-Wants=roms.mount
+# The cards are mounted by role (docs/STORAGE.md): /roms (system card) and /roms2 (data card).
+After=local-fs.target r3i6nos-cards.service sound.target
+Wants=r3i6nos-cards.service
 # The menu owns the screen: no login prompt on tty1.
 Conflicts=getty@tty1.service
 After=getty@tty1.service

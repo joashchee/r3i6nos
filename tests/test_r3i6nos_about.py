@@ -60,7 +60,7 @@ class About(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         t = self.t = Path(self.tmp.name)
         for d in ("etc", "proc/device-tree", "sys/devices/system/cpu/cpu0/cpufreq", "sys/class/thermal/thermal_zone0",
-                  "love/11.5/bin", "love/12.0/bin", "native/Commander", "native/Composer", "tools", "roms", "gpu"):
+                  "love/11.5/bin", "love/12.0/bin", "native/Commander", "native/Composer", "tools", "roms", "roms2", "gpu"):
             (t / d).mkdir(parents=True)
         self.release(VERSION="0.1.0", COMMIT=COMMIT, COMMIT_DATE="2026-11-09", MODIFIED="0", BUILT="2026-11-09",
                      BUILT_BY="github", REPO="joashchee/r3i6nos")
@@ -70,7 +70,7 @@ class About(unittest.TestCase):
         (t / "proc/uptime").write_text("3725.5 100.0\n")
         (t / "proc/cpuinfo").write_text("processor\t: 0\n\nprocessor\t: 1\n\nprocessor\t: 2\n\nprocessor\t: 3\n")
         (t / "proc/meminfo").write_text("MemTotal:        1009000 kB\nMemFree:  100 kB\nMemAvailable:     612000 kB\n")
-        (t / "proc/mounts").write_text(f"/dev/mmcblk1p3 {t / 'roms'} exfat rw 0 0\n/dev/root / ext4 rw 0 0\n")
+        (t / "proc/mounts").write_text(f"/dev/mmcblk1p3 {t / 'roms'} exfat rw 0 0\n/dev/mmcblk1p1 {t / 'roms2'} vfat rw 0 0\n/dev/root / ext4 rw 0 0\n")
         (t / "sys/devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq").write_text("1512000\n")
         (t / "sys/class/thermal/thermal_zone0/temp").write_text("48125\n")
         for v in ("11.5", "12.0"):
@@ -85,7 +85,7 @@ class About(unittest.TestCase):
             (t / "bin" / f).chmod(0o755)
         self.env = {
             "R3I6NOS_ETC": str(t / "etc"), "R3I6NOS_PROC": str(t / "proc"), "R3I6NOS_SYS": str(t / "sys"), "R3I6NOS_ROOT": str(t),
-            "R3I6NOS_ROMS": str(t / "roms"), "R3I6NOS_LOVE_DIR": str(t / "love"), "R3I6NOS_NATIVE_DIR": str(t / "native"),
+            "R3I6NOS_ROMS": str(t / "roms"), "R3I6NOS_ROMS2": str(t / "roms2"), "R3I6NOS_LOVE_DIR": str(t / "love"), "R3I6NOS_NATIVE_DIR": str(t / "native"),
             "R3I6NOS_TOOLS_DIR": str(t / "tools"), "R3I6NOS_GPU_DIR": str(t / "gpu"), "R3I6NOS_UPDATE_API": self.api,
             "R3I6NOS_UPDATE_TIMEOUT": "5", "PATH": f"{t / 'bin'}:{os.environ.get('PATH', '')}",
         }
@@ -128,7 +128,7 @@ class About(unittest.TestCase):
         text = self.info()
         for want in ("r3i6nos 0.1.0", "278a84f000 (2026-11-09)", "2026-11-09, GitHub's build", "Rockchip RK3326 R36S", "Debian 12.7",
                      "4 cores, up to 1512 MHz", "985.4 MB, 597.7 MB free", "48 C", "Mali driver from your card", "(exfat)",
-                     "11.5, 12.0", "Native apps  2", "compose, sprites", "wlan0 192.168.1.20/24", "1 h 2 min"):
+                     "11.5, 12.0", "(vfat)", "Native apps  2", "compose, sprites", "wlan0 192.168.1.20/24", "1 h 2 min"):
             self.assertIn(want, text)
         self.assertNotIn("compose-report", text, "a tool's report is not a tool")
         self.assertIn("SSH          off", text)
@@ -138,7 +138,8 @@ class About(unittest.TestCase):
         (self.t / "gpu").rmdir()
         (self.t / "etc/r3i6nos-release").unlink()
         text = self.info()
-        self.assertIn("not found (no EASYROMS partition)", text)
+        self.assertIn("no games partition", text)
+        self.assertIn("none in the second slot", text)
         self.assertIn("software drawing", text)
         self.assertIn("/etc/r3i6nos-release is missing", text)
 

@@ -5,6 +5,7 @@
 local M = {}
 
 M.DIR = os.getenv("R3I6NOS_TOOLS_DIR") or "/opt/loveos/bin"
+M.SYSTEM = "r3i6nos-report" -- the system's own report (overlay/usr/local/bin/r3i6nos-report, linked into M.DIR)
 
 local function quote(s) return "'" .. tostring(s):gsub("'", "'\\''") .. "'" end
 
@@ -57,7 +58,12 @@ function M.list(sys)
       out[#out + 1] = { cmd = name, tool = tool, app = appOf(sys, M.DIR .. "/" .. name) or tool }
     end
   end
-  table.sort(out, function(a, b) return a.app:lower() < b.app:lower() end)
+  for _, r in ipairs(out) do if r.cmd == M.SYSTEM then r.app, r.system = "r3i6nos (this system)", true end end
+  -- r3i6nos's own report first, then the tools by name
+  table.sort(out, function(a, b)
+    if a.system ~= b.system then return a.system == true end
+    return a.app:lower() < b.app:lower()
+  end)
   return out
 end
 
@@ -72,6 +78,19 @@ end
 
 --- What the screen says once one is started.
 function M.startedLines(r)
+  if r.system then
+    return {
+      "The system report is running.",
+      "",
+      "It checks this unit's build, boot and both card slots,",
+      "and times each card. It takes about a minute.",
+      "",
+      "Then, on a computer, copy this file from the data card",
+      "(or the system card, when there is no data card):",
+      "  r3i6nos/r36s-report.txt",
+      "and give it to Claude.",
+    }
+  end
   return {
     r.app .. "'s report is running.",
     "",
@@ -93,7 +112,7 @@ M.ABOUT = {
   "Copy it to a computer and give it to Claude, which reads",
   "it and fixes the app for this handheld.",
   "",
-  "Listed here: command-line tools (they have no menu).",
+  "Listed here: r3i6nos itself, and command-line tools.",
   "Apps with a screen have Device report in their Start menu.",
   "",
   "Nothing is sent anywhere: the file stays on the card.",

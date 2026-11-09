@@ -14,6 +14,7 @@ local theme = require("r3i6nos_ansiapps")
 local view = require("view")
 
 local ROMS = os.getenv("R3I6NOS_ROMS") or "/roms"
+local ROMS2 = os.getenv("R3I6NOS_ROMS2") or "/roms2" -- the data card (docs/STORAGE.md)
 local LAUNCHERS = os.getenv("R3I6NOS_LAUNCHERS") or "/opt/launchers/native"
 local DEFAULTS = os.getenv("R3I6NOS_DEFAULTS") or "/opt/loveos/defaults"
 local NEXT = os.getenv("R3I6NOS_NEXT") or "/run/loveos/next"
@@ -44,7 +45,7 @@ function love.load()
   love.mouse.setVisible(false)
   theme.init()
   screen = theme.screen()
-  entries = scan.entries(ROMS, LAUNCHERS, DEFAULTS)
+  entries = scan.entries(ROMS, LAUNCHERS, DEFAULTS, ROMS2)
   power = battery.read()
 end
 

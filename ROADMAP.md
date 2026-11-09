@@ -253,3 +253,18 @@ Command-line tools other apps can call (NoCoGaMa's sprites, jingles and animatio
 - [ ] **The NoCoGaMa app's own Device report** (its menu) before its release.
 - [ ] **The first reports from a unit:** run each on the R36S, give the files to Claude, and update the ports and these roadmaps from them. Blocked on the maintainer and a unit.
 - [ ] Rebuild an image so the menu has Settings > Device reports (the tools' reports also run over SSH without it).
+- [x] **The tools folder is writable by `deb_watcher.py`** (2026-11-10): it runs as `loveos`, but `/opt/loveos/bin` was never made in the image and its parent is root's, so a tool package could not get its commands (and its report could not be listed). `build_rootfs.sh` now makes it and gives it to `loveos`; CI checks the owner. Tests in Docker had run as root and missed it. **Untested on the R36S.**
+- [x] **r3i6nos's own report** (2026-11-10, `overlay/usr/local/bin/r3i6nos-report`, `docs/STORAGE.md`): the build, failed units and boot time, and storage (disks, slots, mounts, kernel filesystems, loop devices, a check and speed on each card); first in Settings > Device reports. `tests/test_r3i6nos_report.py`. **Not run on a unit.**
+
+## 13. Storage: the system card and the data card (`docs/STORAGE.md`)
+
+The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five steps, in order.
+
+- [x] **Step 1: mount by role** (2026-11-10): `r3i6nos-cards` mounts the boot disk's partition 3 at `/roms` and any other mmc card (any label; exFAT, FAT or ext4) at `/roms2`, or at `/roms` when the boot card has no partition 3; it writes `/run/r3i6nos/cards`. The fstab's `EASYROMS` line is gone (two cards with that label raced for `/roms`). The menu lists the data card's LÖVE games; About shows both cards; the system report measures both slots. Tests: `test_r3i6nos_cards.py` (10), `test_r3i6nos_report.py`, `test_scan.lua`, `test_reports.lua`, `test_configure_rootfs.sh`. **Untested on the R36S:**
+  - [ ] What TF2 shows up as and whether it is there when the service runs (the system report says); the mounts on the real kernel; a boot with and without a data card.
+  - [ ] Whether the kernel has squashfs and loop devices (the system report says; step 4 depends on it).
+- [ ] **Step 2: both cards in the menu, each app's data on its own card:** `S`/`D` tags, `R3I6NOS_APP_DATA` from `run_app.sh`, the ports moved to it, an app whose card is out greyed.
+- [ ] **Step 3: Settings > Storage:** both cards, Eject data card, Prepare data card, the install target.
+- [ ] **Step 4: installing with a choice of card:** waiting packages, the question with free space, one squashfs image per package (`squashfs-tools`), a root helper by path unit; `.deb` files on the data card installed only then. Blocked on step 1's report (squashfs, loop).
+- [ ] **Step 5: moving an app between cards, and swapping the data card while on** (only if the slot reports it).
+

@@ -23,8 +23,9 @@ spec (`rk3326-evb-lp3-v12`, `rf3536k4ka`, `eGON.BT0`). Genuine RK3326.
   before partition 1. Our layout (`scripts/image-layout.sh`) puts BOOT at the
   same sector, 32768, so the captured bootloader fits unchanged.
 - **The stock OS keeps the games on partition 3 of the same card.** The spec
-  and our fstab expect a second card (TF2) labelled `EASYROMS`. Mounting by
-  label works for either, but the image has only two partitions.
+  and our fstab expected a second card (TF2) labelled `EASYROMS`. Mounting by
+  label works for either, but the image has only two partitions. (Since 2026-11-10 the cards are mounted by role, not label:
+  `docs/STORAGE.md`.)
 
 ## How it boots
 

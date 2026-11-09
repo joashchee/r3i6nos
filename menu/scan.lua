@@ -28,12 +28,14 @@ local function title(name)
 end
 
 --- Returns a sorted list of { title, type, target }.
---- roms: the games card. launchers: native app launchers. defaults (optional): the same
+--- roms: the system card's games partition. launchers: native app launchers. defaults (optional): the same
 --- "Love 11.5" / "Love 12.0" folders, built into the system image; a game of the same file name on
---- the card replaces the built-in one.
-function scan.entries(roms, launchers, defaults)
+--- a card replaces the built-in one. roms2 (optional): the data card in the second slot (docs/STORAGE.md); until step 2
+--- tags each entry with its card, a game of the same file name on both cards is listed once, from the system card.
+function scan.entries(roms, launchers, defaults, roms2)
   local list, have = {}, {}
-  for _, base in ipairs({ roms, defaults }) do
+  for _, base in ipairs({ roms, roms2 or false, defaults or false }) do
+    if base then
     for _, root in ipairs(ROOTS) do
       for _, name in ipairs(ls(base .. "/" .. root.dir)) do
         local path = base .. "/" .. root.dir .. "/" .. name:gsub("/$", "")
@@ -44,6 +46,7 @@ function scan.entries(roms, launchers, defaults)
           list[#list + 1] = { title = title(name), type = root.type, target = path }
         end
       end
+    end
     end
   end
   for _, name in ipairs(ls(launchers)) do

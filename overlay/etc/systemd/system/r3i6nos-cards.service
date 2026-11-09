@@ -1,0 +1,16 @@
+[Unit]
+Description=Mount the system card's games partition at /roms and a card in the second slot at /roms2
+Documentation=file:/usr/local/bin/r3i6nos-cards
+# The root filesystem is mounted read-write and /run exists; the session waits for this (loveos.service).
+After=local-fs.target
+Before=loveos.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/r3i6nos-cards mount
+# A slow card must not hold the menu back for long: the program waits at most a second for the second slot.
+TimeoutStartSec=60
+
+[Install]
+WantedBy=multi-user.target

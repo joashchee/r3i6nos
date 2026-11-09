@@ -1,0 +1,311 @@
+#!/usr/bin/env python3
+"""r3i6nos-report - the device report of r3i6nos itself (docs/DEVICE-REPORTS.md, docs/STORAGE.md).
+
+    r3i6nos-report [--from-settings] [--quiet]
+
+Checks and measures what only the unit can answer about the system, and writes r3i6nos/r36s-report.txt on the data card when one is
+mounted (so the boot card can stay in), else on the system card, for Claude to read in the r3i6nos repo. Settings > Device reports
+starts it (it is linked into /opt/loveos/bin as a report); over SSH, run `r3i6nos-report`. It runs as loveos and needs no root.
+
+Sections: system (the build, kernel, CPU, memory), boot (units that failed, how long boot took), storage (every mmc disk and slot, what
+r3i6nos-cards mounted, the kernel's filesystems, loop devices, and on each mounted card a write/rename/read/delete check and its speed).
+
+Standard library only. Overrides, for tests: R3I6NOS_ETC (/etc), R3I6NOS_PROC (/proc), R3I6NOS_SYS (/sys), R3I6NOS_DEV (/dev),
+R3I6NOS_CARDS_STATE (/run/r3i6nos/cards), R3I6NOS_REPORT_DIR (the folder to write in), R3I6NOS_REPORT_MB (16: the speed test's size).
+"""
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+APP = "r3i6nos"          # read by the menu's Settings > Device reports (menu/reports.lua) for the entry's name
+PACKAGE = "r3i6nos"
+ENV = os.environ.get
+ETC = Path(ENV("R3I6NOS_ETC", "/etc"))
+PROC = Path(ENV("R3I6NOS_PROC", "/proc"))
+SYS = Path(ENV("R3I6NOS_SYS", "/sys"))
+DEV = Path(ENV("R3I6NOS_DEV", "/dev"))
+STATE = Path(ENV("R3I6NOS_CARDS_STATE", "/run/r3i6nos/cards"))
+MB = int(ENV("R3I6NOS_REPORT_MB", "16"))
+REPORT_DIR = ENV("R3I6NOS_REPORT_DIR")
+WANT_FS = ("exfat", "vfat", "ext4", "squashfs")
+
+
+def read(path):
+    try:
+        return Path(path).read_text(errors="replace").replace("\0", "").strip()
+    except OSError:
+        return None
+
+
+def keyvals(path):
+    out = {}
+    for line in (read(path) or "").splitlines():
+        k, sep, v = line.partition("=")
+        if sep:
+            out[k.strip()] = v.strip()
+    return out
+
+
+class Report:
+    def __init__(self, folder, how, version, card, quiet=False):
+        self.quiet = quiet
+        self.counts = {"PASS": 0, "FAIL": 0, "INFO": 0, "SKIP": 0}
+        os.makedirs(folder, exist_ok=True)
+        self.path = os.path.join(folder, "r36s-report.txt")
+        self.tmp = self.path + ".tmp"
+        self.f = open(self.tmp, "w", encoding="ascii", errors="replace", newline="\n")
+        self.raw("# r3i6nos device report\n"
+                 f"app: {APP} {version} ({PACKAGE})\n"
+                 f"made: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                 f"how: {how}\n"
+                 f"for: Claude. Copy r3i6nos/r36s-report.txt from the {card} to a computer and give it to Claude in the r3i6nos repo.\n")
+
+    def raw(self, text):
+        self.f.write(text)
+        if not self.quiet:
+            sys.stdout.write(text)
+            sys.stdout.flush()
+
+    def line(self, status, key, value):
+        key = " ".join(str(key).replace(":", " ").split())
+        value = " ".join(str(value).split())
+        self.counts[status] += 1
+        self.raw(f"{status} {key}: {value}\n")
+
+    def section(self, name):
+        self.raw(f"\n== {name} ==\n")
+
+    def close(self):
+        c = self.counts
+        self.section("summary")
+        self.raw(f"PASS {c['PASS']}  FAIL {c['FAIL']}  INFO {c['INFO']}  SKIP {c['SKIP']}\nend\n")
+        self.f.flush()
+        os.fsync(self.f.fileno())
+        self.f.close()
+        os.replace(self.tmp, self.path)
+
+
+def run(cmd, timeout=10):
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout
+
+
+def gb(n):
+    return f"{n / 1e9:.1f} GB"
+
+
+# ---- sections -------------------------------------------------------------------------------------------------------------------
+
+def system(r, rel):
+    r.section("system")
+    if rel:
+        r.line("INFO", "build", f"r3i6nos {rel.get('VERSION', '?')}, commit {rel.get('COMMIT', '?')[:10]} ({rel.get('COMMIT_DATE', '?')}), "
+                                f"built {rel.get('BUILT', '?')} by {rel.get('BUILT_BY', '?')}" + (", modified" if rel.get("MODIFIED") == "1" else ""))
+    else:
+        r.line("FAIL", "build", "no /etc/r3i6nos-release")
+    u = os.uname()
+    r.line("INFO", "kernel", f"{u.sysname} {u.release} {u.machine}")
+    model = read(PROC / "device-tree" / "model")
+    if model:
+        r.line("INFO", "board", model)
+    cpus = sum(1 for ln in (read(PROC / "cpuinfo") or "").splitlines() if ln.startswith("processor"))
+    khz = read(SYS / "devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
+    r.line("INFO", "cpu", f"{cpus} CPUs" + (f", {int(khz) // 1000} MHz max" if khz and khz.isdigit() else ""))
+    mem = {}
+    for ln in (read(PROC / "meminfo") or "").splitlines():
+        k, _, v = ln.partition(":")
+        mem[k] = v.strip()
+    if "MemTotal" in mem:
+        r.line("INFO", "memory", f"total {mem['MemTotal']}, available {mem.get('MemAvailable', '?')}")
+
+
+def boot(r):
+    r.section("boot")
+    out = run(["systemctl", "list-units", "--failed", "--plain", "--no-legend", "--no-pager"])
+    if out is None:
+        r.line("SKIP", "failed units", "systemctl did not answer")
+    else:
+        failed = [ln.split()[0] for ln in out.splitlines() if ln.strip()]
+        r.line("PASS" if not failed else "FAIL", "failed units", ", ".join(failed) if failed else "none")
+    t = run(["systemd-analyze", "time", "--no-pager"])
+    if t and t.strip():
+        r.line("INFO", "boot time", t.strip().splitlines()[0].replace("Startup finished in ", ""))
+    else:
+        r.line("SKIP", "boot time", "systemd-analyze did not answer")
+
+
+def disks():
+    """[(name, bytes, removable)] for every mmc disk."""
+    out = []
+    try:
+        names = sorted(p.name for p in (SYS / "block").iterdir())
+    except OSError:
+        return out
+    for n in names:
+        if re.fullmatch(r"mmcblk\d+", n):
+            sectors = read(SYS / "block" / n / "size")
+            out.append((n, int(sectors) * 512 if sectors and sectors.isdigit() else 0, read(SYS / "block" / n / "removable") == "1"))
+    return out
+
+
+def mounts():
+    out = {}
+    for line in (read(PROC / "mounts") or "").splitlines():
+        p = line.split()
+        if len(p) >= 4:
+            out[p[1]] = (p[0], p[2], p[3])
+    return out
+
+
+def speed(r, label, folder):
+    path = os.path.join(folder, ".r36s-report-speed")
+    block = os.urandom(1 << 20)
+    try:
+        t0 = time.monotonic()
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o644)
+        try:
+            for _ in range(MB):
+                os.write(fd, block)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        w = time.monotonic() - t0
+        fd = os.open(path, os.O_RDONLY)
+        try:
+            if hasattr(os, "posix_fadvise"):
+                os.posix_fadvise(fd, 0, 0, os.POSIX_FADV_DONTNEED)  # read from the card, not from memory
+            t0 = time.monotonic()
+            while os.read(fd, 1 << 20):
+                pass
+            rd = time.monotonic() - t0
+        finally:
+            os.close(fd)
+        r.line("INFO", f"{label} write speed", f"{MB / w:.1f} MB/s ({MB} MB, synced)")
+        r.line("INFO", f"{label} read speed", f"{MB / rd:.1f} MB/s" if rd > 0 else "too fast to time")
+    except OSError as e:
+        r.line("FAIL", f"{label} speed", e)
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
+
+
+def card_check(r, label, folder):
+    a, b = os.path.join(folder, ".r36s-report-test"), os.path.join(folder, ".r36s-report-test.tmp")
+    try:
+        os.makedirs(folder, exist_ok=True)
+        with open(a, "w") as f:
+            f.write("first\n")
+        with open(b, "w") as f:
+            f.write("second\n")
+        os.replace(b, a)
+        with open(a) as f:
+            ok = f.read() == "second\n"
+        os.remove(a)
+        r.line("PASS" if ok else "FAIL", f"{label} write, rename over, read, delete", "ok" if ok else "read back different text")
+    except OSError as e:
+        r.line("FAIL", f"{label} write, rename over, read, delete", e)
+    for p in (a, b):
+        try:
+            os.remove(p)
+        except OSError:
+            pass
+
+
+def storage(r, cards):
+    r.section("storage")
+    found = disks()
+    boot_disk = cards.get("BOOT_DISK", "none")
+    if not found:
+        r.line("SKIP", "mmc disks", "none in /sys/block")
+    for name, size, removable in found:
+        role = "boot (system card)" if name == boot_disk else "other (data card?)"
+        r.line("INFO", f"disk {name}", f"{gb(size)}, {role}" + (", removable" if removable else ""))
+    if found:
+        r.line("PASS" if len(found) >= 2 else "INFO", "cards in the slots", f"{len(found)}" + ("" if len(found) >= 2 else " (put a card in TF2 to test the data card)"))
+    try:
+        hosts = sorted(p.name for p in (SYS / "class" / "mmc_host").iterdir())
+    except OSError:
+        hosts = []
+    if hosts:
+        r.line("INFO", "mmc hosts", ", ".join(hosts))
+    if not cards:
+        r.line("FAIL", "r3i6nos-cards", f"no {STATE}: the cards service did not run")
+    else:
+        for role in ("SYSTEM", "DATA"):
+            dev, fs, at = cards.get(f"{role}_DEV", "none"), cards.get(f"{role}_FS", "none"), cards.get(f"{role}_AT", "none")
+            name = "system card" if role == "SYSTEM" else "data card"
+            if dev == "none":
+                r.line("INFO", name, "none found")
+            elif at == "none":
+                r.line("FAIL", name, f"{dev} ({fs}) found but not mounted")
+            else:
+                r.line("PASS", name, f"{dev} ({fs}) on {at}")
+    have = set()
+    for ln in (read(PROC / "filesystems") or "").splitlines():
+        have.add(ln.split()[-1])
+    if have:
+        for fs in WANT_FS:
+            r.line("PASS" if fs in have else ("FAIL" if fs == "squashfs" else "INFO"), f"kernel {fs}", "yes" if fs in have else "no")
+    else:
+        r.line("SKIP", "kernel filesystems", "no /proc/filesystems")
+    loops = (DEV / "loop-control").exists() or (DEV / "loop0").exists()
+    r.line("PASS" if loops else "FAIL", "loop devices", "yes" if loops else "no /dev/loop-control or /dev/loop0")
+    m = mounts()
+    for role in ("SYSTEM", "DATA"):
+        at = cards.get(f"{role}_AT", "none")
+        if at == "none" or at not in m:
+            continue
+        label = "system card" if role == "SYSTEM" else "data card"
+        dev, fs, opts = m[at]
+        try:
+            st = os.statvfs(at)
+            r.line("INFO", f"{label} space", f"{gb(st.f_bavail * st.f_frsize)} free of {gb(st.f_blocks * st.f_frsize)} ({fs}, {opts.split(',')[0]})")
+        except OSError as e:
+            r.line("FAIL", f"{label} space", e)
+        folder = os.path.join(at, "r3i6nos")
+        card_check(r, label, folder)
+        speed(r, label, folder)
+
+
+def where(cards):
+    """(folder, which card): the data card when one is mounted, so the boot card can stay in."""
+    data, system_at = cards.get("DATA_AT", "none"), cards.get("SYSTEM_AT", "none")
+    card = "data card" if data != "none" and data != system_at else "system card"
+    if REPORT_DIR:
+        return REPORT_DIR, card
+    root = data if data != "none" else (system_at if system_at != "none" else "/roms")
+    return os.path.join(root, "r3i6nos"), card
+
+
+def main(argv):
+    quiet = "--quiet" in argv
+    how = "Settings > Device reports" if "--from-settings" in argv else "r3i6nos-report"
+    rel = keyvals(ETC / "r3i6nos-release")
+    cards = keyvals(STATE)
+    try:
+        folder, card = where(cards)
+        r = Report(folder, how, rel.get("VERSION", "?"), card, quiet)
+    except OSError as e:
+        print(f"r3i6nos-report: cannot write the report: {e}", file=sys.stderr)
+        return 1
+    for part in (lambda: system(r, rel), lambda: boot(r), lambda: storage(r, cards)):
+        try:
+            part()
+        except Exception as e:  # a broken check is a line in the report, never a missing report
+            r.line("FAIL", "report", f"a check crashed: {e}")
+    r.close()
+    if not quiet:
+        print(f"written: {r.path}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

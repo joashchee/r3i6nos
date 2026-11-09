@@ -12,7 +12,7 @@ nothing about the unit. OUT is written whole (a temporary file renamed), so the 
 Which build this is comes from /etc/r3i6nos-release, written by scripts/configure_rootfs.sh (VERSION, COMMIT, ...).
 
 Standard library only (it runs on a 1 GB board). Overrides, for tests: R3I6NOS_ETC (/etc), R3I6NOS_PROC (/proc),
-R3I6NOS_SYS (/sys), R3I6NOS_ROOT (/), R3I6NOS_ROMS (/roms), R3I6NOS_LOVE_DIR (/opt/love), R3I6NOS_NATIVE_DIR
+R3I6NOS_SYS (/sys), R3I6NOS_ROOT (/), R3I6NOS_ROMS (/roms), R3I6NOS_ROMS2 (/roms2), R3I6NOS_LOVE_DIR (/opt/love), R3I6NOS_NATIVE_DIR
 (/opt/native_apps), R3I6NOS_TOOLS_DIR (/opt/loveos/bin), R3I6NOS_GPU_DIR (/opt/libmali), R3I6NOS_UPDATE_API
 (https://api.github.com), R3I6NOS_UPDATE_TIMEOUT (15 s per question).
 """
@@ -33,6 +33,7 @@ PROC = Path(ENV("R3I6NOS_PROC", "/proc"))
 SYS = Path(ENV("R3I6NOS_SYS", "/sys"))
 ROOT = ENV("R3I6NOS_ROOT", "/")
 ROMS = ENV("R3I6NOS_ROMS", "/roms")
+ROMS2 = ENV("R3I6NOS_ROMS2", "/roms2")
 LOVE_DIR = Path(ENV("R3I6NOS_LOVE_DIR", "/opt/love"))
 NATIVE_DIR = Path(ENV("R3I6NOS_NATIVE_DIR", "/opt/native_apps"))
 TOOLS_DIR = Path(ENV("R3I6NOS_TOOLS_DIR", "/opt/loveos/bin"))
@@ -152,13 +153,12 @@ def info():
     lines += ["", "STORAGE"]
     sp = space(ROOT)
     if sp:
-        lines.append(row("System card", f"{size(sp[1])} free of {size(sp[0])}"))
-    m = mounts().get(ROMS)
-    sp = space(ROMS) if m else None
-    if m and sp:
-        lines.append(row("Games card", f"{size(sp[1])} free of {size(sp[0])} ({m[1]})"))
-    else:
-        lines.append(row("Games card", "not found (no EASYROMS partition)"))
+        lines.append(row("System", f"{size(sp[1])} free of {size(sp[0])}"))
+    allm = mounts()
+    for label, at, missing in (("System card", ROMS, "no games partition"), ("Data card", ROMS2, "none in the second slot")):
+        m = allm.get(at)
+        sp = space(at) if m else None
+        lines.append(row(label, f"{size(sp[1])} free of {size(sp[0])} ({m[1]})" if m and sp else missing))
 
     lines += ["", "SOFTWARE"]
     loves = sorted(p.name for p in LOVE_DIR.glob("*") if (p / "bin" / "love").exists()) if LOVE_DIR.is_dir() else []

@@ -96,7 +96,8 @@ mounted=1
 chroot "$ROOTFS" useradd --uid 1000 --create-home --shell /usr/sbin/nologin \
     --groups video,audio,input,render loveos
 chroot "$ROOTFS" passwd -l root
-chroot "$ROOTFS" chown -R loveos:loveos /opt/native_apps /opt/launchers
+# deb_watcher.py runs as loveos: it writes the apps, their launchers and the tools' commands (/opt/loveos/bin).
+chroot "$ROOTFS" chown -R loveos:loveos /opt/native_apps /opt/launchers /opt/loveos/bin
 chroot "$ROOTFS" apt-get clean
 rm -rf "$ROOTFS"/var/lib/apt/lists/* "$ROOTFS"/debootstrap
 

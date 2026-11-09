@@ -68,7 +68,7 @@ fi
 find "$DEFAULTS" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
 
 # Mount points and places the boot scripts write to.
-mkdir -p "$ROOTFS"/{roms,boot,opt/love,opt/native_apps,opt/launchers/native}
+mkdir -p "$ROOTFS"/{roms,roms2,boot,opt/love,opt/native_apps,opt/launchers/native}
 
 echo "[*] System settings..."
 # Settings > About shows which build this is, and asks GitHub whether it is the newest (only when a person chooses it).
@@ -93,13 +93,11 @@ cat > "$ROOTFS/etc/hosts" <<'EOF'
 127.0.1.1 r3i6nos
 EOF
 
-# Labels match assemble_image.sh. The games card (TF2) is optional at boot.
-# uid/gid make a FAT or exFAT card readable by the loveos user (uid 1000);
-# an ext4 card would refuse these options (phase 1 confirms the real filesystem).
+# Labels match assemble_image.sh. The games cards are not here: r3i6nos-cards.service mounts them by role (docs/STORAGE.md),
+# the system card's partition 3 at /roms and a card in the second slot at /roms2, because both may be labelled EASYROMS.
 cat > "$ROOTFS/etc/fstab" <<'EOF'
 LABEL=ROOTFS   /      ext4  defaults,noatime,errors=remount-ro  0 1
 LABEL=BOOT     /boot  vfat  defaults,noatime,nofail             0 2
-LABEL=EASYROMS /roms  auto  nofail,noatime,uid=1000,gid=1000,umask=022,x-systemd.device-timeout=5s  0 0
 tmpfs          /tmp   tmpfs defaults,nosuid,nodev,size=64m      0 0
 EOF
 
@@ -117,6 +115,11 @@ ln -sfn /etc/systemd/system/loveos.service \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/loveos.service"
 ln -sfn /etc/systemd/system/r3i6nos-bootlog.service \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-bootlog.service"
+ln -sfn /etc/systemd/system/r3i6nos-cards.service \
+    "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-cards.service"
+# The system's own device report (docs/STORAGE.md), listed in Settings > Device reports with the tools' reports.
+mkdir -p "$ROOTFS/opt/loveos/bin"
+ln -sfn /usr/local/bin/r3i6nos-report "$ROOTFS/opt/loveos/bin/r3i6nos-report"
 # Settings > Network and SSH: a path unit that only watches for the menu's request (the helper runs per request, never at boot).
 ln -sfn /etc/systemd/system/r3i6nos-net.path \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-net.path"

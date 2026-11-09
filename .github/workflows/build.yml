@@ -145,12 +145,17 @@ jobs:
           sudo test -x $R/usr/local/bin/loveos-session
           sudo test -f $R/opt/loveos/menu/main.lua
           # every module the boot scripts import must exist in the rootfs (python3-minimal lacks shutil)
-          sudo python3 -I scripts/check_py_imports.py $R overlay/usr/local/bin/deb_watcher.py overlay/usr/local/bin/r3i6nos-net overlay/usr/local/bin/r3i6nos-about
+          sudo python3 -I scripts/check_py_imports.py $R overlay/usr/local/bin/deb_watcher.py overlay/usr/local/bin/r3i6nos-net overlay/usr/local/bin/r3i6nos-about overlay/usr/local/bin/r3i6nos-cards overlay/usr/local/bin/r3i6nos-report
           sudo test -x $R/opt/love/11.5/bin/love
           # Settings > About: the build says which commit it is, and HTTPS to GitHub has its certificates
           sudo grep -Eq '^COMMIT=[0-9a-f]{40}$' $R/etc/r3i6nos-release
           sudo test -s $R/etc/ssl/certs/ca-certificates.crt
           sudo test -x $R/usr/local/bin/r3i6nos-about
+          # docs/STORAGE.md: the cards are mounted by role with blkid and mount; loveos owns the tools folder deb_watcher writes
+          sudo test -x $R/usr/local/bin/r3i6nos-cards
+          sudo test -x $R/usr/sbin/blkid -o -x $R/sbin/blkid
+          sudo test -x $R/usr/bin/mount -o -x $R/bin/mount
+          test "$(sudo stat -c %U $R/opt/loveos/bin)" = loveos
           # the built-in default apps (the input checker three ways)
           sudo test -f "$R/opt/loveos/defaults/Love 11.5/Input_Checker.love"
           sudo test -f "$R/opt/loveos/defaults/Love 12.0/Input_Checker.love"

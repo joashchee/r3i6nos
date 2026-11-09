@@ -1,0 +1,216 @@
+#!/usr/bin/env python3
+"""r3i6nos-cards - mount each microSD card by its role (docs/STORAGE.md).
+
+    r3i6nos-cards mount     at boot (r3i6nos-cards.service, as root): the system card's partition 3 at /roms, a card in the
+                            second slot at /roms2; what was found goes to /run/r3i6nos/cards
+    r3i6nos-cards status    print /run/r3i6nos/cards
+
+The system card is the disk the root filesystem is on; its partition 3 is the games partition flash-macos.sh makes. The data card
+is any other mmc disk with a size. Labels are never read or changed, so two cards both labelled EASYROMS no longer race for /roms.
+With no partition 3, the data card goes to /roms (the old two-card setup). Nothing is ever formatted, checked or written by this
+program on either card (CLAUDE.md rule 7); it only mounts them. It never fails the boot: problems are written down and skipped.
+
+Standard library only (it runs at boot on a 1 GB board); it calls blkid and mount. Overrides, for tests: R3I6NOS_SYS (/sys),
+R3I6NOS_DEV (/dev), R3I6NOS_ROOT_DEV ("MAJ:MIN" of the root filesystem, else stat /), R3I6NOS_ROMS (/roms), R3I6NOS_ROMS2 (/roms2),
+R3I6NOS_CARDS_STATE (/run/r3i6nos/cards), R3I6NOS_PROC (/proc), R3I6NOS_CARD_WAIT (seconds to wait for a second card: 1).
+"""
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ENV = os.environ.get
+SYS = Path(ENV("R3I6NOS_SYS", "/sys"))
+DEV = Path(ENV("R3I6NOS_DEV", "/dev"))
+PROC = Path(ENV("R3I6NOS_PROC", "/proc"))
+ROMS = ENV("R3I6NOS_ROMS", "/roms")
+ROMS2 = ENV("R3I6NOS_ROMS2", "/roms2")
+STATE = Path(ENV("R3I6NOS_CARDS_STATE", "/run/r3i6nos/cards"))
+WAIT = float(ENV("R3I6NOS_CARD_WAIT", "1"))
+ROOT_DEV = ENV("R3I6NOS_ROOT_DEV")
+FAT = {"vfat", "exfat"}
+EXT = {"ext2", "ext3", "ext4"}
+FAT_OPTS = "rw,noatime,uid=1000,gid=1000,umask=022"
+EXT_OPTS = "rw,noatime"
+
+
+def log(msg):
+    print(f"r3i6nos-cards: {msg}", file=sys.stderr)
+
+
+def read(path):
+    try:
+        return Path(path).read_text().strip()
+    except OSError:
+        return None
+
+
+def root_devnum():
+    if ROOT_DEV:
+        return ROOT_DEV
+    st = os.stat("/")
+    return f"{os.major(st.st_dev)}:{os.minor(st.st_dev)}"
+
+
+def boot_disk():
+    """The disk the root filesystem is on (mmcblk0), or None."""
+    link = SYS / "dev" / "block" / root_devnum()
+    try:
+        real = Path(os.path.realpath(link))
+    except OSError:
+        return None
+    if not real.exists():
+        return None
+    return real.parent.name if (real / "partition").exists() else real.name
+
+
+def partitions(disk):
+    """[(number, name)] of a disk's partitions, in order."""
+    out = []
+    base = SYS / "block" / disk
+    try:
+        children = list(base.iterdir())
+    except OSError:
+        return out
+    for child in children:
+        n = read(child / "partition")
+        if n and n.isdigit():
+            out.append((int(n), child.name))
+    return sorted(out)
+
+
+def has_size(disk):
+    s = read(SYS / "block" / disk / "size")
+    return bool(s and s.isdigit() and int(s) > 0)
+
+
+def other_disks(boot):
+    try:
+        names = sorted(p.name for p in (SYS / "block").iterdir())
+    except OSError:
+        return []
+    return [n for n in names if re.fullmatch(r"mmcblk\d+", n) and n != boot and has_size(n)]
+
+
+def fstype(dev):
+    try:
+        r = subprocess.run(["blkid", "-o", "value", "-s", "TYPE", str(dev)], capture_output=True, text=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout.strip() or None
+
+
+def data_partition(disk):
+    """(device, filesystem) of the data card: its first partition with a filesystem, or the whole disk; None if there is none."""
+    for _, name in partitions(disk):
+        t = fstype(DEV / name)
+        if t:
+            return DEV / name, t
+    if not partitions(disk):
+        t = fstype(DEV / disk)
+        if t:
+            return DEV / disk, t
+    return None
+
+
+def mounted_at(target):
+    for line in (read(PROC / "mounts") or "").splitlines():
+        p = line.split()
+        if len(p) >= 2 and p[1] == target:
+            return p[0]
+    return None
+
+
+def mount(dev, fs, target):
+    """True when dev is mounted at target (already, or now)."""
+    if fs in FAT:
+        opts = FAT_OPTS
+    elif fs in EXT:
+        opts = EXT_OPTS
+    else:
+        log(f"{dev}: {fs} is not a filesystem r3i6nos mounts (exFAT, FAT or ext4); left alone")
+        return False
+    if mounted_at(target):
+        return True
+    try:
+        os.makedirs(target, exist_ok=True)
+        r = subprocess.run(["mount", "-t", fs, "-o", opts, str(dev), target], capture_output=True, text=True, timeout=30)
+    except (OSError, subprocess.SubprocessError) as e:
+        log(f"could not mount {dev} at {target}: {e}")
+        return False
+    if r.returncode != 0:
+        log(f"could not mount {dev} at {target}: {r.stderr.strip()}")
+        return False
+    return True
+
+
+def find():
+    """What is in the slots, before mounting: dict of the state keys."""
+    st = {"BOOT_DISK": "none", "SYSTEM_DEV": "none", "SYSTEM_FS": "none", "DATA_DEV": "none", "DATA_FS": "none"}
+    boot = boot_disk()
+    if boot:
+        st["BOOT_DISK"] = boot
+        for n, name in partitions(boot):
+            if n == 3:
+                st["SYSTEM_DEV"], st["SYSTEM_FS"] = str(DEV / name), fstype(DEV / name) or "unknown"
+    deadline = time.monotonic() + WAIT
+    others = other_disks(boot)
+    while not others and time.monotonic() < deadline:
+        time.sleep(0.1)
+        others = other_disks(boot)
+    for disk in others:
+        found = data_partition(disk)
+        if found:
+            st["DATA_DEV"], st["DATA_FS"] = str(found[0]), found[1]
+            break
+        log(f"{disk}: no filesystem found on it; left alone")
+    return st
+
+
+def mount_all():
+    st = find()
+    st["SYSTEM_AT"] = st["DATA_AT"] = "none"
+    data_target = ROMS2
+    if st["SYSTEM_DEV"] != "none":
+        if mount(st["SYSTEM_DEV"], st["SYSTEM_FS"], ROMS):
+            st["SYSTEM_AT"] = ROMS
+    else:
+        data_target = ROMS  # no games partition on the boot card: the data card is the games card, as before
+    if st["DATA_DEV"] != "none" and mount(st["DATA_DEV"], st["DATA_FS"], data_target):
+        st["DATA_AT"] = data_target
+    return st
+
+
+def write_state(st):
+    STATE.parent.mkdir(parents=True, exist_ok=True)
+    tmp = STATE.with_name(STATE.name + ".tmp")
+    keys = ["BOOT_DISK", "SYSTEM_DEV", "SYSTEM_FS", "SYSTEM_AT", "DATA_DEV", "DATA_FS", "DATA_AT"]
+    tmp.write_text("".join(f"{k}={st.get(k, 'none')}\n" for k in keys))
+    tmp.chmod(0o644)
+    os.replace(tmp, STATE)
+
+
+def main(argv):
+    if len(argv) == 2 and argv[1] == "mount":
+        try:
+            st = mount_all()
+        except Exception as e:  # never fail the boot
+            log(f"failed: {e}")
+            st = {}
+        try:
+            write_state(st)
+        except OSError as e:
+            log(f"could not write {STATE}: {e}")
+        return 0
+    if len(argv) == 2 and argv[1] == "status":
+        text = read(STATE)
+        print(text if text is not None else "r3i6nos-cards has not run (no /run/r3i6nos/cards)")
+        return 0 if text is not None else 1
+    print("usage: r3i6nos-cards mount | status", file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

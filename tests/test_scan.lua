@@ -35,5 +35,19 @@ assert(joined:find("love115:Checker One", 1, true), "built-in 11.5 app listed: "
 assert(joined:find("love120:Checker One", 1, true), "built-in 12.0 app listed: " .. joined)
 assert(joined:find("native:Input Checker", 1, true), "native title has underscores cleaned: " .. joined)
 assert(count_zeta == 1, "zeta listed once, got " .. count_zeta)
+-- the data card (docs/STORAGE.md): its games are listed too; the same file name on both cards shows once, from the system card
+local data = root .. "-data"
+sh(('mkdir -p "%s/Love 12.0/Data_Game" "%s/Love 11.5"'):format(data, data))
+sh(('touch "%s/Love 12.0/Data_Game/main.lua" "%s/Love 11.5/zeta.love"'):format(data, data))
+list = scan.entries(root, root .. "/launchers", defs, data)
+local seen, zetas = {}, 0
+for _, e in ipairs(list) do
+  seen[e.type .. ":" .. e.title] = e.target
+  if e.title == "zeta" then zetas = zetas + 1 end
+end
+assert(seen["love120:Data Game"] == data .. "/Love 12.0/Data_Game", "a data card game is listed")
+assert(zetas == 1 and seen["love115:zeta"] == root .. "/Love 11.5/zeta.love", "the system card's copy wins until step 2")
+assert(#scan.entries(root, root .. "/launchers", defs, root .. "-no-such-card") > 0, "an absent data card is fine")
+sh(('rm -rf "%s"'):format(data))
 sh(('rm -rf "%s" "%s"'):format(root, defs))
 print("scan: ok")

@@ -44,7 +44,9 @@ Two ways to have that partition:
   leaves the card in place (not ejected) and exits non-zero; the system partitions are never touched by it.
 - **A card already flashed without it:** `scripts/flash-macos.sh --games-only disk5` adds the partition without writing the image (the
   existing partitions are kept; it refuses a card that is not an untouched r3i6nos card).
-- **Two cards:** a second card in TF2, formatted FAT32 or exFAT, labelled `EASYROMS`, with the folders above.
+- **Two cards:** a second card in TF2, formatted exFAT (or FAT32 or ext4), any label, with the folders above. It is the **data card**, mounted at
+  `/roms2` beside the system card's `/roms` (`docs/STORAGE.md`): the boot card can then stay in. A card flashed with `--no-games` (no partition 3) uses
+  the TF2 card as `/roms`, as before.
 
 The games partition is never formatted by the device: only `flash-macos.sh` creates it, once, on a
 card it has just erased (or `--games-only` on a card with free space and no partition 3). Without one, boot still works; the menu is just empty.
