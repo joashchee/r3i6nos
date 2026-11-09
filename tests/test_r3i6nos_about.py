@@ -127,7 +127,7 @@ class About(unittest.TestCase):
     def test_info_has_the_build_the_unit_and_its_cards(self):
         text = self.info()
         for want in ("r3i6nos 0.1.0", "278a84f000 (2026-11-09)", "2026-11-09, GitHub's build", "Rockchip RK3326 R36S", "Debian 12.7",
-                     "4 cores, up to 1512 MHz", "985.4 MB, 597.7 MB free", "48 C", "Mali driver from your card", "(exfat)",
+                     "4 cores, up to 1512 MHz", "1.0 GB, 626.7 MB free", "48 C", "Mali driver from your card", "(exfat)",
                      "11.5, 12.0", "(vfat)", "Native apps  2", "compose, sprites", "wlan0 192.168.1.20/24", "1 h 2 min"):
             self.assertIn(want, text)
         self.assertNotIn("compose-report", text, "a tool's report is not a tool")

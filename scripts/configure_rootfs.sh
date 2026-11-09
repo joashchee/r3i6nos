@@ -73,7 +73,8 @@ mkdir -p "$ROOTFS"/{roms,roms2,boot,opt/love,opt/native_apps,opt/launchers/nativ
 echo "[*] System settings..."
 # Settings > About shows which build this is, and asks GitHub whether it is the newest (only when a person chooses it).
 # VERSION is the release this build belongs to; the commit says exactly what it was built from. R3I6NOS_COMMIT overrides
-# it for a tree without git; safe.directory lets root (CI's sudo) read a checkout another user owns.
+# it for a tree without git; safe.directory lets root (CI's sudo) read a checkout another user owns. sudo drops GITHUB_ACTIONS,
+# so CI says who built it with R3I6NOS_BUILT_BY (build.yml); the first report from a unit showed a CI image as "local".
 git_() { git -c safe.directory="$REPO" -C "$REPO" "$@" 2>/dev/null; }
 commit="${R3I6NOS_COMMIT:-$(git_ rev-parse HEAD || echo unknown)}"
 modified=0
@@ -84,7 +85,7 @@ COMMIT=$commit
 COMMIT_DATE=$(git_ show -s --format=%cs "$commit" || echo unknown)
 MODIFIED=$modified
 BUILT=$(date -u +%Y-%m-%d)
-BUILT_BY=$([ -n "${GITHUB_ACTIONS:-}" ] && echo github || echo local)
+BUILT_BY=${R3I6NOS_BUILT_BY:-$([ -n "${GITHUB_ACTIONS:-}" ] && echo github || echo local)}
 REPO=joashchee/r3i6nos
 EOF
 echo "r3i6nos" > "$ROOTFS/etc/hostname"

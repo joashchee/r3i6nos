@@ -35,6 +35,7 @@ class SystemReport(unittest.TestCase):
         (t / "proc/device-tree/model").write_bytes(b"R36S\0")
         (t / "proc/cpuinfo").write_text("processor : 0\nprocessor : 1\n")
         (t / "proc/meminfo").write_text("MemTotal: 919232 kB\nMemAvailable: 848420 kB\n")
+        (t / "proc/uptime").write_text("754.31 1200.00\n")
         (t / "proc/filesystems").write_text("nodev\tsysfs\n\text4\n\tvfat\n\texfat\n")
         (t / "proc/mounts").write_text(f"/dev/mmcblk0p3 {t / 'sys1'} exfat rw,noatime 0 0\n/dev/mmcblk1p1 {t / 'sys2'} exfat rw,noatime 0 0\n")
         (t / "sys/block/mmcblk0/size").write_text("249737216\n")
@@ -42,7 +43,10 @@ class SystemReport(unittest.TestCase):
         (t / "sys/block/mmcblk1/removable").write_text("1\n")
         (t / "dev/loop-control").write_text("")
         self.cards(SYSTEM_DEV="/dev/mmcblk0p3", SYSTEM_FS="exfat", SYSTEM_AT=str(t / "sys1"), DATA_DEV="/dev/mmcblk1p1", DATA_FS="exfat", DATA_AT=str(t / "sys2"))
-        (t / "bin/systemctl").write_text("#!/bin/sh\necho 'wpa_supplicant.service loaded failed failed WPA supplicant'\n")
+        (t / "bin/systemctl").write_text("#!/bin/sh\ncase \"$1\" in\n"
+                                         "  list-units) echo 'wpa_supplicant.service loaded failed failed WPA supplicant' ;;\n"
+                                         "  is-system-running) echo degraded; exit 1 ;;\n"
+                                         "  list-jobs) echo '12 r3i6nos-net.path start waiting' ;;\nesac\n")
         (t / "bin/systemd-analyze").write_text("#!/bin/sh\necho 'Startup finished in 3.1s (kernel) + 9.2s (userspace) = 12.3s'\n")
         for f in ("systemctl", "systemd-analyze"):
             (t / "bin" / f).chmod(0o755)
@@ -81,7 +85,8 @@ class SystemReport(unittest.TestCase):
         for want in ("app: r3i6nos 0.1.0 (r3i6nos)", "how: Settings > Device reports", "from the data card",
                      "== system ==", "INFO build: r3i6nos 0.1.0, commit 396fcd3000 (2026-11-09), built 2026-11-09 by github",
                      "INFO cpu: 2 CPUs", "INFO memory: total 919232 kB",
-                     "== boot ==", "FAIL failed units: wpa_supplicant.service", "INFO boot time: 3.1s (kernel) + 9.2s (userspace) = 12.3s",
+                     "== boot ==", "FAIL failed units: wpa_supplicant.service", "FAIL system state: degraded", "INFO jobs waiting: r3i6nos-net.path",
+                     "INFO boot time: 3.1s (kernel) + 9.2s (userspace) = 12.3s", "INFO up for: 12.6 min",
                      "== storage ==", "INFO disk mmcblk0: 127.9 GB, boot (system card)", "INFO disk mmcblk1: 32.0 GB, other (data card?), removable",
                      "PASS cards in the slots: 2", "INFO mmc hosts: mmc0, mmc1",
                      "PASS system card: /dev/mmcblk0p3 (exfat) on", "PASS data card: /dev/mmcblk1p1 (exfat) on",
@@ -103,10 +108,14 @@ class SystemReport(unittest.TestCase):
     def test_no_cards_service_no_release_and_a_clean_boot(self):
         (self.t / "run/cards").unlink()
         (self.t / "etc/r3i6nos-release").unlink()
-        (self.t / "bin/systemctl").write_text("#!/bin/sh\n")
+        (self.t / "bin/systemctl").write_text("#!/bin/sh\ncase \"$1\" in is-system-running) echo running ;; esac\n")
+        (self.t / "bin/systemd-analyze").write_text("#!/bin/sh\necho 'Bootup is not yet finished (org.freedesktop.systemd1.Manager.FinishTimestampMonotonic=0).' >&2\nexit 1\n")
         out = self.t / "out"
         self.report(R3I6NOS_REPORT_DIR=str(out))
         text = self.text(out)
+        self.assertIn("PASS system state: running", text)
+        self.assertIn("PASS jobs waiting: none", text)
+        self.assertIn("SKIP boot time: systemd-analyze: Bootup is not yet finished", text, "says why")
         self.assertIn("FAIL r3i6nos-cards: no", text)
         self.assertIn("FAIL build: no /etc/r3i6nos-release", text)
         self.assertIn("PASS failed units: none", text)

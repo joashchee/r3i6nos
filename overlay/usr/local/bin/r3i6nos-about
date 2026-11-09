@@ -67,10 +67,11 @@ def row(key, value):
 
 
 def size(n):
-    for unit, step in (("GB", 1 << 30), ("MB", 1 << 20)):
+    """Decimal, as the device reports and card makers count (1 GB = 10^9 bytes), so About and a report give the same figure."""
+    for unit, step in (("GB", 10 ** 9), ("MB", 10 ** 6)):
         if n >= step:
             return f"{n / step:.1f} {unit}"
-    return f"{n // 1024} KB"
+    return f"{n // 1000} KB"
 
 
 def space(path):

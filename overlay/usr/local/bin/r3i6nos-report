@@ -104,11 +104,19 @@ class Report:
 
 
 def run(cmd, timeout=10):
+    """stdout, or None when it could not run or failed."""
+    code, out, _ = run_full(cmd, timeout)
+    return out if code == 0 else None
+
+
+def run_full(cmd, timeout=10):
+    """(exit status or None, stdout, the first line of stderr): for checks that should say why they failed."""
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
-    except (OSError, subprocess.SubprocessError):
-        return None
-    return r.stdout
+    except (OSError, subprocess.SubprocessError) as e:
+        return None, "", str(e)
+    err = (r.stderr or "").strip().splitlines()
+    return r.returncode, r.stdout, err[0] if err else ""
 
 
 def gb(n):
@@ -150,11 +158,25 @@ def boot(r):
     else:
         failed = [ln.split()[0] for ln in out.splitlines() if ln.strip()]
         r.line("PASS" if not failed else "FAIL", "failed units", ", ".join(failed) if failed else "none")
-    t = run(["systemd-analyze", "time", "--no-pager"])
-    if t and t.strip():
+    # running: the boot finished and nothing failed; degraded: something failed; starting: jobs are still waiting
+    code, state, err = run_full(["systemctl", "is-system-running"])
+    state = state.strip()
+    if state:
+        r.line("PASS" if state == "running" else ("FAIL" if state in ("degraded", "maintenance") else "INFO"), "system state", state)
+    else:
+        r.line("SKIP", "system state", err or "systemctl did not answer")
+    code, jobs, err = run_full(["systemctl", "list-jobs", "--no-legend", "--no-pager", "--plain"])
+    if code is not None and not err:
+        waiting = [ln.split()[1] for ln in jobs.splitlines() if len(ln.split()) >= 2]
+        r.line("PASS" if not waiting else "INFO", "jobs waiting", ", ".join(waiting[:8]) + (" ..." if len(waiting) > 8 else "") if waiting else "none")
+    code, t, err = run_full(["systemd-analyze", "time", "--no-pager"])
+    if code == 0 and t.strip():
         r.line("INFO", "boot time", t.strip().splitlines()[0].replace("Startup finished in ", ""))
     else:
-        r.line("SKIP", "boot time", "systemd-analyze did not answer")
+        r.line("SKIP", "boot time", f"systemd-analyze: {err}" if err else "systemd-analyze did not answer")
+    up = read(PROC / "uptime")
+    if up:
+        r.line("INFO", "up for", f"{float(up.split()[0]) / 60:.1f} min")
 
 
 def disks():

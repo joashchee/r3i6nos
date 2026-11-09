@@ -75,6 +75,12 @@ system card. Its **storage** section:
 **Not answered by a report:** whether the second slot reports a card being put in or taken out while the unit is on (step 5). To find out
 by hand: with the unit on, insert a card in TF2, then run `ls /sys/block` over SSH.
 
-## Untested on the R36S
+## On the R36S (2026-11-10, image `53f46b3`, r3i6nos's own report)
 
-All of step 1: what TF2 shows up as (probably `mmcblk1`), whether it is ready when the service runs, the mounts themselves, and the report.
+- **The system card works by role:** the boot disk is `mmcblk0` (128.2 GB); its partition 3 is mounted at `/roms` (exFAT, 125.7 GB), and the
+  menu and About see it. Writing 32.4 MB/s, reading 65.3 MB/s (16 MB, synced, from the card not the cache).
+- **The kernel has what step 4 needs:** squashfs and loop devices, and exfat, vfat and ext4.
+- The unit has two mmc hosts, `mmc0` and `mmc1`.
+- **Untested:** the data card. No card was in TF2 for that report. To find out: put a card in TF2, boot, run the report (what it shows up as,
+  whether it is ready when the service runs, its speed); then take it out, boot, put it back with the unit on, and run the report again
+  (it lists the disks the kernel sees, so it shows whether the slot reports a card put in while on: step 5).

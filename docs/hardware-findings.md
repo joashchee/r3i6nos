@@ -123,6 +123,14 @@ The first report from a unit (`docs/DEVICE-REPORTS.md`; KlamANSI's Start > Devic
   right buttons is **untested**.
 - The games card being `mmcblk0` means the flashed card itself (TF1), with `flash-macos.sh`'s partition 3: no second card was needed.
 
+### The system, from r3i6nos's own report (2026-11-10, image `53f46b3`)
+
+- The device tree's model string is **"Game Console R35S/R36S fix by lxc"** (the stock card's DTB).
+- systemd 252 on the 4.4 kernel: **no failed units**. Whether the boot reaches "finished" is not known yet (`systemd-analyze time` gave no
+  answer; the report now records why).
+- Two mmc hosts, `mmc0` and `mmc1`; the boot card is `mmcblk0` (128.2 GB). The kernel has **squashfs**, loop devices, exfat, vfat and ext4.
+- The boot card (exFAT partition 3): **32.4 MB/s** writing, **65.3 MB/s** reading.
+
 ### Graphics under LÖVE (NoCoGaMa's device spike, LÖVE 12.0, 2026-11-10)
 
 - LÖVE 12.0.0 runs on the unit with **LuaJIT 2.1.0-beta3, JIT on** (Debian's system LuaJIT, which r3i6nos's builds link), so 11.5 should have

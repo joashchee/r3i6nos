@@ -120,7 +120,8 @@ jobs:
           scripts/check.sh
 
       - name: Build rootfs
-        run: sudo scripts/build_rootfs.sh
+        # sudo drops GITHUB_ACTIONS: say who built it (Settings > About and the system report show it)
+        run: sudo R3I6NOS_BUILT_BY=github scripts/build_rootfs.sh
 
       - name: Smoke test LÖVE under qemu
         # Dummy video and audio: proves it links and its non-graphical modules work, not that it draws.
@@ -149,6 +150,7 @@ jobs:
           sudo test -x $R/opt/love/11.5/bin/love
           # Settings > About: the build says which commit it is, and HTTPS to GitHub has its certificates
           sudo grep -Eq '^COMMIT=[0-9a-f]{40}$' $R/etc/r3i6nos-release
+          sudo grep -qx 'BUILT_BY=github' $R/etc/r3i6nos-release
           sudo test -s $R/etc/ssl/certs/ca-certificates.crt
           sudo test -x $R/usr/local/bin/r3i6nos-about
           # docs/STORAGE.md: the cards are mounted by role with blkid and mount; loveos owns the tools folder deb_watcher writes
