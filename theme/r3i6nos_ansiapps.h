@@ -425,7 +425,22 @@ typedef struct {
     uint32_t *px;               /* R3_W x R3_H, ARGB8888 */
     R3Screen prev;
     int have_prev;
+    int settle;                 /* presents still owed for the last change (r3_video_draw) */
 } R3Video;
+
+/* How many times a changed screen is presented. Once is not enough on the R36S (KMSDRM with the Mali blob): an app that presented
+ * its first screen once and then waited for input stayed black, while LÖVE and apps that present every frame drew. Presenting the
+ * same picture a few more times fills every buffer of the swap chain, so whichever one the display shows holds it. */
+#define R3_VIDEO_SETTLE 4
+
+/* Whether this call presents: always for a change (which owes R3_VIDEO_SETTLE presents in all), then once per call until the debt
+ * is paid; then nothing until the next change, so an idle app does not keep the GPU busy. Pure, for tests. */
+static inline int r3_video_due(R3Video *v, int changed) {
+    if (changed) v->settle = R3_VIDEO_SETTLE;
+    if (v->settle <= 0) return 0;
+    v->settle--;
+    return 1;
+}
 
 /* Paint every cell into 640x480 ARGB pixels. */
 static inline void r3_render(const R3Screen *s, uint32_t *px) {
@@ -453,16 +468,17 @@ static inline int r3_video_init(R3Video *v, SDL_Renderer *r) {
     return v->tex && v->px;
 }
 
-/* Draw the screen; the pixels are rebuilt only when a cell changed (or force is set, after an expose). */
+/* Draw the screen; the pixels are rebuilt only when a cell changed (or force is set, after an expose). Call it every pass of the main
+ * loop, not only after input: a change is presented over the next R3_VIDEO_SETTLE calls (keep the loop short while v->settle > 0). */
 static inline void r3_video_draw(R3Video *v, SDL_Renderer *r, const R3Screen *s, int force) {
-    if (force || !v->have_prev || memcmp(&v->prev, s, sizeof *s) != 0) {
+    int changed = force || !v->have_prev || memcmp(&v->prev, s, sizeof *s) != 0;
+    if (changed) {
         r3_render(s, v->px);
         SDL_UpdateTexture(v->tex, NULL, v->px, R3_W * (int)sizeof(uint32_t));
         v->prev = *s;
         v->have_prev = 1;
-        force = 1;
     }
-    if (force) {
+    if (r3_video_due(v, changed)) {
         SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
         SDL_RenderClear(r);
         SDL_RenderCopy(r, v->tex, NULL, NULL);

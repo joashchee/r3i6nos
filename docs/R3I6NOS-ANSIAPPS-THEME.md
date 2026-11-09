@@ -80,7 +80,10 @@ Keep the screen composition in a pure module (the menu's `view.lua`) so luajit c
 
 **Native (C, SDL2)**: `theme/r3i6nos_ansiapps.h` is the C twin of the Lua theme (single header, compile with `-I theme` and SDL2's flags): the
 screen (`R3Screen`), text and boxes, the top bar, the command line, the list dialog, the button and key maps, and `R3Video`, which paints
-the cells into a texture and lets SDL scale it by a whole number. `apps/commander-native/commander.c` is the reference app. The two themes
+the cells into a texture and lets SDL scale it by a whole number. **Call `r3_video_draw` on every pass of the main loop**, not only after
+input: a change is presented `R3_VIDEO_SETTLE` (4) times over the next calls, because on the R36S a screen presented once stayed black
+(Commander and the IO Checker started blank, 2026-11-09); keep the loop short while `settle > 0` (Commander waits 16 ms then, 500 ms
+idle). `apps/commander-native/commander.c` is the reference app. The two themes
 cannot drift on the font: both hash all 256 scaled glyphs and the same number is in `tests/test_theme.lua` and in `r3i6nos_ansiapps.h`.
 The font data it builds on: `theme/r3i6nos_vga8x16.h` has the 256 glyphs (`r3i6nos_vga8x16[i][row]`, top bit leftmost) and the Unicode of each
 (`r3i6nos_cp437[i]`). Use the same 64x24 grid of 10x20 cells, the same row roles, colours and mapping from 8x16 to 10x20 as above.

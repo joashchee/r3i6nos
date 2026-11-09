@@ -1543,7 +1543,7 @@ int main(int argc, char **argv) {
         compose(a, &screen, now);
         r3_video_draw(&video, r, &screen, a->force);
         a->force = 0;
-        if (a->pending) {
+        if (a->pending && video.settle == 0) { /* after "Testing..." has been presented in full: the job blocks for seconds */
             int job = a->pending;
             a->pending = 0;
             if (job == H_FILES) run_files(a);

@@ -159,3 +159,12 @@ The first report from a unit (`docs/DEVICE-REPORTS.md`; KlamANSI's Start > Devic
 - **Untested on the unit:** the speaker heard, the jack's input device and its name, the headphones heard. r3i6nos's device report's
   `sound` section records the path and the jack.
 
+## A frame presented once is not shown (native SDL2, 2026-11-09)
+
+- Seen: Commander and the native IO Checker started on a black screen; **any key brought the screen up** (the maintainer, one unit).
+  Both drew their first screen, presented it once with `SDL_RenderPresent`, and waited for input.
+- So on this stack (SDL 2.26.5, KMSDRM, the Mali blob from the stock card) a present does not reach the panel by itself: the
+  frame appears when a later one is presented. LÖVE, KlamANSI and the old Input Checker present continually and never showed it.
+- Rule for native apps: present each change several times, or every frame. `theme/r3i6nos_ansiapps.h`'s `r3_video_draw` presents
+  each change 4 times (`R3_VIDEO_SETTLE`); apps that draw on their own must do the same. Whether 4 is enough is **untested** on the unit.
+

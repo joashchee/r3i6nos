@@ -84,6 +84,16 @@ if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     done
 else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
 
+step "theme video: presenting (theme/r3i6nos_ansiapps.h)"
+if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
+    tv_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-tv.XXXXXX")"
+    # shellcheck disable=SC2046,SC2086  # sdl2-config prints separate flags; $werror is empty or one flag
+    if cc -std=c11 -Wall -Wextra $werror -O2 -I theme $(sdl2-config --cflags) -o "$tv_bin" tests/test_theme_video.c $(sdl2-config --libs) -lm; then
+        SDL_VIDEODRIVER=dummy "$tv_bin" || fail=1
+    else echo "FAIL: tests/test_theme_video.c does not compile"; fail=1; fi
+    rm -f "$tv_bin"
+else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
+
 step "device report helper (theme/r3i6nos_report.h)"
 if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     report_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-report.XXXXXX")"

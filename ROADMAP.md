@@ -157,6 +157,9 @@ All of it goes in the gitignored `local_hardware_assets/`.
   and a native ARM64 `.deb` (C, SDL2), built into the image at `/opt/loveos/defaults`; the menu and `deb_watcher.py` list them beside the card's
   files. Tested on a laptop (logic, fake LÖVE, native draw and self-test); the `native` CI job and qemu smoke are new and **not yet green**.
   **Not yet seen on a real R36S.** The checker is how the real button layout gets recorded (below).
+- [ ] **Commander and the native IO Checker start black on the unit** (reported 2026-11-09; any key then brings the screen up, which
+  confirms the cause: a frame presented once is not shown, `docs/hardware-findings.md`). Fix in the theme, untested there: each
+  change is now presented 4 times (`r3_video_draw`, `docs/R3I6NOS-ANSIAPPS-THEME.md`). Confirm on the unit that both draw at once.
 - [x] **The date and time** (2026-11-09, `docs/CLOCK.md`): asked on a card's first boot and in Settings > Date and time, set by the root
   helper `r3i6nos-clock` (with the zone and the RTC), restored at boot and saved at shutdown and hourly. Tested on a Mac only.
   - [ ] **On the unit:** set it on first boot, power off for a while, boot, and read r3i6nos's report (`clock` section): whether there

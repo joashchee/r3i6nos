@@ -1840,7 +1840,8 @@ int main(int argc, char **argv) {
     int typing = 0, force = 1;
     while (!app.quit) {
         SDL_Event e;
-        int have = (app.mode == M_JOB) ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, 500);
+        /* a job polls; so does a screen still being presented (r3_video_draw owes presents after a change); else wait */
+        int have = (app.mode == M_JOB) ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, (force || video.settle > 0) ? 16 : 500);
         while (have) {
             switch (e.type) {
             case SDL_QUIT: app.quit = 1; break;
