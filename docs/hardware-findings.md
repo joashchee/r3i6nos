@@ -133,11 +133,15 @@ The first report from a unit (`docs/DEVICE-REPORTS.md`; KlamANSI's Start > Devic
 
 ### Graphics under LÖVE (NoCoGaMa's device spike, LÖVE 12.0, 2026-11-10)
 
-- LÖVE 12.0.0 runs on the unit with **LuaJIT 2.1.0-beta3, JIT on** (Debian's system LuaJIT, which r3i6nos's builds link), so 11.5 should have
-  it on too (not yet seen).
+- LÖVE 12.0.0 runs on the unit with **LuaJIT 2.1.0-beta3, JIT on** (Debian's system LuaJIT, which r3i6nos's builds link).
+- **LÖVE 11.5 runs with the JIT off** (its spike report, 2026-11-10), with the same LuaJIT: LÖVE 11.5 calls `jit.off()` itself on arm and arm64
+  (`src/modules/love/jitsetup.lua` in its source, citing LuaJIT issue #285: compiled code can only go in a short memory range on arm64, which
+  other libraries fill, and performance is unreliable). Expect pure-Lua work about 10 times slower under 11.5 than under 12.0; a game should
+  not turn the JIT back on.
 - Renderer **OpenGL ES 3.2**, `v1.r13p0-01rel0`, GPU **ARM Mali-G31**: the blob from the user's card works with SDL's KMSDRM and gbm.
-- The window is 640x480 fullscreen. With vsync off it still draws at 60 fps, which suggests KMSDRM waits for each page flip: frame rates top
-  out at the panel's 60 Hz, so a program's headroom shows in its CPU time, not its fps.
+- The window is 640x480 fullscreen. **Under LÖVE 12.0 (SDL3)** it draws at 60 fps even with vsync off; **under LÖVE 11.5 (SDL2 2.26.5)** the
+  same spike with vsync off drew at 82-88 fps. So the 60 fps ceiling is 12.0's, not the panel's (likely SDL3's KMSDRM waiting for each flip; not checked): under
+  12.0 a program's headroom shows in its CPU time, not its fps. (Corrected 2026-11-10: an earlier note put the ceiling on the panel.)
 - LÖVE treats the pad as a gamepad (`isGamepad` true), through SDL's own database or `run_app.sh`'s mapping: which one, and whether its buttons
   then match the raw layout, is not known yet.
 - A LÖVE program's save folder is `/home/loveos/.local/share/love/<identity>` on ROOTFS, not the games card.

@@ -60,8 +60,25 @@ The device spike's Report page writes `/roms/NoCoGaMa/r36s-report.txt` (was `spi
 - **System:** LuaJIT 2.1.0-beta3 with the JIT on; OpenGL ES 3.2 on the Mali-G31; 640x480 fullscreen; all 17 raw buttons seen; LÖVE sees a gamepad.
 - **Bench** (600 steps of 1/60 s, goal p99 at most 8 ms): 200 actors 0.086 ms a step (p99 0.11), 400 actors 0.17 ms, the all-pairs worst case
   at 400 actors 3.45 ms (p99 3.54). About 29 times the Mac's JIT-on figures.
-- **Draw:** 200 actors at 60 fps as rects (0.95 ms of CPU) and as printed glyphs (5.28 ms). 60 fps is the panel's ceiling here (see
-  `docs/hardware-findings.md`), so the CPU time is the headroom.
+- **Draw:** 200 actors at 60 fps as rects (0.95 ms of CPU) and as printed glyphs (5.28 ms). 60 fps is LÖVE 12.0's ceiling here, not the
+  panel's (11.5 drew faster, below), so the CPU time is the headroom.
 - **Card:** `io.popen` + `ls` lists the folder as `loveos`, and a temp file renamed over an existing one works on exFAT: the app's game list and
   saves can work as designed.
-- **Still to run:** the spike under LÖVE 11.5 (its go/no-go), the app itself, and whether a LÖVE app returns to the menu.
+- **Still to run:** the app itself, and whether a LÖVE app returns to the menu.
+
+## The device spike under LÖVE 11.5 (2026-11-10)
+
+**GO for the plan's rule, with the JIT off: 13 PASS, 1 FAIL.** LÖVE 11.5 turns LuaJIT's JIT off on arm64 itself (`docs/hardware-findings.md`),
+so its figures are about 10 times 12.0's:
+
+| Bench (p99, goal 8 ms) | 11.5, JIT off | 12.0, JIT on (two runs) |
+|---|---|---|
+| player rule, 200 / 400 actors | 1.04 / 1.93 ms | 0.11-0.26 / 0.21-0.35 ms |
+| all-pairs, 200 / 400 actors | 5.75 / **20.3 ms (FAIL)** | 0.93-1.69 / 3.54-6.03 ms |
+| draw 200 actors, rects / glyphs | 88 / 82 fps (0.89 / 1.74 ms CPU) | 60 / 60 fps (0.95-1.01 / 5.25-5.28 ms CPU) |
+
+12.0 was run twice (the second time with the rebuilt spike that saves one file a runtime): the same code took up to 1.7 times as long the
+second time, with more garbage a step, so the JIT's results vary between runs. Read 12.0's figures as a range.
+
+The FAIL is the all-pairs worst case, not the plan's rule: keep collisions to the player against the rest, or cap an all-pairs world near
+200 actors under 11.5. Card, pad and GPU as under 12.0.
