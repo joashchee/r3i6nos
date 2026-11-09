@@ -27,10 +27,14 @@ export SDL_NOMOUSE=1
 
 # Buttons and axes are MEASURED (input checker on a real R36S, 2026-11-07; docs/hardware-findings.md "Input layout"), 0-based as SDL
 # counts: B 0, A 1, X 2, Y 3, L1-R2 4-7, D-pad 8-11 (buttons, not a hat), Select 12, Start 13, L3 14, R3 15, Fn 16; axes 0-3.
-# UNVERIFIED: the GUID (03000000341200006048000000010000) is still the spec's guess, never read from a unit. SDL applies a mapping only
-# to a pad whose GUID matches, so if it does not, nothing here takes effect and apps must read raw buttons (as the checkers and Commander do).
-# Get the real one from `scripts/device-info.sh` ("input devices") or SDL's GetJoystickGUID, then put it here.
-export SDL_GAMECONTROLLERCONFIG="${SDL_GAMECONTROLLERCONFIG:-03000000341200006048000000010000,R36S Handheld,a:b1,b:b0,x:b2,y:b3,leftshoulder:b4,rightshoulder:b5,lefttrigger:b6,righttrigger:b7,dpup:b8,dpdown:b9,dpleft:b10,dpright:b11,back:b12,start:b13,leftstick:b14,rightstick:b15,guide:b16,leftx:a0,lefty:a1,rightx:a2,righty:a3,platform:Linux,}"
+# GUID READ from the unit (KlamANSI's device report, 2026-11-10): SDL 2.26.5 calls the pad "GO-Super Gamepad",
+# 1900bb3e4b4800000011000000010000 (bus 0x19 host, the name's CRC bb3e, vendor 0x484b, product 0x1100, version 0x0100), 17 buttons,
+# 4 axes, 0 hats. SDL's own database maps that pad differently (Select, Start and Fn wrong), and a mapping given here replaces it.
+# The second line is the same pad with the CRC zeroed, as SDL before 2.26 builds the GUID (an app bundling an older SDL) and as
+# 2.26 falls back to. UNTESTED: that an app using SDL's gamepad API then sees these buttons (the checkers and Commander read raw ones).
+R36S_PAD="a:b1,b:b0,x:b2,y:b3,leftshoulder:b4,rightshoulder:b5,lefttrigger:b6,righttrigger:b7,dpup:b8,dpdown:b9,dpleft:b10,dpright:b11,back:b12,start:b13,leftstick:b14,rightstick:b15,guide:b16,leftx:a0,lefty:a1,rightx:a2,righty:a3,platform:Linux,"
+export SDL_GAMECONTROLLERCONFIG="${SDL_GAMECONTROLLERCONFIG:-1900bb3e4b4800000011000000010000,R36S GO-Super Gamepad,$R36S_PAD
+190000004b4800000011000000010000,R36S GO-Super Gamepad,$R36S_PAD}"
 
 KEYS_CFG="${R3I6NOS_KEYS_CFG:-/etc/love_keys.cfg}"
 GPTOKEYB_PID=""

@@ -132,3 +132,17 @@ cols 0-47                                      cols 48-63
 - **Release:** free with no shareware notices (the host never loads the notice code). KlamANSI's licence grants no redistribution, so the package carries a grant
   (free to use and pass on, unmodified; holder ansiapps), confirmed by the maintainer 2026-11-08.
 - **The device report** (2026-11-09, rule 9): Start > Device report on the canvas and `klamansi --report` write `/roms/KlamANSI/r36s-report.txt` (system and the pad's GUID, card, load time, typed lines, frames, paint, memory; timed in a throwaway runtime). The first thing to run on a unit.
+
+## 7. First run on a real R36S (device report, 2026-11-10)
+
+KlamANSI 0.1.0 ran on one unit under r3i6nos and wrote its device report: 19 PASS, 1 FAIL. The figures are in
+`docs/hardware-findings.md` ("First device report"); the report itself is kept in the KlamANSI repo (`r36s/reports/`).
+
+- **Passed:** start-up 597 ms (goal 3 s); every typed line 38-47 ms (goal 100 ms); screen paint 4.6 ms (goal 10 ms); peak memory 47 MB;
+  exFAT on `/roms`, including the rename-over that saves rely on; SDL KMSDRM and ALSA; one pad, its GUID read.
+- **Failed:** a frame took 33.6 ms on average (33.9 at most) against 33 ms. Two thirds of it is KlamANSI's shared `viewScreen`
+  (`public/screens.js`), the rest the R36S host's own copying. **Fix (2026-11-10, KlamANSI repo `r36s/host/r36s-host.js`):** the clear is one
+  copy, the blit hoists its lookups, and the side column is redrawn only when it changes. The cells are identical (601 frames of a random
+  session compared with the old code); in QuickJS on the Mac a frame went from 1.6 to 1.3 ms, which would be about 27 ms on the unit.
+  **Not yet measured on the unit:** the next report says.
+- **Still not tried on the unit:** the feel of the pad (keyboard, pointer, radial), sound being heard, a pulled or full card.

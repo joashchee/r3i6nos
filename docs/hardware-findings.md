@@ -95,7 +95,29 @@ Raw button numbers as LÖVE reports them (counting from 1; SDL's own index is on
   the checker read them through the mapping), so anything that needs the real layout should read raw buttons or
   set its own `SDL_GAMECONTROLLERCONFIG`. `run_app.sh` now carries this layout in its default mapping (2026-11-07), but its **GUID is still the
   spec's guess**, never read from a unit, so SDL may not apply it: read the real one from `device-info.sh` ("input devices").
+  **Read 2026-11-10** (below): `1900bb3e4b4800000011000000010000`, now in `run_app.sh`.
 - `apps/input-checker-love/model.lua` (`LAYOUT`) and `apps/input-checker-native/input_checker.c` (`B_*`) hold these numbers.
 - A report that the event lines looked inverted (UP on press, DOWN on release) was not reproduced by reading the code;
   the checker's event lines now say whether SDL reports the button held at that moment, so a real inversion shows.
 
+## First device report (KlamANSI, 2026-11-10, one R36S, r3i6nos booted)
+
+The first report from a unit (`docs/DEVICE-REPORTS.md`; KlamANSI's Start > Device report, a native SDL2 and QuickJS app installed from
+`native_deb/` by `deb_watcher.py`). What it settles:
+
+| What | Measured |
+|---|---|
+| Kernel | Linux 4.4.189 aarch64 (the stock kernel, as captured) |
+| CPU | 4 cores, part `0xd04` (Cortex-A35), **1512 MHz** max (not 1.3 GHz as the plans guessed) |
+| Memory | 919232 kB total (about 898 MB for Linux), 848420 kB available with KlamANSI running |
+| SDL | **2.26.5** (Debian 12's), video driver **KMSDRM**: a native app draws on the panel with the Mali blob from the card |
+| Sound | one ALSA card, `rockchip,rk817-codec` (RK817 PMIC codec); SDL opens it with the `alsa` driver, one output device. Not yet heard |
+| Pad | 1, **"GO-Super Gamepad"**, GUID **`1900bb3e4b4800000011000000010000`**, 17 buttons, 4 axes, 0 hats (the measured layout above) |
+| Games card | the flashed card's partition 3, `/dev/mmcblk0p3` on `/roms`, **exFAT**, 125.7 GB; `loveos` can make a folder, write, rename over a file, read back and delete |
+| Speed (KlamANSI) | its scripts load in 597 ms; a typed line runs and draws in 38-47 ms; a frame of its screen took 33.6 ms (goal 33); a whole 640 x 480 true-colour paint 4.6 ms. About 20 times the Mac's times (M-series, same QuickJS) |
+| Memory (KlamANSI) | peak 47 MB |
+
+- The GUID decodes as bus `0x19` (host), CRC `bb3e` of the name (SDL 2.26 adds it), vendor `0x484b`, product `0x1100`, version `0x0100`.
+  `run_app.sh` maps it with and without the CRC (SDL before 2.26 leaves it zero). Whether an app using SDL's gamepad API then sees the
+  right buttons is **untested**.
+- The games card being `mmcblk0` means the flashed card itself (TF1), with `flash-macos.sh`'s partition 3: no second card was needed.

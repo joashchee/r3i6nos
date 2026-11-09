@@ -41,7 +41,12 @@ grep -q 'LABEL=EASYROMS /roms' "$R/etc/fstab"   || fail "fstab games card"
 grep -q 'nofail' "$R/etc/fstab"                 || fail "fstab nofail"
 [ -L "$R/etc/systemd/system/multi-user.target.wants/loveos.service" ] || fail "unit not enabled"
 # run_app.sh's default pad mapping carries the measured layout (docs/hardware-findings.md): buttons, not a hat
-M="$(grep '^export SDL_GAMECONTROLLERCONFIG' overlay/usr/local/bin/run_app.sh)"
+# ... under the GUID read from the unit (KlamANSI's device report, 2026-11-10), with and without the name's CRC; and it reaches SDL as two lines
+C="$(bash -c 'unset SDL_GAMECONTROLLERCONFIG; eval "$(sed -n "/^R36S_PAD=/,/}\"\$/p" overlay/usr/local/bin/run_app.sh)"; printf %s "$SDL_GAMECONTROLLERCONFIG"')"
+M="$C"
+[ "$(printf '%s\n' "$C" | grep -c '^1900bb3e4b4800000011000000010000,R36S GO-Super Gamepad,a:b1,')" = 1 ] || fail "run_app.sh mapping lacks the unit's GUID"
+[ "$(printf '%s\n' "$C" | grep -c '^190000004b4800000011000000010000,R36S GO-Super Gamepad,a:b1,')" = 1 ] || fail "run_app.sh mapping lacks the CRC-less GUID"
+case "$C" in *03000000341200006048*) fail "run_app.sh still has the spec's guessed GUID" ;; esac
 for tok in a:b1 b:b0 x:b2 y:b3 leftshoulder:b4 rightshoulder:b5 lefttrigger:b6 righttrigger:b7 dpup:b8 dpdown:b9 dpleft:b10 dpright:b11 back:b12 start:b13 leftstick:b14 rightstick:b15 leftx:a0 lefty:a1 rightx:a2 righty:a3; do
     case ",$M" in *",$tok,"*) ;; *) fail "run_app.sh mapping lacks $tok" ;; esac
 done

@@ -58,7 +58,7 @@ All of it goes in the gitignored `local_hardware_assets/`.
 - [ ] **Run `scripts/device-info.sh` on the R36S** (stock OS booted, over SSH) and keep the output in `local_hardware_assets/info/`.
 - [x] **Confirm the board** is RK3326 (spec section 1): yes, see Phase 1b.
 - [x] **Capture the gamepad mapping** on a real unit (2026-11-07, `docs/hardware-findings.md` "Input layout"): `run_app.sh`'s `SDL_GAMECONTROLLERCONFIG` now has the measured buttons and axes (D-pad as buttons 8-11, not a hat; tested as text).
-  - [ ] **Read the pad's real GUID** (`scripts/device-info.sh`, "input devices") and put it in that mapping: it is still the spec's guess, so SDL may apply the mapping to nothing. **Untested on the R36S:** whether any SDL gamepad mapping takes effect.
+  - [x] **Read the pad's real GUID** (2026-11-10, KlamANSI's device report): "GO-Super Gamepad", `1900bb3e4b4800000011000000010000`, now in `run_app.sh`'s mapping with and without the name's CRC (`docs/hardware-findings.md`, "First device report"). **Untested on the R36S:** whether an app using SDL's gamepad API then sees the right buttons.
 - [x] **Kernel:** reuse the stock 4.4.189 for now (it is what the DTBs and the Mali blob go with); mainline is phase C above.
 - [ ] **Decide gptokeyb:** keep or drop it, and `etc/love_keys.cfg` with it.
 
@@ -90,8 +90,7 @@ All of it goes in the gitignored `local_hardware_assets/`.
 - [x] **Getting the card's modules and blob into the image:** `debugfs` on the Mac (`docs/making-a-card.md`), no Linux needed.
 - [ ] **systemd 252 on kernel 4.4:** unknown until it boots (phase 5). Watch for cgroup, seccomp and `/proc` errors in the journal.
 - [x] **Games card:** `flash-macos.sh` makes it by default (2026-11-07; `--no-games` skips it, `--games-only` adds it to a card already flashed) and adds partition 3 (exFAT, `EASYROMS`, the stock card used exfat too) in the
-  space after ROOTFS and creates `Love 11.5/`, `Love 12.0/`, `native_deb/`; the MBR edit is tested (`add_games_partition.py`). **Untried on a real
-  card** (the first hardware try hit a root-owned MBR file, fixed; every failure now explains itself, tested with fake `diskutil`/`dd` in `tests/test_flash_macos.sh`). Without it, use a second card labelled `EASYROMS` in TF2 (`docs/making-a-card.md`).
+  space after ROOTFS and creates `Love 11.5/`, `Love 12.0/`, `native_deb/`; the MBR edit is tested (`add_games_partition.py`). **Works on a real card** (2026-11-10, KlamANSI's report: exFAT `/dev/mmcblk0p3` on `/roms`, writable by `loveos`, rename over a file works; earlier, the first hardware try hit a root-owned MBR file, fixed; every failure now explains itself, tested with fake `diskutil`/`dd` in `tests/test_flash_macos.sh`). Without it, use a second card labelled `EASYROMS` in TF2 (`docs/making-a-card.md`).
 
 ## 3. Phase 2: rootfs in CI (no hardware)
 
@@ -169,7 +168,7 @@ All of it goes in the gitignored `local_hardware_assets/`.
     `configure_rootfs.sh` now unwires and masks it (r3i6nos-net starts `wpa_supplicant` itself, only on request). **Untested:** a boot of a rebuilt image without the message, and joining Wi-Fi with the service masked.
   - **macOS will not mount BOOT** (`fsck_msdos` is clean). Suspect: FAT hidden-sectors field is 0 (`mkfs.fat -h`). Not yet fixed.
 - [ ] **A LÖVE 11.5 game and a 12.0 game** run and return to the menu.
-- [ ] **A `.deb`** installs, launches and uninstalls by removal.
+- [ ] **A `.deb`** installs, launches and uninstalls by removal. Installs and launches: yes (KlamANSI, 2026-11-10). Uninstall by removal: not tried.
 - [ ] **Fix** what hardware shows; record each unit tested in the README.
 
 ## 7. Phase 6: slim and release
@@ -203,7 +202,9 @@ All of it goes in the gitignored `local_hardware_assets/`.
   - [x] **Package** (2026-11-08): `KlamANSI.deb` (needs only SDL2, libc, libm) installed by the real `deb_watcher` and launched in a clean Debian 12 under Docker; CI workflow green on GitHub (2026-11-08, manual run: `npm test`, then the arm64 build and smoke test).
   - [x] **Export to the card** (2026-11-08): `.ANS` with SAUCE (and anim, txt, md, ascii) to `/roms/KlamANSI/export/`; round-trips through KlamANSI's importer; not tried in a real viewer.
   - [x] Grant confirmed (2026-11-08, maintainer), marker deleted.
-  - [ ] **A try on a real R36S.**
+  - [x] **First run on a real R36S** (2026-11-10, its device report; `docs/KLAMANSI-PORT.md` section 7): installed from `native_deb/`, ran, wrote the report. 19 PASS, 1 FAIL: a frame took 33.6 ms against 33 ms.
+    - [x] **Frame fix** (2026-11-10, KlamANSI repo): the host's clear, blit and side column cut a frame from 1.6 to 1.3 ms in QuickJS on the Mac, cells identical. **Blocked on the next report** from the unit to confirm it is under 33 ms there.
+  - [ ] **A full try on the unit:** the pad's feel (keyboard, pointer, radial), sound heard, files across a reboot, a pulled card.
 
 ## 9. NoCoGaMa (a LÖVE app; code in the private NoCoGaMa repo, `joashchee/nocogama`; status and what r3i6nos gives it: `docs/NOCOGAMA-PORT.md`; its plan: that repo's `docs/R3I6NOS-PORT-PLAN.md`)
 
@@ -212,6 +213,7 @@ All of it goes in the gitignored `local_hardware_assets/`.
   - [x] **Spike, laptop part** (2026-11-08): fixed-step benchmark, 200 actors: 0.003 ms a step with the JIT on and 0.084 ms with it off on this Mac (the Cortex-A35 is a guess, about 10x); the same code under real LÖVE 11.5 and 12.0 headless from this repo's `vendor/love-mac`. **Finding: the official macOS LÖVE 11.5 runs LuaJIT with the JIT off, 12.0 with it on.** The device's own state is the first thing its Info page will say; r3i6nos links Debian's system LuaJIT, so the arm64 builds should have it on (**expected, not seen**). This says nothing about drawing.
   - [x] **Device spike written** (`spike/device/`, `scripts/build_spike.sh`): six pages (Info with the pad's real GUID, Buttons, Card, Bench, Draw, Report to `/roms/NoCoGaMa/spike-result.txt`); its model and card code tested with luajit. **Not drawn by LÖVE, not run on a unit.**
   - [ ] **Maintainer, on the Mac then the R36S:** run the two spike `.love` files (instructions in the NoCoGaMa README and roadmap) and paste `spike-result.txt` back. Its answers (the pad's GUID, write to `/roms`, exFAT, whether a LÖVE app returns to the menu) are also open items here: section 6 and `docs/KLAMANSI-PORT.md`. Go/no-go on 60 Hz at 200 actors on both runtimes.
+    KlamANSI's report (2026-11-10) already answered three of them for any app: the pad's GUID, `/roms` writable by `loveos`, and exFAT with rename over a file. Left for this spike: a LÖVE app returning to the menu, the JIT, the speed.
   - [x] **Data core written** (2026-11-08, committed in the NoCoGaMa repo): `json`, `project` (validate, migrate, atomic save that leaves the old file whole when a rename fails), the fixed 60 Hz world and the six behaviours; its luajit tests pass and the data core (save, load, play to a win) runs under real LÖVE 11.5 and 12.0 headless. About 0.01 ms a step for 200 actors on a Mac. Still no editor, no screens beyond the empty state, nothing drawn.
   - [x] **Editor, play and files, export** (2026-11-08, committed in the NoCoGaMa repo, 13 commits): four editor tabs, undo, several scenes with doors, naming, editing texts; the Games screen with an on-screen keyboard, library and autosave; export to `Love 11.5/<Name>/` and `Love 12.0/<Name>/` (this repo's `menu/scan.lua` lists it, checked by its test); the LÖVE API rule tested against a strict stub. Its `scripts/check.sh` passes (re-run today), including headless real LÖVE 11.5 (JIT off) and 12.0 (JIT on). **Not done:** a frame drawn by LÖVE with a display (`pixels.lua`, `theme.draw`, the glyph atlas); `io.popen` + `ls` for the game list and a rename over an existing file on exFAT, on the unit.
   - [x] **Release workflow** (`.github/workflows/release.yml`, `ci.yml`, `scripts/release_assets.sh`): a `v*` tag builds both `.love` files twice (byte-identical), checksums them, drafts a release; refuses while `RELEASE_NOTES.md` or `package/copyright` is a draft. Tested locally; **never run on GitHub**.
@@ -251,4 +253,3 @@ Command-line tools other apps can call (NoCoGaMa's sprites, jingles and animatio
 - [ ] **The NoCoGaMa app's own Device report** (its menu) before its release.
 - [ ] **The first reports from a unit:** run each on the R36S, give the files to Claude, and update the ports and these roadmaps from them. Blocked on the maintainer and a unit.
 - [ ] Rebuild an image so the menu has Settings > Device reports (the tools' reports also run over SSH without it).
-
