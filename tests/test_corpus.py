@@ -3,6 +3,7 @@ Each file's opening by its app is checked by scripts/build_corpus.sh, which need
 import gzip
 import importlib.util
 import io
+import subprocess
 import sys
 import tarfile
 import tempfile
@@ -46,6 +47,16 @@ class Corpus(unittest.TestCase):
         self.assertEqual(set(listed), set(extra.FORMATS))
         for name, size in listed.items():
             self.assertEqual((FILES / name).stat().st_size, size, f"{name}: the manifest's size is out of date (run scripts/build_corpus.sh)")
+
+    def test_every_file_is_committed(self):
+        # .gitignore ignores *.love and *.deb; the corpus's own are excepted, and a file on disk but not in git passes here but not in CI
+        try:
+            out = subprocess.run(["git", "-C", str(ROOT), "ls-files", "corpus/files"], capture_output=True, text=True, check=True).stdout
+        except (OSError, subprocess.CalledProcessError):
+            self.skipTest("not a git checkout")
+        tracked = {Path(p).name for p in out.splitlines()}
+        on_disk = {p.name for p in FILES.iterdir()}
+        self.assertEqual(on_disk - tracked, set(), "corpus files not in git (an ignore rule?): git add -f them, or fix .gitignore")
 
     def test_small(self):
         sizes = {p.name: p.stat().st_size for p in FILES.iterdir()}
