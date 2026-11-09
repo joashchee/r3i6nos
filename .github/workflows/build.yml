@@ -139,7 +139,7 @@ jobs:
 
       - name: Sanity check the tree
         run: |
-          set -e
+          set -ex  # -x: a failing test shows which one
           R=build/rootfs
           sudo test -L $R/etc/systemd/system/multi-user.target.wants/loveos.service
           sudo test -x $R/usr/local/bin/loveos-session
@@ -155,7 +155,8 @@ jobs:
           sudo test -x $R/usr/local/bin/r3i6nos-cards
           sudo test -x $R/usr/sbin/blkid -o -x $R/sbin/blkid
           sudo test -x $R/usr/bin/mount -o -x $R/bin/mount
-          test "$(sudo stat -c %U $R/opt/loveos/bin)" = loveos
+          # by number: the runner's own uid 1000 is "runner", so a name would be the host's, not the rootfs's
+          test "$(sudo stat -c %u $R/opt/loveos/bin)" = 1000
           # the built-in default apps (the input checker three ways)
           sudo test -f "$R/opt/loveos/defaults/Love 11.5/Input_Checker.love"
           sudo test -f "$R/opt/loveos/defaults/Love 12.0/Input_Checker.love"
