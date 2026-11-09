@@ -105,4 +105,10 @@ line) and `tests/test_reports.lua`.
 `animate` on the tools path, and its report from Settings > Device reports passed **15 of 15**. All 10 commands in its `commands.txt` took
 0.02 to 0.05 s (0.3 s in all), with at most 11.5 MB of memory: a bytecode-only QuickJS executable starts and runs a small command in a few
 hundredths of a second on the Cortex-A35. The report times commands and checks their exit status; it does not compare output with Node on
-the unit (that comparison was made under Docker). Composer and Painter: not yet run there.
+the unit (that comparison was made under Docker).
+
+**Composer** passed **20 of 20**, 11.5 MB peak. Its commands take about 18 times as long as this Mac's native QuickJS build (Neumetik's
+ratio too): `kits` 4.05 s (0.23 s on the Mac), a 4.1 s jingle in 1.67 s, a 26.7 s ambient loop in 16.35 s (1.6x real time), MIDI and notation
+0.03-0.19 s. So an app on the unit makes its loops and jingles ahead of time, never while a person waits.
+
+Painter: not yet run there.
