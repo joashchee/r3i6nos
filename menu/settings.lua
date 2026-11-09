@@ -9,6 +9,7 @@ local battery = require("battery")
 local reports = require("reports")
 local about = require("about")
 local clock = require("clock")
+local mixer = require("mixer")
 
 local settings = {}
 
@@ -16,9 +17,10 @@ local settings = {}
 settings.TIMEOUT = { default = 30, scan = 45, wifi = 75, wired = 60, test = 60, ["ssh-enable"] = 45 }
 
 --- A closed dialog. io is the helper's client (menu/netclient.lua); bat the battery module (menu/battery.lua); rep the device reports
---- (menu/reports.lua); ab Settings > About (menu/about.lua); clk the Date and time dialog (menu/clock.lua). Tests pass fakes.
-function settings.new(io, bat, rep, ab, clk)
-  return { stack = {}, io = io, bat = bat or battery, rep = rep or reports, ab = ab or about, clk = clk or clock }
+--- (menu/reports.lua); ab Settings > About (menu/about.lua); clk the Date and time dialog (menu/clock.lua); mx the Sound mixer
+--- (menu/mixer.lua). Tests pass fakes.
+function settings.new(io, bat, rep, ab, clk, mx)
+  return { stack = {}, io = io, bat = bat or battery, rep = rep or reports, ab = ab or about, clk = clk or clock, mx = mx or mixer }
 end
 
 local function top(s) return s.stack[#s.stack] end
@@ -259,6 +261,11 @@ local function root(s)
     { label = "Network", hint = "Wired and Wi-Fi: status, setup, test, instructions", run = networkMenu },
     { label = "SSH", hint = "Log in from a computer (off until you start it)", run = sshMenu },
     { label = "Battery", hint = "Charge, health and how much each app uses", run = batteryMenu },
+    { label = "Sound mixer", hint = "Volume, boost and the sound chip, with a test sound", run = function(sx)
+        local n = sx.mx.new()
+        n.kind, n.title = "mixer", "Sound mixer"
+        push(sx, n)
+      end },
     { label = "Date and time", hint = "Set the clock and time zone (kept across restarts)", run = function(sx) clockNode(sx, false) end },
     { label = "Device reports", hint = "Check this unit for an app's maker (a file for Claude)", run = reportsMenu },
     { label = "About", hint = "Version, updates, this unit and licences", run = aboutMenu },
@@ -333,6 +340,8 @@ function settings.press(s, action)
       pop(s)
       setClock(s, n)
     end
+  elseif n.kind == "mixer" then
+    if s.mx.press(n, action) == "close" then pop(s) end
   elseif n.kind == "busy" then
     if action == "back" then pop(s) end -- stop waiting; the answer, if it comes, is ignored
   end

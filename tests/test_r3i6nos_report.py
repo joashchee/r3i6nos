@@ -49,7 +49,9 @@ class SystemReport(unittest.TestCase):
                                          "  list-jobs) echo '12 r3i6nos-net.path start waiting' ;;\nesac\n")
         (t / "bin/systemd-analyze").write_text("#!/bin/sh\necho 'Startup finished in 3.1s (kernel) + 9.2s (userspace) = 12.3s'\n")
         (t / "bin/r3i6nos-sound").write_text("#!/bin/sh\necho 'cards: 1'\necho 'card 0 playback path: SPK (of OFF RCV SPK HP)'\n"
-                                             "echo 'jack: rk817-sound Headphone Jack'\necho 'headphones: out'\n")
+                                             "echo 'jack: rk817-sound Headphone Jack'\necho 'headphones: out'\n"
+                                             "echo 'volume keys: none'\necho 'mixer Volume: 16 of 0-20, 80%, -8.0 dB'\n"
+                                             "echo 'mixer Boost: 2 of 0-6, 33%, +6.0 dB'\n")
         (t / "bin/r3i6nos-clock").write_text("#!/bin/sh\necho 'now: 2026-11-09 21:30:00 +0800'\necho 'set by a person: 2026-11-09 21:29:40 +0800'\n"
                                              "echo 'rtc: none'\n")
         for f in ("systemctl", "systemd-analyze", "r3i6nos-sound", "r3i6nos-clock"):
@@ -92,7 +94,8 @@ class SystemReport(unittest.TestCase):
                      "== boot ==", "FAIL failed units: wpa_supplicant.service", "FAIL system state: degraded", "INFO jobs waiting: r3i6nos-net.path",
                      "INFO boot time: 3.1s (kernel) + 9.2s (userspace) = 12.3s", "INFO up for: 12.6 min",
                      "== sound ==", "PASS card 0 playback path: SPK (of OFF RCV SPK HP)", "INFO jack: rk817-sound Headphone Jack",
-                     "INFO headphones: out", "INFO heard: not measured",
+                     "INFO headphones: out", "INFO volume keys: none", "PASS mixer Volume: 16 of 0-20, 80%, -8.0 dB",
+                     "PASS mixer Boost: 2 of 0-6, 33%, +6.0 dB", "INFO heard: not measured",
                      "== clock ==", "INFO now: 2026-11-09 21:30:00 +0800", "PASS set by a person: 2026-11-09 21:29:40", "INFO rtc: none",
                      "== storage ==", "INFO disk mmcblk0: 127.9 GB, boot (system card)", "INFO disk mmcblk1: 32.0 GB, other (data card?), removable",
                      "PASS cards in the slots: 2", "INFO mmc hosts: mmc0, mmc1",
@@ -133,6 +136,7 @@ class SystemReport(unittest.TestCase):
         text = self.text(self.t / "sys2/r3i6nos")
         self.assertIn("FAIL card 0 playback path: OFF (of OFF SPK HP)", text)
         self.assertIn("INFO jack: none", text)
+        self.assertIn("FAIL mixer Volume: missing", text)
 
     def test_a_card_found_but_not_mounted(self):
         self.cards(SYSTEM_DEV="/dev/mmcblk0p3", SYSTEM_FS="exfat", SYSTEM_AT=str(self.t / "sys1"), DATA_DEV="/dev/mmcblk1p1", DATA_FS="ntfs")

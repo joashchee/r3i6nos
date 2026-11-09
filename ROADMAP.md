@@ -183,6 +183,12 @@ All of it goes in the gitignored `local_hardware_assets/`.
     `r3i6nos-sound` (`r3i6nos-sound.service`, before the menu): SPK, or HP while headphones are in, following the device tree's
     `Headphone Jack` switch. Tested on a laptop against a fake `amixer` and event device. **Untested on the unit:** the speaker
     heard, the jack switch's input device existing, HP heard. r3i6nos's device report now has a `sound` section that says.
+  - [x] **Volume, Boost, the volume keys and Settings > Sound mixer** (2026-11-09, `docs/SOUND.md`): software volumes from
+    `/etc/asound.conf` (the codec has none), made and restored at boot and saved at shutdown by `r3i6nos-sound`, which also follows
+    the volume keys; the mixer screen with a test sound. Tested on a Mac only (fake `amixer`, `aplay`, `alsactl`; the menu's logic in luajit).
+    - [ ] **On the unit:** read r3i6nos's report (`sound`: Volume and Boost present, the volume-key device); in Settings > Sound mixer
+      play the music and move Volume and Boost (heard, and Boost's clipping); press the volume keys in an app; restart and see the
+      levels kept. Then update `docs/SOUND.md` and `docs/hardware-findings.md`.
   - Done (2026-11-07, one R36S, Panel 4 DTB from the stock card): ArkOS splash, kernel, initramfs, root by UUID, systemd to
     the end of boot, text console on the panel. `EASYROMS` timeout is expected (no such partition).
   - **Open:** after that nothing is drawn. Blocked on the log: flash an image injected with `R3I6NOS_BOOT_DEBUG=1`, boot, read

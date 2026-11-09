@@ -1,16 +1,18 @@
 [Unit]
-Description=Turn on the speaker (the RK817 codec's Playback Path) and follow the headphone jack
+Description=Sound: the speaker on, the volumes made and restored, then follow the headphone jack and the volume keys
 Documentation=file:/usr/local/bin/r3i6nos-sound
 # After alsa-utils restores the saved mixer state, so a saved OFF cannot undo this; before the menu, so its first sound is heard.
 After=sound.target alsa-restore.service alsa-state.service
 Before=loveos.service
 
 [Service]
-# The path is set before the unit counts as started (ExecStartPre), so the menu starts with it; then the main process keeps
-# reading the jack's switch (and exits at once when the unit has none).
+# The volumes and the path are set before the unit counts as started (ExecStartPre), so the menu starts with them; then the main
+# process keeps reading the jack's switch and the volume keys (and exits at once when the unit has neither).
 Type=simple
 ExecStartPre=/usr/local/bin/r3i6nos-sound set
 ExecStart=/usr/local/bin/r3i6nos-sound start
+# the mixer's levels (Volume, Boost, set in Settings > Sound mixer or with the keys) for the next boot
+ExecStop=/usr/local/bin/r3i6nos-sound save
 Restart=on-failure
 RestartSec=5
 

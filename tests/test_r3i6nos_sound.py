@@ -34,6 +34,10 @@ if args[2] == "cget":
     print("  : values=%d" % cur)
 elif args[2] == "cset":
     open(state, "w").write(str(items.index(args[4])))
+elif args[2] == "scontents":
+    print(open(os.environ["FAKE_MIXER"]).read(), end="")
+elif args[2:4] == ["-q", "sset"]:
+    pass
 '''
 
 
@@ -67,6 +71,13 @@ class Sound(unittest.TestCase):
                     "R3I6NOS_AMIXER": str(t / "amixer"), "R3I6NOS_SOUND_WAIT": "0"}
         os.environ["FAKE_STATE"] = str(t / "state")
         os.environ["FAKE_LOG"] = str(t / "log")
+        os.environ["FAKE_MIXER"] = str(t / "mixer")
+        (t / "mixer").write_text("")
+        for tool in ("aplay", "alsactl"):   # log their arguments (and aplay how many bytes it was given)
+            (t / tool).write_text("#!/bin/sh\necho \"%s $* $(wc -c | tr -d ' ')\" >> \"$FAKE_LOG\"\n" % tool)
+            (t / tool).chmod(0o755)
+        self.env.update({"R3I6NOS_APLAY": str(t / "aplay"), "R3I6NOS_ALSACTL": str(t / "alsactl"),
+                         "R3I6NOS_ALSA_STATE": str(t / "asound.state")})
         self.m = load(self.env)
 
     def tearDown(self):
@@ -103,7 +114,7 @@ class Sound(unittest.TestCase):
         (self.t / "proc/asound/cards").write_text(" 1 [usb]: USB-Audio - Some USB DAC\n")
         rc, _, err = self.main("start")
         self.assertEqual(rc, 0)
-        self.assertIn("nothing to do", err)
+        self.assertIn("the output is left as it is", err)
         self.assertNotIn("cset", (self.t / "log").read_text())
 
     def test_no_sound_card_is_not_an_error(self):
@@ -151,6 +162,103 @@ class Sound(unittest.TestCase):
         self.assertIn("card 0 playback path: OFF (of OFF RCV SPK HP HP_NO_MIC BT SPK_HP)", out)
         self.assertIn("jack: rk817-sound Headphone Jack", out)
         self.assertIn("headphones: out", out)
+
+    # ---- the mixer: the software volumes, the volume keys, saving -------------------------------------------------------------
+
+    MIXER = ("Simple mixer control 'Boost',0\n  Capabilities: volume\n  Limits: 0 - 6\n"
+             "  Front Left: 2 [33%] [6.00dB]\n  Front Right: 2 [33%] [6.00dB]\n"
+             "Simple mixer control 'Playback Path',0\n  Capabilities: enum\n  Items: 'OFF' 'SPK' 'HP'\n  Item0: 'SPK'\n"
+             "Simple mixer control 'Volume',0\n  Capabilities: volume\n  Limits: 0 - 20\n"
+             "  Front Left: 16 [80%] [-8.00dB]\n  Front Right: 16 [80%] [-8.00dB]\n")
+
+    def log(self):
+        return (self.t / "log").read_text() if (self.t / "log").exists() else ""
+
+    def key_dev(self, n, name, words):
+        d = self.t / f"sys/class/input/event{n}/device/capabilities"
+        d.mkdir(parents=True)
+        (d / "key").write_text(words + "\n")
+        (d.parent / "name").write_text(name + "\n")
+        (self.t / f"dev/input/event{n}").write_bytes(b"")
+
+    def test_reads_the_mixer(self):
+        (self.t / "mixer").write_text(self.MIXER)
+        c = {x["name"]: x for x in self.m.mixer_controls()}
+        self.assertEqual(sorted(c), ["Boost", "Playback Path", "Volume"])
+        self.assertEqual((c["Volume"]["value"], c["Volume"]["min"], c["Volume"]["max"]), (16, 0, 20))
+        self.assertEqual(self.m.describe(c["Volume"]), "16 of 0-20, 80%, -8.0 dB")
+        self.assertEqual(self.m.describe(c["Boost"]), "2 of 0-6, 33%, +6.0 dB")
+        self.assertEqual(self.m.describe(c["Playback Path"]), "SPK (of OFF SPK HP)")
+
+    def test_first_boot_makes_the_volumes_and_sets_safe_levels(self):
+        (self.t / "mixer").write_text(self.MIXER)
+        rc, _, _ = self.main("set")
+        self.assertEqual(rc, 0)
+        log = self.log()
+        self.assertIn("aplay -q -D default -t raw -f S16_LE -c 2 -r 44100 4096", log)   # opened once, with silence
+        self.assertIn("-c 0 -q sset Volume 80%", log)
+        self.assertIn("-c 0 -q sset Boost 2", log)
+        self.assertNotIn("alsactl", log)
+
+    def test_saved_levels_are_restored(self):
+        (self.t / "mixer").write_text(self.MIXER)
+        (self.t / "asound.state").write_text("state.rockchiprk817c {\n control.9 {\n  iface MIXER\n  name Boost\n }\n}\n")
+        self.main("set")
+        log = self.log()
+        self.assertIn(f"alsactl -f {self.t / 'asound.state'} restore 0", log)
+        self.assertNotIn("sset Volume", log)
+
+    def test_a_state_from_before_the_volumes_gets_the_defaults(self):
+        (self.t / "mixer").write_text(self.MIXER)
+        (self.t / "asound.state").write_text("state.rockchiprk817c {\n control.1 {\n  name 'Playback Path'\n }\n}\n")
+        self.main("set")
+        self.assertIn("sset Boost 2", self.log())
+
+    def test_start_does_not_open_the_device_again(self):
+        self.main("start")
+        self.assertNotIn("aplay", self.log())
+
+    def test_no_volume_control_is_said(self):
+        _, _, err = self.main("set")
+        self.assertIn("no Volume control", err)
+
+    def test_save(self):
+        rc, _, _ = self.main("save")
+        self.assertEqual(rc, 0)
+        self.assertIn(f"alsactl -f {self.t / 'asound.state'} store 0", self.log())
+
+    def test_finds_the_volume_keys(self):
+        # KEY_VOLUMEDOWN 114 and KEY_VOLUMEUP 115 are bits 50 and 51 of the second 64-bit word (the words are printed highest first)
+        self.key_dev(0, "gpio-keys-vol", "c000000000000 0")
+        self.key_dev(1, "odroidgo3-joypad", "ffff0000 0 0 0 0")   # BTN_ codes only: higher words
+        self.key_dev(2, "power", "10000000000000 0")              # KEY_POWER 116 (bit 52): not a volume key
+        self.assertEqual([n for _, n in self.m.key_devices()], ["gpio-keys-vol"])
+
+    def test_bitmap(self):
+        self.assertEqual(self.m.bitmap("1 0"), 1 << self.m.LONG_BITS)
+        self.assertEqual(self.m.bitmap("4"), 4)
+
+    def test_volume_keys_step_the_volume(self):
+        with redirect_stderr(io.StringIO()):
+            self.m.handle(event(0x01, 115, 1) + event(0, 0, 0))   # up, pressed
+            self.m.handle(event(0x01, 114, 2))                     # down, held (repeat)
+            self.m.handle(event(0x01, 114, 0))                     # released: nothing
+        steps = [ln for ln in self.log().splitlines() if "sset Volume" in ln]
+        self.assertEqual(steps, ["-c 0 -q sset Volume 1+", "-c 0 -q sset Volume 1-"])
+
+    def test_start_follows_the_keys_without_a_jack(self):
+        self.key_dev(0, "gpio-keys-vol", "c000000000000 0")
+        with mock.patch.object(self.m, "follow", return_value=0) as follow:
+            self.main("start")
+        follow.assert_called_once()
+        self.assertEqual([n for _, n in follow.call_args[0][0]], ["gpio-keys-vol"])
+
+    def test_status_lists_the_mixer_and_keys(self):
+        (self.t / "mixer").write_text(self.MIXER)
+        _, out, _ = self.main("status")
+        self.assertIn("volume keys: none", out)
+        self.assertIn("mixer Volume: 16 of 0-20, 80%, -8.0 dB", out)
+        self.assertIn("mixer Boost: 2 of 0-6, 33%, +6.0 dB", out)
 
 
 if __name__ == "__main__":

@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
-"""r3i6nos-sound - turn the R36S's sound output on, and follow the headphone jack.
+"""r3i6nos-sound - the R36S's sound: the output on, the volume and the volume keys, the headphone jack (docs/SOUND.md).
 
-    r3i6nos-sound start     set the output once (speaker, or headphones when plugged in), then follow the jack until stopped
-    r3i6nos-sound set       set the output once and exit
-    r3i6nos-sound status    print each card's "Playback Path" and the jack, one "key: value" a line (the device report reads it)
+    r3i6nos-sound start     the mixer and output once (as set), then follow the headphone jack and the volume keys until stopped
+    r3i6nos-sound set       the mixer's controls made and restored, the output set (speaker, or headphones when plugged in); exit
+    r3i6nos-sound save      keep the mixer's levels for the next boot (alsactl store; at shutdown)
+    r3i6nos-sound status    one "key: value" a line: each card's Playback Path, the jack, every mixer control (the device report reads it)
 
-Why: the stock 4.4 kernel's RK817 codec driver (Rockchip BSP) powers its outputs only through the ALSA mixer control
-"Playback Path" (OFF, RCV, SPK, HP, HP_NO_MIC, BT, SPK_HP, ...), which starts at OFF. On Android the audio HAL sets it; on Debian
-nothing does, so every app opened the sound card, played, and nothing was heard. The device tree's simple-audio-card has a
-headphone-detect GPIO ("Headphone Jack"), which the kernel shows as an input device with the SW_HEADPHONE_INSERT switch; the
-codec does not move the path itself when it changes, so this program does: HP when plugged in, SPK when not.
+The output: the stock 4.4 kernel's RK817 codec driver (Rockchip BSP) powers its outputs only through the ALSA control "Playback Path"
+(OFF, RCV, SPK, HP, ...), which starts at OFF; on Android the audio HAL sets it, on Debian nothing did, so nothing was heard. The
+device tree's simple-audio-card has a headphone-detect GPIO ("Headphone Jack", SW_HEADPHONE_INSERT on an input device); the codec does
+not move the path itself, so this does: HP when plugged in, SPK when not.
 
-Runs as root from r3i6nos-sound.service, after the sound card appears and before the menu. Cards without a "Playback Path"
-control are left alone. Standard library and amixer (alsa-utils) only.
+The volume: the driver has no volume control (its DAC level is fixed by the device tree's spk-volume, about -1 dB, near full), so
+/etc/asound.conf sends every app's sound through two software volumes on card 0: "Volume" (-40 to 0 dB) and "Boost" (0 to +18 dB, for
+quiet sound: it clips what is already loud). ALSA makes them when a program first opens the default device, so this opens it for a
+moment at boot, then restores the saved levels (alsactl), or on a first boot sets Volume 80% and Boost +6 dB. The volume keys (KEY_VOLUMEUP
+and KEY_VOLUMEDOWN on an input device) step Volume; Settings > Sound mixer in the menu changes all of them.
 
-Overrides, for tests: R3I6NOS_PROC (/proc), R3I6NOS_SYS (/sys), R3I6NOS_DEV (/dev), R3I6NOS_AMIXER (amixer),
-R3I6NOS_SOUND_WAIT (10: seconds to wait for a sound card at start).
+Runs as root from r3i6nos-sound.service, before the menu. Standard library and alsa-utils (amixer, aplay, alsactl) only.
+Overrides, for tests: R3I6NOS_PROC (/proc), R3I6NOS_SYS (/sys), R3I6NOS_DEV (/dev), R3I6NOS_AMIXER (amixer), R3I6NOS_APLAY (aplay),
+R3I6NOS_ALSACTL (alsactl), R3I6NOS_ALSA_STATE (/var/lib/alsa/asound.state), R3I6NOS_SOUND_WAIT (10: seconds to wait for a card).
 """
 import fcntl
 import os
@@ -32,11 +36,18 @@ PROC = Path(ENV("R3I6NOS_PROC", "/proc"))
 SYS = Path(ENV("R3I6NOS_SYS", "/sys"))
 DEV = Path(ENV("R3I6NOS_DEV", "/dev"))
 AMIXER = ENV("R3I6NOS_AMIXER", "amixer")
+APLAY = ENV("R3I6NOS_APLAY", "aplay")
+ALSACTL = ENV("R3I6NOS_ALSACTL", "alsactl")
+STATE = Path(ENV("R3I6NOS_ALSA_STATE", "/var/lib/alsa/asound.state"))
 WAIT = float(ENV("R3I6NOS_SOUND_WAIT", "10"))
 CONTROL = "Playback Path"
+VOLUME, BOOST = "Volume", "Boost"         # the software volumes /etc/asound.conf makes on card 0
+DEFAULTS = ((VOLUME, "80%"), (BOOST, "2"))  # Boost steps are 3 dB: 2 is +6 dB
 
-EV_SW = 0x05
+EV_KEY, EV_SW = 0x01, 0x05
 SW_HEADPHONE_INSERT = 0x02
+KEY_VOLUMEDOWN, KEY_VOLUMEUP = 114, 115
+LONG_BITS = 64 if sys.maxsize > 2 ** 32 else 32   # the kernel prints capability bitmaps in words of a C long
 EVENT = struct.Struct("llHHi")          # struct input_event on 64-bit Linux: timeval, type, code, value
 
 
@@ -53,13 +64,19 @@ def cards():
     return [int(m.group(1)) for m in re.finditer(r"^\s*(\d+) \[", text, re.M)]
 
 
-def amixer(*args):
+def run(cmd, data=None):
     try:
-        p = subprocess.run([AMIXER, *args], capture_output=True, text=True, timeout=5)
+        p = subprocess.run(cmd, input=data or b"", capture_output=True, timeout=10)   # never this program's own stdin
     except (OSError, subprocess.TimeoutExpired) as e:
         return 1, str(e)
-    return p.returncode, p.stdout + p.stderr
+    return p.returncode, (p.stdout + p.stderr).decode(errors="replace")
 
+
+def amixer(*args):
+    return run([AMIXER, *args])
+
+
+# ---- the output path ------------------------------------------------------------------------------------------------------------
 
 def path_control(card):
     """(items, current item) of the card's Playback Path, or None when it has none."""
@@ -77,20 +94,61 @@ def choose(items, headphones):
     return next((w for w in want if w in items), None)
 
 
-def jack_devices():
-    """Event devices that have the headphone-insert switch (/sys/class/input/eventN/device/capabilities/sw, a hex bitmap)."""
+def apply(headphones):
+    """Set every card's Playback Path for the speaker or the headphones. Returns how many cards were set."""
+    done = 0
+    for card in cards():
+        ctl = path_control(card)
+        if ctl is None:
+            continue
+        items, current = ctl
+        want = choose(items, headphones)
+        if want is None:
+            log(f"card {card}: no speaker or headphone item in {items}")
+            continue
+        if current == want:
+            done += 1
+            continue
+        rc, out = amixer("-c", str(card), "cset", "name=" + CONTROL, want)
+        if rc == 0:
+            log(f"card {card}: {CONTROL} {current} -> {want}")
+            done += 1
+        else:
+            log(f"card {card}: could not set {CONTROL} to {want}: {out.strip()}")
+    return done
+
+
+# ---- input devices: the jack and the volume keys ---------------------------------------------------------------------------------
+
+def bitmap(text):
+    """A capabilities file (hex words, the highest first, each a C long) as one integer."""
+    value = 0
+    for w in text.split():
+        value = (value << LONG_BITS) | int(w, 16)
+    return value
+
+
+def devices_with(kind, bits):
+    """[(event device, name)] of input devices whose capabilities/<kind> has any of these bits."""
     found = []
     base = SYS / "class/input"
     for ev in sorted(base.glob("event*"), key=lambda p: int(p.name[5:]) if p.name[5:].isdigit() else 0):
         try:
-            words = (ev / "device/capabilities/sw").read_text().split()
-        except OSError:
+            caps = bitmap((ev / "device/capabilities" / kind).read_text())
+        except (OSError, ValueError):
             continue
-        bits = int(words[-1], 16) if words else 0      # the lowest word is last; switch 2 is in it
-        if bits & (1 << SW_HEADPHONE_INSERT):
+        if any(caps & (1 << b) for b in bits):
             name = (ev / "device/name").read_text().strip() if (ev / "device/name").exists() else ev.name
             found.append((DEV / "input" / ev.name, name))
     return found
+
+
+def jack_devices():
+    return devices_with("sw", [SW_HEADPHONE_INSERT])
+
+
+def key_devices():
+    return devices_with("key", [KEY_VOLUMEUP, KEY_VOLUMEDOWN])
 
 
 def jack_state(fd):
@@ -119,29 +177,91 @@ def headphones_in(devices):
     return False
 
 
-def apply(headphones):
-    """Set every card's Playback Path for the speaker or the headphones. Returns how many cards were set."""
-    done = 0
-    for card in cards():
-        ctl = path_control(card)
-        if ctl is None:
-            continue
-        items, current = ctl
-        want = choose(items, headphones)
-        if want is None:
-            log(f"card {card}: no speaker or headphone item in {items}")
-            continue
-        if current == want:
-            done += 1
-            continue
-        rc, out = amixer("-c", str(card), "cset", "name=" + CONTROL, want)
-        if rc == 0:
-            log(f"card {card}: {CONTROL} {current} -> {want}")
-            done += 1
-        else:
-            log(f"card {card}: could not set {CONTROL} to {want}: {out.strip()}")
-    return done
+# ---- the mixer ------------------------------------------------------------------------------------------------------------------
 
+def mixer_controls(card=0):
+    """[{name, caps, min, max, value, percent, db, items, item}] of the card's simple mixer controls (amixer scontents)."""
+    rc, out = amixer("-c", str(card), "scontents")
+    if rc != 0:
+        return []
+    found, cur = [], None
+    for line in out.splitlines():
+        m = re.match(r"Simple mixer control '(.*)',(\d+)", line)
+        if m:
+            cur = {"name": m.group(1), "caps": "", "items": [], "item": None, "value": None}
+            found.append(cur)
+            continue
+        if cur is None:
+            continue
+        s = line.strip()
+        if s.startswith("Capabilities:"):
+            cur["caps"] = s.split(":", 1)[1].strip()
+        elif s.startswith("Limits:"):
+            m = re.search(r"(-?\d+) - (-?\d+)", s)
+            if m:
+                cur["min"], cur["max"] = int(m.group(1)), int(m.group(2))
+        elif s.startswith("Items:"):
+            cur["items"] = re.findall(r"'([^']*)'", s)
+        elif s.startswith("Item0:"):
+            m = re.search(r"'([^']*)'", s)
+            cur["item"] = m.group(1) if m else None
+        elif cur["value"] is None:
+            # the first channel's value: "Front Left: 16 [80%] [-8.00dB]" (softvol) or "Mono: Playback 200 [78%] [-10.00dB] [on]"
+            m = re.match(r"[A-Za-z ]+: (?:Playback )?(-?\d+)(?: \[(\d+)%\])?(?: \[(-?[\d.]+)dB\])?", s)
+            if m:
+                cur["value"] = int(m.group(1))
+                cur["percent"] = m.group(2)
+                cur["db"] = m.group(3)
+    return found
+
+
+def describe(c):
+    if c["items"]:
+        return f"{c['item']} (of {' '.join(c['items'])})"
+    if c["value"] is None:
+        return c["caps"] or "?"
+    text = f"{c['value']} of {c.get('min', 0)}-{c.get('max', '?')}"
+    if c.get("percent"):
+        text += f", {c['percent']}%"
+    if c.get("db"):
+        text += f", {float(c['db']):+.1f} dB"
+    return text
+
+
+def mixer_init():
+    """Make the software volumes (ALSA makes them when the default device is first opened), then restore or set their levels."""
+    silence = bytes(4096)   # 1024 frames of 16-bit stereo: a 23 ms open of the default device, through /etc/asound.conf
+    rc, out = run([APLAY, "-q", "-D", "default", "-t", "raw", "-f", "S16_LE", "-c", "2", "-r", "44100"], silence)
+    if rc != 0:
+        log("could not open the default sound device to make the volumes: " + out.strip()[:200])
+    names = {c["name"] for c in mixer_controls()}
+    if VOLUME not in names:
+        log(f"no {VOLUME} control (is /etc/asound.conf in place?); the volume keys will do nothing")
+    saved = STATE.read_text(errors="replace") if STATE.exists() else ""
+    if f"name {BOOST}" in saved or f"name '{BOOST}'" in saved:
+        rc, out = run([ALSACTL, "-f", str(STATE), "restore", "0"])
+        if rc != 0:
+            log("alsactl restore: " + out.strip()[:200])
+        return
+    for name, value in DEFAULTS:   # a first boot, or a state saved before the volumes existed: never start at the +18 dB maximum
+        if name in names:
+            amixer("-c", "0", "-q", "sset", name, value)
+
+
+def step_volume(up):
+    rc, out = amixer("-c", "0", "-q", "sset", VOLUME, "1+" if up else "1-")
+    if rc != 0:
+        log("volume key: " + out.strip()[:200])
+
+
+def save():
+    rc, out = run([ALSACTL, "-f", str(STATE), "store", "0"])
+    if rc != 0:
+        log("alsactl store: " + out.strip()[:200])
+    return 0
+
+
+# ---- the loop -------------------------------------------------------------------------------------------------------------------
 
 def wait_for_card():
     end = time.monotonic() + WAIT
@@ -151,7 +271,7 @@ def wait_for_card():
 
 
 def follow(devices):
-    """Read the jack's switch events and move the path with them, until stopped."""
+    """Read the jack's switch and the volume keys and act on them, until stopped."""
     fds = {}
     for path, name in devices:
         try:
@@ -160,7 +280,7 @@ def follow(devices):
             log(f"cannot read {path} ({name}): {e}")
     if not fds:
         return 0
-    log("following the headphone jack: " + ", ".join(fds.values()))
+    log("following: " + ", ".join(sorted(set(fds.values()))))
     while True:
         ready, _, _ = select.select(list(fds), [], [])
         for fd in ready:
@@ -168,11 +288,13 @@ def follow(devices):
 
 
 def handle(data):
-    """Move the path for each headphone-switch event in a read from an event device."""
+    """Act on each event in a read from an event device: the headphone switch moves the path; a volume key (pressed or held) steps Volume."""
     for i in range(0, len(data) - EVENT.size + 1, EVENT.size):
         _, _, etype, code, value = EVENT.unpack_from(data, i)
         if etype == EV_SW and code == SW_HEADPHONE_INSERT:
             apply(bool(value))
+        elif etype == EV_KEY and code in (KEY_VOLUMEUP, KEY_VOLUMEDOWN) and value in (1, 2):
+            step_volume(code == KEY_VOLUMEUP)
 
 
 def status():
@@ -188,6 +310,10 @@ def status():
     print("jack: " + (", ".join(n for _, n in devices) if devices else "none"))
     if devices:
         print("headphones: " + ("in" if headphones_in(devices) else "out"))
+    keys = key_devices()
+    print("volume keys: " + (", ".join(n for _, n in keys) if keys else "none"))
+    for c in mixer_controls():
+        print(f"mixer {c['name']}: {describe(c)}")
     return 0
 
 
@@ -195,18 +321,21 @@ def main(argv):
     cmd = argv[1] if len(argv) > 1 else "start"
     if cmd == "status":
         return status()
+    if cmd == "save":
+        return save()
     if cmd not in ("start", "set"):
-        print(__doc__.strip().splitlines()[2], file=sys.stderr)
+        print("\n".join(__doc__.strip().splitlines()[2:6]), file=sys.stderr)
         return 2
     if not wait_for_card():
         log("no sound card")
         return 0
-    devices = jack_devices()
-    if apply(headphones_in(devices)) == 0:
-        log(f"no card has a {CONTROL} control; nothing to do")
-        return 0
-    if cmd == "start" and devices:
-        return follow(devices)
+    if cmd == "set":
+        mixer_init()   # once a boot: ExecStartPre runs set, then start
+    jack, keys = jack_devices(), key_devices()
+    if apply(headphones_in(jack)) == 0:
+        log(f"no card has a {CONTROL} control; the output is left as it is")
+    if cmd == "start" and (jack or keys):
+        return follow(jack + keys)
     return 0
 
 

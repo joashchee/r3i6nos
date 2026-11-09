@@ -138,6 +138,41 @@ local function drawClock(scr, n)
   return "Changing " .. names[n.c.field]
 end
 
+-- Sound mixer: a row a control (its name, a bar for a level, its value), then the test sound. Whole pages when there are many.
+local function drawMixer(scr, n)
+  local mixer = require("mixer")
+  local st = theme.STYLE
+  local page, pages = mixer.page(n)
+  scr:box(FULL.col, FULL.row, FULL.w, FULL.h, {
+    title = n.title, right = pages > 1 and ("Page %d/%d"):format(page, pages) or nil,
+    foot = "Left/Right Change  L1/R1 By 5  B Back",
+  })
+  local x0, bx, bw, vx = FULL.col + 2, FULL.col + 20, 22, FULL.col + 44
+  local function row(y, i, label, frac, value)
+    local s = (i == n.sel) and st.select or st.strong
+    scr:fill(x0, y, 16, 1, 32, s.fg, s.bg)
+    scr:text(x0 + 1, y, theme.fit(label, 14), s.fg, s.bg)
+    if frac then
+      local filled = math.floor(bw * frac + 0.5)
+      for k = 0, bw - 1 do scr:put(bx + k, y, k < filled and 219 or 176, st.body.fg, st.body.bg) end
+    end
+    scr:text(frac and vx or bx, y, theme.fit(value, FULL.w - 2 - (frac and vx or bx)), st.body.fg, st.body.bg)
+  end
+  if #n.controls == 0 then
+    scr:text(x0, FULL.row + 2, "No mixer controls on the sound card.", st.warn.fg, st.warn.bg)
+  end
+  local first = (page - 1) * mixer.PER
+  for k = 1, mixer.PER do
+    local c = n.controls[first + k]
+    if not c then break end
+    local value = mixer.valueText(c)
+    if #c.items > 0 then value = "< " .. value .. " >" end
+    row(FULL.row + 1 + k, first + k, c.name, mixer.fraction(c), value)
+  end
+  row(FULL.row + FULL.h - 3, mixer.rows(n), "Test sound", nil, "< " .. mixer.SOUNDS[n.sound] .. " >")
+  return mixer.hint(n)
+end
+
 --- Draw the Settings dialog's top screen. Returns the reply (a hint) and the breadcrumb for the command line.
 function view.dialog(scr, d)
   local n = settings.node(d)
@@ -147,7 +182,8 @@ function view.dialog(scr, d)
   elseif n.kind == "osk" then hint = drawOsk(scr, n)
   elseif n.kind == "busy" then hint = drawBusy(scr, n)
   elseif n.kind == "confirm" then hint = drawConfirm(scr, n)
-  elseif n.kind == "clock" then hint = drawClock(scr, n) end
+  elseif n.kind == "clock" then hint = drawClock(scr, n)
+  elseif n.kind == "mixer" then hint = drawMixer(scr, n) end
   local titles = {}
   for i, node in ipairs(d.stack) do titles[i] = node.title end
   return hint, table.concat(titles, " > "):lower()

@@ -8,7 +8,7 @@ mounted (so the boot card can stay in), else on the system card, for Claude to r
 starts it (it is linked into /opt/loveos/bin as a report); over SSH, run `r3i6nos-report`. It runs as loveos and needs no root.
 
 Sections: system (the build, kernel, CPU, memory), boot (units that failed, how long boot took), sound (the RK817's Playback
-Path and the headphone jack, from r3i6nos-sound), clock (r3i6nos-clock status), storage (every mmc disk and slot, what
+Path, the headphone jack, the volume keys and the mixer, from r3i6nos-sound), clock (r3i6nos-clock status), storage (every mmc disk and slot, what
 r3i6nos-cards mounted, the kernel's filesystems, loop devices, and on each mounted card a write/rename/read/delete check and its speed).
 
 Standard library only. Overrides, for tests: R3I6NOS_ETC (/etc), R3I6NOS_PROC (/proc), R3I6NOS_SYS (/sys), R3I6NOS_DEV (/dev),
@@ -192,13 +192,19 @@ def sound(r):
     if out is None:
         r.line("SKIP", "sound", "r3i6nos-sound did not answer")
         return
+    volume = False
     for ln in out.splitlines():
         key, _, val = ln.partition(": ")
         if key.endswith("playback path") and val != "none":
             cur = val.split(" ", 1)[0]
             r.line("PASS" if cur in ("SPK", "HP", "HP_NO_MIC", "SPK_HP") else "FAIL", key, val)
+        elif key in ("mixer Volume", "mixer Boost"):
+            volume = True
+            r.line("PASS", key, val)
         elif key:
             r.line("INFO", key, val)
+    if not volume:   # /etc/asound.conf's software volumes (docs/SOUND.md): without them the volume keys and the mixer do nothing
+        r.line("FAIL", "mixer Volume", "missing: the software volumes were not made (is /etc/asound.conf in place?)")
     state = (run(["systemctl", "is-active", "r3i6nos-sound.service"]) or "").strip()
     r.line("INFO", "jack follower", state or "unknown")
     r.line("INFO", "heard", "not measured: listen for the menu's sounds (speaker), then with headphones in")

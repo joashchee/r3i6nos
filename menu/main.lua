@@ -1,7 +1,7 @@
 -- r3i6nos menu: one list of every LÖVE game and native app on the card, in the r3i6nos-ansiapps theme
 -- (theme/, docs/R3I6NOS-ANSIAPPS-THEME.md): 64x24 text cells, a top bar, the list, a three-row command line.
 -- D-pad up/down move, A launches, L1/R1 (or left/right) turn a page, L2/R2 jump to the top/end, Start opens
--- Settings (S / F1 on a keyboard): Network, SSH, Battery and Shutdown. The battery shows at the top right. Never scrolls.
+-- Settings (S / F1 on a keyboard): Network, SSH, Battery, Sound mixer, Date and time, reports, About and Shutdown. The battery shows at the top right. Never scrolls.
 
 package.path = (os.getenv("R3I6NOS_THEME") or "/opt/loveos/theme") .. "/?.lua;" .. package.path
 
@@ -10,6 +10,7 @@ local battery = require("battery")
 local netclient = require("netclient")
 local settings = require("settings")
 local about = require("about")
+local mixer = require("mixer")
 local theme = require("r3i6nos_ansiapps")
 local view = require("view")
 
@@ -64,8 +65,33 @@ local function launch()
   if e then request(e.type .. "\t" .. e.target) end
 end
 
+-- Settings > Sound mixer's test sound: made by mixer.sample, looped while that screen is up and the sound is not Off.
+local playing, playingKind, made = nil, 1, {} -- made: each sound's Source, built once (the music takes a moment on the unit)
+local function testSound()
+  local n = settings.isOpen(dialog) and settings.node(dialog)
+  local want = (n and n.kind == "mixer") and n.sound or 1
+  if want == playingKind then return end
+  if playing then playing:stop(); playing = nil end
+  playingKind = want
+  if want == 1 then return end
+  if not made[want] then
+    local frames = mixer.frames(want)
+    local data = love.sound.newSoundData(frames, mixer.RATE, 16, 2)
+    for i = 0, frames - 1 do
+      local l, r = mixer.sample(want, i)
+      data:setSample(i, 1, l)
+      data:setSample(i, 2, r)
+    end
+    made[want] = love.audio.newSource(data, "static")
+    made[want]:setLooping(true)
+  end
+  playing = made[want]
+  playing:play()
+end
+
 function love.update(dt)
   settings.tick(dialog, dt)
+  testSound()
   powerAge = powerAge + dt
   if powerAge >= POWER_EVERY then powerAge, power = 0, battery.read() end
 end
