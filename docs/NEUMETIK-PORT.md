@@ -114,3 +114,22 @@ the old file whole; nothing outside that folder is written (rule 7). A module's 
 - **The package's NOTICE** is generated from the desktop app's own list of ported code (`app/scripts/third-party-licenses.py`), plus Neumetik MIDI's MIT
   licence and this repo's theme and font notices.
 - **The device report** (2026-11-09, rule 9) replaced the speed test: Start > Device report and `neumetik --report` write `/roms/Neumetik/r36s-report.txt` (system and the pad's GUID, card, start-up, the sound device and whether its callback runs, screen paint, every engine's speed, Visual, memory).
+
+## 8. First run on a real R36S (device report, 2026-11-10)
+
+Neumetik 0.1.0 ran on one unit under r3i6nos and wrote its device report: **18 PASS, 0 FAIL, go on speed.** The report is kept in the
+Neumetik repo (`r36s/reports/`); the unit's figures are in `docs/hardware-findings.md` ("First device report").
+
+| Engine (30 s each, 44100 Hz stereo) | Real time | Mac | Unit vs Mac |
+|---|---|---|---|
+| MIDI, generated 7-part GM song | **3.4x** (the slowest) | 60x | about 18 times slower |
+| ProTracker, 4 / 8 channels | 34.5x / 14.3x | - / 285x | |
+| BGN, Empty room / Murmur / Light rain / Thunderstorm | 26.3x / 11.7x / 6.7x / 5.7x | 61x (Thunderstorm) | |
+| Visual, 25 visualizers at 64 x 20 | 0.82-1.35 ms a frame (Kaleidoscope slowest; goal 8 ms) | 0.07 ms | |
+
+Also: start-up 587 ms to the first screen; a whole screen painted in 4.6 ms; peak memory 49 MB; exFAT with rename over a file; ALSA at
+44100 Hz, 2 channels, 1024 frames, with the callback running 43 times a second.
+
+- **MIDI has the least room:** 3.4x at 44100 Hz would be about 3.1x at the 48000 Hz output rate, and a denser song than the generated one
+  could need more. Nothing to change now; a real MIDI library is the next thing to time.
+- **Not yet tried on the unit:** hearing it, the pad's feel, Visual on the panel, a real `music/` folder.

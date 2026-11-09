@@ -112,7 +112,7 @@ The first report from a unit (`docs/DEVICE-REPORTS.md`; KlamANSI's Start > Devic
 | CPU | 4 cores, part `0xd04` (Cortex-A35), **1512 MHz** max (not 1.3 GHz as the plans guessed) |
 | Memory | 919232 kB total (about 898 MB for Linux), 848420 kB available with KlamANSI running |
 | SDL | **2.26.5** (Debian 12's), video driver **KMSDRM**: a native app draws on the panel with the Mali blob from the card |
-| Sound | one ALSA card, `rockchip,rk817-codec` (RK817 PMIC codec); SDL opens it with the `alsa` driver, one output device. Not yet heard |
+| Sound | one ALSA card, `rockchip,rk817-codec` (RK817 PMIC codec); SDL opens it with the `alsa` driver, one output device. Neumetik's report: opened at 44100 Hz, 2 channels, 1024 frames, and the callback ran 43 times in a second (as expected). Not yet heard |
 | Pad | 1, **"GO-Super Gamepad"**, GUID **`1900bb3e4b4800000011000000010000`**, 17 buttons, 4 axes, 0 hats (the measured layout above) |
 | Games card | the flashed card's partition 3, `/dev/mmcblk0p3` on `/roms`, **exFAT**, 125.7 GB; `loveos` can make a folder, write, rename over a file, read back and delete |
 | Speed (KlamANSI) | its scripts load in 597 ms; a typed line runs and draws in 38-47 ms; a frame of its screen took 33.6 ms (goal 33); a whole 640 x 480 true-colour paint 4.6 ms. About 20 times the Mac's times (M-series, same QuickJS) |
