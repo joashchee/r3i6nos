@@ -172,10 +172,18 @@ All of it goes in the gitignored `local_hardware_assets/`.
   native self-test and screenshots); **not yet run on a unit, nor under a real LÖVE** (`scripts/preview_io_checker.sh` needs a desktop).
   - [ ] **Run it on the unit, all three builds,** and bring back their three reports: the tones heard on the speaker and on headphones,
     the frame rate, whether the power and volume keys reach apps, the patterns as seen. Then update this roadmap and `docs/hardware-findings.md`.
+    - **Native: back** (2026-11-09, image `5f4d67c`; `docs/hardware-findings.md`, "The native IO Checker's first report"): 22 PASS, 4 FAIL.
+      All 17 buttons, no chatter, full axis ranges, the power and volume keys arrive as keys, SDL maps the pad, the card at 40 MB/s.
+      **The sweep was heard from the speaker; every 440 Hz tone was not** (the 4 FAILs). Fixed from it: the tones are now 1 kHz with a
+      440 Hz "Low" one kept (all three builds), the Sound mixer's test sounds moved up, and the report no longer cuts its System lines
+      (the GUID lost a digit; the theme's `R3Item.value` is now 64 bytes).
+    - [ ] **Still to bring back:** the native build again on a new image (the 1 kHz tones and "Low" heard or not, the motion test, the
+      patterns in words, headphones), and the LÖVE 11.5 and 12.0 builds' reports.
 - [x] **Input layout measured** (2026-11-07, first run of the LÖVE 11.5 checker, one unit): A-Y 1-4, D-pad is buttons 9 left / 10 down / 11 up / 12 right
   (no hat), Fn 13, Select 14, L3 15, R3 16, Start 17; table in `docs/hardware-findings.md`. The checker was fixed from it (raw buttons, whole-stick
   highlight, SEL/FN/STA order, raw Select+Start exit, 15 s idle-out, 2x fonts, power/volume pills).
-- [ ] **Still to measure:** L1, R1, L2, R2 (checker assumes 5-8); what power and the volume keys send (keys? names?); whether event lines are really
+- [ ] **Still to measure:** L1, R1, L2, R2 (checker assumes 5-8); ~~what power and the volume keys send~~ (answered 2026-11-09: keyboard keys
+  `power`, `volumeup`, `volumedown`, the native IO Checker's report); whether event lines are really
   inverted (the checker now prints held/free beside each event). Then fix `SDL_GAMECONTROLLERCONFIG` in `run_app.sh` and the menu's controls from the layout.
 - [ ] **First boot (full):** reaches the menu; panel, backlight, D-pad and buttons, audio, TF2 mount.
   - **Sound (2026-11-09): no app was heard from the speaker.** Cause: the stock kernel's RK817 codec keeps its outputs off until
@@ -183,6 +191,8 @@ All of it goes in the gitignored `local_hardware_assets/`.
     `r3i6nos-sound` (`r3i6nos-sound.service`, before the menu): SPK, or HP while headphones are in, following the device tree's
     `Headphone Jack` switch. Tested on a laptop against a fake `amixer` and event device. **Untested on the unit:** the speaker
     heard, the jack switch's input device existing, HP heard. r3i6nos's device report now has a `sound` section that says.
+    **Heard (2026-11-09, image `5f4d67c`):** the IO Checker's sweep came out of the speaker at `SPK`, and the jack switch exists. 440 Hz
+    tones were not heard (the speaker's low end, `docs/hardware-findings.md`). Still untested: headphones.
   - [x] **Volume, Boost, the volume keys and Settings > Sound mixer** (2026-11-09, `docs/SOUND.md`): software volumes from
     `/etc/asound.conf` (the codec has none), made and restored at boot and saved at shutdown by `r3i6nos-sound`, which also follows
     the volume keys; the mixer screen with a test sound. Tested on a Mac only (fake `amixer`, `aplay`, `alsactl`; the menu's logic in luajit).

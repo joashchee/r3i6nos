@@ -312,7 +312,9 @@ static inline void r3_progress(R3Screen *s, int col, int row, int width, int per
 
 /* ---- list dialogs ---------------------------------------------------------------------------------------------- */
 
-typedef struct { char label[192]; char value[32]; } R3Item;
+/* value holds 63 bytes: a pad GUID (32) and longer readings fit whole, so a report copied from items is not cut (2026-11-09); the
+ * list shows a long value cut to the row, leaving the label at least 12 cells. */
+typedef struct { char label[192]; char value[64]; } R3Item;
 
 typedef struct {
     int col, row, w, h;
@@ -349,9 +351,11 @@ static inline void r3_list_dialog(R3Screen *s, const R3List *o) {
     for (int i = first; i < o->n && i < first + per; i++) {
         int y = o->row + 1 + (i - first), st = i == o->sel ? R3_ST_SELECT : R3_ST_BODY;
         r3_fill(s, o->col + 1, y, o->w - 2, 1, 32, R3_ST(st));
-        int vn = r3_width(o->items[i].value);
+        int vn = r3_width(o->items[i].value), room = o->w - 4 - 12 - 1; /* the value's widest: the label keeps 12 cells and a gap */
+        if (room < 1) room = 1;
+        if (vn > room) vn = room;
         r3_text_fit(s, o->col + 2, y, o->items[i].label, o->w - 5 - vn - (vn > 0), R3_ST(st));
-        if (vn > 0) r3_text_right(s, o->col + o->w - 3, y, o->items[i].value, R3_ST(st));
+        if (vn > 0) r3_text_fit(s, o->col + o->w - 2 - vn, y, o->items[i].value, vn, R3_ST(st));
     }
 }
 

@@ -209,11 +209,14 @@ M.PATTERNS = {
 
 M.RATE = 44100
 M.TONES = {
-  { id = "left", label = "Left channel, 440 Hz", freq = 440, left = 1, right = 0, amp = 0.5, secs = 1.5 },
-  { id = "right", label = "Right channel, 440 Hz", freq = 440, left = 0, right = 1, amp = 0.5, secs = 1.5 },
-  { id = "both", label = "Both channels, 440 Hz", freq = 440, left = 1, right = 1, amp = 0.5, secs = 1.5 },
+  -- 1 kHz, not 440 Hz: on the unit every 440 Hz tone was marked silent from the speaker and the sweep heard (2026-11-09,
+  -- docs/hardware-findings.md); a small speaker gives little below about 500 Hz. "low" keeps 440 Hz to measure that.
+  { id = "left", label = "Left channel, 1 kHz", freq = 1000, left = 1, right = 0, amp = 0.5, secs = 1.5 },
+  { id = "right", label = "Right channel, 1 kHz", freq = 1000, left = 0, right = 1, amp = 0.5, secs = 1.5 },
+  { id = "both", label = "Both channels, 1 kHz", freq = 1000, left = 1, right = 1, amp = 0.5, secs = 1.5 },
+  { id = "low", label = "Low, 440 Hz", freq = 440, left = 1, right = 1, amp = 0.5, secs = 1.5 },
   { id = "sweep", label = "Sweep, 100 Hz to 8 kHz", from = 100, to = 8000, left = 1, right = 1, amp = 0.5, secs = 4 },
-  { id = "quiet", label = "Quiet, 440 Hz at 10%", freq = 440, left = 1, right = 1, amp = 0.1, secs = 1.5 },
+  { id = "quiet", label = "Quiet, 1 kHz at 10%", freq = 1000, left = 1, right = 1, amp = 0.1, secs = 1.5 },
 }
 M.FADE = 0.02           -- seconds of fade in and out, so a tone starts and stops without a click
 

@@ -19,7 +19,7 @@ V.HOME = {
     about = { "Full-screen test patterns: colour bars, solid colours for", "stuck pixels, ramps for colour depth, a pixel grid for",
               "scaling and edges, and a moving bar that measures the", "frame rate." } },
   { id = "sound", label = "Sound",
-    about = { "Test tones on the left, the right and both channels, a", "sweep and a quiet tone. After each, press X if you heard",
+    about = { "Test tones on the left, the right and both channels, a", "low tone, a sweep, a quiet one. After each, press X if heard",
               "it or Y if not: the answers go in the device report.", "Shows the speaker path the system set." } },
   { id = "files", label = "Files",
     about = { "On each card: makes its IO_Checker folder, writes,", "renames over, reads back and deletes a file, then times",

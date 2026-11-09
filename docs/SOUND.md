@@ -51,7 +51,8 @@ auto-repeat. It reads the devices without grabbing them, so apps still see the k
 
 Every control `amixer -c 0 scontents` lists that has something to change (a level or a choice), Volume and Boost first, then the
 codec's own (Playback Path). Up/Down choose, Left/Right change one step, L1/R1 five, B goes back. The last row is the **test sound**:
-Off, a 441 Hz tone on the left only, the right only, both, and a short loop of music (four chords, an arpeggio and a bass), made in
+Off, a 1 kHz tone on the left only, the right only, both, and a short loop of music (four chords, an arpeggio and a bass, all above
+340 Hz: the speaker gave nothing heard at 440 Hz in the IO Checker, 2026-11-09), made in
 code by `mixer.sample` so no recording is in the image. It loops while the screen is up and stops when you leave it. The Playback
 Path can be changed here to try the other outputs; the jack sets it again when headphones go in or out.
 

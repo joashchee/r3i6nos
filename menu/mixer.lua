@@ -181,10 +181,12 @@ end
 
 -- ---- the test sounds ------------------------------------------------------------------------------------------------------------
 
+-- 1 kHz and music two octaves up: on the unit 440 Hz tones were not heard from the speaker (2026-11-09, docs/hardware-findings.md).
 M.SOUNDS = { "Off", "Tone, left only", "Tone, right only", "Tone, both sides", "Music" }
+M.TONE_HZ = 1000
 
 -- The music: four chords (C, A minor, F, G), each 1.6 s: a bass note and an arpeggio of eighth notes. Made here, so it is ours.
-local CHORDS = { { 48, 60, 64, 67 }, { 45, 57, 60, 64 }, { 41, 53, 57, 60 }, { 43, 55, 59, 62 } } -- MIDI: bass, then the chord
+local CHORDS = { { 72, 84, 88, 91 }, { 69, 81, 84, 88 }, { 65, 77, 81, 84 }, { 67, 79, 83, 86 } } -- MIDI: bass (349-523 Hz), then the chord
 local ARP = { 1, 2, 3, 2, 1, 2, 3, 4 }   -- which chord tone (4 = the top one an octave up) each eighth plays
 M.CHORD_SECS = 1.6
 local function hz(note) return 440 * 2 ^ ((note - 69) / 12) end
@@ -193,14 +195,14 @@ local function hz(note) return 440 * 2 ^ ((note - 69) / 12) end
 function M.frames(k, rate)
   rate = rate or M.RATE
   if k == 5 then return math.floor(#CHORDS * M.CHORD_SECS * rate) end
-  return rate -- one second of a 441 Hz tone: 441 whole cycles, so the loop joins without a click
+  return rate -- one second of the tone: whole cycles, so the loop joins without a click
 end
 
 --- Sample i (0-based) of sound k at rate: left, right in -1..1.
 function M.sample(k, i, rate)
   rate = rate or M.RATE
   if k >= 2 and k <= 4 then
-    local v = math.sin(2 * math.pi * 441 * i / rate) * 0.5
+    local v = math.sin(2 * math.pi * M.TONE_HZ * i / rate) * 0.5
     return (k == 3) and 0 or v, (k == 2) and 0 or v
   end
   if k ~= 5 then return 0, 0 end

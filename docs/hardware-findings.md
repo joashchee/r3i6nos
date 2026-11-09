@@ -158,6 +158,9 @@ The first report from a unit (`docs/DEVICE-REPORTS.md`; KlamANSI's Start > Devic
   `amixer -c 0 cget name='Playback Path'`, `amixer -c 0 cset name='Playback Path' SPK`.
 - **Untested on the unit:** the speaker heard, the jack's input device and its name, the headphones heard. r3i6nos's device report's
   `sound` section records the path and the jack.
+- **Heard (2026-11-09, the native IO Checker's report, below):** with the path at `SPK`, the sweep came out of the speaker, so the
+  path fix works. Every 440 Hz tone was marked silent at the same level. The jack switch exists ("rockchip,rk817-codec Headphones");
+  headphones were not tried.
 
 ## A frame presented once is not shown (native SDL2, 2026-11-09)
 
@@ -168,3 +171,27 @@ The first report from a unit (`docs/DEVICE-REPORTS.md`; KlamANSI's Start > Devic
 - Rule for native apps: present each change several times, or every frame. `theme/r3i6nos_ansiapps.h`'s `r3_video_draw` presents
   each change 4 times (`R3_VIDEO_SETTLE`); apps that draw on their own must do the same. Whether 4 is enough is **untested** on the unit.
 
+## The native IO Checker's first report (2026-11-09, one R36S, image `5f4d67c`)
+
+`EASYROMS/IO_Checker/r36s-report-native.txt`: 22 PASS, 4 FAIL, 1 SKIP. The image predates the fix for the black start (above), so the app
+ran; only its first screen was missing.
+
+- **Sound:** the output opened (SDL's `alsa` driver, one device, "rockchip,rk817-codec", 44100 Hz) with the path at `SPK`. **The
+  sweep (100 Hz to 8 kHz) was heard; the left, right and both 440 Hz tones were marked silent**, and so was the quiet one, all at the
+  sweep's level (0.5, faded in and out). The only difference is the frequency, so the likely cause is the speaker: a small one gives
+  little below about 500 Hz. Not yet known: where in the sweep it became audible. The checkers' tones are now 1 kHz, with a 440 Hz
+  "Low" tone kept to confirm this, and the menu's Sound mixer's test sounds were moved above 340 Hz (`docs/SOUND.md`).
+  Anything played on the unit needs its content well above 440 Hz to be heard from the speaker; bass will not come through it.
+- **Input:** SDL 2.26.5 sees "GO-Super Gamepad", GUID `1900bb3e4b4800000011000000010000` (the one in `run_app.sh`), 17 buttons, 4 axes,
+  0 hats, and **SDL maps it** (`sdl gamepad mapping: yes`). All 17 buttons were pressed with no chatter (no press within 30 ms of a
+  release); all four axes reach -1.00 and +1.00 and rest at 0.00. **Power, volume up and volume down arrive as keyboard keys**
+  (`power`, `volumeup`, `volumedown`), which is what `r3i6nos-sound` listens for (`KEY_VOLUMEUP`, `KEY_VOLUMEDOWN`; which input
+  device sends them is still unread). L1, R1, L2 and R2 (5-8) were pressed once each, consistent with the layout table above.
+- **Video:** 640x480 at 60 Hz on KMSDRM, renderer `opengles2` with vsync; the window is 640x480. The motion test was not run (SKIP),
+  and how the patterns looked was not said.
+- **Files:** the games card (exFAT, `/dev/mmcblk0p3` on `/roms`) passed write, rename over, read and delete; 8 MB written with sync at
+  40.0 MB/s, read back byte for byte (the read speed is of a cached file).
+- **System:** battery 96% discharging, backlight 51 of 160, 897 MB of memory (813 MB free), the app's peak 47.8 MB.
+- **A bug in the report itself:** its System lines were cut to 31 characters (the pad GUID lost its last digit, the board and sound card
+  names their ends), because the theme's `R3Item.value` held 32 bytes. Now 64 (`theme/r3i6nos_ansiapps.h`), and the list fits a long
+  value to its row.

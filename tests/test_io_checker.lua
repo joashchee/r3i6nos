@@ -107,8 +107,8 @@ local l, r = model.toneSample(left, 1000)
 assert(l ~= 0 and r == 0, "left only")
 local l0 = model.toneSample(left, 0); eq(l0, 0, "fades in from zero")
 local le = model.toneSample(left, model.toneFrames(left)); assert(math.abs(le) < 1e-9, "fades out to zero")
-for i = 0, model.toneFrames(model.TONES[4]) - 1, 997 do
-  local a, b = model.toneSample(model.TONES[4], i)
+for i = 0, model.toneFrames(model.TONES[5]) - 1, 997 do
+  local a, b = model.toneSample(model.TONES[5], i)
   assert(math.abs(a) <= 0.5 and a == b, "sweep in range, both channels")
 end
 eq(model.toneFrames(left), 66150)
@@ -132,8 +132,8 @@ has(text, "PASS shape: 17 buttons, 4 axes, 0 hats"); has(text, "FAIL buttons pre
 has(text, "FAIL chatter: A(2)=1"); has(text, "PASS axis 1 range: -0.95 to +0.97"); has(text, "SKIP axis 2 range: never moved")
 has(text, "PASS axis 1 at rest: +0.02"); has(text, "FAIL axis 2 at rest: +0.30")
 has(text, "PASS volume up key: arrived as a key"); has(text, "SKIP power key")
-has(text, "PASS heard Left channel, 440 Hz: yes"); has(text, "FAIL heard Right channel, 440 Hz: no (silent)")
-has(text, "SKIP heard Both channels, 440 Hz: played, not answered"); has(text, "SKIP heard Quiet, 440 Hz at 10%: not played")
+has(text, "PASS heard Left channel, 1 kHz: yes"); has(text, "FAIL heard Right channel, 1 kHz: no (silent)")
+has(text, "SKIP heard Both channels, 1 kHz: played, not answered"); has(text, "SKIP heard Quiet, 1 kHz at 10%: not played")
 rp = model.newReport({}); model.reportInput(rp, model.newInput(), nil); has(rp:text(), "FAIL pad: none")
 
 -- mounts: the longest mount point that holds the path
@@ -181,7 +181,7 @@ local out = dump()
 eq(#out, 24); has(out[1], "IO Checker"); has(out[1], "LÖVE 11.5.0" == "" and "" or "11.5.0")
 for c = 1, 64 do eq(scr.bg[c], theme.BLUE, "top bar") end
 has(out[3], "Buttons and sticks"); has(out[3], "2/17 buttons"); has(out[4], "Video"); has(out[4], "59.0 fps")
-has(out[5], "1/5 heard"); has(cells(out), "Every button, both sticks"); has(out[23], "open Buttons and sticks")
+has(out[5], "1/6 heard"); has(cells(out), "Every button, both sticks"); has(out[23], "open Buttons and sticks")
 state.sel.home = 6; out = dump(); has(cells(out), "EASYROMS/IO_Checker/"); has(out[23], "open Device report")
 
 state.page = "input"; state.pad = pad({ 2, 9, 15 }, { 0.9, -0.6, 0, 0 }); state.idle = model.newIdle(); state.chord = model.newChord()
@@ -322,7 +322,7 @@ for _, sec in ipairs({ "== system ==", "== input ==", "== video ==", "== sound =
 has(report, "PASS buttons pressed: all 17"); has(report, "PASS chatter: none"); has(report, "PASS power key"); has(report, "PASS volume up key")
 has(report, "PASS axis 1 range: -0.95 to +0.95"); has(report, "PASS axis 1 at rest: +0.01")
 has(report, "PASS window: 640x480"); has(report, "motion: "); has(report, "INFO patterns shown: bars white red green blue black ramps grid motion")
-has(report, "PASS speaker path: SPK"); has(report, "PASS heard Left channel, 440 Hz: yes"); has(report, "FAIL heard Right channel, 440 Hz: no (silent)")
+has(report, "PASS speaker path: SPK"); has(report, "PASS heard Left channel, 1 kHz: yes"); has(report, "FAIL heard Right channel, 1 kHz: no (silent)")
 has(report, "PASS Games card read back"); has(report, "PASS Data card write, rename over, read, delete")
 has(report, "INFO Kernel: 4.4.189"); has(report, "INFO GUID: 1900bb3e4b4800000011000000010000")
 for ln in report:gmatch("([^\n]*)\n") do

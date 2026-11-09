@@ -59,7 +59,7 @@ static const char *HOME_ABOUT[H_COUNT][4] = {
      "the list of buttons never pressed shrinks to nothing.", "Hold SELECT+START for a second to come back."},
     {"Full-screen test patterns: colour bars, solid colours for", "stuck pixels, ramps for colour depth, a pixel grid for",
      "scaling and edges, and a moving bar that measures the", "frame rate."},
-    {"Test tones on the left, the right and both channels, a", "sweep and a quiet tone. After each, press X if you heard",
+    {"Test tones on the left, the right and both channels, a", "low tone, a sweep, a quiet one. After each, press X if heard",
      "it or Y if not: the answers go in the device report.", "Shows the speaker path the system set."},
     {"On each card: makes its IO_Checker folder, writes,", "renames over, reads back and deletes a file, then times",
      "writing and reading 8 MB and shows the free space.", "Nothing else on the card is touched."},
@@ -86,11 +86,14 @@ static const Pattern PATTERNS[] = {
 
 typedef struct { const char *id, *label; double freq, from, to, left, right, amp, secs; } Tone;
 static const Tone TONES[] = {
-    {"left", "Left channel, 440 Hz", 440, 0, 0, 1, 0, 0.5, 1.5},
-    {"right", "Right channel, 440 Hz", 440, 0, 0, 0, 1, 0.5, 1.5},
-    {"both", "Both channels, 440 Hz", 440, 0, 0, 1, 1, 0.5, 1.5},
+    /* 1 kHz, not 440 Hz: on the unit every 440 Hz tone was marked silent from the speaker and the sweep heard (2026-11-09,
+     * docs/hardware-findings.md); a small speaker gives little below about 500 Hz. "low" keeps 440 Hz to measure that. */
+    {"left", "Left channel, 1 kHz", 1000, 0, 0, 1, 0, 0.5, 1.5},
+    {"right", "Right channel, 1 kHz", 1000, 0, 0, 0, 1, 0.5, 1.5},
+    {"both", "Both channels, 1 kHz", 1000, 0, 0, 1, 1, 0.5, 1.5},
+    {"low", "Low, 440 Hz", 440, 0, 0, 1, 1, 0.5, 1.5},
     {"sweep", "Sweep, 100 Hz to 8 kHz", 0, 100, 8000, 1, 1, 0.5, 4},
-    {"quiet", "Quiet, 440 Hz at 10%", 440, 0, 0, 1, 1, 0.1, 1.5},
+    {"quiet", "Quiet, 1 kHz at 10%", 1000, 0, 0, 1, 1, 0.1, 1.5},
 };
 #define NTONE ((int)(sizeof TONES / sizeof TONES[0]))
 enum { A_NONE, A_PLAYED, A_HEARD, A_SILENT };
@@ -1321,7 +1324,8 @@ static int selftest_logic(void) {
     CHECK(l == 0, "fades in");
     tone_sample(&TONES[0], tone_frames(&TONES[0]), &l, &r);
     CHECK(fabs(l) < 1e-9, "fades out");
-    for (int i = 0; i < tone_frames(&TONES[3]); i += 997) { tone_sample(&TONES[3], i, &l, &r); CHECK(fabs(l) <= 0.5 && l == r, "sweep in range"); }
+    for (int i = 0; i < tone_frames(&TONES[4]); i += 997) { tone_sample(&TONES[4], i, &l, &r); CHECK(fabs(l) <= 0.5 && l == r, "sweep in range"); }
+    CHECK(!strcmp(TONES[4].id, "sweep") && TONES[3].freq == 440 && TONES[0].freq == 1000, "tones: 1 kHz, then low and sweep");
     CHECK(tone_frames(&TONES[0]) == 66150, "tone length");
 
     /* the home page, the input page with buttons held, every other page */
@@ -1362,6 +1366,20 @@ static int selftest_logic(void) {
         CHECK(screen_has(&s, "Games card: where") && screen_has(&s, "Games card: read back"), "files page");
         a->page = P_SYSTEM; system_rows(a); compose(a, &s, 0);
         CHECK(screen_has(&s, "Kernel") && screen_has(&s, "GUID"), "system page");
+        /* a whole GUID survives into the item (the report copies items; on the unit it lost its last digit), and a value too long
+         * for the row is cut inside the frame, its label kept */
+        add_sys(a, "Long GUID", "%s", "1900bb3e4b4800000011000000010000");
+        CHECK(!strcmp(a->sys[a->nsys - 1].value, "1900bb3e4b4800000011000000010000"), "a GUID is not cut");
+        add_sys(a, "Very long", "%s", "0123456789012345678901234567890123456789012345678901234567890");
+        a->sel[P_SYSTEM] = a->nsys - 1; compose(a, &s, 0);
+        {
+            char rows[R3_ROWS][R3_COLS + 1];
+            r3_dump(&s, rows);
+            int found = 0;
+            for (int i = 0; i < R3_ROWS; i++) if (strstr(rows[i], "Very long")) found = 1;
+            CHECK(found, "a long value leaves its label");
+        }
+        a->sel[P_SYSTEM] = 0;
         SDL_Joystick *fake = a->js;
         a->js = NULL; /* the report asks SDL about real pads; this pretend one must not reach it */
         write_report(a, "selftest");
