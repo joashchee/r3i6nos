@@ -41,6 +41,14 @@ The `.deb` files are installed by `deb_watcher` at the next boot. A port with no
 command that builds it, and one built before its repo's last commit as **possibly out of date**; the flash goes on either way.
 `--dry-run` shows the list without writing. With `--no-games` nothing is copied, and the list says what to put on the TF2 card.
 
+## The test corpus
+
+Every image carries **one small file of each format the apps read** at `/opt/loveos/test-files` (`corpus/README.md`; Commander
+reaches it). When `flash-macos.sh` makes `EASYROMS` it also copies the corpus there, from this repo, so it never goes missing: all of
+it into `Test files/`, Neumetik's music into `Neumetik/music/Test files/`, and KlamANSI's drawing into `KlamANSI/drawings/test-files/`.
+The corpus's `.love` and `.deb` stay in `Test files/`, not in `Love 11.5/` or `native_deb/`, so nothing is installed until you copy
+them there.
+
 ## Where the games go
 
 The menu lists what it finds under `/roms`, the partition labelled `EASYROMS`:

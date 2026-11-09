@@ -1,0 +1,3 @@
+#!/bin/sh
+# r3i6nos test corpus: a command-line tool package's command. Copy the .deb into native_deb/ and deb_watcher puts this on PATH.
+echo "r3i6nos test corpus: the tool package works (${0##*/})."

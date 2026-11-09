@@ -22,6 +22,8 @@
 # builds, each in its own repo beside this one (R3I6NOS_PORTS_ROOT overrides where): a .deb into native_deb/ (deb_watcher installs
 # it at boot), a .love into "Love 11.5/" and "Love 12.0/". A port with no local build is named, with the command that builds it;
 # one built before its repo's last commit is flagged. The flash goes on either way. --dry-run shows the list.
+# The test corpus (corpus/files: one file of each format the apps read, corpus/README.md) is copied too, from this repo: all of it into
+# "Test files/", Neumetik's music into "Neumetik/music/Test files/" and KlamANSI's drawing into "KlamANSI/drawings/test-files/".
 #
 # If <image>.sha256 sits beside the image it is checked first. The image alone
 # does not boot: run inject-boot.sh on the .img before flashing (not on a .gz).
@@ -59,6 +61,7 @@ PORTS=(
 PORT_COPY=()      # "source<TAB>path on EASYROMS"
 PORT_MISSING=()   # one line a port (or LÖVE version) with no local build
 PORT_STALE=()     # built before the repo's last commit
+CORPUS_COPY=()    # the test corpus (corpus/files), "source<TAB>path on EASYROMS"
 
 newest() {  # the newest existing file of the arguments (a glob that matched nothing is skipped)
     local f best=""
@@ -104,6 +107,19 @@ find_ports() {
         fi
     done
 }
+# The test corpus (corpus/README.md): all of it in "Test files/", and the files of the apps that browse only their own folder in that
+# folder too (Neumetik's music, KlamANSI's drawings). Comes from this repo, so it is always there.
+find_corpus() {
+    local dir f
+    dir="$(cd "$(dirname "$0")/.." && pwd)/corpus/files"
+    [ -d "$dir" ] || return 0
+    for f in "$dir"/*; do [ -f "$f" ] && CORPUS_COPY+=("$f	Test files/$(basename "$f")"); done
+    while read -r f; do [ -n "$f" ] && CORPUS_COPY+=("$dir/$f	Neumetik/music/Test files/$f"); done \
+        < <(python3 -I "$(dirname "$0")/corpus_extra.py" list neumetik)
+    while read -r f; do [ -n "$f" ] && CORPUS_COPY+=("$dir/$f	KlamANSI/drawings/test-files/$f"); done \
+        < <(python3 -I "$(dirname "$0")/corpus_extra.py" list klamansi)
+    return 0
+}
 show_ports() {  # <heading for the list of builds>
     local line
     if [ "${#PORT_COPY[@]}" -gt 0 ]; then
@@ -118,11 +134,12 @@ show_ports() {  # <heading for the list of builds>
         echo "Possibly out of date:"
         for line in "${PORT_STALE[@]}"; do echo "  $line"; done
     fi
+    [ "${#CORPUS_COPY[@]}" -gt 0 ] && echo "The test corpus: ${#CORPUS_COPY[@]} file(s) into Test files/, Neumetik/music/Test files/ and KlamANSI/drawings/test-files/"
     return 0
 }
 copy_ports() {  # <EASYROMS mount point>: never fails the flash; says what did not copy
     local line src dest bad=0
-    for line in "${PORT_COPY[@]+"${PORT_COPY[@]}"}"; do
+    for line in "${PORT_COPY[@]+"${PORT_COPY[@]}"}" "${CORPUS_COPY[@]+"${CORPUS_COPY[@]}"}"; do
         src="${line%%	*}"; dest="$1/${line#*	}"
         # -X: no extended attributes, so macOS writes no ._ file beside it (BSD cp only; elsewhere a plain copy)
         if ! { mkdir -p "$(dirname "$dest")" && { cp -X "$src" "$dest" 2>/dev/null || cp "$src" "$dest"; }; }; then
@@ -134,6 +151,7 @@ copy_ports() {  # <EASYROMS mount point>: never fails the flash; says what did n
     dot_clean -m "$1" 2>/dev/null || true
     find "$1" -name '._*' -delete 2>/dev/null || true
     [ "$bad" = 0 ] && [ "${#PORT_COPY[@]}" -gt 0 ] && echo "Ports copied: ${#PORT_COPY[@]} file(s)."
+    [ "$bad" = 0 ] && [ "${#CORPUS_COPY[@]}" -gt 0 ] && echo "Test corpus copied: ${#CORPUS_COPY[@]} file(s)."
     if [ "${#PORT_MISSING[@]}" -gt 0 ]; then
         echo "Not copied, no local build (build them and run this again with --games-only on a fresh card, or copy them onto EASYROMS):" >&2
         for line in "${PORT_MISSING[@]}"; do echo "  $line" >&2; done
@@ -141,6 +159,7 @@ copy_ports() {  # <EASYROMS mount point>: never fails the flash; says what did n
     return 0
 }
 find_ports
+find_corpus
 
 [ "$(uname -s)" = Darwin ] || fail "macOS only (this is $(uname -s))"
 if [ "$ONLY" = 1 ]; then

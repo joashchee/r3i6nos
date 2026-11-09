@@ -1,0 +1,10 @@
+{
+  "title": "r3i6nos test corpus",
+  "cues": [
+    { "id": "explore", "kind": "loop", "recipe": "song", "params": { "seed": "corpus", "form": "loop" } },
+    { "id": "win", "kind": "stinger", "recipe": "jingle", "params": { "kind": "win" } }
+  ],
+  "transitions": [
+    { "from": "explore", "to": "explore", "at": "phrase", "via": "win" }
+  ]
+}

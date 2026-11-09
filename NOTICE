@@ -9,4 +9,10 @@ IBM VGA 8x16 font (theme/font/, theme/vga8x16.lua, theme/r3i6nos_vga8x16.h)
   Changed: rasterised to 8x16 bitmaps (the two generated files) and scaled to 10x20 at run time.
   The generated files are adaptations and stay under CC BY-SA 4.0. Details: theme/font/README.txt.
 
+Test corpus (corpus/files, installed at /opt/loveos/test-files and copied to EASYROMS by flash-macos.sh)
+  Made for r3i6nos on 2026-11-09 by the maintainer's own apps (ansiapps): Neumetik's generators, writers and its tracker tests' hand-built
+  songs, Composer, Painter and Animator; the rest (corpus/src, scripts/corpus_extra.py) written for r3i6nos. No third-party content.
+  Licence: MIT, as the repository (LICENSE), by the maintainer's decision (2026-11-09). This covers the files only: the apps that made
+  them stay under their own licences.
+
 LÖVE is zlib-licensed; the base system and runtimes keep their own licences.

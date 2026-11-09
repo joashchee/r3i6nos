@@ -1,0 +1,32 @@
+X:1
+T:r3i6nos test corpus
+M:4/4
+L:1/8
+Q:1/4=120
+K:C
+V:1 name="Track 1 (channel 1)"
+%%MIDI program 0
+!mp![CEGc] z [CEGc] z [CEGc] z [CEGc] z | [A,CEA] z [A,CEA] z [A,CEA] z [A,CEA] z |]
+V:2 name="Track 1 (channel 2)" clef=bass
+%%MIDI program 48
+(3:2:5!mp![C,E,G,C]8- [C,E,G,C]3- [C,E,G,C]3/4- [C,E,G,C]3/16 z/16 | (3:2:5[A,,C,E,A,]8- [A,,C,E,A,]3- [A,,C,E,A,]3/4- [A,,C,E,A,]3/16 z/16 |]
+V:3 name="Track 1 (channel 3)" clef=bass
+%%MIDI program 33
+(3:2:7!f!C,,- C,,3/8 z/8 C,/2- C,3/4- C,/8 z/8 (3:2:7C,,- C,,3/8 z/8 C,/2- C,3/4- C,/8 z/8 (3:2:7C,,- C,,3/8 z/8 C,/2- C,3/4- C,/8 z/8 (3:2:7C,,- C,,3/8 z/8 C,/2- C,3/4- C,/8 z/8 | (3:2:7A,,,- A,,,3/8 z/8 A,,/2- A,,3/4- A,,/8 z/8 (3:2:7A,,,- A,,,3/8 z/8 A,,/2- A,,3/4- A,,/8 z/8 (3:2:7A,,,- A,,,3/8 z/8 A,,/2- A,,3/4- A,,/8 z/8 (3:2:7A,,,- A,,,3/8 z/8 A,,/2- A,,3/4- A,,/8 z/8 |]
+V:4 name="Track 1 (channel 4)"
+%%MIDI program 80
+!mf!c3/4- c/8 z/8 d3/4- d/8 z/8 e3/4- e/8 z/8 g3/4- g/8 z/8 e3/4- e/8 z/8 d3/4- d/8 z/8 c3/4- c/8 z/8 A3/4- A/8 z/8 | B3/4- B/8 z/8 c3/4- c/8 z/8 d3/4- d/8 z/8 e3/4- e/8 z/8 d3/4- d/8 z/8 B3/4- B/8 z/8 G3/4- G/8 z/8 A3/4- A/8 z/8 |]
+V:5 name="Track 1 (channel 5)"
+%%MIDI program 25
+!mp!c/2 e/2 g/2 c'/2 c/2 e/2 g/2 c'/2 c/2 e/2 g/2 c'/2 c/2 e/2 g/2 c'/2 | A/2 c/2 e/2 a/2 A/2 c/2 e/2 a/2 A/2 c/2 e/2 a/2 A/2 c/2 e/2 a/2 |]
+V:6 name="Track 1 (channel 6)"
+%%MIDI program 16
+(3:2:5!pp![CEGc]8- [CEGc]3- [CEGc]3/4- [CEGc]3/16 z/16 | (3:2:5[A,CEA]8- [A,CEA]3- [A,CEA]3/4- [A,CEA]3/16 z/16 |]
+V:7 name="Drums 1"
+%%MIDI program 0
+%%MIDI channel 10
+!mp!^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 | ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 ^F,,/4 z/4 |]
+V:8 name="Drums 2"
+%%MIDI program 0
+%%MIDI channel 10
+!f!C,,/2 z/2 z [C,,D,,]/2 z/2 z C,,/2 z/2 z [C,,D,,]/2 z/2 z | C,,/2 z/2 z [C,,D,,]/2 z/2 z C,,/2 z/2 z [C,,D,,]/2 z/2 z |]

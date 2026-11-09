@@ -1,0 +1,44 @@
+midi-acoustic-grand-piano "part1":
+  (tempo! 120)
+  (quant 100)
+  V1: o4 (vol 63) >c8 r8 c8 r8 c8 r8 c8 r8 <a8 r8 a8 r8 a8 r8 a8
+  V2: o4 (vol 63) g8 r8 g8 r8 g8 r8 g8 r8 e8 r8 e8 r8 e8 r8 e8
+  V3: o4 (vol 63) e8 r8 e8 r8 e8 r8 e8 r8 c8 r8 c8 r8 c8 r8 c8
+  V4: o4 (vol 63) c8 r8 c8 r8 c8 r8 c8 r8 <a8 r8 a8 r8 a8 r8 a8
+  V0:
+
+midi-string-ensemble-1 "part2":
+  (quant 100)
+  V1: o4 (vol 55) c2.~8.~32. r64 <a2.~8.~32.
+  V2: o4 (vol 55) <g2.~8.~32. r64 e2.~8.~32.
+  V3: o4 (vol 55) <e2.~8.~32. r64 c2.~8.~32.
+  V4: o4 (vol 55) <c2.~8.~32. r64 <a2.~8.~32.
+  V0:
+
+midi-electric-bass-finger "part3":
+  (quant 100)
+  o4 (vol 79) <<c16.~64 r64 >c16.~64 r64 <c16.~64 r64 >c16.~64 r64 <c16.~64 r64 >c16.~64 r64 <c16.~64 r64 >c16.~64 r64 <<a16.~64 r64 >a16.~64 r64 <a16.~64 r64 >a16.~64 r64 <a16.~64 r64 >a16.~64 r64 <a16.~64 r64 >a16.~64
+
+midi-lead-1-square "part4":
+  (quant 100)
+  o4 (vol 71) >c16.~64 r64 d16.~64 r64 e16.~64 r64 g16.~64 r64 e16.~64 r64 d16.~64 r64 c16.~64 r64 <a16.~64 r64 b16.~64 r64 >c16.~64 r64 d16.~64 r64 e16.~64 r64 d16.~64 r64 <b16.~64 r64 g16.~64 r64 a16.~64
+
+midi-acoustic-guitar-steel "part5":
+  (quant 100)
+  o4 (vol 55) >c16 e16 g16 >c16 <c16 e16 g16 >c16 <c16 e16 g16 >c16 <c16 e16 g16 >c16 <<a16 >c16 e16 a16 <a16 >c16 e16 a16 <a16 >c16 e16 a16 <a16 >c16 e16 a16
+
+midi-drawbar-organ "part6":
+  (quant 100)
+  V1: o4 (vol 39) >c2.~8.~32. r64 <a2.~8.~32.
+  V2: o4 (vol 39) g2.~8.~32. r64 e2.~8.~32.
+  V3: o4 (vol 39) e2.~8.~32. r64 c2.~8.~32.
+  V4: o4 (vol 39) c2.~8.~32. r64 <a2.~8.~32.
+  V0:
+
+percussion "part7":
+  (quant 100)
+  V1: o4 (vol 55) <<f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32 r32 f+32
+  V2: o4 (vol 87) <<c16 r8. (vol 79) d16 r8. (vol 87) c16 r8. (vol 79) d16 r8. (vol 87) c16 r8. (vol 79) d16 r8. (vol 87) c16 r8. (vol 79) d16
+  V3: o4 r4 (vol 87) <<c16 r4.~16 c16 r4.~16 c16 r4.~16 c16
+  V0:
+

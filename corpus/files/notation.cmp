@@ -1,0 +1,8 @@
+title: melody
+bpm: 110
+meter: 4
+key: C major
+bars: 4
+
+track lead program=80 wave=square
+| G5!95:138 r:6 F5!83:s.. r:6 G5!97:s.. r:54 E5!93:90 r:6 | D5:90 r:6 G5!92:90 r:6 B5!96:s.. r:6 A5!79:s.. r:6 D6!94:90 r:6 | C6!92:138 r:6 D6!79:s.. r:6 C6!100:s.. r:6 B5!81:s.. r:6 A5!100:90 r:6 | A5:90 r:6 F5!94:90 r:6 C5!100:h |

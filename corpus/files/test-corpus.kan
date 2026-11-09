@@ -1,0 +1,29 @@
+klam 1
+# r3i6nos test corpus: a KlamANSI drawing made for testing (frames, boxes, fills, shades, text, colours).
+size 40 12
+fg white on blue
+clear
+at 0 0
+box 40 12 double
+at 2 2
+fg yellow on blue
+text R3I6NOS TEST CORPUS
+at 2 4
+fg lcyan on blue
+ch shade1
+fill 36 1
+at 2 5
+fg lgreen on black
+ch shade2
+fill 36 1
+at 2 6
+fg lred on black
+ch shade3
+fill 36 1
+at 2 8
+fg white on blue
+text frame 1 of 2
+frame new 2
+at 2 8
+fg yellow on blue
+text frame 2 of 2

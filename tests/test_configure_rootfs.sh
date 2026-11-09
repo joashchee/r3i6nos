@@ -36,6 +36,8 @@ R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/native" R3I6NOS_LOVE_APPS_
 [ -f "$R/opt/loveos/theme/r3i6nos_ansiapps.lua" ] || fail "theme not installed"
 [ -f "$R/opt/loveos/theme/vga8x16.lua" ]        || fail "theme font data not installed"
 [ -f "$R/opt/loveos/theme/font/LICENSE.TXT" ]    || fail "the font's licence must ship with the theme"
+[ -f "$R/opt/loveos/test-files/MANIFEST.tsv" ] && [ -f "$R/opt/loveos/test-files/README.md" ] || fail "the test corpus is not on the boot disk"
+for f in corpus/files/*; do cmp -s "$f" "$R/opt/loveos/test-files/$(basename "$f")" || fail "test corpus file not installed: $(basename "$f")"; done
 [ "$(cat "$R/etc/hostname")" = r3i6nos ]        || fail "hostname"
 # the games cards are mounted by role, not by label (docs/STORAGE.md): no fstab line, the service enabled, the session waits for it
 ! grep -q 'EASYROMS' "$R/etc/fstab"             || fail "fstab still mounts a card by the EASYROMS label (two cards race for /roms)"

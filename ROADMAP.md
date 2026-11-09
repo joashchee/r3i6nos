@@ -326,3 +326,22 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
 - [ ] **Step 4: installing with a choice of card:** waiting packages, the question with free space, one squashfs image per package (`squashfs-tools`), a root helper by path unit; `.deb` files on the data card installed only then. **Unblocked** (2026-11-09: the kernel has squashfs and loop).
 - [ ] **Step 5: moving an app between cards, and swapping the data card while on** (only if the slot reports it).
 
+## 14. The test corpus: one file of each format the apps read (`corpus/README.md`)
+
+- [x] **The corpus, always on the boot disk** (2026-11-09, maintainer's request): 47 files (424 KB), every one made in code by the
+  apps' own generators and writers or written by hand, none of it anyone else's. Neumetik: MIDI, RIFF RMID, 13 tracker files in 11
+  formats, 22 music-as-text files (MusicXML and `.mxl`, ABC, kern, ChordPro, Alda, mini-notation, RTTTL, TMF, FlMML, SiON, MML in
+  11 dialects); Composer `.cmp` and a cue sheet; Painter PNG and ANSI; an Animator clip; a KlamANSI `.kan`; a `.love` and a tool `.deb`;
+  text and binary for Commander. In the image at `/opt/loveos/test-files`; `flash-macos.sh` also copies it to EASYROMS (`Test files/`,
+  and Neumetik's and KlamANSI's own folders). `scripts/build_corpus.sh` remakes it from the apps' repos and opens each file with the app
+  that reads it (Neumetik's `corpus` example, the Node CLIs, KlamANSI's `load`); a rebuild is identical. Tests: `tests/test_corpus.py`,
+  `tests/test_configure_rootfs.sh`, `tests/test_flash_macos.sh`.
+  - [x] **Its licence** (`NOTICE`): MIT, as the repository (maintainer, 2026-11-09). The files only: Neumetik, Composer, Painter and
+    Animator, which made some of them, stay proprietary.
+  - [ ] **On the unit:** play every file in Neumetik's `Test files`, open the drawing in KlamANSI, view the text and binary files in
+    Commander, run the CLI tools on theirs, and install the `.love` and the `.deb` by copying them into their folders.
+  - [ ] **Not covered: about 100 more tracker formats** Neumetik reads (39 of them MOD packers). Nothing writes them yet; each needs its
+    own small encoder in Neumetik. Not planned (maintainer, 2026-11-09: the corpus covers what can be generated); listed in `corpus/README.md`.
+  - [ ] **When an app's formats change**, run `scripts/build_corpus.sh` and add the new format to `scripts/corpus_extra.py`'s `FORMATS`
+    (the manifest test fails until it is).
+

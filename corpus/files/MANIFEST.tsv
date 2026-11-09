@@ -1,0 +1,48 @@
+file	bytes	format	read by	made by
+midi.mid	2595	Standard MIDI File (General MIDI, 7 parts)	Neumetik, Composer (lint, notate)	Neumetik's generator (r36s/lib gen::midi_song)
+midi-riff.rmi	2616	RIFF RMID (MIDI in a RIFF chunk)	Neumetik	Neumetik's corpus example
+protracker.mod	9236	ProTracker MOD (M.K., 4 channels)	Neumetik	Neumetik's generator (gen::module)
+fasttracker-8chn.mod	13332	FastTracker 8CHN MOD (8 channels)	Neumetik	Neumetik's generator (gen::module)
+screamtracker.s3m	7488	Scream Tracker 3 S3M	Neumetik	Neumetik's tracker export
+adlib.s3m	261	Scream Tracker 3 S3M with AdLib (OPL2) instruments	Neumetik	Neumetik's tracker tests (s3m.rs)
+fasttracker2.xm	14795	FastTracker 2 XM	Neumetik	Neumetik's tracker export
+impulsetracker.it	7818	Impulse Tracker IT	Neumetik	Neumetik's tracker export
+neumetik.ntt	4746	Neumetik tracker file (UMF .ntt)	Neumetik, Composer (writes it)	Neumetik's UMF writer
+tiny.ahx	82	AHX (Abyss' Highest eXperience)	Neumetik	Neumetik's tracker tests (synth.rs)
+tiny.st	75	Sawteeth	Neumetik	Neumetik's tracker tests (synth.rs)
+tiny.kt	110	Klystrack	Neumetik	Neumetik's tracker tests (synth.rs)
+tiny.v2m	251	V2 (farbrausch) V2M	Neumetik	Neumetik's tracker tests (synth.rs)
+tiny.ml	516	Musicline Editor	Neumetik	Neumetik's tracker tests (musicline.rs)
+tiny.ptk	123768	ProTrekkr / NoiseTrekker	Neumetik	Neumetik's tracker tests (ptk.rs)
+notation.musicxml	72458	MusicXML	Neumetik	Neumetik's text writer
+notation.mxl	2779	MusicXML, compressed (.mxl)	Neumetik	this script, from notation.musicxml
+notation.abc	2055	ABC notation	Neumetik	Neumetik's text writer
+notation.krn	3643	Humdrum **kern	Neumetik	Neumetik's text writer
+notation.cho	119	ChordPro	Neumetik	Neumetik's text writer
+notation.alda	2065	Alda	Neumetik	Neumetik's text writer
+notation.mini	969	Strudel / Tidal mini-notation	Neumetik	Neumetik's text writer
+notation.rtttl	82	RTTTL (ringtone)	Neumetik	Neumetik's text writer
+notation.tmf	437	TMF (text MIDI)	Neumetik	Neumetik's text writer
+notation.flmml	94	FlMML	Neumetik	hand-written in Neumetik's corpus example
+notation.sion	127	SiON MML	Neumetik	hand-written in Neumetik's corpus example
+mml-generic.mml	950	MML, plain (Mabinogi syntax)	Neumetik	Neumetik's MML writer
+mml-mabinogi.mml	115	MML, Mabinogi	Neumetik	Neumetik's MML writer
+mml-archeage.mml	115	MML, ArcheAge	Neumetik	Neumetik's MML writer
+mml-maplestory2.ms2mml	1210	MML, MapleStory 2 (.ms2mml)	Neumetik	Neumetik's MML writer
+mml-gwbasic.bas	48	MML, GW-BASIC PLAY	Neumetik	Neumetik's MML writer
+mml-msx.mml	160	MML, MSX BASIC	Neumetik	Neumetik's MML writer
+mml-msx-music.mml	152	MML, MSX-MUSIC (FM)	Neumetik	Neumetik's MML writer
+mml-n88.mml	152	MML, N88-BASIC	Neumetik	Neumetik's MML writer
+mml-c128.mml	152	MML, Commodore 128	Neumetik	Neumetik's MML writer
+mml-zx128.mml	152	MML, ZX Spectrum 128	Neumetik	Neumetik's MML writer
+mml-sakura.mml	1143	MML, Sakura (TextSakura)	Neumetik	Neumetik's MML writer
+notation.cmp	321	Composer notation (.cmp)	Composer	Composer (compose notate)
+cue-sheet.json	346	Composer cue sheet (JSON)	Composer (compose cues)	hand-written (corpus/src)
+painter.png	320	PNG image (RGBA)	Painter (lint, convert, study)	Painter (sprites draw item)
+painter.ans	620	ANSI art (CP437, SAUCE)	Painter (lint)	Painter (sprites draw item --style ansi)
+animator-clip.json	1404	Animator clip (animator-clip JSON)	Animator (lint)	Animator (animate make walk)
+test-corpus.kan	452	KlamANSI drawing (.kan, klam 1)	KlamANSI	hand-written (corpus/src)
+hello.love	716	LÖVE app (.love)	the menu, LÖVE 11.5 and 12.0	this script, from corpus/src/hello-love
+r3i6nos-test-tool.deb	838	Debian package, a command-line tool (.deb)	the menu (deb_watcher, from native_deb/)	this script, from corpus/src/tool
+text-utf8.txt	724	UTF-8 text	Commander	this script
+binary.bin	512	binary (every byte value)	Commander	this script

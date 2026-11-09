@@ -21,6 +21,10 @@ cp -a "$REPO/menu" "$ROOTFS/opt/loveos/menu"
 # The r3i6nos-ansiapps theme, shared by the menu and every LÖVE app (they add /opt/loveos/theme to package.path).
 rm -rf "$ROOTFS/opt/loveos/theme"
 cp -a "$REPO/theme" "$ROOTFS/opt/loveos/theme"
+# The test corpus: one file of each format the apps read (corpus/README.md), always on the boot disk; flash-macos.sh also copies it to EASYROMS.
+rm -rf "$ROOTFS/opt/loveos/test-files"
+cp -a "$REPO/corpus/files" "$ROOTFS/opt/loveos/test-files"
+cp "$REPO/corpus/README.md" "$ROOTFS/opt/loveos/test-files/README.md"
 chmod 755 "$ROOTFS"/usr/local/bin/*
 
 # LÖVE runtimes built by build_love.sh (build/love/<version>/) go to /opt/love/<version>/.

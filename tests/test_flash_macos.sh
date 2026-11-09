@@ -114,6 +114,15 @@ for d in "Love 11.5" "Love 12.0" native_deb; do [ -d "$T/mnt/$d" ] || fail "fold
 [ -f "$T/mnt/Love 12.0/NoCoGaMa.love" ] || fail "NoCoGaMa for 12.0 not copied"
 [ -z "$(find "$T/mnt" -name '._*')" ] || fail "AppleDouble ._ files left on the card"
 echo "$out" | grep -q 'Ports copied: 4 file(s)' || fail "copy count: $out"
+# ... and the test corpus, all of it in "Test files/", Neumetik's music and KlamANSI's drawing in their own folders (corpus/README.md)
+n="$(find corpus/files -type f | wc -l | tr -d ' ')"
+[ "$(find "$T/mnt/Test files" -type f | wc -l | tr -d ' ')" = "$n" ] || fail "the whole corpus is not in Test files/"
+cmp -s corpus/files/midi.mid "$T/mnt/Test files/midi.mid" || fail "corpus file not copied whole"
+[ -f "$T/mnt/Neumetik/music/Test files/tiny.ahx" ] && [ -f "$T/mnt/Neumetik/music/Test files/notation.mxl" ] || fail "Neumetik's music not in its folder"
+[ ! -e "$T/mnt/Neumetik/music/Test files/painter.png" ] || fail "only music goes into Neumetik's folder"
+[ -f "$T/mnt/KlamANSI/drawings/test-files/test-corpus.kan" ] || fail "KlamANSI's drawing not in its folder"
+[ ! -e "$T/mnt/native_deb/r3i6nos-test-tool.deb" ] && [ ! -e "$T/mnt/Love 11.5/hello.love" ] || fail "the corpus's app and package must not be installed"
+echo "$out" | grep -q 'Test corpus copied: ' || fail "corpus copy not reported: $out"
 echo "$out" | grep -q 'KlamANSI: no r36s/build/pkg/KlamANSI.deb (build it: cd .*klamansi && r36s/package/docker-package.sh)' || fail "missing KlamANSI not named: $out"
 echo "$out" | grep -q 'Animator: no repo at' || fail "a port with no repo not named: $out"
 
@@ -122,6 +131,7 @@ out="$(run scripts/flash-macos.sh "$T/x.img" disk9 --dry-run 2>&1)"
 echo "$out" | grep -q 'native_deb/Neumetik.deb   <- ' || fail "dry run does not list the ports: $out"
 echo "$out" | grep -q 'MISSING (not on the card)' || fail "dry run does not say what is missing: $out"
 echo "$out" | grep -q 'Painter: no r36s/build/pkg/sprites.deb' || fail "dry run: Painter: $out"
+echo "$out" | grep -q 'The test corpus: [0-9]* file(s) into Test files/' || fail "dry run does not mention the test corpus: $out"
 out="$(run scripts/flash-macos.sh "$T/x.img" disk9 --no-games --dry-run 2>&1)"
 echo "$out" | grep -q 'the R36S ports are not copied' || fail "--no-games must say the ports are not copied: $out"
 
