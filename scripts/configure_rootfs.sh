@@ -108,6 +108,12 @@ ln -sfn /etc/systemd/system/r3i6nos-net.path \
 rm -f "$ROOTFS"/etc/systemd/system/multi-user.target.wants/{ssh,sshd}.service "$ROOTFS"/etc/systemd/system/sshd.service \
     "$ROOTFS"/etc/systemd/system/sockets.target.wants/ssh.socket "$ROOTFS"/etc/ssh/ssh_host_*
 mkdir -p "$ROOTFS/etc/ssh/sshd_config.d"
+# The wpasupplicant package enables its own D-Bus wpa_supplicant.service. The image has no D-Bus daemon, so it failed at
+# every boot ("Failed to start wpa_supplicant"), and Wi-Fi at boot breaks rule 6 anyway: r3i6nos-net starts
+# `wpa_supplicant -B` itself, only when a person joins a network. Unwire it and mask it so nothing pulls it in.
+rm -f "$ROOTFS"/etc/systemd/system/multi-user.target.wants/wpa_supplicant.service \
+    "$ROOTFS"/etc/systemd/system/dbus-fi.w1.wpa_supplicant1.service
+ln -sfn /dev/null "$ROOTFS/etc/systemd/system/wpa_supplicant.service"
 ln -sfn /lib/systemd/system/multi-user.target "$ROOTFS/etc/systemd/system/default.target"
 for unit in apt-daily.timer apt-daily-upgrade.timer; do
     ln -sfn /dev/null "$ROOTFS/etc/systemd/system/$unit"

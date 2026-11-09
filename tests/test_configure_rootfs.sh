@@ -19,6 +19,9 @@ mkdir -p "$R/etc/systemd/system/multi-user.target.wants" "$R/etc/systemd/system/
 ln -s /lib/systemd/system/ssh.service "$R/etc/systemd/system/multi-user.target.wants/ssh.service"
 ln -s /lib/systemd/system/ssh.service "$R/etc/systemd/system/sshd.service"
 ln -s /lib/systemd/system/ssh.socket "$R/etc/systemd/system/sockets.target.wants/ssh.socket"
+# And what wpasupplicant leaves: its D-Bus service enabled (it failed at every boot: no D-Bus daemon in the image).
+ln -s /lib/systemd/system/wpa_supplicant.service "$R/etc/systemd/system/multi-user.target.wants/wpa_supplicant.service"
+ln -s /lib/systemd/system/wpa_supplicant.service "$R/etc/systemd/system/dbus-fi.w1.wpa_supplicant1.service"
 touch "$R/etc/ssh/ssh_host_ed25519_key" "$R/etc/ssh/ssh_host_ed25519_key.pub" "$R/etc/ssh/ssh_host_rsa_key" "$R/etc/ssh/sshd_config"
 for v in 11.5 12.0; do mkdir -p "$T/loveapps/Love $v"; python3 -I scripts/pack_love.py apps/input-checker-love "$T/loveapps/Love $v/Input_Checker.love" >/dev/null; done
 R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/native" R3I6NOS_LOVE_APPS_BUILD="$T/loveapps" scripts/configure_rootfs.sh "$R" >/dev/null
@@ -96,6 +99,9 @@ grep -q '^PathExists=/run/loveos/net/request' "$R/etc/systemd/system/r3i6nos-net
 [ -z "$(ls "$R"/etc/ssh/ssh_host_* 2>/dev/null)" ] || fail "host keys from the build are in the image: every card would share them"
 [ -f "$R/etc/ssh/sshd_config" ] || fail "sshd_config was removed along with the host keys"
 [ -d "$R/etc/ssh/sshd_config.d" ] || fail "the sshd drop-in folder is missing"
+[ ! -e "$R/etc/systemd/system/multi-user.target.wants/wpa_supplicant.service" ] || fail "wpa_supplicant.service is enabled at boot"
+[ ! -e "$R/etc/systemd/system/dbus-fi.w1.wpa_supplicant1.service" ] && [ ! -L "$R/etc/systemd/system/dbus-fi.w1.wpa_supplicant1.service" ] || fail "the wpa_supplicant D-Bus alias is still there"
+[ "$(readlink "$R/etc/systemd/system/wpa_supplicant.service")" = /dev/null ] || fail "wpa_supplicant.service is not masked"
 
 # --- loveos-session: menu picks, run_app gets the type and target, then exits (ONCE)
 cat > "$T/menu" <<EOF

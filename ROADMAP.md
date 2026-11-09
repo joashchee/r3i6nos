@@ -161,6 +161,8 @@ All of it goes in the gitignored `local_hardware_assets/`.
     `r3i6nos-bootlog.txt` from BOOT on the Mac. Result of that boot (2026-11-07): `loveos.service` ran and looped; LÖVE could not create a window (wrong Mali blob, see 1b)
     and `deb_watcher.py` crashed (`No module named 'shutil'`: `python3-minimal` has none; fixed with `libpython3-stdlib` and a CI check).
     Next: rebuild, inject the right blob, flash, boot again.
+  - [x] **`Failed to start wpa_supplicant` at boot** (seen 2026-11-09 on the unit): the wpasupplicant package's own D-Bus service, enabled by its install script, with no D-Bus daemon in the image.
+    `configure_rootfs.sh` now unwires and masks it (r3i6nos-net starts `wpa_supplicant` itself, only on request). **Untested:** a boot of a rebuilt image without the message, and joining Wi-Fi with the service masked.
   - **macOS will not mount BOOT** (`fsck_msdos` is clean). Suspect: FAT hidden-sectors field is 0 (`mkfs.fat -h`). Not yet fixed.
 - [ ] **A LÖVE 11.5 game and a 12.0 game** run and return to the menu.
 - [ ] **A `.deb`** installs, launches and uninstalls by removal.
