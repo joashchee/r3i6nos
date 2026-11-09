@@ -1,0 +1,214 @@
+#!/usr/bin/env python3
+"""r3i6nos-sound - turn the R36S's sound output on, and follow the headphone jack.
+
+    r3i6nos-sound start     set the output once (speaker, or headphones when plugged in), then follow the jack until stopped
+    r3i6nos-sound set       set the output once and exit
+    r3i6nos-sound status    print each card's "Playback Path" and the jack, one "key: value" a line (the device report reads it)
+
+Why: the stock 4.4 kernel's RK817 codec driver (Rockchip BSP) powers its outputs only through the ALSA mixer control
+"Playback Path" (OFF, RCV, SPK, HP, HP_NO_MIC, BT, SPK_HP, ...), which starts at OFF. On Android the audio HAL sets it; on Debian
+nothing does, so every app opened the sound card, played, and nothing was heard. The device tree's simple-audio-card has a
+headphone-detect GPIO ("Headphone Jack"), which the kernel shows as an input device with the SW_HEADPHONE_INSERT switch; the
+codec does not move the path itself when it changes, so this program does: HP when plugged in, SPK when not.
+
+Runs as root from r3i6nos-sound.service, after the sound card appears and before the menu. Cards without a "Playback Path"
+control are left alone. Standard library and amixer (alsa-utils) only.
+
+Overrides, for tests: R3I6NOS_PROC (/proc), R3I6NOS_SYS (/sys), R3I6NOS_DEV (/dev), R3I6NOS_AMIXER (amixer),
+R3I6NOS_SOUND_WAIT (10: seconds to wait for a sound card at start).
+"""
+import fcntl
+import os
+import re
+import select
+import struct
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ENV = os.environ.get
+PROC = Path(ENV("R3I6NOS_PROC", "/proc"))
+SYS = Path(ENV("R3I6NOS_SYS", "/sys"))
+DEV = Path(ENV("R3I6NOS_DEV", "/dev"))
+AMIXER = ENV("R3I6NOS_AMIXER", "amixer")
+WAIT = float(ENV("R3I6NOS_SOUND_WAIT", "10"))
+CONTROL = "Playback Path"
+
+EV_SW = 0x05
+SW_HEADPHONE_INSERT = 0x02
+EVENT = struct.Struct("llHHi")          # struct input_event on 64-bit Linux: timeval, type, code, value
+
+
+def log(msg):
+    print("r3i6nos-sound: " + msg, file=sys.stderr, flush=True)
+
+
+def cards():
+    """The ALSA card numbers, from /proc/asound/cards (" 0 [rockchiprk817c]: ...")."""
+    try:
+        text = (PROC / "asound/cards").read_text(errors="replace")
+    except OSError:
+        return []
+    return [int(m.group(1)) for m in re.finditer(r"^\s*(\d+) \[", text, re.M)]
+
+
+def amixer(*args):
+    try:
+        p = subprocess.run([AMIXER, *args], capture_output=True, text=True, timeout=5)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        return 1, str(e)
+    return p.returncode, p.stdout + p.stderr
+
+
+def path_control(card):
+    """(items, current item) of the card's Playback Path, or None when it has none."""
+    rc, out = amixer("-c", str(card), "cget", "name=" + CONTROL)
+    if rc != 0 or "ENUMERATED" not in out:
+        return None
+    items = {int(n): name for n, name in re.findall(r"Item #(\d+) '([^']*)'", out)}
+    m = re.search(r":\s*values=(\d+)", out)
+    current = items.get(int(m.group(1))) if m else None
+    return [items[k] for k in sorted(items)], current
+
+
+def choose(items, headphones):
+    want = ("HP", "HP_NO_MIC", "SPK_HP") if headphones else ("SPK", "SPK_HP")
+    return next((w for w in want if w in items), None)
+
+
+def jack_devices():
+    """Event devices that have the headphone-insert switch (/sys/class/input/eventN/device/capabilities/sw, a hex bitmap)."""
+    found = []
+    base = SYS / "class/input"
+    for ev in sorted(base.glob("event*"), key=lambda p: int(p.name[5:]) if p.name[5:].isdigit() else 0):
+        try:
+            words = (ev / "device/capabilities/sw").read_text().split()
+        except OSError:
+            continue
+        bits = int(words[-1], 16) if words else 0      # the lowest word is last; switch 2 is in it
+        if bits & (1 << SW_HEADPHONE_INSERT):
+            name = (ev / "device/name").read_text().strip() if (ev / "device/name").exists() else ev.name
+            found.append((DEV / "input" / ev.name, name))
+    return found
+
+
+def jack_state(fd):
+    """Whether the headphones are in, from the switch state (EVIOCGSW); None if the kernel will not say."""
+    size = 8
+    eviocgsw = (2 << 30) | (size << 16) | (ord("E") << 8) | 0x1B
+    try:
+        buf = fcntl.ioctl(fd, eviocgsw, bytes(size))
+    except OSError:
+        return None
+    return bool(buf[0] & (1 << SW_HEADPHONE_INSERT))
+
+
+def headphones_in(devices):
+    for path, _ in devices:
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+        except OSError:
+            continue
+        try:
+            state = jack_state(fd)
+        finally:
+            os.close(fd)
+        if state is not None:
+            return state
+    return False
+
+
+def apply(headphones):
+    """Set every card's Playback Path for the speaker or the headphones. Returns how many cards were set."""
+    done = 0
+    for card in cards():
+        ctl = path_control(card)
+        if ctl is None:
+            continue
+        items, current = ctl
+        want = choose(items, headphones)
+        if want is None:
+            log(f"card {card}: no speaker or headphone item in {items}")
+            continue
+        if current == want:
+            done += 1
+            continue
+        rc, out = amixer("-c", str(card), "cset", "name=" + CONTROL, want)
+        if rc == 0:
+            log(f"card {card}: {CONTROL} {current} -> {want}")
+            done += 1
+        else:
+            log(f"card {card}: could not set {CONTROL} to {want}: {out.strip()}")
+    return done
+
+
+def wait_for_card():
+    end = time.monotonic() + WAIT
+    while not cards() and time.monotonic() < end:
+        time.sleep(0.25)
+    return bool(cards())
+
+
+def follow(devices):
+    """Read the jack's switch events and move the path with them, until stopped."""
+    fds = {}
+    for path, name in devices:
+        try:
+            fds[os.open(path, os.O_RDONLY)] = name
+        except OSError as e:
+            log(f"cannot read {path} ({name}): {e}")
+    if not fds:
+        return 0
+    log("following the headphone jack: " + ", ".join(fds.values()))
+    while True:
+        ready, _, _ = select.select(list(fds), [], [])
+        for fd in ready:
+            handle(os.read(fd, EVENT.size * 16))
+
+
+def handle(data):
+    """Move the path for each headphone-switch event in a read from an event device."""
+    for i in range(0, len(data) - EVENT.size + 1, EVENT.size):
+        _, _, etype, code, value = EVENT.unpack_from(data, i)
+        if etype == EV_SW and code == SW_HEADPHONE_INSERT:
+            apply(bool(value))
+
+
+def status():
+    found = cards()
+    print(f"cards: {len(found)}")
+    for card in found:
+        ctl = path_control(card)
+        if ctl is None:
+            print(f"card {card} playback path: none")
+        else:
+            print(f"card {card} playback path: {ctl[1]} (of {' '.join(ctl[0])})")
+    devices = jack_devices()
+    print("jack: " + (", ".join(n for _, n in devices) if devices else "none"))
+    if devices:
+        print("headphones: " + ("in" if headphones_in(devices) else "out"))
+    return 0
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else "start"
+    if cmd == "status":
+        return status()
+    if cmd not in ("start", "set"):
+        print(__doc__.strip().splitlines()[2], file=sys.stderr)
+        return 2
+    if not wait_for_card():
+        log("no sound card")
+        return 0
+    devices = jack_devices()
+    if apply(headphones_in(devices)) == 0:
+        log(f"no card has a {CONTROL} control; nothing to do")
+        return 0
+    if cmd == "start" and devices:
+        return follow(devices)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

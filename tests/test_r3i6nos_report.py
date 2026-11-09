@@ -48,10 +48,12 @@ class SystemReport(unittest.TestCase):
                                          "  is-system-running) echo degraded; exit 1 ;;\n"
                                          "  list-jobs) echo '12 r3i6nos-net.path start waiting' ;;\nesac\n")
         (t / "bin/systemd-analyze").write_text("#!/bin/sh\necho 'Startup finished in 3.1s (kernel) + 9.2s (userspace) = 12.3s'\n")
-        for f in ("systemctl", "systemd-analyze"):
+        (t / "bin/r3i6nos-sound").write_text("#!/bin/sh\necho 'cards: 1'\necho 'card 0 playback path: SPK (of OFF RCV SPK HP)'\n"
+                                             "echo 'jack: rk817-sound Headphone Jack'\necho 'headphones: out'\n")
+        for f in ("systemctl", "systemd-analyze", "r3i6nos-sound"):
             (t / "bin" / f).chmod(0o755)
         self.env = {"R3I6NOS_ETC": str(t / "etc"), "R3I6NOS_PROC": str(t / "proc"), "R3I6NOS_SYS": str(t / "sys"), "R3I6NOS_DEV": str(t / "dev"),
-                    "R3I6NOS_CARDS_STATE": str(t / "run/cards"), "R3I6NOS_REPORT_MB": "2", "PATH": f"{t / 'bin'}:{os.environ.get('PATH', '')}"}
+                    "R3I6NOS_CARDS_STATE": str(t / "run/cards"), "R3I6NOS_REPORT_MB": "2", "R3I6NOS_SOUND": str(t / "bin/r3i6nos-sound"), "PATH": f"{t / 'bin'}:{os.environ.get('PATH', '')}"}
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -87,6 +89,8 @@ class SystemReport(unittest.TestCase):
                      "INFO cpu: 2 CPUs", "INFO memory: total 919232 kB",
                      "== boot ==", "FAIL failed units: wpa_supplicant.service", "FAIL system state: degraded", "INFO jobs waiting: r3i6nos-net.path",
                      "INFO boot time: 3.1s (kernel) + 9.2s (userspace) = 12.3s", "INFO up for: 12.6 min",
+                     "== sound ==", "PASS card 0 playback path: SPK (of OFF RCV SPK HP)", "INFO jack: rk817-sound Headphone Jack",
+                     "INFO headphones: out", "INFO heard: not measured",
                      "== storage ==", "INFO disk mmcblk0: 127.9 GB, boot (system card)", "INFO disk mmcblk1: 32.0 GB, other (data card?), removable",
                      "PASS cards in the slots: 2", "INFO mmc hosts: mmc0, mmc1",
                      "PASS system card: /dev/mmcblk0p3 (exfat) on", "PASS data card: /dev/mmcblk1p1 (exfat) on",
@@ -120,6 +124,13 @@ class SystemReport(unittest.TestCase):
         self.assertIn("FAIL build: no /etc/r3i6nos-release", text)
         self.assertIn("PASS failed units: none", text)
 
+    def test_sound_off_is_a_fail(self):
+        (self.t / "bin/r3i6nos-sound").write_text("#!/bin/sh\necho 'cards: 1'\necho 'card 0 playback path: OFF (of OFF SPK HP)'\necho 'jack: none'\n")
+        self.report()
+        text = self.text(self.t / "sys2/r3i6nos")
+        self.assertIn("FAIL card 0 playback path: OFF (of OFF SPK HP)", text)
+        self.assertIn("INFO jack: none", text)
+
     def test_a_card_found_but_not_mounted(self):
         self.cards(SYSTEM_DEV="/dev/mmcblk0p3", SYSTEM_FS="exfat", SYSTEM_AT=str(self.t / "sys1"), DATA_DEV="/dev/mmcblk1p1", DATA_FS="ntfs")
         self.report()
@@ -136,9 +147,9 @@ class SystemReport(unittest.TestCase):
         with mock.patch.object(m.Report, "step", watch), mock.patch.dict(os.environ, {"PATH": self.env["PATH"]}), mock.patch("sys.stdout", io.StringIO()):
             self.assertEqual(m.main(["--from-settings", "--quiet"]), 0)
         steps = [dict(l.split("=", 1) for l in text.splitlines()) for text in seen]
-        self.assertEqual([s["steps"] for s in steps], ["7"] * 8, "3 sections and 2 checks on each of the two cards, then done")
-        self.assertEqual([s["step"] for s in steps], ["1", "2", "3", "4", "5", "6", "7", "7"])
-        self.assertIn("speed", steps[4]["doing"])
+        self.assertEqual([s["steps"] for s in steps], ["8"] * 9, "4 sections and 2 checks on each of the two cards, then done")
+        self.assertEqual([s["step"] for s in steps], ["1", "2", "3", "4", "5", "6", "7", "8", "8"])
+        self.assertIn("speed", steps[5]["doing"])
         self.assertEqual(steps[-1]["doing"], "done")
         self.assertEqual(steps[-1]["file"], str(self.t / "sys2/r3i6nos/r36s-report.txt"))
 

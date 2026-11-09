@@ -118,6 +118,9 @@ ln -sfn /etc/systemd/system/r3i6nos-bootlog.service \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-bootlog.service"
 ln -sfn /etc/systemd/system/r3i6nos-cards.service \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-cards.service"
+# The RK817 codec's outputs stay off until its "Playback Path" is set (r3i6nos-sound): without this no app is heard.
+ln -sfn /etc/systemd/system/r3i6nos-sound.service \
+    "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-sound.service"
 # The system's own device report (docs/STORAGE.md), listed in Settings > Device reports with the tools' reports.
 mkdir -p "$ROOTFS/opt/loveos/bin"
 ln -sfn /usr/local/bin/r3i6nos-report "$ROOTFS/opt/loveos/bin/r3i6nos-report"

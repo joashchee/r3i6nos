@@ -7,11 +7,13 @@ Checks and measures what only the unit can answer about the system, and writes r
 mounted (so the boot card can stay in), else on the system card, for Claude to read in the r3i6nos repo. Settings > Device reports
 starts it (it is linked into /opt/loveos/bin as a report); over SSH, run `r3i6nos-report`. It runs as loveos and needs no root.
 
-Sections: system (the build, kernel, CPU, memory), boot (units that failed, how long boot took), storage (every mmc disk and slot, what
+Sections: system (the build, kernel, CPU, memory), boot (units that failed, how long boot took), sound (the RK817's Playback
+Path and the headphone jack, from r3i6nos-sound), storage (every mmc disk and slot, what
 r3i6nos-cards mounted, the kernel's filesystems, loop devices, and on each mounted card a write/rename/read/delete check and its speed).
 
 Standard library only. Overrides, for tests: R3I6NOS_ETC (/etc), R3I6NOS_PROC (/proc), R3I6NOS_SYS (/sys), R3I6NOS_DEV (/dev),
-R3I6NOS_CARDS_STATE (/run/r3i6nos/cards), R3I6NOS_REPORT_DIR (the folder to write in), R3I6NOS_REPORT_MB (16: the speed test's size).
+R3I6NOS_CARDS_STATE (/run/r3i6nos/cards), R3I6NOS_REPORT_DIR (the folder to write in), R3I6NOS_REPORT_MB (16: the speed test's size),
+R3I6NOS_SOUND (r3i6nos-sound).
 """
 import os
 import re
@@ -30,6 +32,7 @@ DEV = Path(ENV("R3I6NOS_DEV", "/dev"))
 STATE = Path(ENV("R3I6NOS_CARDS_STATE", "/run/r3i6nos/cards"))
 MB = int(ENV("R3I6NOS_REPORT_MB", "16"))
 REPORT_DIR = ENV("R3I6NOS_REPORT_DIR")
+SOUND = ENV("R3I6NOS_SOUND", "/usr/local/bin/r3i6nos-sound")
 PROGRESS = ENV("R3I6NOS_REPORT_PROGRESS")   # set by the menu (menu/reports.lua): where to say how far it has got
 WANT_FS = ("exfat", "vfat", "ext4", "squashfs")
 
@@ -177,6 +180,26 @@ def boot(r):
     up = read(PROC / "uptime")
     if up:
         r.line("INFO", "up for", f"{float(up.split()[0]) / 60:.1f} min")
+
+
+def sound(r):
+    """The speaker's state (r3i6nos-sound status): the RK817 codec is silent while its Playback Path is OFF."""
+    r.step("the sound output")
+    r.section("sound")
+    out = run([SOUND, "status"])
+    if out is None:
+        r.line("SKIP", "sound", "r3i6nos-sound did not answer")
+        return
+    for ln in out.splitlines():
+        key, _, val = ln.partition(": ")
+        if key.endswith("playback path") and val != "none":
+            cur = val.split(" ", 1)[0]
+            r.line("PASS" if cur in ("SPK", "HP", "HP_NO_MIC", "SPK_HP") else "FAIL", key, val)
+        elif key:
+            r.line("INFO", key, val)
+    state = (run(["systemctl", "is-active", "r3i6nos-sound.service"]) or "").strip()
+    r.line("INFO", "jack follower", state or "unknown")
+    r.line("INFO", "heard", "not measured: listen for the menu's sounds (speaker), then with headphones in")
 
 
 def disks():
@@ -342,11 +365,11 @@ def main(argv):
     try:
         folder, card = where(cards)
         r = Report(folder, how, rel.get("VERSION", "?"), card, quiet)
-        r.steps = 3 + 2 * len(mounted_cards(cards))
+        r.steps = 4 + 2 * len(mounted_cards(cards))
     except OSError as e:
         print(f"r3i6nos-report: cannot write the report: {e}", file=sys.stderr)
         return 1
-    for part in (lambda: system(r, rel), lambda: boot(r), lambda: storage(r, cards)):
+    for part in (lambda: system(r, rel), lambda: boot(r), lambda: sound(r), lambda: storage(r, cards)):
         try:
             part()
         except Exception as e:  # a broken check is a line in the report, never a missing report

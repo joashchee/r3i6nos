@@ -158,6 +158,11 @@ All of it goes in the gitignored `local_hardware_assets/`.
 - [ ] **Still to measure:** L1, R1, L2, R2 (checker assumes 5-8); what power and the volume keys send (keys? names?); whether event lines are really
   inverted (the checker now prints held/free beside each event). Then fix `SDL_GAMECONTROLLERCONFIG` in `run_app.sh` and the menu's controls from the layout.
 - [ ] **First boot (full):** reaches the menu; panel, backlight, D-pad and buttons, audio, TF2 mount.
+  - **Sound (2026-11-09): no app was heard from the speaker.** Cause: the stock kernel's RK817 codec keeps its outputs off until
+    its ALSA control `Playback Path` is set, and it starts at `OFF` (on Android the audio HAL sets it). Fixed in the image by
+    `r3i6nos-sound` (`r3i6nos-sound.service`, before the menu): SPK, or HP while headphones are in, following the device tree's
+    `Headphone Jack` switch. Tested on a laptop against a fake `amixer` and event device. **Untested on the unit:** the speaker
+    heard, the jack switch's input device existing, HP heard. r3i6nos's device report now has a `sound` section that says.
   - Done (2026-11-07, one R36S, Panel 4 DTB from the stock card): ArkOS splash, kernel, initramfs, root by UUID, systemd to
     the end of boot, text console on the panel. `EASYROMS` timeout is expected (no such partition).
   - **Open:** after that nothing is drawn. Blocked on the log: flash an image injected with `R3I6NOS_BOOT_DEBUG=1`, boot, read
