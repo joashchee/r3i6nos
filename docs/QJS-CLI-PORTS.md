@@ -112,4 +112,13 @@ ratio too): `kits` 4.05 s (0.23 s on the Mac), a 4.1 s jingle in 1.67 s, a 26.7 
 0.03-0.19 s. So an app on the unit makes its loops and jingles ahead of time, never while a person waits. A second run (2026-11-09 22:30)
 matched to within 2% (ambient 16.08 s), 11.6 MB peak.
 
-Painter: not yet run there.
+**Painter** passed **15 of 16** (2026-11-09 22:31), every command 18 to 21 times the Mac's QuickJS build: small drawings 0.2-0.5 s, a
+character or scene at scale 13-18 s, `convert` of a 16 x 16 PNG 103 s (its colour search; 0.67 s under Node). **The FAIL:** `sheet item`, all
+610 item variants on one 1302 x 7932 PNG, was stopped at the report's 300 s limit, at 104 MB. Half of its time was this shim's deflate,
+which built its output in a JS array and allocated on every byte: now table-driven with the same bytes out (10.1 s to 6.3 s on the
+41 MB sheet in `qjs` on the Mac, the whole command 19.6 s to 15.5 s). It is still about 290 s on the unit, so Painter lists `sheet item` as
+`!SLOW` and times `sheet icon` instead. The detail and what is next are in the Painter repo (`r36s/README.md`, `ROADMAP.md`).
+
+**What this means for a tool on the unit:** QuickJS there is about 20 times this Mac's QuickJS and 150 to 300 times Node, so anything a
+tool does in a loop over every pixel or byte of a large image is minutes. Apps call the tools for small things at run time and make the
+large ones ahead of time.

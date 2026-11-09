@@ -80,6 +80,35 @@ ok('zlib: inflate reads what Node deflates at every level, deflate is read by No
   }
   assert.throws(() => inflateSync(Uint8Array.of(0, 0, 0)), /header/);
   assert.throws(() => inflateSync(nodeZlib.deflateSync(sets.text).subarray(0, 20)));
+  // The table-driven deflate (2026-11-09, made faster for Painter's `sheet` on the R36S) writes exactly what the first one did: that one is
+  // kept here as the reference, verbatim but for its name.
+  const LB = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258], LX = [0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 1, 1, 2, 2, 2, 2, 3, 3, 3, 3, 4, 4, 4, 4, 5, 5, 5, 5, 0];
+  const DB = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 385, 513, 769, 1025, 1537, 2049, 3073, 4097, 6145, 8193, 12289, 16385, 24577], DX = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
+  const fixedCode = (s) => (s < 144 ? [0x30 + s, 8] : s < 256 ? [0x190 + s - 144, 9] : s < 280 ? [s - 256, 7] : [0xc0 + s - 280, 8]);
+  const adler = (b) => { let a = 1, c = 0; for (let i = 0; i < b.length; i++) { a = (a + b[i]) % 65521; c = (c + a) % 65521; } return ((c << 16) | a) >>> 0; };
+  const reference = (b) => {
+    const out = [0x78, 0x01]; let acc = 0, nacc = 0;
+    const put = (v, k) => { acc |= v << nacc; nacc += k; while (nacc >= 8) { out.push(acc & 255); acc >>>= 8; nacc -= 8; } };
+    const putCode = (code, k) => { let r = 0; for (let i = 0; i < k; i++) r |= ((code >> i) & 1) << (k - 1 - i); put(r, k); };
+    put(1, 1); put(1, 2);
+    const head = new Int32Array(1 << 15).fill(-1), hash = (i) => ((b[i] << 10) ^ (b[i + 1] << 5) ^ b[i + 2]) & 0x7fff;
+    for (let i = 0; i < b.length;) {
+      let len = 0, dist = 0;
+      if (i + 2 < b.length) { const h = hash(i), j = head[h]; head[h] = i; if (j >= 0 && i - j <= 32768) { const max = Math.min(258, b.length - i); while (len < max && b[j + len] === b[i + len]) len++; dist = i - j; } }
+      if (len >= 3) {
+        let li = 28; while (LB[li] > len) li--; putCode(...fixedCode(257 + li)); put(len - LB[li], LX[li]);
+        let di = 29; while (DB[di] > dist) di--; putCode(di, 5); put(dist - DB[di], DX[di]);
+        for (let k = 1; k < len && i + k + 2 < b.length; k++) head[hash(i + k)] = i + k;
+        i += len;
+      } else { putCode(...fixedCode(b[i])); i++; }
+    }
+    putCode(...fixedCode(256)); if (nacc) out.push(acc & 255);
+    const sum = adler(b); out.push(sum >>> 24, (sum >>> 16) & 255, (sum >>> 8) & 255, sum & 255);
+    return out;
+  };
+  const edge = new Uint8Array(32768 + 600); for (let i = 0; i < 300; i++) edge[i] = rnd() & 255; edge.set(edge.subarray(0, 300), 32768);
+  const all = { ...sets, edge, bytes: Uint8Array.from({ length: 256 * 40 }, (_, i) => i & 255), two: Uint8Array.of(1, 2), three: Uint8Array.of(1, 2, 3) };
+  for (const [name, data] of Object.entries(all)) assert.deepEqual([...deflateSync(data)], reference(data), `${name}: the same bytes as the first deflate`);
 });
 
 ok('crypto: sha256 matches Node for every length around the block edges, strings and bytes', () => {

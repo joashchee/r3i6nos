@@ -1,6 +1,7 @@
 // node:zlib's inflateSync and deflateSync for QuickJS, in plain JS. inflate is complete (stored, fixed and dynamic Huffman blocks), so any PNG
 // opens. deflate writes fixed-Huffman blocks with greedy LZ77 matching: valid, smaller than raw, but NOT byte-identical to zlib's output (a PNG
-// made here has the same pixels as one made by Node, in a larger file). Pure.
+// made here has the same pixels as one made by Node, in a larger file). Pure. deflate is table-driven (2026-11-09) and writes the same bytes
+// as before; tests/test_qjs_node.mjs keeps the first version as its reference.
 import { Buffer } from './buffer.js';
 
 const LBASE = [3, 4, 5, 6, 7, 8, 9, 10, 11, 13, 15, 17, 19, 23, 27, 31, 35, 43, 51, 59, 67, 83, 99, 115, 131, 163, 195, 227, 258];
@@ -9,7 +10,6 @@ const DBASE = [1, 2, 3, 4, 5, 7, 9, 13, 17, 25, 33, 49, 65, 97, 129, 193, 257, 3
 const DEXT = [0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5, 6, 6, 7, 7, 8, 8, 9, 9, 10, 10, 11, 11, 12, 12, 13, 13];
 const CLORDER = [16, 17, 18, 0, 8, 7, 9, 6, 10, 5, 11, 4, 12, 3, 13, 2, 14, 1, 15];
 
-const adler32 = (b) => { let a = 1, c = 0; for (let i = 0; i < b.length; i++) { a = (a + b[i]) % 65521; c = (c + a) % 65521; } return ((c << 16) | a) >>> 0; };
 
 /** A canonical Huffman decoder from code lengths: counts per length and symbols in code order. */
 function huff(lengths) {
@@ -82,37 +82,69 @@ export function inflateSync(input) {
   return Buffer.from(out.subarray(0, n)); // a copy of exactly the output
 }
 
-/** Fixed Huffman code of a literal/length symbol: [code, bit count]. */
-const fixedCode = (s) => (s < 144 ? [0x30 + s, 8] : s < 256 ? [0x190 + s - 144, 9] : s < 280 ? [s - 256, 7] : [0xc0 + s - 280, 8]);
+// The fixed Huffman codes, bit-reversed once (deflate writes a Huffman code most significant bit first into a stream filled from the low
+// bit): LITREV/LITLEN for the 286 literal/length symbols, DISTREV for the 30 distance codes. LCODE gives a match length's symbol index
+// (0-28) and DCODE a distance's (1-32768). Tables, so a byte costs no allocation: under QuickJS (no JIT) the old per-byte `[code, bits]`
+// arrays and spread calls made deflate half of Painter's `sheet item` (10 s of 20 s on a Mac, about 190 s on the R36S, 2026-11-09).
+const rev = (code, k) => { let r = 0; for (let i = 0; i < k; i++) r |= ((code >> i) & 1) << (k - 1 - i); return r; };
+const LITREV = new Uint16Array(288), LITLEN = new Uint8Array(288);
+for (let s = 0; s < 288; s++) {
+  const [code, k] = s < 144 ? [0x30 + s, 8] : s < 256 ? [0x190 + s - 144, 9] : s < 280 ? [s - 256, 7] : [0xc0 + s - 280, 8];
+  LITREV[s] = rev(code, k); LITLEN[s] = k;
+}
+const DISTREV = new Uint8Array(30);
+for (let d = 0; d < 30; d++) DISTREV[d] = rev(d, 5);
+const LCODE = new Uint8Array(259);
+for (let len = 3, li = 0; len <= 258; len++) { while (li < 28 && LBASE[li + 1] <= len) li++; LCODE[len] = li; }
+const DCODE = new Uint8Array(32769);
+for (let dist = 1, di = 0; dist <= 32768; dist++) { while (di < 29 && DBASE[di + 1] <= dist) di++; DCODE[dist] = di; }
 
+/** Adler-32 in runs of 5552 bytes (the most before the sums can pass 2^32), so a byte costs two adds, not two divisions. Same value. */
+const adler32 = (b) => {
+  let a = 1, c = 0;
+  for (let i = 0; i < b.length;) {
+    const end = Math.min(b.length, i + 5552);
+    for (; i < end; i++) { a += b[i]; c += a; }
+    a %= 65521; c %= 65521;
+  }
+  return ((c << 16) | a) >>> 0;
+};
+
+/** One final fixed-Huffman block with greedy LZ77 matching (a 32 KB window, chains of one). The output is byte for byte what this shim
+ *  wrote before it was made faster (2026-11-09; tests/test_qjs_node.mjs keeps the old one as a reference). */
 export function deflateSync(input) {
-  const b = input instanceof Uint8Array ? input : new Uint8Array(input), out = [0x78, 0x01];
+  const b = input instanceof Uint8Array ? input : new Uint8Array(input), n = b.length;
+  let out = new Uint8Array(Math.max(64, (n >> 2) + 64)), o = 0;
   let acc = 0, nacc = 0;
-  const put = (v, k) => { acc |= v << nacc; nacc += k; while (nacc >= 8) { out.push(acc & 255); acc >>>= 8; nacc -= 8; } };
-  const putCode = (code, k) => { let r = 0; for (let i = 0; i < k; i++) r |= ((code >> i) & 1) << (k - 1 - i); put(r, k); }; // Huffman codes go most significant bit first
+  const grow = () => { const bigger = new Uint8Array(out.length * 2); bigger.set(out); out = bigger; };
+  const put = (v, k) => { // v is at most 13 bits and nacc below 8 here, so acc stays within 21 bits
+    acc |= v << nacc; nacc += k;
+    while (nacc >= 8) { if (o >= out.length) grow(); out[o++] = acc & 255; acc >>>= 8; nacc -= 8; }
+  };
+  out[o++] = 0x78; out[o++] = 0x01;
   put(1, 1); put(1, 2); // one final block, fixed Huffman
   const head = new Int32Array(1 << 15).fill(-1);
-  const hash = (i) => ((b[i] << 10) ^ (b[i + 1] << 5) ^ b[i + 2]) & 0x7fff;
-  for (let i = 0; i < b.length;) {
+  for (let i = 0; i < n;) {
     let len = 0, dist = 0;
-    if (i + 2 < b.length) {
-      const h = hash(i), j = head[h];
+    if (i + 2 < n) {
+      const h = ((b[i] << 10) ^ (b[i + 1] << 5) ^ b[i + 2]) & 0x7fff, j = head[h];
       head[h] = i;
-      if (j >= 0 && i - j <= 32768) { const max = Math.min(258, b.length - i); while (len < max && b[j + len] === b[i + len]) len++; dist = i - j; }
+      if (j >= 0 && i - j <= 32768) { const max = Math.min(258, n - i); while (len < max && b[j + len] === b[i + len]) len++; dist = i - j; }
     }
     if (len >= 3) {
-      let li = 28; while (LBASE[li] > len) li--;
-      putCode(...fixedCode(257 + li)); put(len - LBASE[li], LEXT[li]);
-      let di = 29; while (DBASE[di] > dist) di--;
-      putCode(di, 5); put(dist - DBASE[di], DEXT[di]);
-      for (let k = 1; k < len && i + k + 2 < b.length; k++) head[hash(i + k)] = i + k;
+      const li = LCODE[len], ls = 257 + li;
+      put(LITREV[ls], LITLEN[ls]); if (LEXT[li]) put(len - LBASE[li], LEXT[li]);
+      const di = DCODE[dist];
+      put(DISTREV[di], 5); if (DEXT[di]) put(dist - DBASE[di], DEXT[di]);
+      for (let k = 1; k < len && i + k + 2 < n; k++) { const p = i + k; head[((b[p] << 10) ^ (b[p + 1] << 5) ^ b[p + 2]) & 0x7fff] = p; }
       i += len;
-    } else { putCode(...fixedCode(b[i])); i++; }
+    } else { const s = b[i]; put(LITREV[s], LITLEN[s]); i++; }
   }
-  putCode(...fixedCode(256));
-  if (nacc) out.push(acc & 255);
+  put(LITREV[256], LITLEN[256]);
+  if (nacc) { if (o >= out.length) grow(); out[o++] = acc & 255; }
   const sum = adler32(b);
-  out.push(sum >>> 24, (sum >>> 16) & 255, (sum >>> 8) & 255, sum & 255);
-  return Buffer.from(out);
+  while (o + 4 > out.length) grow();
+  out[o++] = sum >>> 24; out[o++] = (sum >>> 16) & 255; out[o++] = (sum >>> 8) & 255; out[o++] = sum & 255;
+  return Buffer.from(out.subarray(0, o));
 }
 export default { inflateSync, deflateSync };
