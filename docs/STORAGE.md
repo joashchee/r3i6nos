@@ -22,7 +22,7 @@ now worked out from the hardware, so a card's label does not matter and no one's
 
 ## The plan, in order
 
-1. **Mount by role, and measure what the unit can do** (done 2026-11-10, below). Untested on the R36S.
+1. **Mount by role, and measure what the unit can do** (done 2026-11-09, below). Untested on the R36S.
 2. **Both cards in the menu, and each app's data on its own card.** The list shows a tag per entry (`S` system, `D` data); the same name on
    both is listed twice, never merged. `run_app.sh` gives the app `R3I6NOS_APP_DATA`, the `<App>/` folder on the card it was started from,
    and the ports (KlamANSI, NoCoGaMa, the tools, the device reports) use it instead of `/roms/<App>`. An app whose card is out is greyed
@@ -39,7 +39,7 @@ now worked out from the hardware, so a card's label does not matter and no one's
    which card to insert when it is out. The image's own default apps stay in ROOTFS.
 5. **Moving an app between cards, and swapping the data card while the unit is on** (only if the slot reports insertion and removal).
 
-## Step 1: mounting by role (2026-11-10)
+## Step 1: mounting by role (2026-11-09)
 
 `overlay/usr/local/bin/r3i6nos-cards` (Python stdlib, root) runs once at boot from `r3i6nos-cards.service`, before the session:
 
@@ -75,7 +75,7 @@ system card. Its **storage** section:
 **Not answered by a report:** whether the second slot reports a card being put in or taken out while the unit is on (step 5). To find out
 by hand: with the unit on, insert a card in TF2, then run `ls /sys/block` over SSH.
 
-## On the R36S (2026-11-10, image `53f46b3`, r3i6nos's own report)
+## On the R36S (2026-11-09, image `53f46b3`, r3i6nos's own report)
 
 - **The system card works by role:** the boot disk is `mmcblk0` (128.2 GB); its partition 3 is mounted at `/roms` (exFAT, 125.7 GB), and the
   menu and About see it. Writing 32.4 MB/s, reading 65.3 MB/s (16 MB, synced, from the card not the cache).

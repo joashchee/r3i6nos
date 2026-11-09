@@ -60,7 +60,7 @@ grep -q '^Before=loveos.service' "$R/etc/systemd/system/r3i6nos-sound.service" |
 [ -x "$R/usr/local/bin/r3i6nos-report" ]        || fail "r3i6nos-report not installed executable"
 [ -L "$R/etc/systemd/system/multi-user.target.wants/loveos.service" ] || fail "unit not enabled"
 # run_app.sh's default pad mapping carries the measured layout (docs/hardware-findings.md): buttons, not a hat
-# ... under the GUID read from the unit (KlamANSI's device report, 2026-11-10), with and without the name's CRC; and it reaches SDL as two lines
+# ... under the GUID read from the unit (KlamANSI's device report, 2026-11-09), with and without the name's CRC; and it reaches SDL as two lines
 C="$(bash -c 'unset SDL_GAMECONTROLLERCONFIG; eval "$(sed -n "/^R36S_PAD=/,/}\"\$/p" overlay/usr/local/bin/run_app.sh)"; printf %s "$SDL_GAMECONTROLLERCONFIG"')"
 M="$C"
 [ "$(printf '%s\n' "$C" | grep -c '^1900bb3e4b4800000011000000010000,R36S GO-Super Gamepad,a:b1,')" = 1 ] || fail "run_app.sh mapping lacks the unit's GUID"

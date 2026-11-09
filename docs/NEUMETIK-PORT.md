@@ -115,7 +115,7 @@ the old file whole; nothing outside that folder is written (rule 7). A module's 
   licence and this repo's theme and font notices.
 - **The device report** (2026-11-09, rule 9) replaced the speed test: Start > Device report and `neumetik --report` write `/roms/Neumetik/r36s-report.txt` (system and the pad's GUID, card, start-up, the sound device and whether its callback runs, screen paint, every engine's speed, Visual, memory).
 
-## 8. First run on a real R36S (device report, 2026-11-10)
+## 8. First run on a real R36S (device report, 2026-11-09)
 
 Neumetik 0.1.0 ran on one unit under r3i6nos and wrote its device report: **18 PASS, 0 FAIL, go on speed.** The report is kept in the
 Neumetik repo (`r36s/reports/`); the unit's figures are in `docs/hardware-findings.md` ("First device report"). A second report

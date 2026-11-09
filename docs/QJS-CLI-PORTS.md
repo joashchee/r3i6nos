@@ -99,7 +99,7 @@ line) and `tests/test_reports.lua`.
 2. A try on a real R36S, then `qjsc` startup and memory numbers on the Cortex-A35, and a LÖVE app's `io.popen` there.
 3. Optional: a better deflate; the VGA atlas for Painter's PNG render; a `tools.lua` helper for LÖVE apps; a `--help` that fits the 64-column screen.
 
-## On a real R36S (2026-11-10)
+## On a real R36S (2026-11-09)
 
 **Animator** ran first: installed from `native_deb/` by `deb_watcher.py` on image `53f46b3` (the one where `loveos` owns the tools folder),
 `animate` on the tools path, and its report from Settings > Device reports passed **15 of 15**. All 10 commands in its `commands.txt` took

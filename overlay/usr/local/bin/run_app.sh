@@ -27,7 +27,7 @@ export SDL_NOMOUSE=1
 
 # Buttons and axes are MEASURED (input checker on a real R36S, 2026-11-07; docs/hardware-findings.md "Input layout"), 0-based as SDL
 # counts: B 0, A 1, X 2, Y 3, L1-R2 4-7, D-pad 8-11 (buttons, not a hat), Select 12, Start 13, L3 14, R3 15, Fn 16; axes 0-3.
-# GUID READ from the unit (KlamANSI's device report, 2026-11-10): SDL 2.26.5 calls the pad "GO-Super Gamepad",
+# GUID READ from the unit (KlamANSI's device report, 2026-11-09): SDL 2.26.5 calls the pad "GO-Super Gamepad",
 # 1900bb3e4b4800000011000000010000 (bus 0x19 host, the name's CRC bb3e, vendor 0x484b, product 0x1100, version 0x0100), 17 buttons,
 # 4 axes, 0 hats. SDL's own database maps that pad differently (Select, Start and Fn wrong), and a mapping given here replaces it.
 # The second line is the same pad with the CRC zeroed, as SDL before 2.26 builds the GUID (an app bundling an older SDL) and as

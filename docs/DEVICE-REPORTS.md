@@ -79,7 +79,7 @@ uses three files in `/run/loveos/report/`:
 - **`progress`**: written by the report itself, when `R3I6NOS_REPORT_PROGRESS` names it (the menu sets it), whole each time (a temporary
   file renamed over it): `step=N`, `steps=M`, `doing=<what it is checking now>`, `file=<the report's path>`. The wait screen shows `doing`, a
   bar of `step` out of `steps` and the time so far. `r3i6nos-report` and `tools/qjs-node/report.py` write it; a report that does not (a
-  tool packaged before 2026-11-10) still works: the wait shows the time and says it cannot show steps.
+  tool packaged before 2026-11-09) still works: the wait shows the time and says it cannot show steps.
 - **`done`**: `exit=N`, written by the shell that started the report when it ends, so every report, old or new, says when it has finished.
 
 When `done` appears, the screen shows the report's own summary line (`PASS n  FAIL n  INFO n  SKIP n`) and which card the file is on, or,

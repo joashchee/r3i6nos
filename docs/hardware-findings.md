@@ -24,7 +24,7 @@ spec (`rk3326-evb-lp3-v12`, `rf3536k4ka`, `eGON.BT0`). Genuine RK3326.
   same sector, 32768, so the captured bootloader fits unchanged.
 - **The stock OS keeps the games on partition 3 of the same card.** The spec
   and our fstab expected a second card (TF2) labelled `EASYROMS`. Mounting by
-  label works for either, but the image has only two partitions. (Since 2026-11-10 the cards are mounted by role, not label:
+  label works for either, but the image has only two partitions. (Since 2026-11-09 the cards are mounted by role, not label:
   `docs/STORAGE.md`.)
 
 ## How it boots
@@ -96,12 +96,12 @@ Raw button numbers as LÖVE reports them (counting from 1; SDL's own index is on
   the checker read them through the mapping), so anything that needs the real layout should read raw buttons or
   set its own `SDL_GAMECONTROLLERCONFIG`. `run_app.sh` now carries this layout in its default mapping (2026-11-07), but its **GUID is still the
   spec's guess**, never read from a unit, so SDL may not apply it: read the real one from `device-info.sh` ("input devices").
-  **Read 2026-11-10** (below): `1900bb3e4b4800000011000000010000`, now in `run_app.sh`.
+  **Read 2026-11-09** (below): `1900bb3e4b4800000011000000010000`, now in `run_app.sh`.
 - `apps/io-checker-love/model.lua` (`LAYOUT`), `apps/io-checker-native/io_checker.c` (`L_*`) and the theme's `PAD` hold these numbers.
 - A report that the event lines looked inverted (UP on press, DOWN on release) was not reproduced by reading the code;
   the checker's event lines now say whether SDL reports the button held at that moment, so a real inversion shows.
 
-## First device report (KlamANSI, 2026-11-10, one R36S, r3i6nos booted)
+## First device report (KlamANSI, 2026-11-09, one R36S, r3i6nos booted)
 
 The first report from a unit (`docs/DEVICE-REPORTS.md`; KlamANSI's Start > Device report, a native SDL2 and QuickJS app installed from
 `native_deb/` by `deb_watcher.py`). What it settles:
@@ -123,7 +123,7 @@ The first report from a unit (`docs/DEVICE-REPORTS.md`; KlamANSI's Start > Devic
   right buttons is **untested**.
 - The games card being `mmcblk0` means the flashed card itself (TF1), with `flash-macos.sh`'s partition 3: no second card was needed.
 
-### The system, from r3i6nos's own report (2026-11-10, image `53f46b3`)
+### The system, from r3i6nos's own report (2026-11-09, image `53f46b3`)
 
 - The device tree's model string is **"Game Console R35S/R36S fix by lxc"** (the stock card's DTB).
 - systemd 252 on the 4.4 kernel: **no failed units**. Whether the boot reaches "finished" is not known yet (`systemd-analyze time` gave no
@@ -131,17 +131,17 @@ The first report from a unit (`docs/DEVICE-REPORTS.md`; KlamANSI's Start > Devic
 - Two mmc hosts, `mmc0` and `mmc1`; the boot card is `mmcblk0` (128.2 GB). The kernel has **squashfs**, loop devices, exfat, vfat and ext4.
 - The boot card (exFAT partition 3): **32.4 MB/s** writing, **65.3 MB/s** reading.
 
-### Graphics under LÖVE (NoCoGaMa's device spike, LÖVE 12.0, 2026-11-10)
+### Graphics under LÖVE (NoCoGaMa's device spike, LÖVE 12.0, 2026-11-09)
 
 - LÖVE 12.0.0 runs on the unit with **LuaJIT 2.1.0-beta3, JIT on** (Debian's system LuaJIT, which r3i6nos's builds link).
-- **LÖVE 11.5 runs with the JIT off** (its spike report, 2026-11-10), with the same LuaJIT: LÖVE 11.5 calls `jit.off()` itself on arm and arm64
+- **LÖVE 11.5 runs with the JIT off** (its spike report, 2026-11-09), with the same LuaJIT: LÖVE 11.5 calls `jit.off()` itself on arm and arm64
   (`src/modules/love/jitsetup.lua` in its source, citing LuaJIT issue #285: compiled code can only go in a short memory range on arm64, which
   other libraries fill, and performance is unreliable). Expect pure-Lua work about 10 times slower under 11.5 than under 12.0; a game should
   not turn the JIT back on.
 - Renderer **OpenGL ES 3.2**, `v1.r13p0-01rel0`, GPU **ARM Mali-G31**: the blob from the user's card works with SDL's KMSDRM and gbm.
 - The window is 640x480 fullscreen. **Under LÖVE 12.0 (SDL3)** it draws at 60 fps even with vsync off; **under LÖVE 11.5 (SDL2 2.26.5)** the
   same spike with vsync off drew at 82-88 fps. So the 60 fps ceiling is 12.0's, not the panel's (likely SDL3's KMSDRM waiting for each flip; not checked): under
-  12.0 a program's headroom shows in its CPU time, not its fps. (Corrected 2026-11-10: an earlier note put the ceiling on the panel.)
+  12.0 a program's headroom shows in its CPU time, not its fps. (Corrected 2026-11-09: an earlier note put the ceiling on the panel.)
 - LÖVE treats the pad as a gamepad (`isGamepad` true), through SDL's own database or `run_app.sh`'s mapping: which one, and whether its buttons
   then match the raw layout, is not known yet.
 - A LÖVE program's save folder is `/home/loveos/.local/share/love/<identity>` on ROOTFS, not the games card.

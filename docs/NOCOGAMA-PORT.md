@@ -53,7 +53,7 @@ All five decisions in the NoCoGaMa plan's section 0 are **confirmed by the maint
 
 The device spike's Report page writes `/roms/NoCoGaMa/r36s-report.txt` (was `spike-result.txt`) in `docs/DEVICE-REPORTS.md`'s grammar: system, pad (17 raw buttons seen or FAIL), card, bench (p99 goal 8 ms), draw (goal 60 fps). The app gets its own Device report before its release (NoCoGaMa's roadmap).
 
-## First run on a real R36S (the device spike, LÖVE 12.0, 2026-11-10)
+## First run on a real R36S (the device spike, LÖVE 12.0, 2026-11-09)
 
 **GO under LÖVE 12.0: 14 PASS, 0 FAIL.** The report is in the NoCoGaMa repo (`spike/reports/`).
 
@@ -66,7 +66,7 @@ The device spike's Report page writes `/roms/NoCoGaMa/r36s-report.txt` (was `spi
   saves can work as designed.
 - **Still to run:** the app itself, and whether a LÖVE app returns to the menu.
 
-## The device spike under LÖVE 11.5 (2026-11-10)
+## The device spike under LÖVE 11.5 (2026-11-09)
 
 **GO for the plan's rule, with the JIT off: 13 PASS, 1 FAIL.** LÖVE 11.5 turns LuaJIT's JIT off on arm64 itself (`docs/hardware-findings.md`),
 so its figures are about 10 times 12.0's:
