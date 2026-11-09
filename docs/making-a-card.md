@@ -23,8 +23,23 @@ One-off: `brew install mtools e2fsprogs`.
 
 ## Built-in apps
 
-Every image carries the **R36S Input Checker** three ways (LÖVE 11.5, LÖVE 12.0, native ARM64; `apps/README.md`), so the menu
-is never empty and you can test the pad before adding any games. They live on the system partition, not on `EASYROMS`.
+Every image carries the **IO Checker** three ways (LÖVE 11.5, LÖVE 12.0, native ARM64; `apps/README.md`), so the menu
+is never empty and you can check the buttons, screen, sound and cards before adding any games. They live on the system partition, not on `EASYROMS`.
+
+## The R36S ports go on too
+
+When `flash-macos.sh` makes `EASYROMS` (a full flash, or `--games-only`), it copies the R36S ports onto it from their **newest local
+builds**, each in its own repo beside this one (`R3I6NOS_PORTS_ROOT` overrides the folder):
+
+| Port | Its local build | Goes to | Built by (in its repo) |
+|---|---|---|---|
+| KlamANSI | `r36s/build/pkg/KlamANSI.deb` | `native_deb/` | `r36s/package/docker-package.sh` |
+| Neumetik, Composer, Painter, Animator | `r36s/build/pkg/Neumetik.deb`, `compose.deb`, `sprites.deb`, `animate.deb` | `native_deb/` | `r36s/build-deb.sh` |
+| NoCoGaMa | `build/Love 11.5/*.love`, `build/Love 12.0/*.love` (the newest) | `Love 11.5/NoCoGaMa.love`, `Love 12.0/NoCoGaMa.love` | `scripts/build.sh` |
+
+The `.deb` files are installed by `deb_watcher` at the next boot. A port with no local build is listed as **MISSING** with the
+command that builds it, and one built before its repo's last commit as **possibly out of date**; the flash goes on either way.
+`--dry-run` shows the list without writing. With `--no-games` nothing is copied, and the list says what to put on the TF2 card.
 
 ## Where the games go
 

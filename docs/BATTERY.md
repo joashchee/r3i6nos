@@ -28,7 +28,7 @@ Every figure that depends on them says "not reported" when the battery does not 
 | `shutdown` | just before Settings > Shutdown powers off |
 
 Each line holds the boot id, the uptime, the clock, the event, the app, the charge, the state, millivolts, the full and design capacity, the temperature and the cycle
-count, with `-` for what the battery does not report. The clock can be wrong (no battery-backed clock), so everything is ordered by boot and uptime. The log keeps
+count, with `-` for what the battery does not report. The clock can be wrong (no battery-backed clock; `docs/CLOCK.md` asks for it and keeps it, but time while off may be lost), so everything is ordered by boot and uptime. The log keeps
 about the newest 1500 lines (trimmed in place when it passes 2000), so it stays small on the SD card; samples are a few lines an hour of play.
 
 The state folder belongs to user `loveos` (`StateDirectory=r3i6nos-battery` in `loveos.service`), so no root helper is needed and nothing is written to the games card

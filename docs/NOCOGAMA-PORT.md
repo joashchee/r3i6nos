@@ -6,8 +6,8 @@ behaviours, play it, all with the pad. The code, its plan and its tests live in 
 
 ## Shape
 
-- **A LÖVE app, user-installed**: one `NoCoGaMa.love` packed for each of `Love 11.5/` and `Love 12.0/` on the games card, from the same code, never `DEFAULT=1` (not in the image), as the input checker is packed twice.
-  Its own `scripts/build.sh` mirrors `scripts/build_love_app.sh` and its release workflow will mirror `app-input-checker-love.yml`; `love-app.yml` is not called while its repo is private.
+- **A LÖVE app, user-installed**: one `NoCoGaMa.love` packed for each of `Love 11.5/` and `Love 12.0/` on the games card, from the same code, never `DEFAULT=1` (not in the image), as the IO Checker is packed twice.
+  Its own `scripts/build.sh` mirrors `scripts/build_love_app.sh` and its release workflow will mirror `app-io-checker-love.yml`; `love-app.yml` is not called while its repo is private.
 - **The theme without a departure** (rule 8): 64 x 24 cells of 10 x 20, top bar, 20-row display, three-row command line. A LÖVE app can draw one pixel region inside the cells, so the level view (320 x 240) sits in the
   theme and nothing is left out (KlamANSI's native host had to give up the tool bar and command-line rows). It does not copy the theme or its CC BY-SA font: it loads `theme/` from `/opt/loveos/theme` on the device and
   from `R3I6NOS_THEME` on a Mac.
@@ -19,7 +19,7 @@ behaviours, play it, all with the pad. The code, its plan and its tests live in 
 ## What it uses from r3i6nos (all checked to exist, 2026-11-08)
 
 `theme/r3i6nos_ansiapps.lua` (`theme.PAD`, the raw buttons; `theme.KEYS`; list dialogs), `menu/osk.lua` (the on-screen keyboard pattern for names), `menu/scan.lua` (an exported game must be listed by it), `scripts/build_love_app.sh`,
-`.github/workflows/love-app.yml` and `app-input-checker-love.yml` (patterns), `R3I6NOS_ROMS`, the raw pad layout of `docs/hardware-findings.md`, and the `Love 11.5/` and `Love 12.0/` folders on the games card, which the menu already scans.
+`.github/workflows/love-app.yml` and `app-io-checker-love.yml` (patterns), `R3I6NOS_ROMS`, the raw pad layout of `docs/hardware-findings.md`, and the `Love 11.5/` and `Love 12.0/` folders on the games card, which the menu already scans.
 
 ## Progress
 

@@ -1,0 +1,18 @@
+[Unit]
+Description=Keep the clock across restarts (the board has no battery-backed clock): restore at boot, save at shutdown
+Documentation=file:/usr/local/bin/r3i6nos-clock
+# Early, before anything stamps a time (the battery log, the menu, the device reports); after the root filesystem, where the time is saved.
+DefaultDependencies=no
+After=local-fs.target
+Before=time-set.target sysinit.target shutdown.target loveos.service
+Wants=time-set.target
+Conflicts=shutdown.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/r3i6nos-clock restore
+ExecStop=/usr/local/bin/r3i6nos-clock save
+
+[Install]
+WantedBy=sysinit.target

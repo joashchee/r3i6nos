@@ -28,6 +28,7 @@ snapshot() {
         section "kernel: graphics, panel and GPU lines"
         dmesg 2>&1 | grep -iE 'drm|mali|vop|panel|dsi|gpu|fb0|fbcon|backlight' | tail -n 80
         section "kernel: warnings and errors (last 60)"; dmesg --level=err,warn 2>&1 | tail -n 60
+        run /usr/local/bin/r3i6nos-clock status
         run /usr/local/bin/r3i6nos-sound status
         run systemctl --no-pager -l status r3i6nos-sound.service
         run ls -l /dev/dri /dev/fb0 /dev/input /dev/snd

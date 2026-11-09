@@ -17,8 +17,8 @@ function M.escape(v)
   return (tostring(v):gsub("\\", "\\\\"):gsub("\n", "\\n"))
 end
 
---- Ask for a verb with args (a table of strings). Returns the request id, or nil and a reason.
-function M.request(verb, args)
+--- Ask for a verb with args (a table of strings), in folder dir. Returns the request id, or nil and a reason.
+local function request(dir, verb, args)
   counter = counter + 1
   local id = ("%d-%d-%d"):format(os.time(), counter, math.random(0, 999999)) -- unique, so an old answer is never taken for this one
   local lines = { "id=" .. id, "verb=" .. verb }
@@ -26,12 +26,12 @@ function M.request(verb, args)
   for k in pairs(args or {}) do keys[#keys + 1] = k end
   table.sort(keys)
   for _, k in ipairs(keys) do lines[#lines + 1] = k .. "=" .. M.escape(args[k]) end
-  local tmp = M.DIR .. "/request.tmp"
+  local tmp = dir .. "/request.tmp"
   local f = io.open(tmp, "w")
   if not f then return nil, "cannot write " .. tmp end
   f:write(table.concat(lines, "\n"), "\n")
   f:close()
-  local ok, err = os.rename(tmp, M.DIR .. "/request") -- one step: the helper never sees half a file
+  local ok, err = os.rename(tmp, dir .. "/request") -- one step: the helper never sees half a file
   if not ok then return nil, err end
   return id
 end
@@ -53,15 +53,26 @@ function M.parse(text)
   return r
 end
 
---- The answer to request id, or nil while there is none yet (or the file is another request's).
-function M.poll(id)
-  local f = io.open(M.OUT .. "/result", "r")
+--- The answer to request id in folder out, or nil while there is none yet (or the file is another request's).
+local function poll(out, id)
+  local f = io.open(out .. "/result", "r")
   if not f then return nil end
   local text = f:read("*a")
   f:close()
   local r = M.parse(text)
   if r.id ~= id then return nil end
   return r
+end
+
+function M.request(verb, args) return request(M.DIR, verb, args) end
+function M.poll(id) return poll(M.OUT, id) end
+
+--- A client of another root helper with the same two-file protocol (r3i6nos-clock: /run/loveos/clock, /run/r3i6nos-clock).
+function M.new(dir, out)
+  return {
+    request = function(verb, args) return request(dir, verb, args) end,
+    poll = function(id) return poll(out, id) end,
+  }
 end
 
 return M

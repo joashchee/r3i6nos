@@ -88,6 +88,6 @@ The font data it builds on: `theme/r3i6nos_vga8x16.h` has the 256 glyphs (`r3i6n
 
 ## What the theme does not cover
 
-- Not done: the default input checkers (`apps/`) still draw their own pad picture; they move onto the theme when they are next changed.
+- The IO Checker (`docs/IO-CHECKER.md`) is on the theme but for its video test patterns, which are pixels by necessity and say so.
 - Not run on a real R36S, or under LÖVE with a display: `theme.init` and `theme.draw` (the atlas, the canvas, the scaling) are only
   checked by reading them; the data side (font, mapping, layout, list logic, the menu's screen) is tested by luajit.

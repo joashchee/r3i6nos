@@ -8,12 +8,13 @@ mounted (so the boot card can stay in), else on the system card, for Claude to r
 starts it (it is linked into /opt/loveos/bin as a report); over SSH, run `r3i6nos-report`. It runs as loveos and needs no root.
 
 Sections: system (the build, kernel, CPU, memory), boot (units that failed, how long boot took), sound (the RK817's Playback
-Path and the headphone jack, from r3i6nos-sound), storage (every mmc disk and slot, what
+Path and the headphone jack, from r3i6nos-sound), clock (r3i6nos-clock status), storage (every mmc disk and slot, what
 r3i6nos-cards mounted, the kernel's filesystems, loop devices, and on each mounted card a write/rename/read/delete check and its speed).
 
 Standard library only. Overrides, for tests: R3I6NOS_ETC (/etc), R3I6NOS_PROC (/proc), R3I6NOS_SYS (/sys), R3I6NOS_DEV (/dev),
 R3I6NOS_CARDS_STATE (/run/r3i6nos/cards), R3I6NOS_REPORT_DIR (the folder to write in), R3I6NOS_REPORT_MB (16: the speed test's size),
-R3I6NOS_SOUND (r3i6nos-sound).
+R3I6NOS_SOUND (r3i6nos-sound),
+R3I6NOS_CLOCK (r3i6nos-clock).
 """
 import os
 import re
@@ -33,6 +34,7 @@ STATE = Path(ENV("R3I6NOS_CARDS_STATE", "/run/r3i6nos/cards"))
 MB = int(ENV("R3I6NOS_REPORT_MB", "16"))
 REPORT_DIR = ENV("R3I6NOS_REPORT_DIR")
 SOUND = ENV("R3I6NOS_SOUND", "/usr/local/bin/r3i6nos-sound")
+CLOCK = ENV("R3I6NOS_CLOCK", "/usr/local/bin/r3i6nos-clock")
 PROGRESS = ENV("R3I6NOS_REPORT_PROGRESS")   # set by the menu (menu/reports.lua): where to say how far it has got
 WANT_FS = ("exfat", "vfat", "ext4", "squashfs")
 
@@ -202,6 +204,22 @@ def sound(r):
     r.line("INFO", "heard", "not measured: listen for the menu's sounds (speaker), then with headphones in")
 
 
+def clock(r):
+    """The clock (r3i6nos-clock status, docs/CLOCK.md): this report's own timestamps are only as good as it is."""
+    r.step("the clock")
+    r.section("clock")
+    out = run([CLOCK, "status"])
+    if out is None:
+        r.line("SKIP", "clock", "r3i6nos-clock did not answer")
+        return
+    for ln in out.splitlines():
+        key, _, val = ln.partition(": ")
+        if key == "set by a person":
+            r.line("PASS" if val != "no" else "FAIL", key, val if val != "no" else "no: set it in Settings > Date and time (the times here may be off)")
+        elif key:
+            r.line("INFO", key, val)
+
+
 def disks():
     """[(name, bytes, removable)] for every mmc disk."""
     out = []
@@ -365,11 +383,11 @@ def main(argv):
     try:
         folder, card = where(cards)
         r = Report(folder, how, rel.get("VERSION", "?"), card, quiet)
-        r.steps = 4 + 2 * len(mounted_cards(cards))
+        r.steps = 5 + 2 * len(mounted_cards(cards))
     except OSError as e:
         print(f"r3i6nos-report: cannot write the report: {e}", file=sys.stderr)
         return 1
-    for part in (lambda: system(r, rel), lambda: boot(r), lambda: sound(r), lambda: storage(r, cards)):
+    for part in (lambda: system(r, rel), lambda: boot(r), lambda: sound(r), lambda: clock(r), lambda: storage(r, cards)):
         try:
             part()
         except Exception as e:  # a broken check is a line in the report, never a missing report

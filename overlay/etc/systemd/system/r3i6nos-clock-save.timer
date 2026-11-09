@@ -1,0 +1,9 @@
+[Unit]
+Description=Save the time on the card every hour
+
+[Timer]
+OnBootSec=15min
+OnUnitActiveSec=1h
+
+[Install]
+WantedBy=timers.target

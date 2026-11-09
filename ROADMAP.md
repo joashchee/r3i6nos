@@ -23,8 +23,8 @@ document that has the detail. Nothing here has run on a real R36S yet.
   speed on the SD card, exFAT (no links or permissions). Not done: overwrite choices, a text-mode picker for long names, opening a `.love` from the list.
 - [x] **Per-app build workflows, apart from the firmware** (2026-11-07; `apps/README.md`, "Adding an app"): `app.conf` + `scripts/build_native_app.sh` + reusable `native-app.yml` + `app-commander.yml`
   (tag `commander-v*` releases the `.deb`). **Untested:** the workflows on GitHub and the build script in a Debian 12 container.
-  - [x] `app-input-checker-native.yml` added the same way (tag `input-checker-native-v*`).
-  - [x] **LÖVE apps' equivalent** (`TYPE=love`, `build_love_app.sh`, `love-app.yml`, `app-input-checker-love.yml`). **Untested:** on GitHub; the `.love` is not run under real LÖVE by it.
+  - [x] `app-input-checker-native.yml` added the same way (tag `input-checker-native-v*`); now `app-io-checker-native.yml` (tag `io-checker-native-v*`).
+  - [x] **LÖVE apps' equivalent** (`TYPE=love`, `build_love_app.sh`, `love-app.yml`, `app-input-checker-love.yml`, now `app-io-checker-love.yml`). **Untested:** on GitHub; the `.love` is not run under real LÖVE by it.
   - [ ] Ports (prebuilt or cross-built ARM64 games) have no workflow yet: decide their shape (a `TYPE=port` manifest that builds or fetches, then packs a `.deb`) when the first one lands.
 - [x] **Settings dialog with Shutdown** (2026-11-07; Start / S opens it, Shutdown asks "Yes / No" with No preselected, then the session
   leaves a flag, exits 0, and `loveos.service`'s root `ExecStopPost` runs `r3i6nos-poweroff` -> `systemctl --no-block poweroff`).
@@ -137,6 +137,11 @@ All of it goes in the gitignored `local_hardware_assets/`.
 - [x] **`.github/workflows/build.yml`** (was `rootfs.yml`): manual or `v*` tags; an `image` job runs the image tests,
   assembles, checks, compresses and uploads `r36s-loveos.img.gz` with a checksum.
 - [x] **First green `image` job** (2026-11-07): `tests/test_image.sh` (assemble, check, inject-boot, inject-rootfs against real `debugfs`) and the image build pass in CI. Still never booted on hardware.
+- [x] **The ports go on with the games partition** (2026-11-09, `docs/making-a-card.md`): `flash-macos.sh` copies the newest local
+  build of each R36S port (KlamANSI, Neumetik, Composer, Painter, Animator as `.deb`; NoCoGaMa as `.love` for both runtimes) onto
+  `EASYROMS`, names the missing ones with the command that builds them, flags builds older than their repo's last commit, and removes
+  macOS's `._` files. Tested with fake disks and a fake ports folder, and a dry run against the real repos (KlamANSI and Painter had no
+  build); **not yet run onto a real card.**
 - [x] **Refusal tried** (2026-11-07, on the maintainer's Mac): `flash-macos.sh <image> disk0 --dry-run` says "disk0 is an INTERNAL disk. Refusing." The happy path then ran on a real 128 GB card (2026-11-07): 2.4 GB written in 38 s, ejected. Whether that card boots is not yet known.
 - [x] **`scripts/capture-card.sh`** (2026-11-06, **never run on a card**; the MBR parsing is unit-tested on synthetic cards):
   read-only copy of the bootloader, BOOT files, modules and firmware into `local_hardware_assets/`, plus a report.
@@ -152,6 +157,18 @@ All of it goes in the gitignored `local_hardware_assets/`.
   and a native ARM64 `.deb` (C, SDL2), built into the image at `/opt/loveos/defaults`; the menu and `deb_watcher.py` list them beside the card's
   files. Tested on a laptop (logic, fake LÖVE, native draw and self-test); the `native` CI job and qemu smoke are new and **not yet green**.
   **Not yet seen on a real R36S.** The checker is how the real button layout gets recorded (below).
+- [x] **The date and time** (2026-11-09, `docs/CLOCK.md`): asked on a card's first boot and in Settings > Date and time, set by the root
+  helper `r3i6nos-clock` (with the zone and the RTC), restored at boot and saved at shutdown and hourly. Tested on a Mac only.
+  - [ ] **On the unit:** set it on first boot, power off for a while, boot, and read r3i6nos's report (`clock` section): whether there
+    is an RTC and whether it kept the time while off. If it does not, consider asking again when the clock may be far behind.
+- [x] **The IO Checker replaces the Input Checker** (2026-11-09, `docs/IO-CHECKER.md`): the same three builds (`apps/io-checker-love`,
+  `apps/io-checker-native`), now on the r3i6nos-ansiapps theme, checking input (every button with presses and chatter, axis ranges and
+  rest, the buttons never pressed, the power and volume keys), video (nine full-screen patterns, a measured frame rate), sound (left,
+  right, both, sweep, quiet; marked heard or silent), files (both cards: write, rename over, read back, delete, speed, free space), the
+  system, and a device report at `EASYROMS/IO_Checker/r36s-report-<build>.txt`. Tested on a Mac only (the LÖVE app under a fake LÖVE, the
+  native self-test and screenshots); **not yet run on a unit, nor under a real LÖVE** (`scripts/preview_io_checker.sh` needs a desktop).
+  - [ ] **Run it on the unit, all three builds,** and bring back their three reports: the tones heard on the speaker and on headphones,
+    the frame rate, whether the power and volume keys reach apps, the patterns as seen. Then update this roadmap and `docs/hardware-findings.md`.
 - [x] **Input layout measured** (2026-11-07, first run of the LÖVE 11.5 checker, one unit): A-Y 1-4, D-pad is buttons 9 left / 10 down / 11 up / 12 right
   (no hat), Fn 13, Select 14, L3 15, R3 16, Start 17; table in `docs/hardware-findings.md`. The checker was fixed from it (raw buttons, whole-stick
   highlight, SEL/FN/STA order, raw Select+Start exit, 15 s idle-out, 2x fonts, power/volume pills).

@@ -8,7 +8,7 @@ ROOT = Path(__file__).resolve().parent.parent
 spec = importlib.util.spec_from_file_location("pack_love", ROOT / "scripts/pack_love.py")
 pl = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(pl)
-APP = ROOT / "apps/input-checker-love"
+APP = ROOT / "apps/io-checker-love"
 
 
 class Pack(unittest.TestCase):

@@ -8,6 +8,7 @@ local pages = require("netpages")
 local battery = require("battery")
 local reports = require("reports")
 local about = require("about")
+local clock = require("clock")
 
 local settings = {}
 
@@ -15,9 +16,9 @@ local settings = {}
 settings.TIMEOUT = { default = 30, scan = 45, wifi = 75, wired = 60, test = 60, ["ssh-enable"] = 45 }
 
 --- A closed dialog. io is the helper's client (menu/netclient.lua); bat the battery module (menu/battery.lua); rep the device reports
---- (menu/reports.lua); ab Settings > About (menu/about.lua). Tests pass fakes.
-function settings.new(io, bat, rep, ab)
-  return { stack = {}, io = io, bat = bat or battery, rep = rep or reports, ab = ab or about }
+--- (menu/reports.lua); ab Settings > About (menu/about.lua); clk the Date and time dialog (menu/clock.lua). Tests pass fakes.
+function settings.new(io, bat, rep, ab, clk)
+  return { stack = {}, io = io, bat = bat or battery, rep = rep or reports, ab = ab or about, clk = clk or clock }
 end
 
 local function top(s) return s.stack[#s.stack] end
@@ -234,11 +235,31 @@ local function aboutMenu(s)
   }, 48))
 end
 
+-- Date and time: the fields, then a wait for the root clock helper. first: the card's first boot, where B is "Not now".
+local function clockNode(s, first)
+  local clk = s.clk
+  return push(s, { kind = "clock", title = first and "Set the date and time" or "Date and time", first = first,
+                   c = clk.new(os.date("*t"), clk.currentZone()) })
+end
+
+local function setClock(s, n)
+  local clk = s.clk
+  local id, err = clk.client.request("set", clk.request(n.c))
+  if not id then return show(s, n.title, { "Could not ask for it:", tostring(err) }, false) end
+  push(s, {
+    kind = "busy", title = n.title, id = id, elapsed = 0, timeout = clk.WAIT, waiting = "Setting the clock...",
+    poll = function(b) return clk.client.poll(b.id) end,
+    lost = { "No answer from the clock helper.", "", "The clock was not set. Try again from", "Settings > Date and time." },
+    on_result = function(sx, res) show(sx, n.title, res.lines, res.ok) end,
+  })
+end
+
 local function root(s)
   return menu("Settings", {
     { label = "Network", hint = "Wired and Wi-Fi: status, setup, test, instructions", run = networkMenu },
     { label = "SSH", hint = "Log in from a computer (off until you start it)", run = sshMenu },
     { label = "Battery", hint = "Charge, health and how much each app uses", run = batteryMenu },
+    { label = "Date and time", hint = "Set the clock and time zone (kept across restarts)", run = function(sx) clockNode(sx, false) end },
     { label = "Device reports", hint = "Check this unit for an app's maker (a file for Claude)", run = reportsMenu },
     { label = "About", hint = "Version, updates, this unit and licences", run = aboutMenu },
     { label = "Shutdown", hint = "Power the device off", run = function(sx)
@@ -251,6 +272,12 @@ end
 function settings.open(s)
   s.stack = {}
   push(s, root(s))
+end
+
+--- The card's first boot: the Date and time dialog on its own (docs/CLOCK.md). B is "Not now" and is remembered.
+function settings.openClock(s)
+  s.stack = {}
+  clockNode(s, true)
 end
 
 -- ---- input -------------------------------------------------------------------------------------------------------------------
@@ -296,6 +323,15 @@ function settings.press(s, action)
       local text = n.osk.text
       pop(s)
       n.on_done(s, text)
+    end
+  elseif n.kind == "clock" then
+    local ev = s.clk.press(n.c, action)
+    if ev == "cancel" then
+      if n.first then s.clk.markAsked() end
+      pop(s)
+    elseif ev == "set" then
+      pop(s)
+      setClock(s, n)
     end
   elseif n.kind == "busy" then
     if action == "back" then pop(s) end -- stop waiting; the answer, if it comes, is ignored

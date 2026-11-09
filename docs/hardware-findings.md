@@ -97,7 +97,7 @@ Raw button numbers as LÖVE reports them (counting from 1; SDL's own index is on
   set its own `SDL_GAMECONTROLLERCONFIG`. `run_app.sh` now carries this layout in its default mapping (2026-11-07), but its **GUID is still the
   spec's guess**, never read from a unit, so SDL may not apply it: read the real one from `device-info.sh` ("input devices").
   **Read 2026-11-10** (below): `1900bb3e4b4800000011000000010000`, now in `run_app.sh`.
-- `apps/input-checker-love/model.lua` (`LAYOUT`) and `apps/input-checker-native/input_checker.c` (`B_*`) hold these numbers.
+- `apps/io-checker-love/model.lua` (`LAYOUT`), `apps/io-checker-native/io_checker.c` (`L_*`) and the theme's `PAD` hold these numbers.
 - A report that the event lines looked inverted (UP on press, DOWN on release) was not reproduced by reading the code;
   the checker's event lines now say whether SDL reports the button held at that moment, so a real inversion shows.
 

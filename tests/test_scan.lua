@@ -23,7 +23,7 @@ for i, w in ipairs(want) do assert(got[i] == w, ("entry %d: want %s, got %s"):fo
 local defs = root .. "-defaults"
 sh(('mkdir -p "%s/Love 11.5" "%s/Love 12.0"'):format(defs, defs))
 sh(('touch "%s/Love 11.5/Checker_One.love" "%s/Love 11.5/zeta.love" "%s/Love 12.0/Checker_One.love"'):format(defs, defs, defs))
-sh(('touch "%s/launchers/Input_Checker.sh"'):format(root))
+sh(('touch "%s/launchers/IO_Checker.sh"'):format(root))
 list = scan.entries(root, root .. "/launchers", defs)
 local titles, count_zeta = {}, 0
 for _, e in ipairs(list) do
@@ -33,7 +33,7 @@ end
 local joined = table.concat(titles, ",")
 assert(joined:find("love115:Checker One", 1, true), "built-in 11.5 app listed: " .. joined)
 assert(joined:find("love120:Checker One", 1, true), "built-in 12.0 app listed: " .. joined)
-assert(joined:find("native:Input Checker", 1, true), "native title has underscores cleaned: " .. joined)
+assert(joined:find("native:IO Checker", 1, true), "native title has underscores cleaned: " .. joined)
 assert(count_zeta == 1, "zeta listed once, got " .. count_zeta)
 -- the data card (docs/STORAGE.md): its games are listed too; the same file name on both cards shows once, from the system card
 local data = root .. "-data"

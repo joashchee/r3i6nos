@@ -54,7 +54,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [input-checker-native, commander-native]
+        app: [io-checker-native, commander-native]
     uses: ./.github/workflows/native-app.yml
     with:
       app: ${{ matrix.app }}
@@ -65,7 +65,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [input-checker-love]
+        app: [io-checker-love]
     uses: ./.github/workflows/love-app.yml
     with:
       app: ${{ matrix.app }}
@@ -135,7 +135,7 @@ jobs:
         # in a temporary folder), not that they draw on the panel or see a pad.
         run: |
           D=build/rootfs/opt/loveos/defaults/native_deb
-          scripts/smoke_native.sh build/rootfs "$D/Input_Checker_Native.deb" input-checker-native
+          scripts/smoke_native.sh build/rootfs "$D/IO_Checker_Native.deb" io-checker-native
           scripts/smoke_native.sh build/rootfs "$D/Commander.deb" commander
 
       - name: Sanity check the tree
@@ -159,10 +159,10 @@ jobs:
           sudo test -x $R/usr/bin/mount -o -x $R/bin/mount
           # by number: the runner's own uid 1000 is "runner", so a name would be the host's, not the rootfs's
           test "$(sudo stat -c %u $R/opt/loveos/bin)" = 1000
-          # the built-in default apps (the input checker three ways)
-          sudo test -f "$R/opt/loveos/defaults/Love 11.5/Input_Checker.love"
-          sudo test -f "$R/opt/loveos/defaults/Love 12.0/Input_Checker.love"
-          sudo test -f "$R/opt/loveos/defaults/native_deb/Input_Checker_Native.deb"
+          # the built-in default apps (the IO Checker three ways)
+          sudo test -f "$R/opt/loveos/defaults/Love 11.5/IO_Checker.love"
+          sudo test -f "$R/opt/loveos/defaults/Love 12.0/IO_Checker.love"
+          sudo test -f "$R/opt/loveos/defaults/native_deb/IO_Checker_Native.deb"
           sudo test -f "$R/opt/loveos/defaults/native_deb/Commander.deb"
           sudo grep -q '^loveos:x:1000:' $R/etc/passwd
           sudo grep -q '^root:!' $R/etc/shadow

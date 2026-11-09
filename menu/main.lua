@@ -47,6 +47,7 @@ function love.load()
   screen = theme.screen()
   entries = scan.entries(ROMS, LAUNCHERS, DEFAULTS, ROMS2)
   power = battery.read()
+  if require("clock").needed() then settings.openClock(dialog) end -- the card's first boot: ask for the date and time (docs/CLOCK.md)
 end
 
 local function request(line)

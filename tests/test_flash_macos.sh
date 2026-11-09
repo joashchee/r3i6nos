@@ -52,6 +52,12 @@ exit 0
 EOS
 chmod +x "$BIN"/*
 export R3I6NOS_WAIT_S3=1
+# the ports' repos, faked: Neumetik and Composer built, NoCoGaMa built for both LÖVE versions (one with a stray older build), the rest not
+P="$T/ports"; export R3I6NOS_PORTS_ROOT="$P"
+mkdir -p "$P/neumetik/r36s/build/pkg" "$P/composer/r36s/build/pkg" "$P/klamansi/r36s" "$P/painter" "$P/nocogama/build/Love 11.5" "$P/nocogama/build/Love 12.0"
+printf 'deb' > "$P/neumetik/r36s/build/pkg/Neumetik.deb"; printf 'deb' > "$P/composer/r36s/build/pkg/compose.deb"
+printf 'old' > "$P/nocogama/build/Love 11.5/NoCoGaMa-old.love"; touch -t 202601010000 "$P/nocogama/build/Love 11.5/NoCoGaMa-old.love"
+printf 'love' > "$P/nocogama/build/Love 11.5/NoCoGaMa-11.5.love"; printf 'love' > "$P/nocogama/build/Love 12.0/NoCoGaMa-12.0.love"
 run() { PATH="$BIN:$PATH" "$@"; }
 
 # an untouched r3i6nos MBR (what add_games_partition.py accepts): signature, partitions 1 and 2
@@ -101,6 +107,23 @@ out="$(echo disk9 | FAKE_MBR="$T/mbr_good" FAKE_MOUNT="$T/mnt" run scripts/flash
 [ "$rc" -eq 0 ] || fail "games-only success path failed ($rc): $out"
 echo "$out" | grep -q 'Games partition ready' || fail "no success message: $out"
 for d in "Love 11.5" "Love 12.0" native_deb; do [ -d "$T/mnt/$d" ] || fail "folder not made: $d"; done
+# ... and the ports' newest local builds are on it, the missing ones named with how to build them
+[ "$(cat "$T/mnt/native_deb/Neumetik.deb")" = deb ] || fail "Neumetik.deb not copied"
+[ -f "$T/mnt/native_deb/compose.deb" ] || fail "compose.deb not copied"
+[ "$(cat "$T/mnt/Love 11.5/NoCoGaMa.love")" = love ] || fail "the newest NoCoGaMa build for 11.5, named NoCoGaMa.love, not copied"
+[ -f "$T/mnt/Love 12.0/NoCoGaMa.love" ] || fail "NoCoGaMa for 12.0 not copied"
+[ -z "$(find "$T/mnt" -name '._*')" ] || fail "AppleDouble ._ files left on the card"
+echo "$out" | grep -q 'Ports copied: 4 file(s)' || fail "copy count: $out"
+echo "$out" | grep -q 'KlamANSI: no r36s/build/pkg/KlamANSI.deb (build it: cd .*klamansi && r36s/package/docker-package.sh)' || fail "missing KlamANSI not named: $out"
+echo "$out" | grep -q 'Animator: no repo at' || fail "a port with no repo not named: $out"
+
+# --- the dry run lists the ports; --no-games says they are not copied
+out="$(run scripts/flash-macos.sh "$T/x.img" disk9 --dry-run 2>&1)"
+echo "$out" | grep -q 'native_deb/Neumetik.deb   <- ' || fail "dry run does not list the ports: $out"
+echo "$out" | grep -q 'MISSING (not on the card)' || fail "dry run does not say what is missing: $out"
+echo "$out" | grep -q 'Painter: no r36s/build/pkg/sprites.deb' || fail "dry run: Painter: $out"
+out="$(run scripts/flash-macos.sh "$T/x.img" disk9 --no-games --dry-run 2>&1)"
+echo "$out" | grep -q 'the R36S ports are not copied' || fail "--no-games must say the ports are not copied: $out"
 
 # --- every failure explains itself, exits non-zero, and does not eject
 expect_games_fail() {  # <label> <text that must appear> <env...>

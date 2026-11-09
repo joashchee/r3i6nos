@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch for the menu's Date and time requests
+# Only WATCHES a file: a person choosing a date and time in the menu (first boot, or Settings > Date and time).
+
+[Path]
+PathExists=/run/loveos/clock/request
+Unit=r3i6nos-clock-set.service
+
+[Install]
+WantedBy=multi-user.target

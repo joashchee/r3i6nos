@@ -1,0 +1,7 @@
+[Unit]
+Description=Save the time on the card (so a crash or a flat battery loses at most an hour)
+Documentation=file:/usr/local/bin/r3i6nos-clock
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/r3i6nos-clock save

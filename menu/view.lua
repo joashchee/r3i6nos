@@ -113,6 +113,31 @@ local function drawConfirm(scr, n)
   return n.hint
 end
 
+-- Date and time: six fields on one row, the chosen one black on cyan.
+local function drawClock(scr, n)
+  local clock = require("clock")
+  local st = theme.STYLE
+  local w, h = 52, n.first and 11 or 9
+  local col, row = centered(w, h)
+  scr:box(col, row, w, h, { title = n.title, foot = n.first and "A Set  B Not now" or "A Set  B Back" })
+  local y = row + 2
+  if n.first then
+    scr:text(col + 3, y, "This unit does not keep the time while it is off,", st.body.fg, st.body.bg)
+    scr:text(col + 3, y + 1, "and the reports are stamped with it. Set it once:", st.body.fg, st.body.bg)
+    y = y + 3
+  end
+  local parts, seps = clock.parts(n.c), { "-", "-", "  ", ":", "   ", "" }
+  local x = col + 3
+  for i, p in ipairs(parts) do
+    local s = (i == n.c.field) and st.select or st.strong
+    x = scr:text(x, y, p, s.fg, s.bg)
+    x = scr:text(x, y, seps[i], st.body.fg, st.body.bg)
+  end
+  scr:text(col + 3, y + 2, "Left/Right: field  Up/Down: change  L1/R1: faster", st.hint.fg, st.hint.bg)
+  local names = { "the year", "the month", "the day", "the hour", "the minute", "the time zone (hours from UTC)" }
+  return "Changing " .. names[n.c.field]
+end
+
 --- Draw the Settings dialog's top screen. Returns the reply (a hint) and the breadcrumb for the command line.
 function view.dialog(scr, d)
   local n = settings.node(d)
@@ -121,7 +146,8 @@ function view.dialog(scr, d)
   elseif n.kind == "pages" then hint = drawPages(scr, n)
   elseif n.kind == "osk" then hint = drawOsk(scr, n)
   elseif n.kind == "busy" then hint = drawBusy(scr, n)
-  elseif n.kind == "confirm" then hint = drawConfirm(scr, n) end
+  elseif n.kind == "confirm" then hint = drawConfirm(scr, n)
+  elseif n.kind == "clock" then hint = drawClock(scr, n) end
   local titles = {}
   for i, node in ipairs(d.stack) do titles[i] = node.title end
   return hint, table.concat(titles, " > "):lower()

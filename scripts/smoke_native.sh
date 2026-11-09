@@ -3,14 +3,14 @@
 #
 # Runs an arm64 native app from a .deb under qemu-user, against the built rootfs's libraries
 # (qemu -L), with SDL's dummy video driver: `--selftest` opens SDL, draws one frame and prints
-# one line (the app's own checks run first). The binary is usr/games/<binary-name>, default input-checker-native. A pass proves the binary runs and links against the rootfs's SDL2. It does NOT prove
+# one line (the app's own checks run first). The binary is usr/games/<binary-name>, default io-checker-native. A pass proves the binary runs and links against the rootfs's SDL2. It does NOT prove
 # it draws on the panel or sees the gamepad: that needs the device (ROADMAP phase 5).
 
 set -u
 
 ROOTFS="${1:?Usage: $0 <rootfs-dir> <app.deb>}"
 DEB="${2:?Usage: $0 <rootfs-dir> <app.deb> [binary-name]}"
-APP="${3:-input-checker-native}"
+APP="${3:-io-checker-native}"
 
 command -v dpkg-deb >/dev/null || { echo "smoke_native: dpkg-deb not installed" >&2; exit 1; }
 [ -f "$DEB" ] || { echo "smoke_native: no such file: $DEB" >&2; exit 1; }

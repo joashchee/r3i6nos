@@ -90,4 +90,4 @@ case "$WHICH" in
     12.0) fetch_120 ;;
     all) fetch_115; fetch_120 ;;
 esac
-echo "Run an app:  $DEST/11.5/love.app/Contents/MacOS/love apps/input-checker-love"
+echo "Run an app:  $DEST/11.5/love.app/Contents/MacOS/love apps/io-checker-love"

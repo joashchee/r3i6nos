@@ -45,7 +45,7 @@ if [ -d "$GPU_DIR" ]; then
     export LOVE_GRAPHICS_USE_OPENGLES=1
 fi
 
-mkdir -p "$NEXT_DIR" "$NEXT_DIR/net"   # net: where Settings > Network leaves its requests for the root helper
+mkdir -p "$NEXT_DIR" "$NEXT_DIR/net" "$NEXT_DIR/clock"   # net, clock: where Settings leaves its requests for the root helpers
 
 battery_sample session
 

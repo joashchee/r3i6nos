@@ -34,6 +34,7 @@ PACKAGES=(
     libharfbuzz0b                        # LÖVE 12 text shaping
     libwayland-client0 libwayland-server0  # the stock Mali blob is the wayland-gbm build and links them
     exfatprogs                           # a likely games-card filesystem
+    tzdata                               # the Date and time dialog's zones (/usr/share/zoneinfo/Etc/GMT-8 and so on; r3i6nos-clock)
     iproute2 iw wpasupplicant udhcpc iputils-ping  # Settings > Network (r3i6nos-net): addresses, Wi-Fi scan and join, DHCP, tests
     ca-certificates                      # Settings > About > Check for updates (HTTPS to GitHub, only when chosen)
     openssh-server                       # Settings > SSH; its service is NOT enabled and its host keys are made on first start (configure_rootfs.sh)

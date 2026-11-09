@@ -55,7 +55,7 @@ for love in "$LOVE_APPS_BUILD"/Love\ */*.love; do
     fi
 done
 if [ -z "$have_love_apps" ]; then
-    echo "[!] No LÖVE default app in $LOVE_APPS_BUILD: run scripts/build_love_app.sh input-checker-love (the image will have no LÖVE app)" >&2
+    echo "[!] No LÖVE default app in $LOVE_APPS_BUILD: run scripts/build_love_app.sh io-checker-love (the image will have no LÖVE app)" >&2
 fi
 NATIVE_BUILD="${R3I6NOS_NATIVE_BUILD:-$REPO/build/native}"
 have_native=""
@@ -124,6 +124,14 @@ ln -sfn /etc/systemd/system/r3i6nos-sound.service \
 # The system's own device report (docs/STORAGE.md), listed in Settings > Device reports with the tools' reports.
 mkdir -p "$ROOTFS/opt/loveos/bin"
 ln -sfn /usr/local/bin/r3i6nos-report "$ROOTFS/opt/loveos/bin/r3i6nos-report"
+# The clock (docs/CLOCK.md): restored at boot and saved at shutdown and hourly; the menu's Date and time requests are set by a root helper.
+mkdir -p "$ROOTFS/etc/systemd/system/sysinit.target.wants" "$ROOTFS/etc/systemd/system/timers.target.wants"
+ln -sfn /etc/systemd/system/r3i6nos-clock.service \
+    "$ROOTFS/etc/systemd/system/sysinit.target.wants/r3i6nos-clock.service"
+ln -sfn /etc/systemd/system/r3i6nos-clock-save.timer \
+    "$ROOTFS/etc/systemd/system/timers.target.wants/r3i6nos-clock-save.timer"
+ln -sfn /etc/systemd/system/r3i6nos-clock-set.path \
+    "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-clock-set.path"
 # Settings > Network and SSH: a path unit that only watches for the menu's request (the helper runs per request, never at boot).
 ln -sfn /etc/systemd/system/r3i6nos-net.path \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-net.path"

@@ -1,0 +1,283 @@
+#!/usr/bin/env python3
+"""r3i6nos-clock - the R36S's date, time and time zone (docs/CLOCK.md).
+
+    r3i6nos-clock restore   at boot (r3i6nos-clock.service): bring the clock forward to the newest of the saved time, the RTC and the build
+    r3i6nos-clock save      at shutdown and hourly (r3i6nos-clock-save.timer): keep the time on the card
+    r3i6nos-clock apply     a person chose a time (r3i6nos-clock-set.path, from the menu's request): set it, the zone, the RTC; save
+    r3i6nos-clock status    key: value lines, for the device report and the boot log
+
+Why: the board has no battery-backed clock that this kernel reads at boot, so every boot started from an old time and the device reports'
+timestamps drifted. Without a network at boot (CLAUDE.md rule 6) the only sources are the person and the card: the menu asks for the date
+and time on a card's first boot (and Settings > Date and time any time after), this keeps it across reboots, and it writes the RK817's RTC
+too when the kernel has one, which may keep counting while the unit is off (untested).
+
+The request comes from /run/loveos/clock (the menu's user owns it) and is treated as hostile, as r3i6nos-net does: opened without following
+links, a small regular file, every field checked. The answer goes to /run/r3i6nos-clock/result, which only root writes.
+Request: id=, set=YYYY-MM-DD HH:MM (local time in the chosen zone), zone=-12..+14 (whole hours from UTC).
+Result:  id=, ok=1|0, then L<TAB>text lines.
+
+Standard library only. Overrides, for tests: R3I6NOS_CLOCK_DIR (/run/loveos/clock), R3I6NOS_CLOCK_OUT (/run/r3i6nos-clock),
+R3I6NOS_CLOCK_STATE (/var/lib/r3i6nos), R3I6NOS_ETC (/etc), R3I6NOS_ZONEINFO (/usr/share/zoneinfo), R3I6NOS_SYS (/sys),
+R3I6NOS_RTC_DEV (/dev/rtc0).
+"""
+import calendar
+import errno
+import fcntl
+import os
+import re
+import stat
+import struct
+import sys
+import time
+from pathlib import Path
+
+ENV = os.environ.get
+REQ_DIR = Path(ENV("R3I6NOS_CLOCK_DIR", "/run/loveos/clock"))
+OUT_DIR = Path(ENV("R3I6NOS_CLOCK_OUT", "/run/r3i6nos-clock"))
+STATE = Path(ENV("R3I6NOS_CLOCK_STATE", "/var/lib/r3i6nos"))
+ETC = Path(ENV("R3I6NOS_ETC", "/etc"))
+ZONEINFO = Path(ENV("R3I6NOS_ZONEINFO", "/usr/share/zoneinfo"))
+SYS = Path(ENV("R3I6NOS_SYS", "/sys"))
+RTC_DEV = ENV("R3I6NOS_RTC_DEV", "/dev/rtc0")
+SAVED = STATE / "clock"            # the last time saved: seconds since 1970, one line
+SET_MARK = STATE / "clock-set"     # a person set the clock on this card: when (one line), so the menu stops asking
+BOOT = OUT_DIR / "boot"            # what restore did this boot, for status
+MAX_REQUEST = 4096
+YEARS = (2024, 2099)
+RTC_SET_TIME = 0x4024700A          # _IOW('p', 0x0a, struct rtc_time): nine ints
+
+
+class Refused(Exception):
+    pass
+
+
+# ---- plumbing (tests replace settime and now) --------------------------------------------------------------------------------
+
+def now():
+    return time.time()
+
+
+def settime(t):
+    time.clock_settime(time.CLOCK_REALTIME, float(t))
+
+
+def read(path):
+    try:
+        return Path(path).read_text(errors="replace").strip()
+    except OSError:
+        return None
+
+
+def write_atomic(path, text, mode=0o644):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}")
+    with open(tmp, "w") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+
+
+def floor():
+    """The clock is never before the image was built (/etc/r3i6nos-release BUILT=YYYY-MM-DD), else 2026-01-01."""
+    rel = read(ETC / "r3i6nos-release") or ""
+    m = re.search(r"^BUILT=(\d{4})-(\d{2})-(\d{2})", rel, re.M)
+    y, mo, d = (int(m.group(1)), int(m.group(2)), int(m.group(3))) if m else (2026, 1, 1)
+    return calendar.timegm((y, mo, d, 0, 0, 0))
+
+
+def saved():
+    v = read(SAVED)
+    return int(v) if v and v.isdigit() else None
+
+
+def rtc():
+    """(name, seconds since 1970) of rtc0 as the kernel shows it, or None."""
+    base = SYS / "class" / "rtc" / "rtc0"
+    v = read(base / "since_epoch")
+    if not v or not v.isdigit():
+        return None
+    return read(base / "name") or "rtc0", int(v)
+
+
+def write_rtc(t):
+    """Set rtc0 to t (UTC). Returns what happened, in words."""
+    try:
+        fd = os.open(RTC_DEV, os.O_WRONLY)
+    except OSError as e:
+        return f"no RTC to set ({e.strerror})"
+    try:
+        g = time.gmtime(int(t))
+        fcntl.ioctl(fd, RTC_SET_TIME, struct.pack("9i", g.tm_sec, g.tm_min, g.tm_hour, g.tm_mday, g.tm_mon - 1, g.tm_year - 1900, 0, 0, 0))
+        return "the RTC was set too"
+    except OSError as e:
+        return f"the RTC could not be set ({e.strerror})"
+    finally:
+        os.close(fd)
+
+
+def zone_name(hours):
+    """Etc/GMT-8 is UTC+8: the Etc zones count the other way."""
+    return "Etc/UTC" if hours == 0 else f"Etc/GMT{'-' if hours > 0 else '+'}{abs(hours)}"
+
+
+def zone_hours():
+    """The zone this system is in, as whole hours from UTC (0 when it is not an Etc zone)."""
+    name = read(ETC / "timezone") or ""
+    m = re.fullmatch(r"Etc/GMT([+-])(\d{1,2})", name)
+    return (-1 if m.group(1) == "+" else 1) * int(m.group(2)) if m else 0
+
+
+def set_zone(hours):
+    name = zone_name(hours)
+    target = ZONEINFO / name
+    if not target.exists():
+        raise Refused(f"No time zone file {target} on this system.")
+    link = ETC / "localtime"
+    tmp = ETC / f".localtime.{os.getpid()}"
+    os.symlink(target, tmp)
+    os.replace(tmp, link)
+    write_atomic(ETC / "timezone", name + "\n")
+    os.environ["TZ"] = f":{target}"
+    time.tzset()
+
+
+# ---- verbs ------------------------------------------------------------------------------------------------------------------
+
+def restore():
+    """Bring the clock forward to the newest believable time; never back."""
+    cur, fl, sv, r = now(), floor(), saved(), rtc()
+    best, source = cur, "the system clock"
+    for t, name in ((fl, "the image's build date"), (sv, "the time saved on the card"), (r[1] if r else None, f"the RTC ({r[0]})" if r else "")):
+        if t and t > best + 2:
+            best, source = t, name
+    if best > cur + 2:
+        settime(best)
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    write_atomic(BOOT, f"source={source}\nwas={int(cur)}\nnow={int(best)}\n")
+    return 0
+
+
+def save():
+    t = int(now())
+    if t >= floor():                       # an unset clock is never saved over a good one
+        write_atomic(SAVED, f"{t}\n")
+    return 0
+
+
+def parse_request(text):
+    req = {}
+    for line in text.splitlines():
+        k, sep, v = line.partition("=")
+        if sep and re.fullmatch(r"[a-z]+", k):
+            req[k] = v.strip()
+    return req
+
+
+def parse_set(value, zone):
+    """'YYYY-MM-DD HH:MM' local time in zone (hours) -> seconds since 1970 UTC."""
+    m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2}) (\d{2}):(\d{2})", value or "")
+    if not m:
+        raise Refused("The date and time must look like 2026-11-09 21:30.")
+    y, mo, d, h, mi = (int(x) for x in m.groups())
+    if not YEARS[0] <= y <= YEARS[1]:
+        raise Refused(f"The year must be {YEARS[0]} to {YEARS[1]}.")
+    if not 1 <= mo <= 12 or not 1 <= d <= calendar.monthrange(y, mo)[1]:
+        raise Refused("There is no such day.")
+    if not (0 <= h <= 23 and 0 <= mi <= 59):
+        raise Refused("There is no such time.")
+    return calendar.timegm((y, mo, d, h, mi, 0)) - zone * 3600
+
+
+def handle(req):
+    """(ok, lines) for one request."""
+    try:
+        z = req.get("zone", "0")
+        if not re.fullmatch(r"[+-]?\d{1,2}", z) or not -12 <= int(z) <= 14:
+            raise Refused("The time zone must be UTC-12 to UTC+14.")
+        zone = int(z)
+        t = parse_set(req.get("set"), zone)
+        set_zone(zone)
+        settime(t)
+        rtc_note = write_rtc(t)
+        save()
+        write_atomic(SET_MARK, time.strftime("%Y-%m-%d %H:%M:%S %z", time.localtime(t)) + "\n")
+        shown = time.strftime("%Y-%m-%d %H:%M", time.localtime(t))
+        return True, [f"The clock is now {shown} ({'UTC' if zone == 0 else f'UTC{zone:+d}'}).", f"Kept across restarts; {rtc_note}."]
+    except Refused as e:
+        return False, [str(e)]
+    except OSError as e:
+        return False, ["The clock could not be set:", str(e)]
+
+
+def read_request():
+    """The request text, or None. Never follows a link or waits on a pipe; a small regular file only."""
+    try:
+        fd = os.open(REQ_DIR / "request", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as e:
+        # a link (ELOOP) is refused, but answered and deleted, or the path unit would keep firing on it
+        return "" if e.errno == errno.ELOOP else None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_REQUEST:
+            return ""
+        return os.read(fd, MAX_REQUEST).decode("utf-8", "replace")
+    finally:
+        os.close(fd)
+
+
+def write_result(rid, ok, lines):
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(OUT_DIR, 0o755)
+    tmp = OUT_DIR / f"result.{os.getpid()}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    with os.fdopen(fd, "w") as f:
+        f.write(f"id={rid}\nok={1 if ok else 0}\n" + "".join(f"L\t{line}\n" for line in lines))
+    os.replace(tmp, OUT_DIR / "result")
+
+
+def apply():
+    text = read_request()
+    if text is None:
+        return 0
+    try:
+        (REQ_DIR / "request").unlink()   # first: a failure below must not make the path unit loop
+    except OSError:
+        pass
+    req = parse_request(text)
+    rid = re.sub(r"[^0-9A-Za-z._-]", "", req.get("id", "0"))[:40] or "0"
+    ok, lines = handle(req)
+    write_result(rid, ok, lines)
+    return 0
+
+
+def status():
+    t = now()
+    print("now: " + time.strftime("%Y-%m-%d %H:%M:%S %z", time.localtime(t)))
+    print(f"zone: {read(ETC / 'timezone') or 'unknown'}")
+    mark = read(SET_MARK)
+    print(f"set by a person: {mark or 'no'}")
+    sv = saved()
+    print("saved: " + (time.strftime("%Y-%m-%d %H:%M:%S", time.gmtime(sv)) + " UTC" if sv else "none"))
+    r = rtc()
+    print("rtc: " + (f"{r[0]}, {time.strftime('%Y-%m-%d %H:%M:%S', time.gmtime(r[1]))} UTC ({r[1] - int(t):+d} s from the system clock)" if r else "none"))
+    boot = dict(line.split("=", 1) for line in (read(BOOT) or "").splitlines() if "=" in line)
+    if boot:
+        moved = int(boot.get("now", 0)) - int(boot.get("was", 0))
+        print(f"at boot: {boot.get('source', '?')}" + (f", moved forward {moved} s" if moved > 2 else ", not moved"))
+    else:
+        print("at boot: restore did not run")
+    return 0
+
+
+def main(argv):
+    verbs = {"restore": restore, "save": save, "apply": apply, "status": status}
+    if len(argv) != 2 or argv[1] not in verbs:
+        print("\n".join(__doc__.strip().splitlines()[2:6]), file=sys.stderr)
+        return 2
+    return verbs[argv[1]]()
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -18,6 +18,11 @@
 #   --games-only  add the games partition to a card that is ALREADY flashed, without writing the image
 #                 (existing partitions are kept; it refuses a card that is not an untouched r3i6nos card).
 #
+# The R36S ports (KlamANSI, Neumetik, Composer, Painter, Animator, NoCoGaMa) are copied onto EASYROMS from their newest local
+# builds, each in its own repo beside this one (R3I6NOS_PORTS_ROOT overrides where): a .deb into native_deb/ (deb_watcher installs
+# it at boot), a .love into "Love 11.5/" and "Love 12.0/". A port with no local build is named, with the command that builds it;
+# one built before its repo's last commit is flagged. The flash goes on either way. --dry-run shows the list.
+#
 # If <image>.sha256 sits beside the image it is checked first. The image alone
 # does not boot: run inject-boot.sh on the .img before flashing (not on a .gz).
 #
@@ -39,6 +44,101 @@ for arg in "$@"; do
 done
 
 fail() { echo "flash-macos: $*" >&2; exit 1; }
+
+# --- the R36S ports, from their local builds ---
+# name|repo folder|kind|its build in the repo ({v}: the LÖVE version)|the command that makes it, run in the repo
+PORTS_ROOT="${R3I6NOS_PORTS_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
+PORTS=(
+    "KlamANSI|klamansi|deb|r36s/build/pkg/KlamANSI.deb|r36s/package/docker-package.sh"
+    "Neumetik|neumetik|deb|r36s/build/pkg/Neumetik.deb|r36s/build-deb.sh"
+    "Composer|composer|deb|r36s/build/pkg/compose.deb|r36s/build-deb.sh"
+    "Painter|painter|deb|r36s/build/pkg/sprites.deb|r36s/build-deb.sh"
+    "Animator|animator|deb|r36s/build/pkg/animate.deb|r36s/build-deb.sh"
+    "NoCoGaMa|nocogama|love|build/Love {v}/*.love|scripts/build.sh"
+)
+PORT_COPY=()      # "source<TAB>path on EASYROMS"
+PORT_MISSING=()   # one line a port (or LÖVE version) with no local build
+PORT_STALE=()     # built before the repo's last commit
+
+newest() {  # the newest existing file of the arguments (a glob that matched nothing is skipped)
+    local f best=""
+    for f in "$@"; do
+        [ -f "$f" ] || continue
+        if [ -z "$best" ] || [ "$f" -nt "$best" ]; then best="$f"; fi
+    done
+    printf '%s' "$best"
+}
+note_stale() {  # <name> <repo> <file>
+    local made last
+    made="$(stat -f %m "$3" 2>/dev/null || echo 0)"
+    last="$(git -C "$2" log -1 --format=%ct 2>/dev/null || echo 0)"
+    if [ "$last" -gt "$made" ]; then
+        PORT_STALE+=("$1: $(basename "$3") was built $(date -r "$made" '+%Y-%m-%d %H:%M'), before the repo's last commit ($(date -r "$last" '+%Y-%m-%d %H:%M')): it may not be the latest")
+    fi
+}
+find_ports() {
+    local entry name dir kind rel how repo f v base path
+    for entry in "${PORTS[@]}"; do
+        IFS='|' read -r name dir kind rel how <<<"$entry"
+        repo="$PORTS_ROOT/$dir"
+        if [ ! -d "$repo" ]; then
+            PORT_MISSING+=("$name: no repo at $repo")
+            continue
+        fi
+        if [ "$kind" = deb ]; then
+            f="$(newest "$repo/$rel")"
+            if [ -n "$f" ]; then PORT_COPY+=("$f	native_deb/$(basename "$f")"); note_stale "$name" "$repo" "$f"
+            else PORT_MISSING+=("$name: no $rel (build it: cd $repo && $how)"); fi
+        else
+            for v in 11.5 12.0; do
+                path="${rel//\{v\}/$v}"
+                # the folder is quoted (it has a space: "Love 11.5"), the file pattern is not, so it expands
+                # shellcheck disable=SC2086
+                f="$(newest "$repo/${path%/*}"/${path##*/})"
+                if [ -n "$f" ]; then
+                    base="$(basename "$f" .love)"; base="${base%-"$v"}"   # NoCoGaMa-11.5.love -> NoCoGaMa.love: the menu shows the file's name
+                    PORT_COPY+=("$f	Love $v/$base.love"); note_stale "$name ($v)" "$repo" "$f"
+                else PORT_MISSING+=("$name for LÖVE $v: no ${rel//\{v\}/$v} (build it: cd $repo && $how)"); fi
+            done
+        fi
+    done
+}
+show_ports() {  # <heading for the list of builds>
+    local line
+    if [ "${#PORT_COPY[@]}" -gt 0 ]; then
+        echo "$1 ($PORTS_ROOT):"
+        for line in "${PORT_COPY[@]}"; do echo "  ${line#*	}   <- ${line%%	*}"; done
+    fi
+    if [ "${#PORT_MISSING[@]}" -gt 0 ]; then
+        echo "MISSING (not on the card):"
+        for line in "${PORT_MISSING[@]}"; do echo "  $line"; done
+    fi
+    if [ "${#PORT_STALE[@]}" -gt 0 ]; then
+        echo "Possibly out of date:"
+        for line in "${PORT_STALE[@]}"; do echo "  $line"; done
+    fi
+    return 0
+}
+copy_ports() {  # <EASYROMS mount point>: never fails the flash; says what did not copy
+    local line src dest bad=0
+    for line in "${PORT_COPY[@]+"${PORT_COPY[@]}"}"; do
+        src="${line%%	*}"; dest="$1/${line#*	}"
+        if ! { mkdir -p "$(dirname "$dest")" && cp -X "$src" "$dest"; }; then
+            echo "flash-macos: could not copy $src to $dest (copy it yourself)" >&2
+            bad=1
+        fi
+    done
+    # macOS writes ._ files on exFAT; the menu and deb_watcher would take ._X.love or ._X.deb for an app
+    dot_clean -m "$1" 2>/dev/null || true
+    find "$1" -name '._*' -delete 2>/dev/null || true
+    [ "$bad" = 0 ] && [ "${#PORT_COPY[@]}" -gt 0 ] && echo "Ports copied: ${#PORT_COPY[@]} file(s)."
+    if [ "${#PORT_MISSING[@]}" -gt 0 ]; then
+        echo "Not copied, no local build (build them and run this again with --games-only on a fresh card, or copy them onto EASYROMS):" >&2
+        for line in "${PORT_MISSING[@]}"; do echo "  $line" >&2; done
+    fi
+    return 0
+}
+find_ports
 
 [ "$(uname -s)" = Darwin ] || fail "macOS only (this is $(uname -s))"
 if [ "$ONLY" = 1 ]; then
@@ -112,6 +212,12 @@ diskutil list "/dev/$DISK" || true
 if [ "$GAMES" = 1 ]; then
     echo
     echo "The space after the system partition becomes an exFAT partition named EASYROMS (use --no-games to skip this)."
+    echo
+    show_ports "R36S ports copied onto it from their newest local builds"
+else
+    echo
+    echo "--no-games: the R36S ports are not copied (no games partition)."
+    show_ports "Their newest local builds, to copy onto the card in TF2 yourself (same folders)"
 fi
 
 if [ "$DRY" = 1 ]; then
@@ -200,6 +306,7 @@ games_partition() {
     mkdir -p "$mnt/Love 11.5" "$mnt/Love 12.0" "$mnt/native_deb" \
         || { games_fail "making the folders on $mnt" "mkdir failed (is the volume read-only?)" "create the folders 'Love 11.5', 'Love 12.0' and 'native_deb' on $mnt yourself."; return 1; }
     echo "Games partition ready: $mnt (Love 11.5, Love 12.0, native_deb)"
+    copy_ports "$mnt"
 }
 GAMES_OK=1
 if [ "$GAMES" = 1 ]; then

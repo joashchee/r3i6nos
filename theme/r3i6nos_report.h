@@ -97,13 +97,15 @@ static inline int r3_report_mkdirs(const char *path) {
     return (mkdir(tmp, 0755) == 0 || errno == EEXIST) ? 0 : -1;
 }
 
-/* Starts dir/r36s-report.txt (as .tmp until closed) and writes the header. 0, or -1 when it can't (errno set). */
-static inline int r3_report_open(R3Report *r, const char *dir, const char *app, const char *version, const char *package, const char *how) {
+/* Starts dir/file (as .tmp until closed) and writes the header. 0, or -1 when it can't (errno set). For an app with more than one
+ * build on the same card (the IO Checker: LÖVE 11.5, LÖVE 12.0, native), one file a build; everything else uses r3_report_open. */
+static inline int r3_report_open_named(R3Report *r, const char *dir, const char *file, const char *app, const char *version, const char *package,
+                                       const char *how, const char *repo /* the repo Claude reads it in; NULL: the app's own */) {
     int quiet = r->quiet;
     memset(r, 0, sizeof *r);
     r->quiet = quiet;
     if (r3_report_mkdirs(dir) != 0) return -1;
-    snprintf(r->path, sizeof r->path, "%s/r36s-report.txt", dir);
+    snprintf(r->path, sizeof r->path, "%s/%s", dir, file);
     snprintf(r->tmp, sizeof r->tmp, "%s.tmp", r->path);
     r->f = fopen(r->tmp, "w");
     if (!r->f) return -1;
@@ -112,10 +114,15 @@ static inline int r3_report_open(R3Report *r, const char *dir, const char *app, 
     strftime(when, sizeof when, "%Y-%m-%d %H:%M:%S", localtime(&now));
     const char *base = strrchr(dir, '/');
     snprintf(line, sizeof line,
-             "# r3i6nos device report\napp: %s %s (%s)\nmade: %s\nhow: %s\nfor: Claude. Copy EASYROMS/%s/r36s-report.txt to a computer and give it to Claude in the %s repo.\n",
-             app, version, package, when, how, base ? base + 1 : dir, app);
+             "# r3i6nos device report\napp: %s %s (%s)\nmade: %s\nhow: %s\nfor: Claude. Copy EASYROMS/%s/%s to a computer and give it to Claude in the %s repo.\n",
+             app, version, package, when, how, base ? base + 1 : dir, file, repo ? repo : app);
     r3_report_raw(r, line);
     return 0;
+}
+
+/* Starts dir/r36s-report.txt (as .tmp until closed) and writes the header. 0, or -1 when it can't (errno set). */
+static inline int r3_report_open(R3Report *r, const char *dir, const char *app, const char *version, const char *package, const char *how) {
+    return r3_report_open_named(r, dir, "r36s-report.txt", app, version, package, how, NULL);
 }
 
 /* The summary, "end", and the file renamed into place. 0 when the report is on the card. */

@@ -100,6 +100,7 @@ if the file is missing or has no `end`, that the report stopped and where its `.
 | Neumetik | Neumetik repo `r36s/` | Start > Device report, `neumetik --report` | `/roms/Neumetik/r36s-report.txt` |
 | KlamANSI | KlamANSI repo `r36s/` | Start > Device report, `klamansi --report` | `/roms/KlamANSI/r36s-report.txt` |
 | NoCoGaMa (device spike) | NoCoGaMa repo `spike/device/` | its Report page | `/roms/NoCoGaMa/r36s-report-11.5.txt` and `-12.0.txt` (one a runtime) |
+| IO Checker (the hardware: input, video, sound, cards) | `apps/io-checker-love/`, `apps/io-checker-native/` | its Device report item, or `io-checker-native --report` | `/roms/IO_Checker/r36s-report-11.5.txt`, `-12.0.txt`, `-native.txt` (one a build) |
 | Composer, Painter, Animator | their repos' `r36s/` (the package from `tools/qjs-node/`) | Settings > Device reports, or `compose-report`, `sprites-report`, `animate-report` | `/roms/Composer/`, `/roms/Painter/`, `/roms/Animator/r36s-report.txt` |
 
-The default apps (Commander, the input checkers) are this repo's own and are tried on the unit directly; the input checker is itself the pad's report.
+Commander is this repo's own and is tried on the unit directly. The IO Checker (`docs/IO-CHECKER.md`) is the hardware's report: buttons, sticks, keys, screen, sound and cards, with what the person saw and heard.
