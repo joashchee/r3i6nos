@@ -98,3 +98,11 @@ line) and `tests/test_reports.lua`.
 1. ~~The maintainer confirms the grant~~ (done 2026-11-08: KlamANSI's wording on four packages, markers deleted, holder ansiapps everywhere).
 2. A try on a real R36S, then `qjsc` startup and memory numbers on the Cortex-A35, and a LÖVE app's `io.popen` there.
 3. Optional: a better deflate; the VGA atlas for Painter's PNG render; a `tools.lua` helper for LÖVE apps; a `--help` that fits the 64-column screen.
+
+## On a real R36S (2026-11-10)
+
+**Animator** ran first: installed from `native_deb/` by `deb_watcher.py` on image `53f46b3` (the one where `loveos` owns the tools folder),
+`animate` on the tools path, and its report from Settings > Device reports passed **15 of 15**. All 10 commands in its `commands.txt` took
+0.02 to 0.05 s (0.3 s in all), with at most 11.5 MB of memory: a bytecode-only QuickJS executable starts and runs a small command in a few
+hundredths of a second on the Cortex-A35. The report times commands and checks their exit status; it does not compare output with Node on
+the unit (that comparison was made under Docker). Composer and Painter: not yet run there.
