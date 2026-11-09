@@ -122,3 +122,14 @@ The first report from a unit (`docs/DEVICE-REPORTS.md`; KlamANSI's Start > Devic
   `run_app.sh` maps it with and without the CRC (SDL before 2.26 leaves it zero). Whether an app using SDL's gamepad API then sees the
   right buttons is **untested**.
 - The games card being `mmcblk0` means the flashed card itself (TF1), with `flash-macos.sh`'s partition 3: no second card was needed.
+
+### Graphics under LÖVE (NoCoGaMa's device spike, LÖVE 12.0, 2026-11-10)
+
+- LÖVE 12.0.0 runs on the unit with **LuaJIT 2.1.0-beta3, JIT on** (Debian's system LuaJIT, which r3i6nos's builds link), so 11.5 should have
+  it on too (not yet seen).
+- Renderer **OpenGL ES 3.2**, `v1.r13p0-01rel0`, GPU **ARM Mali-G31**: the blob from the user's card works with SDL's KMSDRM and gbm.
+- The window is 640x480 fullscreen. With vsync off it still draws at 60 fps, which suggests KMSDRM waits for each page flip: frame rates top
+  out at the panel's 60 Hz, so a program's headroom shows in its CPU time, not its fps.
+- LÖVE treats the pad as a gamepad (`isGamepad` true), through SDL's own database or `run_app.sh`'s mapping: which one, and whether its buttons
+  then match the raw layout, is not known yet.
+- A LÖVE program's save folder is `/home/loveos/.local/share/love/<identity>` on ROOTFS, not the games card.

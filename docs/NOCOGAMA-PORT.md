@@ -52,3 +52,16 @@ All five decisions in the NoCoGaMa plan's section 0 are **confirmed by the maint
 ## The device report (2026-11-09, rule 9)
 
 The device spike's Report page writes `/roms/NoCoGaMa/r36s-report.txt` (was `spike-result.txt`) in `docs/DEVICE-REPORTS.md`'s grammar: system, pad (17 raw buttons seen or FAIL), card, bench (p99 goal 8 ms), draw (goal 60 fps). The app gets its own Device report before its release (NoCoGaMa's roadmap).
+
+## First run on a real R36S (the device spike, LÖVE 12.0, 2026-11-10)
+
+**GO under LÖVE 12.0: 14 PASS, 0 FAIL.** The report is in the NoCoGaMa repo (`spike/reports/`).
+
+- **System:** LuaJIT 2.1.0-beta3 with the JIT on; OpenGL ES 3.2 on the Mali-G31; 640x480 fullscreen; all 17 raw buttons seen; LÖVE sees a gamepad.
+- **Bench** (600 steps of 1/60 s, goal p99 at most 8 ms): 200 actors 0.086 ms a step (p99 0.11), 400 actors 0.17 ms, the all-pairs worst case
+  at 400 actors 3.45 ms (p99 3.54). About 29 times the Mac's JIT-on figures.
+- **Draw:** 200 actors at 60 fps as rects (0.95 ms of CPU) and as printed glyphs (5.28 ms). 60 fps is the panel's ceiling here (see
+  `docs/hardware-findings.md`), so the CPU time is the headroom.
+- **Card:** `io.popen` + `ls` lists the folder as `loveos`, and a temp file renamed over an existing one works on exFAT: the app's game list and
+  saves can work as designed.
+- **Still to run:** the spike under LÖVE 11.5 (its go/no-go), the app itself, and whether a LÖVE app returns to the menu.
