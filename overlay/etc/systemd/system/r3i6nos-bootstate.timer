@@ -1,0 +1,10 @@
+[Unit]
+Description=Write how the boot went a minute after boot, then every 5 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=5min
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

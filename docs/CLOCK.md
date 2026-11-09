@@ -41,6 +41,11 @@ last saved time and runs behind by however long the unit was off. Set it again i
 a person set it and when, the saved time, the RTC (its name and how far it is from the system clock), and what restore did this boot.
 A unit's report answers the open questions: whether `/sys/class/rtc/rtc0` exists, and whether it kept time while the unit was off.
 
+**First answer (2026-11-09 22:30, image `5f4d67c`, r3i6nos's report):** the kernel has an RTC, **`rk808-rtc`** (the RK817's), and after the time
+was set in the dialog at 22:13 it read 1 s from the system clock, so setting it reaches the RTC. That boot restore left the clock as it was
+("the system clock, not moved"). **Still open:** whether the RTC keeps time while the unit is off; power off for an hour, boot, and read the
+report's `clock` section before setting anything.
+
 **Not run on a real R36S.** Tested here: the helper against temporary folders with the clock-setting call replaced
 (`tests/test_r3i6nos_clock.py`), the dialog and Settings against a fake helper (`tests/test_clock.lua`), the units installed and
 enabled (`tests/test_configure_rootfs.sh`), the report's section (`tests/test_r3i6nos_report.py`).

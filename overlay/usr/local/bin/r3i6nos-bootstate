@@ -1,0 +1,29 @@
+#!/bin/bash
+# r3i6nos-bootstate - write how the boot went to /run/r3i6nos/boot-state, for programs that are not root.
+#
+# Why: the image has no D-Bus, and systemctl and systemd-analyze reach systemd without it only as root (its private socket). So
+# r3i6nos's device report, started from Settings as loveos, got "Failed to connect to bus" for its boot section (2026-11-09). This
+# runs as root from r3i6nos-bootstate.timer (a minute after boot, then every 5 minutes) and writes what they say, one
+# "key: value" a line; the report reads it when systemctl will not answer (docs/DEVICE-REPORTS.md).
+#
+# Overrides, for tests: R3I6NOS_BOOTSTATE (/run/r3i6nos/boot-state); systemctl and systemd-analyze are found on PATH.
+
+set -u
+OUT="${R3I6NOS_BOOTSTATE:-/run/r3i6nos/boot-state}"
+first() { "$@" 2>&1 | head -n 1; }
+
+mkdir -p "$(dirname "$OUT")"
+tmp="$OUT.tmp"
+{
+    echo "written: $(date '+%Y-%m-%d %H:%M:%S %z')"
+    echo "up: $(cut -d' ' -f1 /proc/uptime 2>/dev/null) s"
+    failed="$(systemctl list-units --failed --plain --no-legend --no-pager 2>/dev/null | awk 'NF { print $1 }' | paste -sd ' ' -)"
+    echo "failed units: ${failed:-none}"
+    echo "system state: $(first systemctl is-system-running)"
+    jobs="$(systemctl list-jobs --no-legend --no-pager --plain 2>/dev/null | awk 'NF { print $2 }' | paste -sd ' ' -)"
+    echo "jobs waiting: ${jobs:-none}"
+    echo "boot time: $(first systemd-analyze time)"
+    for unit in r3i6nos-sound.service r3i6nos-cards.service r3i6nos-clock.service loveos.service; do
+        echo "unit $unit: $(first systemctl is-active "$unit")"
+    done
+} > "$tmp" && chmod 644 "$tmp" && mv -f "$tmp" "$OUT"

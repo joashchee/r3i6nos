@@ -50,6 +50,7 @@ grep -q '^Before=loveos.service' "$R/etc/systemd/system/r3i6nos-sound.service" |
 [ -x "$R/usr/local/bin/r3i6nos-clock" ]         || fail "r3i6nos-clock not installed executable"
 [ -L "$R/etc/systemd/system/sysinit.target.wants/r3i6nos-clock.service" ] || fail "the clock is not restored at boot"
 [ -L "$R/etc/systemd/system/timers.target.wants/r3i6nos-clock-save.timer" ] || fail "the clock is not saved hourly"
+[ -L "$R/etc/systemd/system/timers.target.wants/r3i6nos-bootstate.timer" ] || fail "the boot state is not written for the report"
 [ -L "$R/etc/systemd/system/multi-user.target.wants/r3i6nos-clock-set.path" ] || fail "the menu's Date and time requests are not watched"
 [ -f "$R/opt/loveos/menu/clock.lua" ]           || fail "the menu's Date and time dialog is missing"
 ! grep -q 'roms.mount' "$R/etc/systemd/system/loveos.service" || fail "the session still waits for a roms.mount that no longer exists"

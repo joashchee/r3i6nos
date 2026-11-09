@@ -57,7 +57,8 @@ class SystemReport(unittest.TestCase):
         for f in ("systemctl", "systemd-analyze", "r3i6nos-sound", "r3i6nos-clock"):
             (t / "bin" / f).chmod(0o755)
         self.env = {"R3I6NOS_ETC": str(t / "etc"), "R3I6NOS_PROC": str(t / "proc"), "R3I6NOS_SYS": str(t / "sys"), "R3I6NOS_DEV": str(t / "dev"),
-                    "R3I6NOS_CARDS_STATE": str(t / "run/cards"), "R3I6NOS_REPORT_MB": "2", "R3I6NOS_SOUND": str(t / "bin/r3i6nos-sound"), "R3I6NOS_CLOCK": str(t / "bin/r3i6nos-clock"), "PATH": f"{t / 'bin'}:{os.environ.get('PATH', '')}"}
+                    "R3I6NOS_CARDS_STATE": str(t / "run/cards"), "R3I6NOS_REPORT_MB": "2", "R3I6NOS_SOUND": str(t / "bin/r3i6nos-sound"), "R3I6NOS_CLOCK": str(t / "bin/r3i6nos-clock"),
+                    "R3I6NOS_BOOTSTATE": str(t / "run/boot-state"), "PATH": f"{t / 'bin'}:{os.environ.get('PATH', '')}"}
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -114,6 +115,38 @@ class SystemReport(unittest.TestCase):
         text = self.text(self.t / "sys1/r3i6nos")
         self.assertIn("from the system card", text)
         self.assertIn("INFO data card: none found", text)
+
+    NO_BUS = "#!/bin/sh\necho 'Failed to connect to bus: No such file or directory' >&2\nexit 1\n"
+
+    def test_no_bus_reads_the_boot_state(self):
+        # From Settings the report runs as loveos, and with no D-Bus systemctl cannot reach systemd (the unit, 2026-11-09)
+        (self.t / "bin/systemctl").write_text(self.NO_BUS)
+        (self.t / "bin/systemd-analyze").write_text(self.NO_BUS)
+        (self.t / "run/boot-state").write_text("written: 2026-11-09 22:29:00 +0800\nup: 1080.2 s\nfailed units: none\nsystem state: running\n"
+                                               "jobs waiting: none\nboot time: Startup finished in 3.1s (kernel) + 9.2s (userspace) = 12.3s\n"
+                                               "unit r3i6nos-sound.service: active\n")
+        self.report()
+        text = self.text(self.t / "sys2/r3i6nos")
+        for want in ("INFO boot facts from:", "written 2026-11-09 22:29:00 +0800", "PASS failed units: none", "PASS system state: running",
+                     "PASS jobs waiting: none", "INFO boot time: 3.1s (kernel) + 9.2s (userspace) = 12.3s", "INFO jack follower: active"):
+            self.assertIn(want, text)
+
+    def test_no_bus_and_a_failed_unit_in_the_boot_state(self):
+        (self.t / "bin/systemctl").write_text(self.NO_BUS)
+        (self.t / "run/boot-state").write_text("written: x\nfailed units: a.service b.service\nsystem state: degraded\njobs waiting: none\n"
+                                               "boot time: Bootup is not yet finished\n")
+        self.report()
+        text = self.text(self.t / "sys2/r3i6nos")
+        self.assertIn("FAIL failed units: a.service, b.service", text)
+        self.assertIn("FAIL system state: degraded", text)
+        self.assertIn("SKIP boot time: Bootup is not yet finished", text)
+
+    def test_no_bus_and_no_boot_state_yet(self):
+        (self.t / "bin/systemctl").write_text(self.NO_BUS)
+        self.report()
+        text = self.text(self.t / "sys2/r3i6nos")
+        self.assertIn("SKIP boot: systemctl answers only root here (no D-Bus)", text)
+        self.assertIn("not written yet", text)
 
     def test_no_cards_service_no_release_and_a_clean_boot(self):
         (self.t / "run/cards").unlink()

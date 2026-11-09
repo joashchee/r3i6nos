@@ -130,6 +130,9 @@ ln -sfn /etc/systemd/system/r3i6nos-clock.service \
     "$ROOTFS/etc/systemd/system/sysinit.target.wants/r3i6nos-clock.service"
 ln -sfn /etc/systemd/system/r3i6nos-clock-save.timer \
     "$ROOTFS/etc/systemd/system/timers.target.wants/r3i6nos-clock-save.timer"
+# how the boot went, for the device report (systemctl answers only root: no D-Bus in the image)
+ln -sfn /etc/systemd/system/r3i6nos-bootstate.timer \
+    "$ROOTFS/etc/systemd/system/timers.target.wants/r3i6nos-bootstate.timer"
 ln -sfn /etc/systemd/system/r3i6nos-clock-set.path \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-clock-set.path"
 # Settings > Network and SSH: a path unit that only watches for the menu's request (the helper runs per request, never at boot).

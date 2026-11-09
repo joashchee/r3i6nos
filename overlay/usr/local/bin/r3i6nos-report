@@ -35,6 +35,7 @@ MB = int(ENV("R3I6NOS_REPORT_MB", "16"))
 REPORT_DIR = ENV("R3I6NOS_REPORT_DIR")
 SOUND = ENV("R3I6NOS_SOUND", "/usr/local/bin/r3i6nos-sound")
 CLOCK = ENV("R3I6NOS_CLOCK", "/usr/local/bin/r3i6nos-clock")
+BOOTSTATE = Path(ENV("R3I6NOS_BOOTSTATE", "/run/r3i6nos/boot-state"))   # r3i6nos-bootstate (root) writes it: systemctl answers only root
 PROGRESS = ENV("R3I6NOS_REPORT_PROGRESS")   # set by the menu (menu/reports.lua): where to say how far it has got
 WANT_FS = ("exfat", "vfat", "ext4", "squashfs")
 
@@ -154,31 +155,57 @@ def system(r, rel):
         r.line("INFO", "memory", f"total {mem['MemTotal']}, available {mem.get('MemAvailable', '?')}")
 
 
+def boot_state():
+    """{key: value} from r3i6nos-bootstate's file, or {} when it is not there yet."""
+    text = read(BOOTSTATE) or ""
+    return {k: v for k, _, v in (ln.partition(": ") for ln in text.splitlines()) if k}
+
+
+def state_line(r, state):
+    # running: the boot finished and nothing failed; degraded: something failed; starting: jobs are still waiting
+    r.line("PASS" if state == "running" else ("FAIL" if state in ("degraded", "maintenance") else "INFO"), "system state", state)
+
+
+def jobs_line(r, waiting):
+    r.line("PASS" if not waiting else "INFO", "jobs waiting", ", ".join(waiting[:8]) + (" ..." if len(waiting) > 8 else "") if waiting else "none")
+
+
 def boot(r):
     r.step("how the boot went")
     r.section("boot")
     out = run(["systemctl", "list-units", "--failed", "--plain", "--no-legend", "--no-pager"])
     if out is None:
-        r.line("SKIP", "failed units", "systemctl did not answer")
+        # Not root, and no D-Bus in the image: systemctl cannot reach systemd. r3i6nos-bootstate (root, on a timer) writes what it says.
+        st = boot_state()
+        if not st:
+            r.line("SKIP", "boot", f"systemctl answers only root here (no D-Bus), and {BOOTSTATE} is not written yet (a minute after boot)")
+        else:
+            r.line("INFO", "boot facts from", f"{BOOTSTATE}, written {st.get('written', '?')} (systemctl answers only root here)")
+            failed = [] if st.get("failed units", "none") == "none" else st["failed units"].split()
+            r.line("PASS" if not failed else "FAIL", "failed units", ", ".join(failed) if failed else "none")
+            if st.get("system state"):
+                state_line(r, st["system state"])
+            jobs = st.get("jobs waiting", "none")
+            jobs_line(r, [] if jobs == "none" else jobs.split())
+            t = st.get("boot time", "")
+            r.line("INFO" if t.startswith("Startup finished") else "SKIP", "boot time", t.replace("Startup finished in ", "") or "not written")
     else:
         failed = [ln.split()[0] for ln in out.splitlines() if ln.strip()]
         r.line("PASS" if not failed else "FAIL", "failed units", ", ".join(failed) if failed else "none")
-    # running: the boot finished and nothing failed; degraded: something failed; starting: jobs are still waiting
-    code, state, err = run_full(["systemctl", "is-system-running"])
-    state = state.strip()
-    if state:
-        r.line("PASS" if state == "running" else ("FAIL" if state in ("degraded", "maintenance") else "INFO"), "system state", state)
-    else:
-        r.line("SKIP", "system state", err or "systemctl did not answer")
-    code, jobs, err = run_full(["systemctl", "list-jobs", "--no-legend", "--no-pager", "--plain"])
-    if code is not None and not err:
-        waiting = [ln.split()[1] for ln in jobs.splitlines() if len(ln.split()) >= 2]
-        r.line("PASS" if not waiting else "INFO", "jobs waiting", ", ".join(waiting[:8]) + (" ..." if len(waiting) > 8 else "") if waiting else "none")
-    code, t, err = run_full(["systemd-analyze", "time", "--no-pager"])
-    if code == 0 and t.strip():
-        r.line("INFO", "boot time", t.strip().splitlines()[0].replace("Startup finished in ", ""))
-    else:
-        r.line("SKIP", "boot time", f"systemd-analyze: {err}" if err else "systemd-analyze did not answer")
+        code, state, err = run_full(["systemctl", "is-system-running"])
+        state = state.strip()
+        if state:
+            state_line(r, state)
+        else:
+            r.line("SKIP", "system state", err or "systemctl did not answer")
+        code, jobs, err = run_full(["systemctl", "list-jobs", "--no-legend", "--no-pager", "--plain"])
+        if code is not None and not err:
+            jobs_line(r, [ln.split()[1] for ln in jobs.splitlines() if len(ln.split()) >= 2])
+        code, t, err = run_full(["systemd-analyze", "time", "--no-pager"])
+        if code == 0 and t.strip():
+            r.line("INFO", "boot time", t.strip().splitlines()[0].replace("Startup finished in ", ""))
+        else:
+            r.line("SKIP", "boot time", f"systemd-analyze: {err}" if err else "systemd-analyze did not answer")
     up = read(PROC / "uptime")
     if up:
         r.line("INFO", "up for", f"{float(up.split()[0]) / 60:.1f} min")
@@ -205,7 +232,7 @@ def sound(r):
             r.line("INFO", key, val)
     if not volume:   # /etc/asound.conf's software volumes (docs/SOUND.md): without them the volume keys and the mixer do nothing
         r.line("FAIL", "mixer Volume", "missing: the software volumes were not made (is /etc/asound.conf in place?)")
-    state = (run(["systemctl", "is-active", "r3i6nos-sound.service"]) or "").strip()
+    state = (run(["systemctl", "is-active", "r3i6nos-sound.service"]) or "").strip() or boot_state().get("unit r3i6nos-sound.service", "")
     r.line("INFO", "jack follower", state or "unknown")
     r.line("INFO", "heard", "not measured: listen for the menu's sounds (speaker), then with headphones in")
 

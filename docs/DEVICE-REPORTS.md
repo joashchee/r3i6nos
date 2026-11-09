@@ -103,4 +103,8 @@ if the file is missing or has no `end`, that the report stopped and where its `.
 | IO Checker (the hardware: input, video, sound, cards) | `apps/io-checker-love/`, `apps/io-checker-native/` | its Device report item, or `io-checker-native --report` | `/roms/IO_Checker/r36s-report-11.5.txt`, `-12.0.txt`, `-native.txt` (one a build) |
 | Composer, Painter, Animator | their repos' `r36s/` (the package from `tools/qjs-node/`) | Settings > Device reports, or `compose-report`, `sprites-report`, `animate-report` | `/roms/Composer/`, `/roms/Painter/`, `/roms/Animator/r36s-report.txt` |
 
+**A report started from Settings runs as `loveos`, not root.** The image has no D-Bus, so `systemctl` and `systemd-analyze` cannot reach
+systemd from a report ("Failed to connect to bus", seen 2026-11-09). r3i6nos's own report reads what they say from `/run/r3i6nos/boot-state`,
+written by the root timer `r3i6nos-bootstate`; an app's report that needs a unit's state reads it there too.
+
 Commander is this repo's own and is tried on the unit directly. The IO Checker (`docs/IO-CHECKER.md`) is the hardware's report: buttons, sticks, keys, screen, sound and cards, with what the person saw and heard.

@@ -195,3 +195,20 @@ ran; only its first screen was missing.
 - **A bug in the report itself:** its System lines were cut to 31 characters (the pad GUID lost its last digit, the board and sound card
   names their ends), because the theme's `R3Item.value` held 32 bytes. Now 64 (`theme/r3i6nos_ansiapps.h`), and the list fits a long
   value to its row.
+
+## r3i6nos's second report (2026-11-09 22:30, one R36S, image `5f4d67c`)
+
+9 PASS, 0 FAIL, 3 SKIP, run from Settings > Device reports 18 minutes after boot.
+
+- **Clock:** the zone `Etc/GMT-8` (UTC+8), set by a person at 22:13; the kernel has an RTC, **`rk808-rtc`**, 1 s from the system clock after
+  that (`docs/CLOCK.md`). Whether it keeps time while off is still open.
+- **Sound:** the path at `SPK` (of `OFF SPK HP SPK_HP`: this unit's codec lists four items, not the BSP's full set); the jack switch
+  "rockchip,rk817-codec Headphones", out.
+- **Storage:** the system card (`mmcblk0`, 128.2 GB, exFAT partition 3 on `/roms`) writes 39.2 MB/s and reads 66.5 MB/s (32.4 and 65.3 in
+  the first report); no card in TF2. The kernel has exfat, vfat, ext4, squashfs and loop devices.
+- **The boot section was SKIP:** `systemctl` and `systemd-analyze` said "Failed to connect to bus". The image has no D-Bus, and without it
+  they reach systemd only as root (its private socket); the report runs from Settings as `loveos`. So did the jack follower's state
+  ("unknown"). Fixed: `r3i6nos-bootstate` (root, `r3i6nos-bootstate.timer`, a minute after boot and every 5 minutes) writes what they say to
+  `/run/r3i6nos/boot-state`, and the report reads it when `systemctl` will not answer. How the first report got "no failed units" is not
+  known (it may have been run as root over SSH; the report does not say who ran it).
+

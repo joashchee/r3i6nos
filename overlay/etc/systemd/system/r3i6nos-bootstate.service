@@ -1,0 +1,7 @@
+[Unit]
+Description=Write how the boot went for the device report (systemctl answers only root here: no D-Bus)
+Documentation=file:/usr/local/bin/r3i6nos-bootstate
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/r3i6nos-bootstate
