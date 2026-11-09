@@ -212,3 +212,14 @@ ran; only its first screen was missing.
   `/run/r3i6nos/boot-state`, and the report reads it when `systemctl` will not answer. How the first report got "no failed units" is not
   known (it may have been run as root over SSH; the report does not say who ran it).
 
+## No sound at all: alsa-lib refused the Boost softvol (2026-11-10)
+
+- Seen (the maintainer, image with `/etc/asound.conf`): every app failed to open sound, "cannot open: ALSA: Couldn't open audio device"
+  (SDL's message when `snd_pcm_open` fails).
+- Why: Boost's softvol had `min_dB 0.0`; alsa-lib (1.2.8, Debian 12) refuses any softvol whose `min_dB` is not negative
+  ("min_dB must be a negative value", Invalid argument), so the `default` device could not be opened by anything. Reproduced in
+  Debian 12 under Docker with the image's alsa-lib, the null device in place of the codec.
+- Fixed: Boost runs from -3 dB with step 1 at 0 dB and step 0 (silence) never used (`docs/SOUND.md`). `tests/test_asound_conf.py`
+  checks every softvol against alsa-lib's rules everywhere, and opens the chain in alsa-lib where `aplay` is installed (CI installs it).
+  **Untested on the unit:** sound back, and the Volume and Boost controls made at boot.
+

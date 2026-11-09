@@ -76,6 +76,11 @@ function M.order(controls)
   return list
 end
 
+--- The lowest step a control may be set to: Boost's step 0 is silence (a softvol's lowest step; /etc/asound.conf), so it stops at
+--- step 1, 0 dB. Any other control: its own minimum.
+M.FLOOR = { Boost = 1 }
+local function floor(c) return math.max(c.min or 0, M.FLOOR[c.name] or c.min or 0) end
+
 --- The amixer arguments that move control c by steps (negative: down; a choice moves one item whatever the size), stopping at
 --- its ends; nil when it is already at the end it is moving to.
 function M.change(c, steps)
@@ -87,7 +92,7 @@ function M.change(c, steps)
     if j < 1 or j > #c.items then return nil end
     return { M.AMIXER, "-c", "0", "-q", "sset", c.name, c.items[j] }
   end
-  local v = math.max(c.min, math.min(c.max, c.value + steps))
+  local v = math.max(floor(c), math.min(c.max, c.value + steps))
   if v == c.value then return nil end
   return { M.AMIXER, "-c", "0", "-q", "sset", c.name, tostring(v) }
 end
@@ -103,7 +108,8 @@ end
 --- How a control's value reads: "80%  -8 dB", "+6 dB", "SPK".
 function M.valueText(c)
   if #c.items > 0 then return c.item or "?" end
-  if c.name == "Boost" and c.db then return ("%+.0f dB"):format(c.db) end
+  if c.name == "Volume" and c.value == 0 then return "off" end   -- a softvol's step 0 is silence, whatever dB amixer reports
+  if c.name == "Boost" and c.db then return c.value == 0 and "silent (step 0)" or ("%+.0f dB"):format(c.db) end
   local parts = {}
   if c.percent then parts[#parts + 1] = ("%d%%"):format(c.percent) end
   if c.db then parts[#parts + 1] = ("%+.0f dB"):format(c.db) end
@@ -114,7 +120,8 @@ end
 --- 0..1: how far up a level is (nil for a choice).
 function M.fraction(c)
   if #c.items > 0 or not c.max or c.max == c.min then return nil end
-  return (c.value - c.min) / (c.max - c.min)
+  local lo = floor(c)
+  return math.max(0, (c.value - lo) / (c.max - lo))
 end
 
 M.HINTS = {

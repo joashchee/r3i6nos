@@ -9,7 +9,7 @@ local theme = require("r3i6nos_ansiapps")
 local function eq(a, b, m) assert(a == b, (m or "") .. (" want %s, got %s"):format(tostring(b), tostring(a))) end
 
 -- A fake amixer with card 0's controls as they are expected on the unit: the two softvols and the RK817's Playback Path.
-local state = { Volume = 16, Boost = 2, path = "SPK", fail = false }
+local state = { Volume = 16, Boost = 3, path = "SPK", fail = false }   -- Boost: -3 to +18 dB, step 3 is +6 dB
 local calls = {}
 local PATHS = { "OFF", "RCV", "SPK", "HP", "HP_NO_MIC", "BT", "SPK_HP" }
 local function scontents()
@@ -20,9 +20,9 @@ local function scontents()
     "Simple mixer control 'Boost',0",
     "  Capabilities: volume",
     "  Playback channels: Front Left - Front Right",
-    "  Limits: 0 - 6",
-    ("  Front Left: %d [%d%%] [%sdB]"):format(state.Boost, math.floor(state.Boost / 6 * 100), db(state.Boost, 0, 3)),
-    ("  Front Right: %d [%d%%] [%sdB]"):format(state.Boost, math.floor(state.Boost / 6 * 100), db(state.Boost, 0, 3)),
+    "  Limits: 0 - 7",
+    ("  Front Left: %d [%d%%] [%sdB]"):format(state.Boost, math.floor(state.Boost / 7 * 100), db(state.Boost, -3, 3)),
+    ("  Front Right: %d [%d%%] [%sdB]"):format(state.Boost, math.floor(state.Boost / 7 * 100), db(state.Boost, -3, 3)),
     "Simple mixer control 'Playback Path',0",
     "  Capabilities: enum",
     "  Items: " .. table.concat(q, " "),
@@ -68,7 +68,11 @@ eq(mixer.fraction(by.Volume), 0.8); eq(mixer.fraction(by["Playback Path"]), nil)
 -- ---- changes: a level moves by steps and stops at its ends; a choice moves one item
 eq(table.concat(mixer.change(by.Volume, 1), " "), "amixer -c 0 -q sset Volume 17")
 eq(table.concat(mixer.change(by.Volume, 10), " "), "amixer -c 0 -q sset Volume 20", "clamped to the top")
-eq(table.concat(mixer.change(by.Boost, -5), " "), "amixer -c 0 -q sset Boost 0", "clamped to the bottom")
+eq(table.concat(mixer.change(by.Boost, -5), " "), "amixer -c 0 -q sset Boost 1", "Boost stops at step 1 (0 dB): step 0 is silence")
+eq(mixer.fraction({ name = "Boost", items = {}, value = 1, min = 0, max = 7 }), 0, "Boost's bar is empty at 0 dB")
+eq(mixer.valueText({ name = "Boost", items = {}, value = 1, min = 0, max = 7, db = 0 }), "+0 dB")
+eq(mixer.valueText({ name = "Boost", items = {}, value = 0, min = 0, max = 7, db = -3 }), "silent (step 0)", "says so if it is ever there")
+eq(mixer.valueText({ name = "Volume", items = {}, value = 0, min = 0, max = 20, percent = 0, db = -40 }), "off", "step 0 is silence, not -40 dB")
 eq(table.concat(mixer.change(by["Playback Path"], -5), " "), "amixer -c 0 -q sset Playback Path RCV", "one item")
 local top = { name = "V", items = {}, value = 20, min = 0, max = 20 }
 eq(mixer.change(top, 1), nil, "already at the top")
@@ -90,7 +94,7 @@ settings.press(s, "pageup")
 eq(state.Volume, 12, "L1: five down")
 eq(n.controls[1].value, 12, "read back")
 settings.press(s, "down"); settings.press(s, "left"); settings.press(s, "left"); settings.press(s, "left")
-eq(state.Boost, 0); eq(n.msg, "Already at the bottom.", "says why nothing changed")
+eq(state.Boost, 1, "down to 0 dB, not to silence"); eq(n.msg, "Already at the bottom.", "says why nothing changed")
 eq(mixer.hint(n), "Already at the bottom.")
 settings.press(s, "down"); settings.press(s, "right")
 eq(state.path, "HP", "a choice")

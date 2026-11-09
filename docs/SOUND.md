@@ -29,9 +29,16 @@ DTBs), near full. So `/etc/asound.conf` sends the `default` device, which LÖVE 
 | Control | Range | Steps | First boot |
 |---|---|---|---|
 | **Volume** | -40 to 0 dB | 2 dB (21 levels) | 80% (-8 dB) |
-| **Boost** | 0 to +18 dB | 3 dB (7 levels) | +6 dB |
+| **Boost** | 0 to +18 dB (step 1 to 7; step 0 is silence and never used) | 3 dB | +6 dB (step 3) |
 
-Boost makes quiet sound louder and clips sound that is already loud; it is never left at its maximum by default. A `plug` in front
+Boost makes quiet sound louder and clips sound that is already loud; it is never left at its maximum by default.
+
+**Two alsa-lib rules shape these** (alsa-lib 1.2.8, `src/pcm/pcm_softvol.c`; `tests/test_asound_conf.py` checks both). A softvol's
+`min_dB` must be negative, or alsa-lib refuses it and **no program can open the default device**: the first image with Boost had
+`min_dB 0.0`, and every app on the unit failed with "Couldn't open audio device" (2026-11-10). And a softvol's step 0 is silence, whatever
+its `min_dB`. So Boost is set from -3 dB, its step 0 (silence) is never used, and its step 1 is exactly 0 dB, which alsa-lib passes
+through untouched. `r3i6nos-sound` and the mixer stop at step 1, and a saved Boost of 0 is put back to 1 at boot. Volume's step 0 is
+silence too: the mixer shows it as "off". A `plug` in front
 converts any app's rate and format. There is no `dmix`: one app plays at a time (the menu exits before an app starts).
 
 ALSA makes a softvol's control only when a program first opens the device, so `r3i6nos-sound set` opens `default` for 23 ms of

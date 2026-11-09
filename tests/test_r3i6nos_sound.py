@@ -165,8 +165,8 @@ class Sound(unittest.TestCase):
 
     # ---- the mixer: the software volumes, the volume keys, saving -------------------------------------------------------------
 
-    MIXER = ("Simple mixer control 'Boost',0\n  Capabilities: volume\n  Limits: 0 - 6\n"
-             "  Front Left: 2 [33%] [6.00dB]\n  Front Right: 2 [33%] [6.00dB]\n"
+    MIXER = ("Simple mixer control 'Boost',0\n  Capabilities: volume\n  Limits: 0 - 7\n"
+             "  Front Left: 3 [42%] [6.00dB]\n  Front Right: 3 [42%] [6.00dB]\n"
              "Simple mixer control 'Playback Path',0\n  Capabilities: enum\n  Items: 'OFF' 'SPK' 'HP'\n  Item0: 'SPK'\n"
              "Simple mixer control 'Volume',0\n  Capabilities: volume\n  Limits: 0 - 20\n"
              "  Front Left: 16 [80%] [-8.00dB]\n  Front Right: 16 [80%] [-8.00dB]\n")
@@ -187,7 +187,7 @@ class Sound(unittest.TestCase):
         self.assertEqual(sorted(c), ["Boost", "Playback Path", "Volume"])
         self.assertEqual((c["Volume"]["value"], c["Volume"]["min"], c["Volume"]["max"]), (16, 0, 20))
         self.assertEqual(self.m.describe(c["Volume"]), "16 of 0-20, 80%, -8.0 dB")
-        self.assertEqual(self.m.describe(c["Boost"]), "2 of 0-6, 33%, +6.0 dB")
+        self.assertEqual(self.m.describe(c["Boost"]), "3 of 0-7, 42%, +6.0 dB")
         self.assertEqual(self.m.describe(c["Playback Path"]), "SPK (of OFF SPK HP)")
 
     def test_first_boot_makes_the_volumes_and_sets_safe_levels(self):
@@ -197,7 +197,7 @@ class Sound(unittest.TestCase):
         log = self.log()
         self.assertIn("aplay -q -D default -t raw -f S16_LE -c 2 -r 44100 4096", log)   # opened once, with silence
         self.assertIn("-c 0 -q sset Volume 80%", log)
-        self.assertIn("-c 0 -q sset Boost 2", log)
+        self.assertIn("-c 0 -q sset Boost 3", log)
         self.assertNotIn("alsactl", log)
 
     def test_saved_levels_are_restored(self):
@@ -212,7 +212,23 @@ class Sound(unittest.TestCase):
         (self.t / "mixer").write_text(self.MIXER)
         (self.t / "asound.state").write_text("state.rockchiprk817c {\n control.1 {\n  name 'Playback Path'\n }\n}\n")
         self.main("set")
-        self.assertIn("sset Boost 2", self.log())
+        self.assertIn("sset Boost 3", self.log())
+
+    def test_a_restored_boost_of_silence_goes_to_0_db(self):
+        # Boost's step 0 is a softvol's silence: a state saved there would leave every app mute (/etc/asound.conf)
+        (self.t / "mixer").write_text(self.MIXER.replace("3 [42%] [6.00dB]", "0 [0%] [-3.00dB]"))
+        (self.t / "asound.state").write_text("state.rockchiprk817c {\n control.9 {\n  iface MIXER\n  name Boost\n }\n}\n")
+        with redirect_stderr(io.StringIO()) as err:
+            self.m.mixer_init()
+        self.assertIn("-c 0 -q sset Boost 1", self.log())
+        self.assertIn("set to 1 (0 dB)", err.getvalue())
+
+    def test_a_restored_boost_above_the_floor_is_left_alone(self):
+        (self.t / "mixer").write_text(self.MIXER)
+        (self.t / "asound.state").write_text("state.rockchiprk817c {\n control.9 {\n  iface MIXER\n  name Boost\n }\n}\n")
+        with redirect_stderr(io.StringIO()):
+            self.m.mixer_init()
+        self.assertNotIn("sset Boost", self.log())
 
     def test_start_does_not_open_the_device_again(self):
         self.main("start")
@@ -258,7 +274,7 @@ class Sound(unittest.TestCase):
         _, out, _ = self.main("status")
         self.assertIn("volume keys: none", out)
         self.assertIn("mixer Volume: 16 of 0-20, 80%, -8.0 dB", out)
-        self.assertIn("mixer Boost: 2 of 0-6, 33%, +6.0 dB", out)
+        self.assertIn("mixer Boost: 3 of 0-7, 42%, +6.0 dB", out)
 
 
 if __name__ == "__main__":

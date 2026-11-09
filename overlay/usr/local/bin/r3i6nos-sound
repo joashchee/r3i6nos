@@ -13,7 +13,7 @@ not move the path itself, so this does: HP when plugged in, SPK when not.
 
 The volume: the driver has no volume control (its DAC level is fixed by the device tree's spk-volume, about -1 dB, near full), so
 /etc/asound.conf sends every app's sound through two software volumes on card 0: "Volume" (-40 to 0 dB) and "Boost" (0 to +18 dB, for
-quiet sound: it clips what is already loud). ALSA makes them when a program first opens the default device, so this opens it for a
+quiet sound: it clips what is already loud; its step 0 is silence and never used). ALSA makes them when a program first opens the default device, so this opens it for a
 moment at boot, then restores the saved levels (alsactl), or on a first boot sets Volume 80% and Boost +6 dB. The volume keys (KEY_VOLUMEUP
 and KEY_VOLUMEDOWN on an input device) step Volume; Settings > Sound mixer in the menu changes all of them.
 
@@ -42,7 +42,8 @@ STATE = Path(ENV("R3I6NOS_ALSA_STATE", "/var/lib/alsa/asound.state"))
 WAIT = float(ENV("R3I6NOS_SOUND_WAIT", "10"))
 CONTROL = "Playback Path"
 VOLUME, BOOST = "Volume", "Boost"         # the software volumes /etc/asound.conf makes on card 0
-DEFAULTS = ((VOLUME, "80%"), (BOOST, "2"))  # Boost steps are 3 dB: 2 is +6 dB
+DEFAULTS = ((VOLUME, "80%"), (BOOST, "3"))  # Boost steps are 3 dB from -3 dB: 1 is 0 dB, 3 is +6 dB
+BOOST_FLOOR = 1   # Boost's step 0 is silence (a softvol's lowest step); 1 is 0 dB. /etc/asound.conf says why
 
 EV_KEY, EV_SW = 0x01, 0x05
 SW_HEADPHONE_INSERT = 0x02
@@ -242,6 +243,10 @@ def mixer_init():
         rc, out = run([ALSACTL, "-f", str(STATE), "restore", "0"])
         if rc != 0:
             log("alsactl restore: " + out.strip()[:200])
+        boost = next((c for c in mixer_controls() if c["name"] == BOOST), None)
+        if boost and boost["value"] is not None and boost["value"] < BOOST_FLOOR:   # silence, saved from before the floor: never
+            amixer("-c", "0", "-q", "sset", BOOST, str(BOOST_FLOOR))
+            log(f"{BOOST} was at step {boost['value']} (silence); set to {BOOST_FLOOR} (0 dB)")
         return
     for name, value in DEFAULTS:   # a first boot, or a state saved before the volumes existed: never start at the +18 dB maximum
         if name in names:

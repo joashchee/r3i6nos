@@ -200,6 +200,8 @@ All of it goes in the gitignored `local_hardware_assets/`.
   - [x] **Volume, Boost, the volume keys and Settings > Sound mixer** (2026-11-09, `docs/SOUND.md`): software volumes from
     `/etc/asound.conf` (the codec has none), made and restored at boot and saved at shutdown by `r3i6nos-sound`, which also follows
     the volume keys; the mixer screen with a test sound. Tested on a Mac only (fake `amixer`, `aplay`, `alsactl`; the menu's logic in luajit).
+    - **Broke all sound on the unit** (2026-11-10): alsa-lib refused Boost's `min_dB 0.0`, so nothing could open the default device.
+      Fixed (Boost from -3 dB, its silent step 0 never used; `tests/test_asound_conf.py`); **untested on the unit**: a new image first.
     - [ ] **On the unit:** read r3i6nos's report (`sound`: Volume and Boost present, the volume-key device); in Settings > Sound mixer
       play the music and move Volume and Boost (heard, and Boost's clipping); press the volume keys in an app; restart and see the
       levels kept. Then update `docs/SOUND.md` and `docs/hardware-findings.md`.
