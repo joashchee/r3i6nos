@@ -102,6 +102,13 @@ grep -q '^PathExists=/run/loveos/net/request' "$R/etc/systemd/system/r3i6nos-net
 [ ! -e "$R/etc/systemd/system/multi-user.target.wants/wpa_supplicant.service" ] || fail "wpa_supplicant.service is enabled at boot"
 [ ! -e "$R/etc/systemd/system/dbus-fi.w1.wpa_supplicant1.service" ] && [ ! -L "$R/etc/systemd/system/dbus-fi.w1.wpa_supplicant1.service" ] || fail "the wpa_supplicant D-Bus alias is still there"
 [ "$(readlink "$R/etc/systemd/system/wpa_supplicant.service")" = /dev/null ] || fail "wpa_supplicant.service is not masked"
+# Settings > About: the build says what it is, and the helper that shows it is installed
+grep -qx "VERSION=$(tr -d '[:space:]' < VERSION)" "$R/etc/r3i6nos-release" || fail "r3i6nos-release has the wrong VERSION"
+grep -Eq '^COMMIT=([0-9a-f]{40}|unknown)$' "$R/etc/r3i6nos-release" || fail "r3i6nos-release has no COMMIT"
+grep -qx 'REPO=joashchee/r3i6nos' "$R/etc/r3i6nos-release" || fail "r3i6nos-release names no repository"
+grep -Eq '^MODIFIED=[01]$' "$R/etc/r3i6nos-release" || fail "r3i6nos-release has no MODIFIED"
+[ -x "$R/usr/local/bin/r3i6nos-about" ] || fail "r3i6nos-about not installed executable"
+R3I6NOS_ETC="$R/etc" python3 -I "$R/usr/local/bin/r3i6nos-about" info | grep -q "r3i6nos $(tr -d '[:space:]' < VERSION)" || fail "r3i6nos-about info does not read the build's version"
 
 # --- loveos-session: menu picks, run_app gets the type and target, then exits (ONCE)
 cat > "$T/menu" <<EOF

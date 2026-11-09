@@ -42,6 +42,10 @@ document that has the detail. Nothing here has run on a real R36S yet.
   - [ ] Which `power_supply` the fuel gauge is and what it reports (`scripts/device-info.sh` should list `/sys/class/power_supply`); check the indicator, health and cycle figures against it.
   - [ ] That `StateDirectory=r3i6nos-battery` gives `loveos` a writable folder under systemd 252, and that the ticker does not disturb a game.
   - [ ] Whether an app's name (its file name) is a good enough label for `.deb` apps.
+- [x] **Settings > About** (2026-11-09, `docs/ABOUT.md`): the build (`/etc/r3i6nos-release`, from `VERSION` and the commit), the unit, the pads' GUIDs, Check for updates against GitHub (only when chosen), Licences. Tested on the laptop with a fake system and a fake GitHub. **Untested on the R36S:**
+  - [ ] The pages on the panel; `ip` and `systemctl is-active` as `loveos`; the check over a USB adapter (needs the CA bundle and DNS).
+  - [x] `joashchee/r3i6nos` is public (maintainer, 2026-11-09), so GitHub answers the check without a token.
+  - [ ] The first release: tag `v0.1.0` and upload the image, so "the latest release" means something.
 - [x] **First push** to GitHub (`joashchee/r3i6nos`, 2026-11-06).
 
 ## 2. Phase 1: ground truth from the working card (needs the R36S and a Mac)

@@ -9,6 +9,7 @@ local scan = require("scan")
 local battery = require("battery")
 local netclient = require("netclient")
 local settings = require("settings")
+local about = require("about")
 local theme = require("r3i6nos_ansiapps")
 local view = require("view")
 
@@ -19,6 +20,22 @@ local NEXT = os.getenv("R3I6NOS_NEXT") or "/run/loveos/next"
 
 local entries, selected = {}, 1
 local dialog = settings.new(netclient, battery)
+
+-- Settings > About: what only LÖVE knows. The pads' GUIDs are what the SDL mapping in run_app.sh needs (still unread on a unit).
+about.extra = function()
+  local ma, mi, re = love.getVersion()
+  local lines = { "MENU", ("%-13s%s"):format("Runs on", ("LÖVE %d.%d.%d"):format(ma, mi, re)) }
+  local w, h = love.graphics.getDimensions()
+  lines[#lines + 1] = ("%-13s%dx%d"):format("Screen", w, h)
+  local pads = love.joystick.getJoysticks()
+  lines[#lines + 1] = ("%-13s%d"):format("Pads", #pads)
+  for i, j in ipairs(pads) do
+    lines[#lines + 1] = ("  %d %s"):format(i, j:getName()):sub(1, 60)
+    lines[#lines + 1] = ("    %s"):format(j:getGUID())
+    lines[#lines + 1] = ("    %d buttons, %d axes, %d hats"):format(j:getButtonCount(), j:getAxisCount(), j:getHatCount())
+  end
+  return lines
+end
 local screen
 local power, powerAge = nil, 0 -- the battery reading for the top bar, re-read every few seconds
 local POWER_EVERY = 10

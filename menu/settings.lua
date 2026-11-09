@@ -7,6 +7,7 @@ local osk = require("osk")
 local pages = require("netpages")
 local battery = require("battery")
 local reports = require("reports")
+local about = require("about")
 
 local settings = {}
 
@@ -14,9 +15,9 @@ local settings = {}
 settings.TIMEOUT = { default = 30, scan = 45, wifi = 75, wired = 60, test = 60, ["ssh-enable"] = 45 }
 
 --- A closed dialog. io is the helper's client (menu/netclient.lua); bat the battery module (menu/battery.lua); rep the device reports
---- (menu/reports.lua). Tests pass fakes.
-function settings.new(io, bat, rep)
-  return { stack = {}, io = io, bat = bat or battery, rep = rep or reports }
+--- (menu/reports.lua); ab Settings > About (menu/about.lua). Tests pass fakes.
+function settings.new(io, bat, rep, ab)
+  return { stack = {}, io = io, bat = bat or battery, rep = rep or reports, ab = ab or about }
 end
 
 local function top(s) return s.stack[#s.stack] end
@@ -188,12 +189,34 @@ local function reportsMenu(s)
   push(s, menu("Device reports", items, 48))
 end
 
+-- About: this build and unit, the update check (the only network use here, and only when chosen), the licences.
+local function aboutMenu(s)
+  local ab = s.ab
+  push(s, menu("About", {
+    { label = "This system", hint = "Version, build, board, memory, cards, apps, pads", run = function(sx)
+        show(sx, "About this system", ab.info())
+      end },
+    { label = "Check for updates", hint = "Ask GitHub if a newer build is out (uses the network)", run = function(sx)
+        local ok, err = ab.startCheck()
+        if not ok then return show(sx, "Updates", { "Could not check:", tostring(err) }, false) end
+        push(sx, {
+          kind = "busy", title = "Checking for updates", elapsed = 0, timeout = ab.WAIT, waiting = "Asking GitHub...",
+          poll = function() return ab.poll() end, lost = ab.CHECK_LOST,
+          on_result = function(sy, res) show(sy, "Updates", res.lines, res.ok) end,
+        })
+      end },
+    { label = "Licences", hint = "r3i6nos, the font and the other parts", run = function(sx) showPages(sx, "Licences", ab.LICENCES) end },
+    { label = "Back", hint = "Return to Settings", run = function(sx) pop(sx) end },
+  }, 48))
+end
+
 local function root(s)
   return menu("Settings", {
     { label = "Network", hint = "Wired and Wi-Fi: status, setup, test, instructions", run = networkMenu },
     { label = "SSH", hint = "Log in from a computer (off until you start it)", run = sshMenu },
     { label = "Battery", hint = "Charge, health and how much each app uses", run = batteryMenu },
     { label = "Device reports", hint = "Check this unit for an app's maker (a file for Claude)", run = reportsMenu },
+    { label = "About", hint = "Version, updates, this unit and licences", run = aboutMenu },
     { label = "Shutdown", hint = "Power the device off", run = function(sx)
         confirm(sx, "Shut down the device?", "Yes, shut down", "Powers the device off", function() return "poweroff" end)
       end },
@@ -273,13 +296,14 @@ function settings.tick(s, dt)
   local n = top(s)
   if not n or n.kind ~= "busy" then return end
   n.elapsed = n.elapsed + dt
-  local res = s.io and s.io.poll(n.id)
+  local res
+  if n.poll then res = n.poll() else res = s.io and s.io.poll(n.id) end
   if res then
     pop(s)
     n.on_result(s, res)
   elseif n.elapsed >= n.timeout then
     pop(s)
-    show(s, n.title, {
+    show(s, n.title, n.lost or {
       "No answer from the network helper.", "",
       "It may still be working, or it is not running.", "Go back and look at Status, or try again.",
     }, false)

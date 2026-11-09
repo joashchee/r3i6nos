@@ -30,6 +30,7 @@ if command -v luajit >/dev/null; then
     luajit tests/test_battery.lua || fail=1
     luajit tests/test_settings.lua || fail=1
     luajit tests/test_reports.lua || fail=1
+    luajit tests/test_about.lua || fail=1
     luajit tests/test_net_menu.lua || fail=1
     luajit tests/test_theme.lua || fail=1
     luajit tests/test_menu_view.lua || fail=1

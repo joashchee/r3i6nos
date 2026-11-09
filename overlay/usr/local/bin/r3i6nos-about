@@ -1,0 +1,302 @@
+#!/usr/bin/env python3
+"""r3i6nos-about - what Settings > About shows: this build and this unit, and whether a newer build is out.
+
+    r3i6nos-about info          the system's details, as lines of at most 60 characters, for the menu's pages
+    r3i6nos-about check OUT     asks GitHub whether this build is the newest; writes OUT ("ok=1" or "ok=0", then lines)
+
+It runs as the session user (loveos): it needs no root. `info` only reads files and never uses the network. `check`
+is the only network use, and only runs when a person picks Settings > About > Check for updates (CLAUDE.md rule 6):
+it asks api.github.com two questions (the latest release, and how this build's commit compares with main) and sends
+nothing about the unit. OUT is written whole (a temporary file renamed), so the menu never reads half an answer.
+
+Which build this is comes from /etc/r3i6nos-release, written by scripts/configure_rootfs.sh (VERSION, COMMIT, ...).
+
+Standard library only (it runs on a 1 GB board). Overrides, for tests: R3I6NOS_ETC (/etc), R3I6NOS_PROC (/proc),
+R3I6NOS_SYS (/sys), R3I6NOS_ROOT (/), R3I6NOS_ROMS (/roms), R3I6NOS_LOVE_DIR (/opt/love), R3I6NOS_NATIVE_DIR
+(/opt/native_apps), R3I6NOS_TOOLS_DIR (/opt/loveos/bin), R3I6NOS_GPU_DIR (/opt/libmali), R3I6NOS_UPDATE_API
+(https://api.github.com), R3I6NOS_UPDATE_TIMEOUT (15 s per question).
+"""
+import json
+import os
+import re
+import socket
+import ssl
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+from pathlib import Path
+
+ENV = os.environ.get
+ETC = Path(ENV("R3I6NOS_ETC", "/etc"))
+PROC = Path(ENV("R3I6NOS_PROC", "/proc"))
+SYS = Path(ENV("R3I6NOS_SYS", "/sys"))
+ROOT = ENV("R3I6NOS_ROOT", "/")
+ROMS = ENV("R3I6NOS_ROMS", "/roms")
+LOVE_DIR = Path(ENV("R3I6NOS_LOVE_DIR", "/opt/love"))
+NATIVE_DIR = Path(ENV("R3I6NOS_NATIVE_DIR", "/opt/native_apps"))
+TOOLS_DIR = Path(ENV("R3I6NOS_TOOLS_DIR", "/opt/loveos/bin"))
+GPU_DIR = Path(ENV("R3I6NOS_GPU_DIR", "/opt/libmali"))
+API = ENV("R3I6NOS_UPDATE_API", "https://api.github.com").rstrip("/")
+TIMEOUT = float(ENV("R3I6NOS_UPDATE_TIMEOUT", "15"))
+WIDTH = 60
+MAX_BODY = 2 * 1024 * 1024     # a compare answer lists commits; more than this is not GitHub
+KEY = 13                       # the column the values start in
+
+
+def read(path, default=None):
+    try:
+        return Path(path).read_text(errors="replace").replace("\0", "").strip()
+    except OSError:
+        return default
+
+
+def release():
+    """The build's identity, from /etc/r3i6nos-release (KEY=value lines)."""
+    out = {}
+    for line in (read(ETC / "r3i6nos-release", "") or "").splitlines():
+        k, sep, v = line.partition("=")
+        if sep:
+            out[k.strip()] = v.strip()
+    return out
+
+
+def row(key, value):
+    return (f"{key:<{KEY}}{value}")[:WIDTH]
+
+
+def size(n):
+    for unit, step in (("GB", 1 << 30), ("MB", 1 << 20)):
+        if n >= step:
+            return f"{n / step:.1f} {unit}"
+    return f"{n // 1024} KB"
+
+
+def space(path):
+    try:
+        st = os.statvfs(path)
+    except OSError:
+        return None
+    return st.f_frsize * st.f_blocks, st.f_frsize * st.f_bavail
+
+
+def mounts():
+    """{mount point: (device, filesystem)} from /proc/mounts."""
+    out = {}
+    for line in (read(PROC / "mounts", "") or "").splitlines():
+        parts = line.split()
+        if len(parts) >= 3:
+            out[parts[1].replace("\\040", " ")] = (parts[0], parts[2])
+    return out
+
+
+def run(cmd):
+    """A command's output, or None: a missing tool or a slow one never stops About."""
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout if r.returncode == 0 else None
+
+
+def build_lines(rel):
+    version = rel.get("VERSION", "unknown")
+    commit = rel.get("COMMIT", "unknown")
+    short = commit[:10] if re.fullmatch(r"[0-9a-f]{40}", commit) else commit
+    by = {"github": "GitHub's build", "local": "a local build"}.get(rel.get("BUILT_BY", ""), "unknown")
+    lines = [row("Version", f"r3i6nos {version}"),
+             row("Commit", short + (f" ({rel['COMMIT_DATE']})" if rel.get("COMMIT_DATE", "unknown") != "unknown" else "")),
+             row("Built", f"{rel.get('BUILT', 'unknown')}, {by}")]
+    if rel.get("MODIFIED") == "1":
+        lines.append(row("", "with changes not in that commit"))
+    return lines
+
+
+def info():
+    rel = release()
+    lines = ["THIS BUILD"] + build_lines(rel) if rel else ["THIS BUILD", "No build details: /etc/r3i6nos-release is missing."]
+
+    lines += ["", "SYSTEM"]
+    model = read(PROC / "device-tree" / "model")
+    if model:
+        lines.append(row("Board", model))
+    debian = read(ETC / "debian_version")
+    lines.append(row("Base", f"Debian {debian}" if debian else "unknown"))
+    u = os.uname()
+    lines.append(row("Kernel", f"Linux {u.release} ({u.machine})"))
+    up = read(PROC / "uptime")
+    if up:
+        s = int(float(up.split()[0]))
+        lines.append(row("Up for", f"{s // 3600} h {s % 3600 // 60} min"))
+
+    lines += ["", "HARDWARE"]
+    cpus = sum(1 for ln in (read(PROC / "cpuinfo", "") or "").splitlines() if ln.startswith("processor"))
+    khz = read(SYS / "devices/system/cpu/cpu0/cpufreq/cpuinfo_max_freq")
+    cpu = f"{cpus} cores" if cpus else "unknown"
+    if khz and khz.isdigit():
+        cpu += f", up to {int(khz) // 1000} MHz"
+    lines.append(row("Processor", cpu))
+    mem = {}
+    for ln in (read(PROC / "meminfo", "") or "").splitlines():
+        k, _, v = ln.partition(":")
+        if v.strip().endswith("kB"):
+            mem[k] = int(v.split()[0]) * 1024
+    if "MemTotal" in mem:
+        free = f", {size(mem['MemAvailable'])} free" if "MemAvailable" in mem else ""
+        lines.append(row("Memory", size(mem["MemTotal"]) + free))
+    temp = read(SYS / "class/thermal/thermal_zone0/temp")
+    if temp and temp.lstrip("-").isdigit():
+        lines.append(row("Temperature", f"{int(temp) / 1000:.0f} C"))
+    lines.append(row("Graphics", "Mali driver from your card" if GPU_DIR.is_dir() else "software drawing (no Mali driver)"))
+
+    lines += ["", "STORAGE"]
+    sp = space(ROOT)
+    if sp:
+        lines.append(row("System card", f"{size(sp[1])} free of {size(sp[0])}"))
+    m = mounts().get(ROMS)
+    sp = space(ROMS) if m else None
+    if m and sp:
+        lines.append(row("Games card", f"{size(sp[1])} free of {size(sp[0])} ({m[1]})"))
+    else:
+        lines.append(row("Games card", "not found (no EASYROMS partition)"))
+
+    lines += ["", "SOFTWARE"]
+    loves = sorted(p.name for p in LOVE_DIR.glob("*") if (p / "bin" / "love").exists()) if LOVE_DIR.is_dir() else []
+    lines.append(row("LÖVE", ", ".join(loves) if loves else "none installed"))
+    natives = sorted(p.name for p in NATIVE_DIR.iterdir() if p.is_dir()) if NATIVE_DIR.is_dir() else []
+    lines.append(row("Native apps", str(len(natives))))
+    tools = sorted(p.name for p in TOOLS_DIR.iterdir() if not p.name.endswith("-report")) if TOOLS_DIR.is_dir() else []
+    lines.append(row("Tools", ", ".join(tools) if tools else "none installed"))
+
+    lines += ["", "NETWORK"]
+    lines.append(row("Name", read(ETC / "hostname") or socket.gethostname()))
+    addrs = []
+    for ln in (run(["ip", "-o", "-4", "addr", "show"]) or "").splitlines():
+        p = ln.split()
+        if len(p) >= 4 and p[1] != "lo":
+            addrs.append(f"{p[1]} {p[3]}")
+    lines.append(row("Addresses", ", ".join(addrs) if addrs else "none (not connected)"))
+    ssh = (run(["systemctl", "is-active", "ssh"]) or "").strip()
+    lines.append(row("SSH", "on" if ssh == "active" else "off"))
+    return lines
+
+
+# ---- check -------------------------------------------------------------------------------------------------------------------
+
+class Unreachable(Exception):
+    pass
+
+
+def get(path):
+    """(status, parsed JSON or None). Raises Unreachable when GitHub cannot be reached at all."""
+    req = urllib.request.Request(API + path, headers={"Accept": "application/vnd.github+json", "User-Agent": "r3i6nos-about"})
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            body = r.read(MAX_BODY + 1)
+            status = r.status
+    except urllib.error.HTTPError as e:
+        return e.code, None
+    except (urllib.error.URLError, socket.timeout, ssl.SSLError, OSError) as e:
+        reason = getattr(e, "reason", e)
+        raise Unreachable(str(reason)[:WIDTH - 2]) from None
+    if len(body) > MAX_BODY:
+        return status, None
+    try:
+        return status, json.loads(body)
+    except ValueError:
+        return status, None
+
+
+def vtuple(v):
+    nums = re.findall(r"\d+", v or "")
+    return tuple(int(n) for n in nums[:3]) if nums else None
+
+
+def check():
+    """(ok, lines): ok is False only when the question could not be asked."""
+    rel = release()
+    if not rel:
+        return False, ["This build has no details (/etc/r3i6nos-release is", "missing), so it cannot be compared."]
+    repo = rel.get("REPO", "joashchee/r3i6nos")
+    if not re.fullmatch(r"[\w.-]+/[\w.-]+", repo):
+        return False, ["The build names no valid repository."]
+    mine = rel.get("VERSION", "unknown")
+    commit = rel.get("COMMIT", "")
+    verdicts, lines = [], []
+    try:
+        status, rj = get(f"/repos/{repo}/releases/latest")
+        if status == 200 and isinstance(rj, dict) and rj.get("tag_name"):
+            tag = str(rj["tag_name"])
+            date = str(rj.get("published_at") or "")[:10]
+            a, b = vtuple(mine), vtuple(tag)
+            lines.append(row("Latest", f"{tag} ({date})" if date else tag))
+            if a and b and b > a:
+                verdicts.append("A newer release is out.")
+                lines += ["", "To update, flash the new image to the system card from a",
+                          "computer (the games card is not touched). It is at:", str(rj.get("html_url", ""))[:WIDTH]]
+            elif a and b and b < a:
+                verdicts.append("This build is newer than the latest release.")
+            else:
+                verdicts.append("This is the latest release.")
+        elif status == 404:
+            lines.append(row("Latest", "no release published yet"))
+        elif status in (403, 429):
+            return False, ["GitHub is refusing questions from this address", "for now (its rate limit). Try again in an hour."]
+        else:
+            lines.append(row("Latest", f"GitHub answered {status}"))
+
+        if re.fullmatch(r"[0-9a-f]{40}", commit):
+            status, cj = get(f"/repos/{repo}/compare/{commit}...main")
+            if status == 200 and isinstance(cj, dict):
+                newer = int(cj.get("ahead_by") or 0)
+                commits = cj.get("commits") or []
+                if newer == 0:
+                    verdicts.append("Built from the newest commit on main.")
+                else:
+                    verdicts.append(f"main has {newer} newer commit{'s' if newer != 1 else ''} than this build.")
+                    last = commits[-1] if commits and isinstance(commits[-1], dict) else {}
+                    sha = str(last.get("sha", ""))[:10]
+                    date = str(((last.get("commit") or {}).get("committer") or {}).get("date", ""))[:10]
+                    if sha:
+                        lines.append(row("Newest", f"{sha} ({date})" if date else sha))
+            elif status == 404:
+                verdicts.append("This build's commit is not on GitHub:")
+                lines += ["", "it was built from work that was never pushed, so it", "cannot be compared with main."]
+            elif status in (403, 429):
+                return False, ["GitHub is refusing questions from this address", "for now (its rate limit). Try again in an hour."]
+        else:
+            lines += ["", "This build does not record its commit, so only the", "release could be compared."]
+    except Unreachable as e:
+        return False, ["Could not reach GitHub:", f"  {e}", "",
+                       "Connect first in Settings > Network, then try again.",
+                       "(Network > Test connection shows which step fails.)"]
+    if rel.get("MODIFIED") == "1":
+        lines += ["", "This build also had changes not in its commit."]
+    head = [row("This build", f"r3i6nos {mine}, commit {commit[:10] or 'unknown'}")]
+    return True, (verdicts or ["Nothing to compare with yet."]) + [""] + head + lines
+
+
+def write(out, ok, lines):
+    out = Path(out)
+    tmp = out.with_name(out.name + ".tmp")
+    tmp.write_text("ok=" + ("1" if ok else "0") + "\n" + "\n".join(ln[:WIDTH] for ln in lines) + "\n")
+    os.replace(tmp, out)
+
+
+def main(argv):
+    if len(argv) == 2 and argv[1] == "info":
+        print("\n".join(info()))
+        return 0
+    if len(argv) == 3 and argv[1] == "check":
+        try:
+            ok, lines = check()
+        except Exception as e:  # never leave the menu waiting for nothing
+            ok, lines = False, ["The check failed:", str(e)[:WIDTH]]
+        write(argv[2], ok, lines)
+        return 0
+    print(__doc__.strip().splitlines()[2], file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

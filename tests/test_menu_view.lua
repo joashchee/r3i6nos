@@ -75,6 +75,9 @@ view.render(scr, { entries = entries, selected = 1, dialog = dialog })
 has(scr:dump()[22], "a file for Claude") -- Device reports (CLAUDE.md rule 9)
 settings.press(dialog, "down")
 view.render(scr, { entries = entries, selected = 1, dialog = dialog })
+has(scr:dump()[22], "Version, updates") -- About
+settings.press(dialog, "down")
+view.render(scr, { entries = entries, selected = 1, dialog = dialog })
 has(scr:dump()[22], "Power the device off")
 settings.press(dialog, "accept")
 view.render(scr, { entries = entries, selected = 1, dialog = dialog })
@@ -156,6 +159,31 @@ do
   settings.press(dialog, "back"); pick("Clear history"); rows = draw(); has(table.concat(rows, "\n"), "Clear the battery history?")
   has(table.concat(rows, "\n"), "Yes, clear it"); has(rows[22], "Deletes only the recorded battery samples")
   snap("battery clear")
+end
+
+-- About: its menu, the system's pages, the update wait (its own words, not the network helper's), the answer, the licences
+do
+  local ab = require("about")
+  local fakeab = {
+    WAIT = 45, CHECK_LOST = ab.CHECK_LOST, LICENCES = ab.LICENCES,
+    info = function() return { "THIS BUILD", "Version      r3i6nos 0.1.0", "Commit       278a84f1c2 (2026-11-09)" } end,
+    startCheck = function() return true end, poll = function() return nil end,
+  }
+  dialog = settings.new(io_, nil, nil, fakeab); settings.open(dialog)
+  pick("About"); rows = draw(); has(table.concat(rows, "\n"), "Check for updates"); has(rows[23], "> settings > about")
+  snap("about menu")
+  pick("This system"); rows = draw(); has(table.concat(rows, "\n"), "r3i6nos 0.1.0")
+  snap("about system")
+  settings.press(dialog, "back"); pick("Check for updates"); rows = draw()
+  has(table.concat(rows, "\n"), "Asking GitHub..."); assert(not table.concat(rows, "\n"):find("network helper", 1, true))
+  snap("about checking")
+  fakeab.poll = function() return { ok = true, lines = { "This is the latest release." } } end
+  settings.tick(dialog, 1); rows = draw(); has(table.concat(rows, "\n"), "This is the latest release.")
+  snap("about answer")
+  settings.press(dialog, "back"); pick("Licences"); rows = draw(); has(table.concat(rows, "\n"), "MIT licence")
+  snap("about licences")
+  settings.press(dialog, "pagedown"); rows = draw(); has(table.concat(rows, "\n"), "CC BY-SA 4.0")
+  snap("about licences 2")
 end
 
 -- every cell is a code page 437 index, every colour a palette colour, every pair passes 4.5:1, on every screen above

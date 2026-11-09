@@ -41,7 +41,7 @@ end
 local s = new()
 eq(title(s), "Settings"); eq(settings.node(s).items[1].label, "Network"); eq(settings.node(s).items[2].label, "SSH")
 eq(settings.node(s).items[3].label, "Battery"); eq(settings.node(s).items[4].label, "Device reports")
-eq(settings.node(s).items[5].label, "Shutdown")
+eq(settings.node(s).items[5].label, "About"); eq(settings.node(s).items[6].label, "Shutdown")
 choose(s, "Shutdown")
 eq(kind(s), "confirm"); eq(settings.node(s).sel, 2, "the confirmation starts on No")
 assert(settings.press(s, "accept") == nil and kind(s) == "menu", "accepting the default (No) must not power off")
@@ -242,3 +242,43 @@ do
   print("settings device reports: ok")
 end
 
+-- ---- About: This system, Check for updates (a busy wait on its own poll, not the network helper), Licences
+do
+  local started, answer = 0, nil
+  local fakeab = {
+    WAIT = 5, CHECK_LOST = { "lost" }, LICENCES = { { "MIT" }, { "FONT" } },
+    info = function() return { "THIS BUILD", "Version      r3i6nos 0.1.0" } end,
+    startCheck = function() started = started + 1; return true end,
+    poll = function() return answer end,
+  }
+  local io_ = fake()
+  local a = settings.new(io_, nil, nil, fakeab); settings.open(a)
+  choose(a, "About")
+  eq(title(a), "About")
+  local labels = {}
+  for i, it in ipairs(settings.node(a).items) do labels[i] = it.label end
+  eq(table.concat(labels, ","), "This system,Check for updates,Licences,Back")
+  choose(a, "This system"); eq(kind(a), "pages"); eq(settings.node(a).pages[1][2], "Version      r3i6nos 0.1.0")
+  settings.press(a, "back")
+  eq(started, 0, "nothing reaches the network until Check for updates is chosen (rule 6)")
+  choose(a, "Check for updates"); eq(started, 1); eq(kind(a), "busy"); eq(settings.node(a).waiting, "Asking GitHub...")
+  settings.tick(a, 1); eq(kind(a), "busy", "no answer yet: still waiting")
+  eq(#io_.sent, 0, "the update check never goes through the root network helper")
+  answer = { ok = true, lines = { "This is the latest release." } }
+  settings.tick(a, 1); eq(kind(a), "pages"); eq(settings.node(a).pages[1][1], "This is the latest release."); assert(not settings.node(a).bad)
+  settings.press(a, "back"); eq(title(a), "About")
+  answer = nil
+  choose(a, "Check for updates"); settings.tick(a, 6)
+  eq(kind(a), "pages"); eq(settings.node(a).pages[1][1], "lost"); assert(settings.node(a).bad, "a lost check is shown as a failure")
+  settings.press(a, "back")
+  answer = { ok = false, lines = { "Could not reach GitHub:" } }
+  choose(a, "Check for updates"); settings.tick(a, 0.1); assert(settings.node(a).bad)
+  settings.press(a, "back")
+  choose(a, "Check for updates"); answer = nil; settings.press(a, "back"); eq(title(a), "About", "B stops waiting")
+  fakeab.startCheck = function() return false, "no helper" end
+  choose(a, "Check for updates"); eq(kind(a), "pages"); assert(settings.node(a).bad)
+  settings.press(a, "back")
+  choose(a, "Licences"); eq(#settings.node(a).pages, 2)
+  settings.press(a, "back"); choose(a, "Back"); eq(title(a), "Settings")
+end
+print("settings about: ok")

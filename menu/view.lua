@@ -82,7 +82,7 @@ local function drawBusy(scr, n)
   local col, row = centered(w, h)
   scr:box(col, row, w, h, { title = n.title, foot = "B Stop waiting" })
   local st = theme.STYLE
-  scr:text(col + 3, row + 2, "Waiting for the network helper...", st.body.fg, st.body.bg)
+  scr:text(col + 3, row + 2, n.waiting or "Waiting for the network helper...", st.body.fg, st.body.bg)
   scr:text(col + 3, row + 4, ("%d s"):format(math.floor(n.elapsed)), st.hint.fg, st.hint.bg)
   return "Working: " .. n.title
 end

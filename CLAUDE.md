@@ -14,7 +14,7 @@ is blocked and on what.
 
 - `overlay/`: files copied onto the image's root filesystem as-is
   (`usr/local/bin/`, `etc/systemd/system/`). Paths mirror the device.
-- `menu/`: the boot menu, a LÖVE 11.5 app installed at `/opt/loveos/menu`; its Settings has Network and SSH (a root helper, `overlay/usr/local/bin/r3i6nos-net`, does the work) Battery (`docs/BATTERY.md`; its top bar shows the charge) and Device reports (`menu/reports.lua`, rule 9).
+- `menu/`: the boot menu, a LÖVE 11.5 app installed at `/opt/loveos/menu`; its Settings has Network and SSH (a root helper, `overlay/usr/local/bin/r3i6nos-net`, does the work) Battery (`docs/BATTERY.md`; its top bar shows the charge) Device reports (`menu/reports.lua`, rule 9) and About (`docs/ABOUT.md`: the build, the unit, Check for updates).
 - `apps/`: the apps (each has an `app.conf`, native or LÖVE, and its own workflow, `.github/workflows/app-<name>.yml`; only `DEFAULT=1` apps enter the image). The default apps built into the image (`/opt/loveos/defaults`): the input checker as LÖVE 11.5, LÖVE 12.0 and native ARM64, and Commander (a native ARM64 file manager). See `apps/README.md`.
 - `theme/`: the r3i6nos-ansiapps text-mode theme for LÖVE (`.lua`) and C/SDL2 (`.h`): font, screen, list dialogs; installed at `/opt/loveos/theme`. See `docs/R3I6NOS-ANSIAPPS-THEME.md`.
 - `tools/qjs-node/`: the shims and builder that turn a Node-style CLI into one QuickJS executable (`docs/QJS-CLI-PORTS.md`); an app's folder is only ever read, never copied in.
@@ -42,7 +42,7 @@ is blocked and on what.
    standard library): they run at boot on 1 GB of RAM. Path overrides go
    through `R3I6NOS_*` environment variables so tests can run on a laptop.
 5. **The menu never scrolls:** whole pages, `Page n/m` in the foot.
-6. **No telemetry, no network at boot, no accounts.** Settings > Network and SSH (`docs/NETWORK.md`) only act when a person chooses them; SSH is off and has no shared host keys in the image.
+6. **No telemetry, no network at boot, no accounts.** Settings > Network and SSH (`docs/NETWORK.md`) and About's Check for updates (`docs/ABOUT.md`) only act when a person chooses them; SSH is off and has no shared host keys in the image.
 7. **Keep the user's data safe:** the games card (`EASYROMS`) is theirs. Boot
    scripts only read it; never format, repartition or delete from it.
 8. **Every app made for r3i6nos starts from the r3i6nos-ansiapps theme** (`theme/`, `docs/R3I6NOS-ANSIAPPS-THEME.md`): the IBM VGA

@@ -71,6 +71,22 @@ find "$DEFAULTS" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
 mkdir -p "$ROOTFS"/{roms,boot,opt/love,opt/native_apps,opt/launchers/native}
 
 echo "[*] System settings..."
+# Settings > About shows which build this is, and asks GitHub whether it is the newest (only when a person chooses it).
+# VERSION is the release this build belongs to; the commit says exactly what it was built from. R3I6NOS_COMMIT overrides
+# it for a tree without git; safe.directory lets root (CI's sudo) read a checkout another user owns.
+git_() { git -c safe.directory="$REPO" -C "$REPO" "$@" 2>/dev/null; }
+commit="${R3I6NOS_COMMIT:-$(git_ rev-parse HEAD || echo unknown)}"
+modified=0
+if [ -z "${R3I6NOS_COMMIT:-}" ] && [ -n "$(git_ status --porcelain --untracked-files=no)" ]; then modified=1; fi
+cat > "$ROOTFS/etc/r3i6nos-release" <<EOF
+VERSION=$(tr -d '[:space:]' < "$REPO/VERSION")
+COMMIT=$commit
+COMMIT_DATE=$(git_ show -s --format=%cs "$commit" || echo unknown)
+MODIFIED=$modified
+BUILT=$(date -u +%Y-%m-%d)
+BUILT_BY=$([ -n "${GITHUB_ACTIONS:-}" ] && echo github || echo local)
+REPO=joashchee/r3i6nos
+EOF
 echo "r3i6nos" > "$ROOTFS/etc/hostname"
 cat > "$ROOTFS/etc/hosts" <<'EOF'
 127.0.0.1 localhost
