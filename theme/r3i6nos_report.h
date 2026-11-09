@@ -254,8 +254,10 @@ static inline void r3_report_card(R3Report *r, const char *dir) {
     r3_report_section(r, "card");
     char a[PATH_MAX + 32], b[PATH_MAX + 32], buf[64] = "";
     r3_report_check(r, r3_report_mkdirs(dir) == 0, "mkdir", dir);
-    snprintf(a, sizeof a, "%s/.r36s-report-test", dir);
-    snprintf(b, sizeof b, "%s/.r36s-report-test.tmp", dir);
+    if (snprintf(a, sizeof a, "%s/.r36s-report-test", dir) >= (int)sizeof a || snprintf(b, sizeof b, "%s/.r36s-report-test.tmp", dir) >= (int)sizeof b) {
+        r3_report_line(r, R3_FAIL, "card", "the folder's path is too long: %.80s...", dir);
+        return;
+    }
     FILE *f = fopen(a, "w");
     int ok = f && fputs("first\n", f) >= 0;
     if (f) ok &= fclose(f) == 0;

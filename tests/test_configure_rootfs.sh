@@ -45,7 +45,8 @@ grep -q 'LABEL=BOOT .*nofail' "$R/etc/fstab"    || fail "fstab BOOT nofail"
 grep -q '^ExecStart=/usr/local/bin/r3i6nos-cards mount$' "$R/etc/systemd/system/r3i6nos-cards.service" || fail "the cards unit runs the wrong command"
 grep -q '^After=.*r3i6nos-cards.service' "$R/etc/systemd/system/loveos.service" || fail "the session does not wait for the cards"
 ! grep -q 'roms.mount' "$R/etc/systemd/system/loveos.service" || fail "the session still waits for a roms.mount that no longer exists"
-[ -d "$R/roms" ] && [ -d "$R/roms2" ]            || fail "mount points /roms and /roms2 missing"
+[ -d "$R/roms" ]                                || fail "mount point /roms missing"
+[ -d "$R/roms2" ]                               || fail "mount point /roms2 missing"
 [ "$(readlink "$R/opt/loveos/bin/r3i6nos-report")" = /usr/local/bin/r3i6nos-report ] || fail "the system report is not linked into the reports folder"
 [ -x "$R/usr/local/bin/r3i6nos-report" ]        || fail "r3i6nos-report not installed executable"
 [ -L "$R/etc/systemd/system/multi-user.target.wants/loveos.service" ] || fail "unit not enabled"
@@ -114,7 +115,9 @@ grep -q '^PathExists=/run/loveos/net/request' "$R/etc/systemd/system/r3i6nos-net
 [ -f "$R/etc/ssh/sshd_config" ] || fail "sshd_config was removed along with the host keys"
 [ -d "$R/etc/ssh/sshd_config.d" ] || fail "the sshd drop-in folder is missing"
 [ ! -e "$R/etc/systemd/system/multi-user.target.wants/wpa_supplicant.service" ] || fail "wpa_supplicant.service is enabled at boot"
-[ ! -e "$R/etc/systemd/system/dbus-fi.w1.wpa_supplicant1.service" ] && [ ! -L "$R/etc/systemd/system/dbus-fi.w1.wpa_supplicant1.service" ] || fail "the wpa_supplicant D-Bus alias is still there"
+if [ -e "$R/etc/systemd/system/dbus-fi.w1.wpa_supplicant1.service" ] || [ -L "$R/etc/systemd/system/dbus-fi.w1.wpa_supplicant1.service" ]; then
+    fail "the wpa_supplicant D-Bus alias is still there"
+fi
 [ "$(readlink "$R/etc/systemd/system/wpa_supplicant.service")" = /dev/null ] || fail "wpa_supplicant.service is not masked"
 # Settings > About: the build says what it is, and the helper that shows it is installed
 grep -qx "VERSION=$(tr -d '[:space:]' < VERSION)" "$R/etc/r3i6nos-release" || fail "r3i6nos-release has the wrong VERSION"
