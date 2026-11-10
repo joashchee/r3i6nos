@@ -2,7 +2,7 @@
  * bytes of one member. The viewer's Contents page uses it to open a file inside an archive, or to extract it to the other panel.
  *
  * Covered: ZIP and what is built on it (.zip, .love, jar/apk, msix), TAR (plain, or inside gzip, xz or zstd), ar, and a .deb (the
- * files of its data part). Not covered, because nothing here unpacks them: RAR, Cabinet, LHA, cpio, ISO, 7-Zip, bzip2. A document in a
+ * files of its data part). cpio (newc, crc and old ASCII). Not covered, because nothing here unpacks them: RAR, Cabinet, LHA, ISO, 7-Zip, bzip2. A document in a
  * ZIP (docx, odt, EPUB) shows its text instead of its parts. A member is read whole into memory, at most ARC_MEMBER_MAX. */
 #ifndef COMMANDER_ARC_MEMBERS_H
 #define COMMANDER_ARC_MEMBERS_H
@@ -33,9 +33,58 @@ static void arc_free(Arc *a) {
 
 static int arc_kind_listable(int kind) {
     switch (kind) {
-    case K_ZIP: case K_LOVE: case K_JAR: case K_MSIX: case K_TAR: case K_GZIP: case K_XZ: case K_ZSTD: case K_AR: case K_DEB: return 1;
+    case K_ZIP: case K_LOVE: case K_JAR: case K_MSIX: case K_TAR: case K_GZIP: case K_XZ: case K_ZSTD: case K_AR: case K_DEB: case K_CPIO: return 1;
     default: return 0;
     }
+}
+
+/* cpio members: names, kinds and the offsets of their bytes in the file (the same walk as cpio_list). Returns how many were seen. */
+static int cpio_members(const FFile *f, ArcMem *out, int max, int *seen) {
+    off_t p = 0;
+    int n = 0;
+    *seen = 0;
+    for (int guard = 0; p + 76 <= f->size && guard < 200000; guard++) {
+        uint8_t h[110];
+        if (ff_read(f, p, h, 110) < 76) break;
+        unsigned long long size, mode, mt;
+        size_t nl, hs;
+        char num[16];
+        if (!memcmp(h, "070701", 6) || !memcmp(h, "070702", 6)) {
+            memcpy(num, h + 14, 8); num[8] = 0; mode = strtoull(num, NULL, 16);
+            memcpy(num, h + 46, 8); num[8] = 0; mt = strtoull(num, NULL, 16);
+            memcpy(num, h + 54, 8); num[8] = 0; size = strtoull(num, NULL, 16);
+            memcpy(num, h + 94, 8); num[8] = 0; nl = strtoul(num, NULL, 16);
+            hs = 110;
+        } else if (!memcmp(h, "070707", 6)) {
+            memcpy(num, h + 18, 6); num[6] = 0; mode = strtoull(num, NULL, 8);
+            memcpy(num, h + 48, 11); num[11] = 0; mt = strtoull(num, NULL, 8);
+            memcpy(num, h + 59, 6); num[6] = 0; nl = strtoul(num, NULL, 8);
+            memcpy(num, h + 65, 11); num[11] = 0; size = strtoull(num, NULL, 8);
+            hs = 76;
+        } else break;
+        char name[400];
+        size_t got = ff_read(f, p + (off_t)hs, name, nl < sizeof name - 1 ? nl : sizeof name - 1);
+        name[got] = 0;
+        if (!strcmp(name, "TRAILER!!!")) break;
+        int newc = hs == 110;
+        off_t data = p + (off_t)hs + (off_t)nl;
+        if (newc) data = (data + 3) & ~(off_t)3;
+        (*seen)++;
+        if (n < max) {
+            ArcMem *m = &out[n++];
+            const char *nm = name;
+            while (nm[0] == '.' && nm[1] == '/') nm += 2;
+            snprintf(m->name, sizeof m->name, "%s", nm);
+            unix_time_short((long long)mt, m->when, sizeof m->when);
+            m->size = size;
+            m->off = (uint64_t)data;
+            unsigned long long ty = mode & 0170000;
+            m->type = ty == 0040000 ? AM_DIR : ty == 0100000 ? AM_FILE : ty == 0120000 ? AM_LINK : AM_OTHER;
+        }
+        p = data + (off_t)size;
+        if (newc) p = (p + 3) & ~(off_t)3;
+    }
+    return n;
 }
 
 /* Lists the members of the file at path (of the given kind). 0, or -1 if this is not an archive it can list (arc is then empty). */
@@ -78,6 +127,16 @@ static int arc_open(Arc *a, const char *path, int kind) {
             m->type = AM_FILE;
         }
         free(ents);
+        return 0;
+    }
+
+    if (kind == K_CPIO) {
+        int seen = 0;
+        a->how = ARC_AR; /* members read from the file at their offsets */
+        cpio_members(&a->f, a->m, FF_MAX_LIST, &seen);
+        a->n = seen < FF_MAX_LIST ? seen : FF_MAX_LIST;
+        a->more = seen > a->n ? seen - a->n : 0;
+        if (a->n == 0) { arc_free(a); return -1; }
         return 0;
     }
 

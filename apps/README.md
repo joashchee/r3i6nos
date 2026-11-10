@@ -115,8 +115,8 @@ member out into a temporary file and opens it in the viewer, as any other file (
 **B** goes back to the list at the same member, and the temporary file is removed. **Start** (Tab, F1 or `s` on a keyboard) extracts
 the member into the other panel's folder under its own name, without its folders, and never over a file that is already there
 (it says so). A folder, a link, an encrypted member, one packed by a method that is not supported (ZIP's deflate and stored are) and
-one over 48 MiB say why they cannot be opened. A document in a ZIP (docx, odt, EPUB) still shows its text instead. RAR, Cabinet, LHA,
-cpio, ISO and 7-Zip list their members but cannot give them yet. Reopening the list after B reads the archive again, so a big
+one over 48 MiB say why they cannot be opened. A document in a ZIP (docx, odt, EPUB) still shows its text instead. A cpio (newc, CRC or old ASCII) opens the same way. RAR, Cabinet, LHA,
+ISO and 7-Zip list their members but cannot give them yet. Reopening the list after B reads the archive again, so a big
 `.tar.xz` takes the same few seconds on the way back as on the way in (on the unit: untested).
 
 **What it will and won't do:** copy and move go to the other panel's folder and **never overwrite**: a name that already exists is skipped and

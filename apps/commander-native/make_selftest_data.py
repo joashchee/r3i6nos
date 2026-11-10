@@ -211,6 +211,22 @@ with zipfile.ZipFile(inner, "w", zipfile.ZIP_DEFLATED) as z:
     z.writestr("inner/", b"")
     z.writestr("inner/game.tar.gz", [x for x in files if x[0] == "targz"][0][2])
     z.writestr("hello.txt", b"hello from inside a zip\n")
+def cpio_newc(members):
+    out = b""
+    def ent(name, mode, data, ino):
+        nm = name.encode() + b"\0"
+        h = b"070701" + b"".join(b"%08X" % v for v in (ino, mode, 0, 0, 1, 1700000000, len(data), 0, 0, 0, 0, len(nm), 0))
+        r = h + nm
+        r += b"\0" * (-len(r) % 4)
+        r += data
+        r += b"\0" * (-len(r) % 4)
+        return r
+    for i, (name, mode, data) in enumerate(members):
+        out += ent(name, mode, data, i + 1)
+    return out + ent("TRAILER!!!", 0, b"", 0)
+
+
+add("cpio_newc", "initrd.cpio", cpio_newc([("bin", 0o40755, b""), ("bin/hello", 0o100755, b"#!/bin/sh\necho hello from cpio\n"), ("etc.txt", 0o100644, b"cpio etc\n" * 3)]))
 add("zip_nested", "bundle.zip", inner.getvalue())
 LONG = "deep/" * 12 + "this-is-a-very-long-member-name.txt"
 add("tar_many", "many.tar.gz", gzip.compress(tar_bytes([("many/f%02d.txt" % i, b"file number %d\n" % i) for i in range(40)] + [(LONG, b"long name\n")]), mtime=1700000000))

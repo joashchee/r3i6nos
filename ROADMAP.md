@@ -47,8 +47,11 @@ document that has the detail. Nothing here has run on a real R36S yet.
       `deb_zst`, `zip_nested`, `tar_many`: open, back, extract, nested, a folder, paging, a long name, cleanup), and the screens looked at
       as pictures. **Untested on the unit:** how long a `.tar.xz` of tens of MiB takes to list and to open a member from (the list is read
       again on the way back), and the temporary files in `$TMPDIR` or `/tmp` (the unit's `/tmp` must be writable by the menu's user).
-    - [ ] **Next:** more archives to pick from (RAR, Cabinet, cpio, LHA and ISO list their members but cannot give them; cpio and ISO store
-      files plain, so they are the easy ones; bzip2 and 7-Zip need a decoder); extract a whole folder or tagged members; progressive JPEG;
+    - [x] **cpio members open** (2026-11-11): `arc_members.h` walks newc, CRC and old ASCII cpio (`cpio_members`); a member is read from the
+      file at its offset, like an ar member. Self-test fixture `cpio_newc` (listing, opening a file); GCC 12 on ARM64 builds it with no warnings.
+      Untested on the unit.
+    - [ ] **Next:** more archives to pick from (RAR, Cabinet, LHA and ISO list their members but cannot give them; ISO stores
+      files plain, so it is the easy one; bzip2 and 7-Zip need a decoder); extract a whole folder or tagged members; progressive JPEG;
       play a sound file (WAV, then the tracker formats through Neumetik?).
 - [ ] **Commander and the native IO Checker start black on the unit** (reported 2026-11-09; any key then brings the screen up, which
   confirms the cause: a frame presented once is not shown, `docs/hardware-findings.md`). Fix in the theme, untested there: each

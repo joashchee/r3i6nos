@@ -2576,6 +2576,13 @@ static void test_archive_members(const char *root) {
     app_action(&a, R3_BACK);
     CHECK(start_viewer(&a, fx_path("deb_zst"), 0, 0) == 0 && a.view.has_arc && a.view.arc.n == 2, "a .deb (zstd) lists its files");
 
+    CHECK(start_viewer(&a, fx_path("cpio_newc"), 0, 0) == 0 && a.view.has_arc && a.view.arc.n == 3 && a.view.arc.m[0].type == AM_DIR, "a cpio lists 3 members");
+    app_action(&a, R3_DOWN);
+    app_action(&a, R3_ACCEPT);
+    app_compose(&a, &s);
+    CHECK(a.vdepth == 1 && dump_has(&s, "echo hello from cpio"), "a file from a cpio opens");
+    app_action(&a, R3_BACK);
+
     /* many members: paging with the pick, a long name keeps its end */
     CHECK(start_viewer(&a, fx_path("tar_many"), 0, 0) == 0 && a.view.has_arc && a.view.arc.n == 41, "41 members");
     int rows = VIEW_ROWS;
