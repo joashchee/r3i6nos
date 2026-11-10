@@ -388,3 +388,25 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
   r3i6nos empties it; an Empty action would delete for good, which the desktop Crunchy never does (`docs/CRUNCHY-PORT.md`, decision 6).
 - [ ] **A GitHub workflow** for the package (maintainer: Crunchy's repo has no CI yet).
 - [ ] **Later:** Smart Move on the pad, the `.diskettehashes` export, Compress image (oxipng and WebP first).
+
+## 16. Chordica (a native port; code in the Chordica repo, `r36s/`; plan and decisions: `docs/CHORDICA-PORT.md`)
+
+- [x] **Built** (2026-11-10, maintainer's request): `r36s/lib` links Chordica's own `chordica-engine` and compiles the desktop's
+  `chordica2009.rs` (the 2009 voicings) unchanged behind a C API; `r36s/host/chordica.c` is the CHORDiCA 2009 control on the theme
+  (the bass on the D-pad, the chords on X Y A B, the shoulders pick the column, Select is the 2009 menu; the Start menu, settings,
+  How to play); `Chordica.deb` (`r36s-chordica`). Tests: 24 library tests (with the desktop's `chordica2009` tests and the C API), the
+  host's `--selftest` of every screen, `r36s/check.sh`. `flash-macos.sh` copies the `.deb` to `native_deb/`. **Never run on an R36S.**
+  - [x] **The arm64 package in Debian 12 and its clean-room install** (2026-11-10, `r36s/build-deb.sh --clean-room`): `Chordica.deb`
+    (4.1 MB; SDL2, libc, libm, libgcc_s; glibc 2.34 at most) built and smoke-tested, installed by `deb_watcher.py` in a clean Debian 12,
+    and its device report there: 18 PASS, 1 FAIL (no pad under Docker). Under Docker on a Mac (not the unit): 48x to 130x real time,
+    99% of 256-frame buffers in 5% of their time, press to sound about 18 ms with the dummy driver. The 2 GB build VM needs the crates
+    compiled one at a time (`r36s/package/build-deb.sh` does it under 4 GB).
+- [ ] **On the unit:** Start > Device report, then bring back `EASYROMS/Chordica/r36s-report.txt`: the buffer ALSA gives (goal 512
+  frames or fewer), a press's wait for the callback and press to sound (goal 25 ms), the engine's speed at that buffer (goals 4x real
+  time and 99% of buffers in half their time; Neumetik's MIDI ran 18 times slower on the unit than on a Mac, which would put this at
+  about 2.4x), memory. Then play it: the pad mapping, how the grid reads on the panel.
+- [ ] **Decide the release terms** (maintainer): `r36s/package/copyright` is Neumetik's free grant marked DRAFT; the desktop Chordica is sold.
+- [ ] **Decide the pad mapping** (maintainer, after playing it): rows by button, columns by shoulder, Select as M (`docs/CHORDICA-PORT.md`, section 3).
+- [x] **Committed in the Chordica repo** (2026-11-10, maintainer's request): after the work in progress there, in its own commit (decision 8).
+- [ ] **A GitHub workflow** for the package (Chordica's repo has no CI yet).
+- [ ] **Later:** the mode keyboard on the pad, SoundFonts from the card, the metronome, takes and the score, sessions over Wi-Fi.

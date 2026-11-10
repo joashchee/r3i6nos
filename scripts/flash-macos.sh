@@ -18,7 +18,7 @@
 #   --games-only  add the games partition to a card that is ALREADY flashed, without writing the image
 #                 (existing partitions are kept; it refuses a card that is not an untouched r3i6nos card).
 #
-# The R36S ports (KlamANSI, Neumetik, Composer, Painter, Animator, Crunchy, NoCoGaMa) are copied onto EASYROMS from their newest local
+# The R36S ports (KlamANSI, Neumetik, Composer, Painter, Animator, Crunchy, Chordica, NoCoGaMa) are copied onto EASYROMS from their newest local
 # builds, each in its own repo beside this one (R3I6NOS_PORTS_ROOT overrides where): a .deb into native_deb/ (deb_watcher installs
 # it at boot), a .love into "Love 11.5/" and "Love 12.0/". A port with no local build is named, with the command that builds it;
 # one built before its repo's last commit is flagged. The flash goes on either way. --dry-run shows the list.
@@ -57,6 +57,7 @@ PORTS=(
     "Painter|painter|deb|r36s/build/pkg/sprites.deb|r36s/build-deb.sh"
     "Animator|animator|deb|r36s/build/pkg/animate.deb|r36s/build-deb.sh"
     "Crunchy|crunchy|deb|r36s/build/pkg/Crunchy.deb|r36s/build-deb.sh"
+    "Chordica|chordica|deb|r36s/build/pkg/Chordica.deb|r36s/build-deb.sh"
     "NoCoGaMa|nocogama|love|build/Love {v}/*.love|scripts/build.sh"
 )
 PORT_COPY=()      # "source<TAB>path on EASYROMS"
