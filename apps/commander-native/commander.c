@@ -10,12 +10,23 @@
  *   Start  the menu (copy, move, rename, new folder, delete, sort, hidden files, quit)    Select+Start  quit
  *   Keyboard: F2 rename, F3 view, F5 copy, F6 move, F7 new folder, F8 delete, F10 quit, Tab switch panel, Insert/Space tag.
  *
+ * The viewer (A on a file) knows what the file is and opens it in tabs, Left/Right (or X/Y) to switch, Up/Down and L1/R1 to page:
+ *   Info      the type (by its bytes, as the ansiapps catalogue Diskette identifies files: formats.h) and its details: picture size
+ *             and camera, sound format, length and tags, a module's channels, a program's machine, a font's names, an archive's size...
+ *   Picture   PNG, JPEG, GIF, BMP, ICO, TGA, QOI, PCX, PNM drawn in the display view (images.h)
+ *   Art       ANSI, NFO/DIZ, BIN, XBin, ADF, IDF drawn with the VGA font at 8x16, 25 rows a page (ansiart.h)
+ *   Contents  what is inside an archive, package or disk image; or Text out of a document (PDF, RTF, HTML, docx, odt, epub);
+ *             a module's instruments, a MIDI's words, a database's tables, a program's libraries (fmt_*.h)
+ *   Text      the file itself as text (UTF-8, UTF-16 or code page 437), when it is text
+ *   Hex       the bytes
+ *
  * Safety: copy and move never overwrite (a name that exists is skipped and counted); delete asks, with No preselected; links are
  * never followed (a link is copied as a link and deleted as a link); a folder is never copied into itself; "/" is never moved or
  * deleted. Work runs in small slices from the main loop with a progress bar, and B cancels it.
  *
  * `--selftest` checks the logic against a temporary folder and prints one R3I6NOS_SMOKE line; `--screenshot out.bmp` draws the
- * real screen once, without a window. */
+ * real screen once, without a window (`--view FILE [--tab N] [--page N]` first opens the viewer on FILE). `--info FILE` and
+ * `--content FILE` print the viewer's Info and Content pages as text. */
 #define _GNU_SOURCE
 #include <dirent.h>
 #include <stdarg.h>
@@ -29,8 +40,11 @@
 #include <unistd.h>
 
 #include "r3i6nos_ansiapps.h"
+#include "formats.h"
+#include "ansiart.h"
+#include "selftest_data.h"
 
-#define VERSION "1.0"
+#define VERSION "1.1"
 #define PANE_W 32
 #define PANE_ROWS (R3_DISPLAY_ROWS - 2) /* entries a page */
 #define MAX_OPS 500000
@@ -532,15 +546,20 @@ static int do_mkdir(const char *dir, const char *name, char *err, size_t errsz) 
     return 0;
 }
 
-/* ---- the viewer: text or hex, in whole pages ------------------------------------------------------------------------------- */
+/* ---- the viewer: whole pages in tabs (Info, the file's content, its text, hex) ------------------------------------------------- */
 
 #define VIEW_W (R3_COLS - 2)
 #define VIEW_ROWS (R3_DISPLAY_ROWS - 2)
 #define VIEW_MAX_BYTES (4 * 1024 * 1024)
 #define VIEW_MAX_LINES 200000
+#define PIC_W R3_W                                /* a picture or art page: the whole display view, no frame */
+#define PIC_H (R3_DISPLAY_ROWS * R3_CELL_H)
+#define PIC_Y (R3_DISPLAY_TOP * R3_CELL_H)
 
+/* Lines of cells: one tab's text. */
 typedef struct {
     unsigned char *cells;      /* lines x VIEW_W code page 437 indices */
+    unsigned char *fg;         /* lines x VIEW_W colours (0: the body style) */
     unsigned char *len;        /* cells used on each line */
     int n, cap, hex, page, truncated;
     off_t filesize;
@@ -549,6 +568,7 @@ typedef struct {
 
 static void view_free(View *v) {
     free(v->cells);
+    free(v->fg);
     free(v->len);
     memset(v, 0, sizeof *v);
 }
@@ -557,24 +577,98 @@ static int view_line(View *v) {
     if (v->n >= VIEW_MAX_LINES) { v->truncated = 1; return -1; }
     if (v->n == v->cap) {
         int cap = v->cap ? v->cap * 2 : 256;
-        unsigned char *c = realloc(v->cells, (size_t)cap * VIEW_W), *l = realloc(v->len, (size_t)cap);
-        if (!c || !l) { free(c ? c : v->cells); v->cells = c ? c : v->cells; if (l) v->len = l; return -1; }
-        v->cells = c;
-        v->len = l;
+        unsigned char *c = realloc(v->cells, (size_t)cap * VIEW_W);
+        if (c) v->cells = c;
+        unsigned char *f = realloc(v->fg, (size_t)cap * VIEW_W);
+        if (f) v->fg = f;
+        unsigned char *l = realloc(v->len, (size_t)cap);
+        if (l) v->len = l;
+        if (!c || !f || !l) return -1;
         v->cap = cap;
     }
     memset(v->cells + (size_t)v->n * VIEW_W, 32, VIEW_W);
+    memset(v->fg + (size_t)v->n * VIEW_W, 0, VIEW_W);
     v->len[v->n] = 0;
     return v->n++;
 }
 
-static void view_put(View *v, int line, int ch) {
-    if (v->len[line] < VIEW_W) v->cells[(size_t)line * VIEW_W + v->len[line]++] = (unsigned char)ch;
+static void view_put_c(View *v, int line, int ch, int fg) {
+    if (v->len[line] < VIEW_W) {
+        v->cells[(size_t)line * VIEW_W + v->len[line]] = (unsigned char)ch;
+        v->fg[(size_t)line * VIEW_W + v->len[line]++] = (unsigned char)fg;
+    }
 }
+
+static void view_put(View *v, int line, int ch) { view_put_c(v, line, ch, 0); }
 
 static int view_pages(const View *v) { return v->n ? (v->n + VIEW_ROWS - 1) / VIEW_ROWS : 1; }
 
-static int view_load(View *v, const char *path, char *err, size_t errsz) {
+enum { AS_AUTO, AS_TEXT, AS_HEX };
+
+/* Bytes as lines: text (UTF-8, UTF-16 with a byte-order mark, or else code page 437 byte for byte) wrapped at VIEW_W, or hex. */
+static void view_from_bytes(View *v, const unsigned char *data, size_t got, int as) {
+    size_t probe = got < 4096 ? got : 4096;
+    int binary = 0, ctrl = 0;
+    int utf16 = got >= 2 && ((data[0] == 0xFF && data[1] == 0xFE) || (data[0] == 0xFE && data[1] == 0xFF));
+    for (size_t i = 0; i < probe && !utf16; i++) {
+        if (data[i] == 0) binary = 1;
+        if (data[i] < 9 || (data[i] > 13 && data[i] < 32 && data[i] != 27 && data[i] != 26)) ctrl++;
+    }
+    if (probe && ctrl * 10 > (int)probe) binary = 1;
+    v->hex = as == AS_HEX || (as == AS_AUTO && binary);
+    if (v->hex) {
+        for (size_t off = 0; off < got; off += 8) {
+            int line = view_line(v);
+            if (line < 0) break;
+            char txt[80];
+            int k = snprintf(txt, sizeof txt, "%06zX ", off);
+            for (size_t b = 0; b < 8; b++) {
+                if (off + b < got) k += snprintf(txt + k, sizeof txt - (size_t)k, " %02X", data[off + b]);
+                else k += snprintf(txt + k, sizeof txt - (size_t)k, "   ");
+            }
+            k += snprintf(txt + k, sizeof txt - (size_t)k, "  |");
+            for (size_t b = 0; b < 8 && off + b < got; b++) txt[k++] = (data[off + b] >= 32 && data[off + b] < 127) ? (char)data[off + b] : '.';
+            txt[k++] = '|';
+            for (int c = 0; c < k; c++) view_put(v, line, (unsigned char)txt[c]);
+        }
+        if (v->n == 0) view_line(v);
+        return;
+    }
+    char *conv = NULL;
+    if (utf16) { /* to UTF-8 first */
+        size_t cap = got * 2 + 4;
+        conv = malloc(cap);
+        if (conv) { utf16_to_utf8(conv, cap, data, got, data[0] == 0xFE); data = (const unsigned char *)conv; got = strlen(conv); }
+    }
+    int non_ascii, utf8 = utf8_valid(data, got, &non_ascii);
+    int line = view_line(v);
+    const unsigned char *p = data, *end = data + got;
+    if (got >= 3 && p[0] == 0xEF && p[1] == 0xBB && p[2] == 0xBF) p += 3;
+    while (line >= 0 && p < end) {
+        if (*p == '\n') { p++; line = view_line(v); continue; }
+        if (*p == '\r') { p++; continue; }
+        if (*p == 26 && !utf8) break; /* DOS end of file: a SAUCE record may follow */
+        if (*p == '\t') {
+            int stop = (v->len[line] / 4 + 1) * 4;
+            p++;
+            while (v->len[line] < stop) {
+                if (v->len[line] >= VIEW_W) { line = view_line(v); if (line < 0) break; }
+                view_put(v, line, 32);
+            }
+            continue;
+        }
+        int ch;
+        if (utf8) ch = r3_cp437_of(r3_utf8_next(&p, end));
+        else { ch = *p < 32 || *p == 127 ? 32 : *p; p++; } /* not UTF-8: the bytes are code page 437, as DOS wrote them */
+        if (v->len[line] >= VIEW_W) { line = view_line(v); if (line < 0) break; }
+        view_put(v, line, ch);
+    }
+    free(conv);
+    if (v->n == 0) view_line(v);
+}
+
+/* A file as text or hex (as), at most VIEW_MAX_BYTES of it. */
+static int view_load_as(View *v, const char *path, int as, char *err, size_t errsz) {
     memset(v, 0, sizeof *v);
     int fd = open(path, O_RDONLY);
     if (fd < 0) { snprintf(err, errsz, "%s: %s", base_name(path), strerror(errno)); return -1; }
@@ -594,52 +688,210 @@ static int view_load(View *v, const char *path, char *err, size_t errsz) {
     }
     close(fd);
     if ((off_t)got < st.st_size) v->truncated = 1;
-    size_t probe = got < 4096 ? got : 4096;
-    int binary = 0, ctrl = 0;
-    for (size_t i = 0; i < probe; i++) {
-        if (data[i] == 0) binary = 1;
-        if (data[i] < 9 || (data[i] > 13 && data[i] < 32 && data[i] != 27)) ctrl++;
-    }
-    if (probe && ctrl * 10 > (int)probe) binary = 1;
-    v->hex = binary;
-    if (binary) {
-        for (size_t off = 0; off < got; off += 8) {
-            int line = view_line(v);
-            if (line < 0) break;
-            char txt[80];
-            int k = snprintf(txt, sizeof txt, "%06zX ", off);
-            for (size_t b = 0; b < 8; b++) {
-                if (off + b < got) k += snprintf(txt + k, sizeof txt - (size_t)k, " %02X", data[off + b]);
-                else k += snprintf(txt + k, sizeof txt - (size_t)k, "   ");
-            }
-            k += snprintf(txt + k, sizeof txt - (size_t)k, "  |");
-            for (size_t b = 0; b < 8 && off + b < got; b++) txt[k++] = (data[off + b] >= 32 && data[off + b] < 127) ? (char)data[off + b] : '.';
-            txt[k++] = '|';
-            for (int c = 0; c < k; c++) view_put(v, line, (unsigned char)txt[c]);
-        }
-    } else {
-        int line = view_line(v);
-        const unsigned char *p = data, *end = data + got;
-        while (line >= 0 && p < end) {
-            if (*p == '\n') { p++; line = view_line(v); continue; }
-            if (*p == '\r') { p++; continue; }
-            if (*p == '\t') {
-                int stop = (v->len[line] / 4 + 1) * 4;
-                p++;
-                while (v->len[line] < stop) {
-                    if (v->len[line] >= VIEW_W) { line = view_line(v); if (line < 0) break; }
-                    view_put(v, line, 32);
-                }
-                continue;
-            }
-            unsigned cp = r3_utf8_next(&p, end);
-            if (v->len[line] >= VIEW_W) { line = view_line(v); if (line < 0) break; }
-            view_put(v, line, r3_cp437_of(cp));
-        }
-    }
+    int cut = v->truncated;
+    view_from_bytes(v, data, got, as);
+    v->truncated |= cut;
     free(data);
-    if (v->n == 0) view_line(v);
     return 0;
+}
+
+static int view_load(View *v, const char *path, char *err, size_t errsz) { return view_load_as(v, path, AS_AUTO, err, errsz); }
+
+/* The Info rows as lines: the label in the hint colour, the value after it, wrapped under itself. */
+static void view_from_info(View *v, const FInfo *in) {
+    enum { KEY_W = 15 };
+    for (int i = 0; i < in->n; i++) {
+        int line = view_line(v);
+        if (line < 0) return;
+        unsigned char key[KEY_W + 1], val[600];
+        int kn = r3_fit(in->r[i].k, KEY_W, key), vn = r3_decode(in->r[i].v, val, (int)sizeof val);
+        for (int c = 0; c < kn; c++) view_put_c(v, line, key[c], R3_LIGHT_CYAN);
+        while (v->len[line] < KEY_W + 1) view_put(v, line, ' ');
+        for (int c = 0; c < vn; c++) {
+            if (v->len[line] >= VIEW_W) {
+                line = view_line(v);
+                if (line < 0) return;
+                while (v->len[line] < KEY_W + 1) view_put(v, line, ' ');
+            }
+            view_put(v, line, val[c]);
+        }
+    }
+    if (v->n == 0) view_line(v);
+}
+
+enum { TAB_LINES, TAB_PICTURE, TAB_ART };
+enum { LOAD_READY, LOAD_TEXT, LOAD_HEX };
+#define MAX_TABS 4
+
+typedef struct {
+    int kind, load;            /* what it shows; LOAD_TEXT/LOAD_HEX: read the file when first shown */
+    char name[16];
+    View v;
+} Tab;
+
+typedef struct {
+    char path[PATH_MAX], title[256];
+    FType type;
+    off_t filesize;
+    Tab tab[MAX_TABS];
+    int ntabs, cur;
+    FImage pic;                /* fitted to PIC_W x PIC_H */
+    int pic_w, pic_h;          /* as decoded */
+    Art art;
+    int art_page;
+    unsigned gen;              /* changes whenever the pixels shown change */
+} Viewer;
+
+static void viewer_free(Viewer *w) {
+    for (int i = 0; i < w->ntabs; i++) view_free(&w->tab[i].v);
+    img_free(&w->pic);
+    art_free(&w->art);
+    unsigned gen = w->gen;
+    memset(w, 0, sizeof *w);
+    w->gen = gen + 1;
+}
+
+static Tab *viewer_tab(Viewer *w) { return &w->tab[w->cur]; }
+
+static Tab *viewer_add(Viewer *w, int kind, const char *name) {
+    if (w->ntabs >= MAX_TABS) return NULL;
+    Tab *t = &w->tab[w->ntabs++];
+    memset(t, 0, sizeof *t);
+    t->kind = kind;
+    copy_str(t->name, sizeof t->name, name);
+    copy_str(t->v.title, sizeof t->v.title, w->title);
+    return t;
+}
+
+/* Show tab i, reading the file for it the first time. */
+static void viewer_show(Viewer *w, int i, char *err, size_t errsz) {
+    if (i < 0 || i >= w->ntabs) return;
+    w->cur = i;
+    w->gen++;
+    Tab *t = &w->tab[i];
+    if (t->load == LOAD_READY) return;
+    int as = t->load == LOAD_HEX ? AS_HEX : AS_TEXT;
+    t->load = LOAD_READY;
+    if (view_load_as(&t->v, w->path, as, err, errsz) != 0) { view_line(&t->v); return; }
+}
+
+static int pages_of(const Viewer *w) {
+    const Tab *t = &w->tab[w->cur];
+    if (t->kind == TAB_ART) return art_pages(&w->art, PIC_H);
+    if (t->kind == TAB_PICTURE) return 1;
+    return view_pages(&t->v);
+}
+
+static int page_of(const Viewer *w) {
+    const Tab *t = &w->tab[w->cur];
+    return t->kind == TAB_ART ? w->art_page : t->kind == TAB_PICTURE ? 0 : t->v.page;
+}
+
+static void set_page(Viewer *w, int page) {
+    int pages = pages_of(w);
+    if (page < 0) page = 0;
+    if (page > pages - 1) page = pages - 1;
+    Tab *t = &w->tab[w->cur];
+    if (t->kind == TAB_ART) w->art_page = page;
+    else if (t->kind == TAB_LINES) t->v.page = page;
+    w->gen++;
+}
+
+static int is_picture_kind(int k) {
+    return k == K_PNG || k == K_JPEG || k == K_GIF || k == K_BMP || k == K_ICO || k == K_TGA || k == K_QOI || k == K_PCX || k == K_PNM;
+}
+
+static int is_art_kind(int k) { return k == K_ANSI || k == K_BINART || k == K_XBIN || k == K_ADF || k == K_IDF; }
+
+/* Open a file in the viewer: work out what it is, then make its tabs. Returns -1 (and err) only when it cannot be read at all. */
+static int viewer_open(Viewer *w, const char *path, char *err, size_t errsz) {
+    viewer_free(w);
+    FFile f;
+    if (ff_open(&f, path, err, errsz) != 0) {
+        char why[200];
+        copy_str(why, sizeof why, err);
+        snprintf(err, errsz, "%s: %s", base_name(path), why);
+        return -1;
+    }
+    copy_str(w->path, sizeof w->path, path);
+    copy_str(w->title, sizeof w->title, base_name(path));
+    w->filesize = f.size;
+    w->type = ff_identify(&f);
+    int k = w->type.kind;
+    FInfo info = {0, 0, 0};
+    ff_info(&f, w->type, &info);
+
+    Tab *t = viewer_add(w, TAB_LINES, "Info");
+    int content = -1;
+    if (is_picture_kind(k)) {
+        size_t n;
+        uint8_t *b = ff_load(&f, 0, FF_MAX_LOAD, &n);
+        FImage full;
+        char why[160] = "";
+        if (b && img_decode(img_kind(b, n, f.ext), b, n, &full, why, sizeof why) == 0) {
+            if (k == K_JPEG) img_orient(&full, ff_jpeg_orientation(&f));
+            w->pic_w = full.w;
+            w->pic_h = full.h;
+            if (img_fit(&full, PIC_W, PIC_H, &w->pic) == 0) { content = w->ntabs; viewer_add(w, TAB_PICTURE, "Picture"); }
+            img_free(&full);
+        } else {
+            info_add(&info, "Picture", "not shown: %s", why[0] ? why : "the file could not be read");
+        }
+        free(b);
+    } else if (is_art_kind(k)) {
+        char why[160];
+        if (art_load(&w->art, &f, k, why, sizeof why) == 0) { content = w->ntabs; viewer_add(w, TAB_ART, "Art"); }
+        else info_add(&info, "Art", "not shown: %s", why);
+    }
+    if (content < 0) {
+        FText txt = {0, 0, 0, 0, 0};
+        uint8_t *raw = NULL;
+        size_t rawn = 0;
+        char name[32];
+        int fc = ff_content(&f, w->type, &txt, &raw, &rawn, name, sizeof name);
+        if (fc != FC_NONE) {
+            content = w->ntabs;
+            Tab *c = viewer_add(w, TAB_LINES, name);
+            if (fc == FC_BYTES) view_from_bytes(&c->v, raw, rawn, AS_AUTO);
+            else view_from_bytes(&c->v, (const unsigned char *)(txt.s ? txt.s : ""), txt.n, AS_TEXT);
+            if (txt.cut) c->v.truncated = 1;
+        }
+        free(raw);
+        text_free(&txt);
+    }
+    int text = -1;
+    if (ff_looks_text(f.head, f.hn) && k != K_EMPTY) {
+        text = w->ntabs;
+        Tab *s = viewer_add(w, TAB_LINES, content >= 0 && !strcmp(w->tab[content].name, "Text") ? "Source" : "Text");
+        s->load = LOAD_TEXT;
+    }
+    int hex = w->ntabs;
+    Tab *h = viewer_add(w, TAB_LINES, "Hex");
+    h->load = LOAD_HEX;
+    ff_close(&f);
+    t = &w->tab[0];
+    view_from_info(&t->v, &info);
+    info_free(&info);
+    for (int i = 0; i < w->ntabs; i++) w->tab[i].v.filesize = w->filesize;
+    int first = content >= 0 ? content : text >= 0 ? text : (k == K_UNKNOWN || k == K_EMPTY) ? hex : 0;
+    viewer_show(w, first, err, errsz);
+    return 0;
+}
+
+/* The pixels over the display view while a picture or art tab shows. */
+static void viewer_overlay(const Viewer *w, uint32_t *px) {
+    const Tab *t = &w->tab[w->cur];
+    if (w->ntabs == 0) return;
+    if (t->kind == TAB_ART && w->art.ch) {
+        art_draw(&w->art, w->art_page, px, PIC_Y, PIC_H);
+    } else if (t->kind == TAB_PICTURE && w->pic.px) {
+        for (int y = 0; y < PIC_H; y++) memset(px + (size_t)(PIC_Y + y) * R3_W, 0, R3_W * sizeof(uint32_t));
+        int x0 = (PIC_W - w->pic.w) / 2, y0 = PIC_Y + (PIC_H - w->pic.h) / 2;
+        for (int y = 0; y < w->pic.h; y++) {
+            uint32_t *dst = px + (size_t)(y0 + y) * R3_W + x0;
+            memcpy(dst, w->pic.px + (size_t)y * w->pic.w, (size_t)w->pic.w * sizeof(uint32_t));
+        }
+    }
 }
 
 /* ---- the application ---------------------------------------------------------------------------------------------------------- */
@@ -669,7 +921,7 @@ typedef struct {
     int in_cmd;
     char in_prompt[200], in_old[256];
     /* the viewer and the running job */
-    View view;
+    Viewer view;
     Job job;
     int job_active;
     char **job_srcs;
@@ -714,7 +966,7 @@ static void app_init(App *a, const char *left, const char *right) {
 static void app_free(App *a) {
     pane_free(&a->p[0]);
     pane_free(&a->p[1]);
-    view_free(&a->view);
+    viewer_free(&a->view);
     job_free(&a->job);
     for (int i = 0; i < a->job_nsrcs; i++) free(a->job_srcs[i]);
     free(a->job_srcs);
@@ -816,8 +1068,7 @@ static void run_cmd(App *a, int cmd) {
         if (e->is_dir) { say(a, R3_ST_WARN, "%s is a folder: A opens it", e->name); break; }
         char full[PATH_MAX], err[256];
         path_join(full, sizeof full, p->path, e->name);
-        view_free(&a->view);
-        if (view_load(&a->view, full, err, sizeof err) != 0) { say(a, R3_ST_ERROR, "%s", err); break; }
+        if (viewer_open(&a->view, full, err, sizeof err) != 0) { say(a, R3_ST_ERROR, "%s", err); break; }
         a->mode = M_VIEW;
         break;
     }
@@ -1040,12 +1291,16 @@ static void app_action(App *a, int action) {
         }
         break;
     case M_VIEW: {
-        int pages = view_pages(&a->view);
-        if (action == R3_BACK || action == R3_ACCEPT) { a->mode = M_BROWSE; view_free(&a->view); break; }
-        if (action == R3_UP || action == R3_PAGEUP || action == R3_LEFT) a->view.page = a->view.page > 0 ? a->view.page - 1 : 0;
-        else if (action == R3_DOWN || action == R3_PAGEDOWN || action == R3_RIGHT) a->view.page = a->view.page < pages - 1 ? a->view.page + 1 : pages - 1;
-        else if (action == R3_HOME) a->view.page = 0;
-        else if (action == R3_END) a->view.page = pages - 1;
+        Viewer *w = &a->view;
+        char err[256] = "";
+        if (action == R3_BACK || action == R3_ACCEPT) { a->mode = M_BROWSE; viewer_free(w); break; }
+        if (action == R3_LEFT || action == R3_Y) viewer_show(w, (w->cur + w->ntabs - 1) % w->ntabs, err, sizeof err);
+        else if (action == R3_RIGHT || action == R3_X) viewer_show(w, (w->cur + 1) % w->ntabs, err, sizeof err);
+        else if (action == R3_UP || action == R3_PAGEUP) set_page(w, page_of(w) - 1);
+        else if (action == R3_DOWN || action == R3_PAGEDOWN) set_page(w, page_of(w) + 1);
+        else if (action == R3_HOME) set_page(w, 0);
+        else if (action == R3_END) set_page(w, pages_of(w) - 1);
+        if (err[0]) say(a, R3_ST_ERROR, "%s", err);
         break;
     }
     case M_JOB:
@@ -1172,23 +1427,41 @@ static void app_compose(const App *a, R3Screen *s) {
     left[0] = right[0] = 0;
 
     if (a->mode == M_VIEW) {
-        const View *v = &a->view;
-        int pages = view_pages(v);
-        char pg[32];
-        snprintf(pg, sizeof pg, "Page %d/%d", v->page + 1, pages);
-        R3Box b = {1, v->title, pages > 1 ? pg : NULL, "B close  Up/Down page", 0};
-        r3_box(s, 0, R3_DISPLAY_TOP, R3_COLS, R3_DISPLAY_ROWS, &b);
-        for (int r = 0; r < VIEW_ROWS; r++) {
-            int ln = v->page * VIEW_ROWS + r;
-            if (ln >= v->n) break;
-            r3_put_cells(s, 1, R3_DISPLAY_TOP + 1 + r, v->cells + (size_t)ln * VIEW_W, v->len[ln], R3_ST(R3_ST_BODY));
+        const Viewer *w = &a->view;
+        const Tab *t = &w->tab[w->cur];
+        int pages = pages_of(w), page = page_of(w);
+        char pg[32], tabs[80];
+        snprintf(pg, sizeof pg, "Page %d/%d", page + 1, pages);
+        /* the tab strip: the one shown in brackets */
+        int k = 0;
+        for (int i = 0; i < w->ntabs && k < (int)sizeof tabs - 20; i++)
+            k += snprintf(tabs + k, sizeof tabs - (size_t)k, i == w->cur ? "[%s]" : " %s ", w->tab[i].name);
+        if (t->kind == TAB_LINES) {
+            const View *v = &t->v;
+            R3Box b = {1, w->title, pages > 1 ? pg : NULL, tabs, 0};
+            r3_box(s, 0, R3_DISPLAY_TOP, R3_COLS, R3_DISPLAY_ROWS, &b);
+            for (int r = 0; r < VIEW_ROWS; r++) {
+                int ln = v->page * VIEW_ROWS + r;
+                if (ln >= v->n) break;
+                const unsigned char *cells = v->cells + (size_t)ln * VIEW_W, *fg = v->fg + (size_t)ln * VIEW_W;
+                for (int c = 0; c < v->len[ln]; c++) r3_put(s, 1 + c, R3_DISPLAY_TOP + 1 + r, cells[c], fg[c] ? fg[c] : R3_LIGHT_GRAY, R3_BLACK);
+            }
+        } else {
+            r3_fill(s, 0, R3_DISPLAY_TOP, R3_COLS, R3_DISPLAY_ROWS, 32, R3_ST(R3_ST_BODY)); /* the pixels go over this */
         }
         char sz[16];
-        fmt_size((unsigned long long)v->filesize, sz, sizeof sz);
-        snprintf(left, sizeof left, "%s view, %s bytes", v->hex ? "Hex" : "Text", sz);
-        c.reply = v->truncated ? "Only the first part of this file is shown" : "B closes the viewer";
-        c.reply_style = v->truncated ? R3_ST_WARN : R3_ST_HINT;
-        c.line = v->title;
+        fmt_size((unsigned long long)w->filesize, sz, sizeof sz);
+        if (t->kind == TAB_PICTURE)
+            snprintf(left, sizeof left, "%s, %dx%d%s", w->type.label, w->pic_w, w->pic_h,
+                     w->pic.w > w->pic_w ? " (enlarged)" : w->pic.w < w->pic_w ? " (made smaller)" : "");
+        else if (t->kind == TAB_ART) snprintf(left, sizeof left, "%s, %d columns  %s", w->type.label, w->art.w, pages > 1 ? pg : "");
+        else snprintf(left, sizeof left, "%s, %s bytes", w->type.label, sz);
+        static char reply[160];
+        if (t->kind != TAB_LINES) snprintf(reply, sizeof reply, "%s  Left/Right tab", tabs);
+        else snprintf(reply, sizeof reply, "%s", t->v.truncated ? "Only the first part is shown" : "Left/Right tab  Up/Down page  B close");
+        c.reply = a->reply[0] && a->reply_style == R3_ST_ERROR ? a->reply : reply;
+        c.reply_style = a->reply[0] && a->reply_style == R3_ST_ERROR ? R3_ST_ERROR : (t->kind == TAB_LINES && t->v.truncated ? R3_ST_WARN : R3_ST_HINT);
+        c.line = w->title;
         c.left = left;
         r3_command_line(s, &c);
         return;
@@ -1255,6 +1528,42 @@ static void app_compose(const App *a, R3Screen *s) {
         copy_str(items[1].label, sizeof items[1].label, "No");
         centered_list(s, a->conf_title, items, 2, a->conf_sel, "A Choose  B Back", 48);
     }
+}
+
+/* The screen's pixels: the cells, then a picture or art page over the display view. */
+static void app_render(const App *a, const R3Screen *s, uint32_t *px) {
+    r3_render(s, px);
+    if (a->mode == M_VIEW) viewer_overlay(&a->view, px);
+}
+
+/* r3_video_draw, with the viewer's pixels: a change of picture or page redraws even when the cells stay the same. */
+static void app_video_draw(R3Video *v, SDL_Renderer *r, const R3Screen *s, const App *a, int force) {
+    static unsigned last_gen = ~0u;
+    unsigned gen = a->mode == M_VIEW ? a->view.gen * 2 + 1 : 0;
+    int changed = force || !v->have_prev || gen != last_gen || memcmp(&v->prev, s, sizeof *s) != 0;
+    if (changed) {
+        app_render(a, s, v->px);
+        SDL_UpdateTexture(v->tex, NULL, v->px, R3_W * (int)sizeof(uint32_t));
+        v->prev = *s;
+        v->have_prev = 1;
+        last_gen = gen;
+    }
+    if (r3_video_due(v, changed)) {
+        SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
+        SDL_RenderClear(r);
+        SDL_RenderCopy(r, v->tex, NULL, NULL);
+        SDL_RenderPresent(r);
+    }
+}
+
+/* Open the viewer on a file at start (--view), on tab number `tab` (1 is Info; 0 keeps the one it opens on) and page `page`. */
+static int start_viewer(App *a, const char *file, int tab, int page) {
+    char err[256];
+    if (viewer_open(&a->view, file, err, sizeof err) != 0) { fprintf(stderr, "commander: %s\n", err); return -1; }
+    a->mode = M_VIEW;
+    if (tab > 0) viewer_show(&a->view, tab - 1, err, sizeof err);
+    if (page > 1) set_page(&a->view, page - 1);
+    return 0;
 }
 
 /* ---- the tests that need no display ----------------------------------------------------------------------------------------------- */
@@ -1334,12 +1643,12 @@ static int row_has(const R3Screen *s, int row, const char *text) {
 }
 
 /* With R3I6NOS_FM_SHOTS set to a folder, the self-test saves the screen in each state there as <name>.bmp. */
-static void shot(const R3Screen *s, const char *name) {
+static void shot(const App *a, const R3Screen *s, const char *name) {
     const char *dir = getenv("R3I6NOS_FM_SHOTS");
     if (!dir || !*dir) return;
     uint32_t *px = malloc((size_t)R3_W * R3_H * 4);
     if (!px) return;
-    r3_render(s, px);
+    app_render(a, s, px);
     SDL_Surface *surf = SDL_CreateRGBSurfaceFrom(px, R3_W, R3_H, 32, R3_W * 4, 0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
     char path[PATH_MAX];
     snprintf(path, sizeof path, "%s/%s.bmp", dir, name);
@@ -1563,7 +1872,7 @@ static void test_ui(const char *root) {
     CHECK(dump_has(&s, "10") && dump_has(&s, "1/3"), "sizes and page 1/3 (45 entries, 18 a page)");
     CHECK(row_has(&s, 22, "ui/left") || row_has(&s, 22, "left"), "prompt shows the folder");
     CHECK(row_has(&s, 21, "A open"), "idle tip");
-    shot(&s, "1-browse");
+    shot(&a, &s, "1-browse");
     /* the three rows of the command line and the top row are the only things outside the panels */
     for (int c = 0; c < R3_COLS; c++) CHECK(s.bg[c] == R3_BLUE, "top bar is blue");
 
@@ -1611,7 +1920,7 @@ static void test_ui(const char *root) {
     CHECK(a.mode == M_MENU, "Start opens the menu");
     app_compose(&a, &s);
     CHECK(dump_has(&s, "Make directory") && dump_has(&s, "Quit") && dump_has(&s, "Hidden files"), "menu items");
-    shot(&s, "2-menu");
+    shot(&a, &s, "2-menu");
     app_action(&a, R3_BACK);
     CHECK(a.mode == M_BROWSE, "B closes the menu");
 
@@ -1631,12 +1940,12 @@ static void test_ui(const char *root) {
     CHECK(a.mode == M_CONFIRM && a.conf_sel == 0, "copy asks, Yes first");
     app_compose(&a, &s);
     CHECK(dump_has(&s, "Copy 1 item?") && dump_has(&s, "Yes, copy to"), "copy confirmation text");
-    shot(&s, "3-confirm-copy");
+    shot(&a, &s, "3-confirm-copy");
     app_action(&a, R3_ACCEPT);
     CHECK(a.mode == M_JOB, "A starts the job");
     app_compose(&a, &s);
     CHECK(row_has(&s, 21, "B cancels"), "job tip");
-    shot(&s, "4-job");
+    shot(&a, &s, "4-job");
     for (int g = 0; g < 1000 && a.mode == M_JOB; g++) app_tick(&a, 50);
     CHECK(a.mode == M_BROWSE && strstr(a.reply, "Copied 1 item"), "copy finished: %s", a.reply);
     path_join(p, sizeof p, right, "file01.txt");
@@ -1688,7 +1997,7 @@ static void test_ui(const char *root) {
     CHECK(!strcmp(a.buf, "file05~x.txt"), "typed text is added: %s", a.buf);
     app_compose(&a, &s);
     CHECK(row_has(&s, 21, "Rename file04.txt to:") && row_has(&s, 22, "file05~x.txt"), "the line is shown on the prompt row");
-    shot(&s, "5-rename");
+    shot(&a, &s, "5-rename");
     app_action(&a, R3_BACK);
     CHECK(a.mode == M_BROWSE, "B cancels typing");
     path_join(p, sizeof p, left, "file04.txt");
@@ -1715,18 +2024,18 @@ static void test_ui(const char *root) {
     /* the viewer: text wraps into pages, a binary file is hex */
     a.p[0].sel = pane_find(&a.p[0], "Notes.txt");
     app_action(&a, R3_ACCEPT);
-    CHECK(a.mode == M_VIEW && !a.view.hex && a.view.n >= 3, "text view (%d lines)", a.view.n);
+    CHECK(a.mode == M_VIEW && !viewer_tab(&a.view)->v.hex && viewer_tab(&a.view)->v.n >= 3, "text view (%d lines)", viewer_tab(&a.view)->v.n);
     app_compose(&a, &s);
     CHECK(dump_has(&s, "line one") && dump_has(&s, "    tabbed") && !dump_has(&s, "Page 1/1"), "text and tab shown, no page number for one page");
-    shot(&s, "6-view-text");
+    shot(&a, &s, "6-view-text");
     app_action(&a, R3_BACK);
     CHECK(a.mode == M_BROWSE, "B closes the viewer");
     a.p[0].sel = pane_find(&a.p[0], "data.bin");
     app_action(&a, R3_ACCEPT);
-    CHECK(a.mode == M_VIEW && a.view.hex, "binary shows as hex");
+    CHECK(a.mode == M_VIEW && viewer_tab(&a.view)->v.hex, "binary shows as hex");
     app_compose(&a, &s);
     CHECK(dump_has(&s, "000000  00 01 02 41 42 43 FF FE  |...ABC..|"), "hex line");
-    shot(&s, "7-view-hex");
+    shot(&a, &s, "7-view-hex");
     app_action(&a, R3_BACK);
 
     /* a long line wraps at 62 and pages by 18 */
@@ -1745,6 +2054,261 @@ static void test_ui(const char *root) {
     app_free(&a);
 }
 
+/* ---- the formats: identification, Info, Content, pictures and art (fixtures from selftest_data.h) ------------------------------ */
+
+static char g_fxdir[PATH_MAX];
+
+static const Fixture *fx_find(const char *id) {
+    for (size_t i = 0; i < sizeof FIXTURES / sizeof FIXTURES[0]; i++)
+        if (!strcmp(FIXTURES[i].id, id)) return &FIXTURES[i];
+    return NULL;
+}
+
+/* The fixture written to the test folder; its path. */
+static const char *fx_path(const char *id) {
+    static char p[PATH_MAX];
+    const Fixture *fx = fx_find(id);
+    if (!fx) return "";
+    path_join(p, sizeof p, g_fxdir, fx->name);
+    if (!exists(p)) write_file(p, (const char *)fx->data, fx->len);
+    return p;
+}
+
+static FType fx_type(const char *id) {
+    FFile f;
+    char err[256];
+    FType t = {"", "", -1};
+    if (ff_open(&f, fx_path(id), err, sizeof err) != 0) return t;
+    t = ff_identify(&f);
+    ff_close(&f);
+    return t;
+}
+
+/* Whether the Info page has row `key` whose value contains `want`. */
+static int fx_info(const char *id, const char *key, const char *want) {
+    FFile f;
+    char err[256];
+    if (ff_open(&f, fx_path(id), err, sizeof err) != 0) return 0;
+    FInfo in = {0, 0, 0};
+    ff_info(&f, ff_identify(&f), &in);
+    ff_close(&f);
+    int ok = 0;
+    for (int i = 0; i < in.n; i++)
+        if (!strcmp(in.r[i].k, key) && strstr(in.r[i].v, want)) ok = 1;
+    if (!ok) {
+        fprintf(stderr, "  %s Info has:\n", id);
+        for (int i = 0; i < in.n; i++) fprintf(stderr, "    %s: %s\n", in.r[i].k, in.r[i].v);
+    }
+    info_free(&in);
+    return ok;
+}
+
+/* Whether the Content page (lines or unpacked bytes) contains `want` (and says what it has when not, unless quiet). */
+static int fx_content_q(const char *id, const char *want, int quiet) {
+    FFile f;
+    char err[256], name[32];
+    if (ff_open(&f, fx_path(id), err, sizeof err) != 0) return 0;
+    FText t = {0, 0, 0, 0, 0};
+    uint8_t *raw = NULL;
+    size_t rawn = 0;
+    int fc = ff_content(&f, ff_identify(&f), &t, &raw, &rawn, name, sizeof name);
+    ff_close(&f);
+    int ok = (fc == FC_LINES && t.s && strstr(t.s, want)) || (fc == FC_BYTES && raw && memmem(raw, rawn, want, strlen(want)));
+    if (!ok && !quiet) fprintf(stderr, "  %s Content (%s): %s\n", id, name, fc == FC_LINES && t.s ? t.s : "(none)");
+    free(raw);
+    text_free(&t);
+    return ok;
+}
+
+static int fx_content(const char *id, const char *want) { return fx_content_q(id, want, 0); }
+
+static void test_formats(const char *root) {
+    path_join(g_fxdir, sizeof g_fxdir, root, "formats");
+    CHECK(mkdir_p(g_fxdir) == 0, "fixtures folder");
+
+    /* identification */
+    static const struct { const char *id; int kind; } kinds[] = {
+        {"jpeg_base", K_JPEG}, {"jpeg_prog", K_JPEG}, {"png_rgba", K_PNG}, {"png_adam7", K_PNG}, {"gif", K_GIF}, {"bmp8", K_BMP}, {"tga", K_TGA},
+        {"pcx", K_PCX}, {"ppm", K_PNM}, {"ico", K_ICO}, {"qoi", K_QOI}, {"wav", K_WAV}, {"midi", K_MIDI}, {"mod", K_MOD}, {"mp3", K_MP3},
+        {"flac", K_FLAC}, {"docx", K_OOXML}, {"targz", K_GZIP}, {"gz", K_GZIP}, {"sqlite", K_SQLITE}, {"pdf", K_PDF}, {"rtf", K_RTF},
+        {"html", K_HTML}, {"mbr", K_DISK}, {"ansi", K_ANSI}, {"xbin", K_XBIN},
+    };
+    for (size_t i = 0; i < sizeof kinds / sizeof kinds[0]; i++) {
+        FType t = fx_type(kinds[i].id);
+        CHECK(t.kind == kinds[i].kind, "%s is identified as %s (kind %d, want %d)", kinds[i].id, t.label, t.kind, kinds[i].kind);
+    }
+
+    /* Info */
+    CHECK(fx_info("jpeg_base", "Dimensions", "24 x 16") && fx_info("jpeg_base", "Coding", "baseline"), "JPEG size and coding");
+    CHECK(fx_info("jpeg_prog", "Coding", "progressive"), "progressive JPEG is named");
+    CHECK(fx_info("png_adam7", "Colour", "palette, 2 bits") && fx_info("png_adam7", "Colour", "interlaced") && fx_info("png_adam7", "Title", "Adam7 test"), "PNG header and text");
+    CHECK(fx_info("gif", "Dimensions", "10 x 6"), "GIF size");
+    CHECK(fx_info("wav", "Sound", "mono, 8000 Hz, 16-bit") && fx_info("wav", "Duration", "0.05 s") && fx_info("wav", "Coding", "PCM"), "WAV");
+    CHECK(fx_info("midi", "Title", "Test song") && fx_info("midi", "Duration", "2.00 s") && fx_info("midi", "Notes", "4 on 1 channel"), "MIDI: name, length, notes");
+    CHECK(fx_info("midi", "Tempo", "120 BPM"), "MIDI tempo");
+    CHECK(fx_info("mod", "Title", "commander test") && fx_info("mod", "Channels", "4"), "MOD");
+    CHECK(fx_info("mp3", "Title", "Mp3 title") && fx_info("mp3", "Bit rate", "128 kbit/s") && fx_info("mp3", "Sound", "44100 Hz"), "MP3 tag and frame");
+    CHECK(fx_info("flac", "Sound", "stereo, 44100 Hz, 16-bit") && fx_info("flac", "Title", "Flacky"), "FLAC");
+    CHECK(fx_info("docx", "Title", "Docx title") && fx_info("docx", "Author", "Commander"), "docx properties");
+    CHECK(fx_info("targz", "Contents", "a TAR archive, 2 entries"), "tar.gz holds a TAR");
+    CHECK(fx_info("gz", "Original name", "notes.txt") && fx_info("gz", "Unpacked", "64 B"), "gzip name and size");
+    CHECK(fx_info("sqlite", "Tables", "songs") && fx_info("sqlite", "Schema", "1 tables, 1 indexes"), "SQLite schema");
+    CHECK(fx_info("pdf", "Pages", "2") && fx_info("pdf", "Title", "PDF title") && fx_info("pdf", "Author", "Ann"), "PDF pages and info");
+    CHECK(fx_info("rtf", "Title", "RTF title"), "RTF title");
+    CHECK(fx_info("html", "Title", "Page title"), "HTML title");
+    CHECK(fx_info("mbr", "Partition 1", "FAT32") && fx_info("mbr", "Partition 1", "R36S CARD") && fx_info("mbr", "Partition 1", "boot"), "MBR partition and label");
+    CHECK(fx_info("xbin", "Characters", "3 x 1"), "XBin size");
+
+    /* Content */
+    CHECK(fx_content("docx", "Hello from a docx") && fx_content("docx", "Second & last"), "docx text");
+    CHECK(fx_content("targz", "game/main.lua") && fx_content("targz", "game/readme.txt"), "tar.gz listing");
+    CHECK(fx_content("gz", "gzip says hello"), "gzip unpacked");
+    CHECK(fx_content("pdf", "Hello PDF") && fx_content("pdf", "Second page"), "PDF text, plain and Flate");
+    CHECK(fx_content("rtf", "Hello RTF") && fx_content("rtf", "Caf\xC3\xA9") && !fx_content_q("rtf", "Arial;", 1), "RTF text without the font table");
+    CHECK(fx_content("html", "One & two") && fx_content("html", "Heading"), "HTML text");
+    CHECK(fx_content("midi", "la la") && fx_content("midi", "Test song"), "MIDI names and lyrics");
+    CHECK(fx_content("mod", "bass drum"), "MOD sample names");
+    CHECK(fx_content("sqlite", "table    songs") && fx_content("sqlite", "index    by_plays"), "SQLite schema list");
+    CHECK(fx_content("mbr", "FAT32"), "MBR partition list");
+
+    /* pictures: the decoders against Pillow */
+    for (size_t i = 0; i < sizeof FIXTURE_PIXELS / sizeof FIXTURE_PIXELS[0]; i++) {
+        const FixturePixel *px = &FIXTURE_PIXELS[i];
+        const Fixture *fx = fx_find(px->id);
+        FImage im;
+        char err[160] = "";
+        const char *dot = strrchr(fx->name, '.');
+        int rc = img_decode(img_kind(fx->data, fx->len, dot ? dot + 1 : ""), fx->data, fx->len, &im, err, sizeof err);
+        CHECK(rc == 0, "%s decodes: %s", px->id, err);
+        if (rc != 0) continue;
+        uint32_t c = im.px[(size_t)px->y * im.w + px->x];
+        int r = (int)(c >> 16 & 255), g = (int)(c >> 8 & 255), b = (int)(c & 255), al = (int)(c >> 24);
+        int tol = !strncmp(px->id, "jpeg", 4) ? 10 : 0;
+        CHECK(abs(r - px->r) <= tol && abs(g - px->g) <= tol && abs(b - px->b) <= tol && abs(al - px->a) <= tol,
+              "%s at %d,%d is %d,%d,%d,%d; Pillow says %d,%d,%d,%d", px->id, px->x, px->y, r, g, b, al, px->r, px->g, px->b, px->a);
+        img_free(&im);
+    }
+    {
+        const Fixture *fx = fx_find("qoi");
+        FImage im;
+        char err[160];
+        CHECK(img_decode(IMG_QOI, fx->data, fx->len, &im, err, sizeof err) == 0 && im.w == 2 && im.px[1] == 0xFFC86432u && im.px[3] == 0x80FFFFFFu, "QOI pixels");
+        img_free(&im);
+        fx = fx_find("jpeg_prog");
+        CHECK(img_decode(IMG_JPEG, fx->data, fx->len, &im, err, sizeof err) != 0 && strstr(err, "progressive"), "a progressive JPEG says why it is not drawn");
+        FImage small = {2, 1, NULL}, fit;
+        uint32_t two[2] = {0xFFFF0000u, 0x00000000u};
+        small.px = two;
+        CHECK(img_fit(&small, 640, 400, &fit) == 0 && fit.w == 640 && fit.h == 320 && fit.px[0] == 0xFFFF0000u, "a small picture grows by a whole number");
+        CHECK(fit.px && (fit.px[639] & 0xFFFFFF) != 0 && (fit.px[639] & 0xFFFFFF) < 0x505050, "transparency shows the checkerboard");
+        img_free(&fit);
+        unsigned char zbuf[64];
+        static const unsigned char bad[] = {0x78, 0x9C, 0xFF, 0xFF, 0xFF};
+        CHECK(fi_zlib(bad, sizeof bad, zbuf, sizeof zbuf, NULL) < 0, "damaged DEFLATE is refused");
+    }
+
+    /* art */
+    {
+        FFile f;
+        char err[160];
+        Art art;
+        CHECK(ff_open(&f, fx_path("ansi"), err, sizeof err) == 0 && art_load(&art, &f, K_ANSI, err, sizeof err) == 0, "ANSI loads");
+        CHECK(art.ch[0] == 'H' && art.at[0] == 0x0E && art.ch[2] == ' ' && art.at[2] == 0x17 && art.ch[3] == 'X' && art.at[3] == 0x14, "ANSI colours: bold yellow, blue background, red");
+        CHECK(art.h == 2 && art.ch[art.w + 2] == 'Z', "ANSI cursor move to the right (%d rows)", art.h);
+        art_free(&art);
+        ff_close(&f);
+        CHECK(ff_open(&f, fx_path("xbin"), err, sizeof err) == 0 && art_load(&art, &f, K_XBIN, err, sizeof err) == 0 && art.w == 3 && art.ch[2] == 'C' && art.at[2] == 0x4A, "XBin cells");
+        art_free(&art);
+        ff_close(&f);
+    }
+
+#ifdef __linux__
+    {
+        FFile f;
+        char err[160];
+        if (ff_open(&f, "/proc/self/exe", err, sizeof err) == 0) {
+            FType t = ff_identify(&f);
+            CHECK(t.kind == K_ELF, "this program is an ELF (%s)", t.label);
+            FInfo in = {0, 0, 0};
+            ff_info(&f, t, &in);
+            int kind_row = 0;
+            for (int i = 0; i < in.n; i++) if (!strcmp(in.r[i].k, "Kind")) kind_row = 1;
+            CHECK(kind_row, "ELF details");
+#ifdef __aarch64__
+            int r36s = 0;
+            for (int i = 0; i < in.n; i++) if (!strcmp(in.r[i].k, "On the R36S") && strstr(in.r[i].v, "right kind")) r36s = 1;
+            CHECK(r36s, "an ARM64 program is the R36S's kind");
+#endif
+            info_free(&in);
+            ff_close(&f);
+        }
+    }
+#endif
+}
+
+/* The viewer's tabs on real files, through the app. */
+static void test_viewer_tabs(const char *root) {
+    (void)root;
+    App a;
+    app_init(&a, g_fxdir, g_fxdir);
+    R3Screen s;
+    char err[256];
+
+    CHECK(start_viewer(&a, fx_path("png_rgba"), 0, 0) == 0 && a.mode == M_VIEW, "picture opens");
+    CHECK(viewer_tab(&a.view)->kind == TAB_PICTURE && a.view.ntabs == 3 && !strcmp(a.view.tab[0].name, "Info"), "a picture opens on its Picture tab");
+    app_compose(&a, &s);
+    CHECK(dump_has(&s, "[Picture]") && dump_has(&s, "5x3 (enlarged)"), "picture status line");
+    uint32_t *px = malloc((size_t)R3_W * R3_H * 4);
+    if (px) {
+        app_render(&a, &s, px);
+        uint32_t mid = px[(size_t)(PIC_Y + PIC_H / 2) * R3_W + R3_W / 2];
+        CHECK((mid & 0xFFFFFF) != 0, "the picture is drawn over the display view (%08x)", mid);
+    }
+    shot(&a, &s, "8-view-picture");
+    app_action(&a, R3_LEFT);
+    CHECK(a.view.cur == 0, "Left goes to Info");
+    app_compose(&a, &s);
+    CHECK(dump_has(&s, "Dimensions") && dump_has(&s, "5 x 3 pixels") && dump_has(&s, "[Info]"), "Info page");
+    shot(&a, &s, "9-view-info");
+    app_action(&a, R3_LEFT);
+    CHECK(a.view.cur == 2 && viewer_tab(&a.view)->v.hex && viewer_tab(&a.view)->v.n > 0, "Left again wraps to Hex, read when first shown");
+    app_action(&a, R3_BACK);
+    CHECK(a.mode == M_BROWSE, "B closes");
+
+    CHECK(start_viewer(&a, fx_path("ansi"), 0, 0) == 0 && viewer_tab(&a.view)->kind == TAB_ART, "ANSI opens on Art");
+    app_compose(&a, &s);
+    if (px) {
+        app_render(&a, &s, px);
+        int cw, chh;
+        art_cell(&a.view.art, &cw, &chh);
+        uint32_t c = px[(size_t)(PIC_Y + chh / 2) * R3_W + (R3_W - a.view.art.w * cw) / 2 + 1]; /* the left stroke of the H */
+        CHECK((c & 0xFFFFFF) != 0, "art drawn (%08x)", c);
+    }
+    shot(&a, &s, "10-view-art");
+    app_action(&a, R3_BACK);
+
+    CHECK(start_viewer(&a, fx_path("targz"), 0, 0) == 0 && !strcmp(viewer_tab(&a.view)->name, "Contents"), "an archive opens on Contents");
+    app_compose(&a, &s);
+    CHECK(dump_has(&s, "game/main.lua"), "listing shown");
+    shot(&a, &s, "11-view-contents");
+    app_action(&a, R3_BACK);
+
+    CHECK(start_viewer(&a, fx_path("html"), 0, 0) == 0 && !strcmp(viewer_tab(&a.view)->name, "Text") && a.view.ntabs == 4 && !strcmp(a.view.tab[2].name, "Source"), "HTML: Text, then Source");
+    app_action(&a, R3_RIGHT);
+    app_compose(&a, &s);
+    CHECK(dump_has(&s, "<!DOCTYPE html>"), "Source shows the markup");
+    app_action(&a, R3_BACK);
+
+    CHECK(start_viewer(&a, fx_path("jpeg_prog"), 0, 0) == 0 && a.view.cur == 0, "a picture that cannot be drawn opens on Info");
+    app_compose(&a, &s);
+    CHECK(dump_has(&s, "progressive"), "Info says why");
+    app_action(&a, R3_BACK);
+
+    CHECK(viewer_open(&a.view, "/nonexistent/file", err, sizeof err) != 0 && strstr(err, "file"), "a missing file is an error");
+    free(px);
+    app_free(&a);
+}
+
 static int selftest_logic(void) {
     char templ[PATH_MAX];
     const char *tmp = getenv("TMPDIR");
@@ -1755,6 +2319,8 @@ static int selftest_logic(void) {
     test_theme();
     test_files(real ? real : root);
     test_ui(real ? real : root);
+    test_formats(real ? real : root);
+    test_viewer_tabs(real ? real : root);
     rm_rf(root);
     if (real) { rm_rf(real); free(real); }
     return g_fail;
@@ -1762,14 +2328,15 @@ static int selftest_logic(void) {
 
 /* ---- main ----------------------------------------------------------------------------------------------------------------------- */
 
-static int save_screenshot(const char *path, const char *left, const char *right) {
+static int save_screenshot(const char *path, const char *left, const char *right, const char *file, int tab, int page) {
     App a;
     app_init(&a, left, right);
+    if (file && start_viewer(&a, file, tab, page) != 0) { app_free(&a); return 1; }
     R3Screen s;
     app_compose(&a, &s);
     uint32_t *px = malloc((size_t)R3_W * R3_H * 4);
     if (!px) return 1;
-    r3_render(&s, px);
+    app_render(&a, &s, px);
     SDL_Surface *surf = SDL_CreateRGBSurfaceFrom(px, R3_W, R3_H, 32, R3_W * 4, 0x00FF0000, 0x0000FF00, 0x000000FF, 0xFF000000);
     int rc = surf ? SDL_SaveBMP(surf, path) : 1;
     if (surf) SDL_FreeSurface(surf);
@@ -1778,13 +2345,40 @@ static int save_screenshot(const char *path, const char *left, const char *right
     return rc;
 }
 
+/* --info FILE: what the viewer's Info page says, as text (and --content: its Content page). For trying the formats on a laptop. */
+static int print_info(const char *file, int content) {
+    char err[256];
+    FFile f;
+    if (ff_open(&f, file, err, sizeof err) != 0) { fprintf(stderr, "commander: %s: %s\n", file, err); return 1; }
+    FType ty = ff_identify(&f);
+    if (!content) {
+        FInfo in = {0, 0, 0};
+        ff_info(&f, ty, &in);
+        for (int i = 0; i < in.n; i++) printf("%-15s %s\n", in.r[i].k, in.r[i].v);
+        info_free(&in);
+    } else {
+        FText t = {0, 0, 0, 0, 0};
+        uint8_t *raw = NULL;
+        size_t rawn = 0;
+        char name[32];
+        int fc = ff_content(&f, ty, &t, &raw, &rawn, name, sizeof name);
+        printf("== %s\n", fc == FC_NONE ? "(no content page)" : name);
+        if (fc == FC_LINES && t.s) fwrite(t.s, 1, t.n, stdout);
+        if (fc == FC_BYTES) fwrite(raw, 1, rawn, stdout);
+        free(raw);
+        text_free(&t);
+    }
+    ff_close(&f);
+    return 0;
+}
+
 static void open_pads(void) {
     for (int i = 0; i < SDL_NumJoysticks(); i++) SDL_JoystickOpen(i);
 }
 
 int main(int argc, char **argv) {
-    int selftest = 0;
-    const char *shot = NULL;
+    int selftest = 0, tab = 0, page = 0;
+    const char *shot = NULL, *view = NULL;
     const char *left = getenv("R3I6NOS_FM_LEFT"), *right = getenv("R3I6NOS_FM_RIGHT");
     if (!left || !*left) left = access("/roms", R_OK) == 0 ? "/roms" : (getenv("HOME") ? getenv("HOME") : "/");
     if (!right || !*right) right = getenv("HOME") && *getenv("HOME") ? getenv("HOME") : "/";
@@ -1792,10 +2386,17 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "--selftest")) selftest = 1;
         else if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--version")) { puts("commander " VERSION); return 0; }
-        else { fprintf(stderr, "usage: %s [--selftest | --screenshot out.bmp | --version]\n", argv[0]); return 2; }
+        else if ((!strcmp(argv[i], "--info") || !strcmp(argv[i], "--content")) && i + 1 < argc) return print_info(argv[i + 1], argv[i][2] == 'c');
+        else if (!strcmp(argv[i], "--view") && i + 1 < argc) view = argv[++i];
+        else if (!strcmp(argv[i], "--tab") && i + 1 < argc) tab = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--page") && i + 1 < argc) page = atoi(argv[++i]);
+        else {
+            fprintf(stderr, "usage: %s [--selftest | --version | --info FILE | --content FILE | [--view FILE [--tab N] [--page N]] [--screenshot out.bmp]]\n", argv[0]);
+            return 2;
+        }
     }
     if (shot) {
-        int rc = save_screenshot(shot, left, right);
+        int rc = save_screenshot(shot, left, right, view, tab, page);
         return rc;
     }
     if (selftest) {
@@ -1819,11 +2420,12 @@ int main(int argc, char **argv) {
 
     App app;
     app_init(&app, left, right);
+    if (view && !selftest && start_viewer(&app, view, tab, page) != 0) { app_free(&app); SDL_Quit(); return 1; }
     R3Screen screen;
 
     if (selftest) {
         app_compose(&app, &screen);
-        r3_video_draw(&video, r, &screen, 1);
+        app_video_draw(&video, r, &screen, &app, 1);
         SDL_version v;
         SDL_GetVersion(&v);
         printf("R3I6NOS_SMOKE ok commander=%s sdl=%d.%d.%d joysticks=%d renderer=%s\n", VERSION, v.major, v.minor, v.patch,
@@ -1840,7 +2442,7 @@ int main(int argc, char **argv) {
     int typing = 0, force = 1;
     while (!app.quit) {
         SDL_Event e;
-        /* a job polls; so does a screen still being presented (r3_video_draw owes presents after a change); else wait */
+        /* a job polls; so does a screen still being presented (app_video_draw owes presents after a change); else wait */
         int have = (app.mode == M_JOB) ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, (force || video.settle > 0) ? 16 : 500);
         while (have) {
             switch (e.type) {
@@ -1876,7 +2478,7 @@ int main(int argc, char **argv) {
             else SDL_StopTextInput();
         }
         app_compose(&app, &screen);
-        r3_video_draw(&video, r, &screen, force);
+        app_video_draw(&video, r, &screen, &app, force);
         force = 0;
     }
     app_free(&app);

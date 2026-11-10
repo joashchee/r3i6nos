@@ -15,7 +15,7 @@ this corpus. None of it is anyone else's music, art or program. The files are MI
 | `Neumetik/music/Test files/` on EASYROMS | the music files, so Neumetik's own file list shows them |
 | `KlamANSI/drawings/test-files/` on EASYROMS | the KlamANSI drawing, so its Files panel shows it |
 
-Commander can open any of them (text or hex view), wherever they are.
+Commander's viewer opens any of them, wherever they are: an Info page for each, and a Picture, Art or Contents page for the PNG, the ANSI file, the `.love`, the `.mxl` and the `.deb`.
 
 ## What it covers
 

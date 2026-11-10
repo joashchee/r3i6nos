@@ -50,7 +50,7 @@ file's mode, size and date with its place in the list (a progress bar while it w
 | D-pad up / down | move |
 | D-pad left / right | switch panel (the left panel is active after left) |
 | L1 / R1, L2 / R2 | page up / down, top / bottom |
-| A | open a folder, or view a file (text, or hex for binary; whole pages, 4 MiB at most) |
+| A | open a folder, or view a file (see **The viewer** below) |
 | B | parent folder (the folder you came from stays selected); cancels a running job |
 | X | tag / untag the entry and move down; **Y** tags all or none |
 | Start | the menu: View, Copy, Move, Rename, Make directory, Delete, Tag all, Untag all, Sort by, Hidden files, Swap panels, Other panel = this folder, Quit |
@@ -59,6 +59,54 @@ file's mode, size and date with its place in the list (a progress bar while it w
 A keyboard works too: F2 rename, F3 view, F5 copy, F6 move, F7 new folder, F8 delete, F10 quit, Tab switch panel, Insert/Space tag.
 Rename and new folder use the command line: Up/Down step the last letter through a list, Right adds a letter, Left deletes one, A accepts,
 B cancels (a keyboard just types).
+
+### The viewer
+
+A on a file works out what it is from its bytes (magic numbers first, then the name, then a look at the bytes: the same order of rules
+the ansiapps catalogue app Diskette uses, rewritten in C in `formats.h`) and opens it in tabs. **Left/Right** (or X/Y) switch tabs,
+**Up/Down** and L1/R1 turn pages, L2/R2 go to the first and last page, A or B close it. It opens on the most useful tab: the picture,
+the art or the contents when there is one, else the text, else Hex for unknown binary data.
+
+| Tab | Shows |
+|---|---|
+| **Info** | the type and category, the exact size, and that format's details (below) |
+| **Picture** | PNG (every colour type and depth, interlaced), JPEG (baseline; a big photo is decoded at 1/8 size, which is still sharper than the screen; EXIF orientation applied), GIF (first frame), BMP (1-32 bits, RLE), ICO/CUR, TGA, QOI, PCX, PBM/PGM/PPM, drawn over the whole display view: a small one enlarged by a whole number, a big one shrunk, transparency on a dark checkerboard |
+| **Art** | ANSI art (escape codes, iCE colours, 256 and 24-bit colours brought to the 16), NFO and DIZ (code page 437), BIN, XBin (its palette and font, packed or not), ArtWorx ADF, iCE Draw IDF: drawn with the VGA font at its own 8x16, 25 rows a page (wider art in narrower cells, so nothing scrolls sideways) |
+| **Contents** / **Text** / ... | what is inside: the files of a ZIP (and LÖVE `.love`, jar/apk, msix, `.mxl`), TAR, `.tar.gz`, RAR 4/5, Cabinet, cpio, LHA, ar, ISO 9660 (the top folder); a `.deb`'s control file and file list; a disk image's partitions (MBR or GPT) with each one's filesystem and label; the text of a PDF, RTF, HTML, docx/pptx/xlsx, odt and EPUB; a `.gz` unpacked; a tracker module's instrument names and message; a MIDI's names, lyrics and markers; an SQLite database's tables; a dBase table's fields; a program's libraries |
+| **Text** (**Source** next to a document's Text) | the file as text: UTF-8, UTF-16 with a byte-order mark, or code page 437 byte for byte when it is not UTF-8 (DOS text and NFO files) |
+| **Hex** | the bytes (the first 4 MiB) |
+
+What **Info** knows, by family:
+
+- **Pictures:** dimensions, colour type and depth, interlacing, resolution, PNG text chunks and APNG frames, JPEG coding (baseline,
+  progressive, CMYK...) and EXIF (camera, lens, date taken, exposure, aperture, ISO, focal length, flash, orientation, GPS present),
+  GIF frames and looping, ICO's pictures, WebP (lossy, lossless, extended), HEIC/AVIF and PSD size, SVG width/height/view box, TIFF tags.
+- **Sound and music:** WAV (coding, rate, channels, bits, length, INFO tags), AIFF, FLAC (stream info, Vorbis comments, cover art), MP3
+  (ID3v1 and v2.2-2.4 tags, MPEG version and layer, bit rate, VBR length from Xing/VBRI), Ogg Vorbis/Opus/FLAC/Theora (comments, length
+  from the last page), MIDI (format, tracks, timing, tempo, time and key signature, notes and channels, length through tempo changes,
+  RIFF RMID too), MOD, S3M, XM, IT, MTM, STM (title, channels, patterns, instruments, tracker), Neumetik's `.ntt`, and the names of
+  AHX, HivelyTracker, Sawteeth, Klystrack, Musicline, ProTrekkr, DigiBooster, OctaMED, Oktalyzer and more. Music as text (ABC,
+  MusicXML, kern, ChordPro, Alda, MML...) is named, with ABC's and MusicXML's titles.
+- **Video:** MP4/MOV/M4A (brand, length, tracks and codecs, size, iTunes tags), Matroska/WebM (title, length, codecs, size, sound),
+  AVI (size, frame rate, length, codecs), FLV, MPEG.
+- **Archives and disks:** the counts and sizes above, compression ratio, encryption, comments; Office/OpenDocument/EPUB properties
+  (title, author, dates, pages, words); a `.love`'s title and save folder from `conf.lua` (and whether `main.lua` is there); a `.deb`'s
+  package, version, architecture and description; zstd, xz, bzip2, lzip, 7-Zip, RPM details; ISO volume, publisher, El Torito, Joliet.
+- **Programs:** ELF kind, machine, loader, libraries, stripped or not, and **whether it runs on the R36S** (ARM64 Linux; 32-bit ARM and
+  other machines are named as not); Windows PE (machine, GUI or console, .NET, build date), Mach-O, Java class version, WebAssembly, Lua
+  and LuaJIT bytecode, scripts' interpreters.
+- **Fonts:** TrueType/OpenType/TTC/WOFF names (family, style, version, designer, licence), glyph count, weight; WOFF2 and PSF console fonts.
+- **Data and documents:** SQLite (page size, text encoding, writer's version, tables), dBase, Parquet, PDF (version, title, author,
+  producer, pages, pictures, encryption), legacy Office, RTF, email (from, to, subject, date) and mbox (message count), BitTorrent
+  (name, tracker, files), glTF/GLB, OBJ and STL (vertices, faces, triangles), SAUCE records on text art.
+- **Text:** encoding, lines and the longest line, words, line endings, JSON well-formedness, CSV columns, XML root element, and counts
+  for subtitles, playlists, calendars, contacts, cue sheets.
+
+Everything reads with limits (32 MiB read for one page, 16 MiB unpacked from one member, 48 MiB to list a `.tar.gz`, 5,000 entries
+listed, 24 megapixels decoded), so a huge or damaged file gives a shorter page, never a crash. Nothing is written. Not done: 7-Zip,
+xz, zstd, bzip2 and Brotli data are not unpacked (their archives are named and described, not listed), progressive and arithmetic-coded
+JPEGs, HEIC/AVIF/WebP pictures and video frames are described but not drawn, sound is not played, and a file inside an archive cannot be
+opened from the listing yet.
 
 **What it will and won't do:** copy and move go to the other panel's folder and **never overwrite**: a name that already exists is skipped and
 counted in the result. Delete asks first with **No** preselected, says when folders are included, and never follows a link (a link is
@@ -69,9 +117,12 @@ tagged, it is the entry under the cursor. It runs as the `loveos` user, so syste
 
 **Checked here** (by `commander --selftest`, run by `scripts/check.sh` and in CI under qemu): the file operations against a temporary folder
 (copy, links, skipped names, copy-into-itself, move by rename and by copy, a failed copy keeping its source, delete not following links, cancel,
-rename, new folder), the panels (sorting, hidden files, paging), every dialog and the viewer's text. Looked at as pictures
-(`R3I6NOS_FM_SHOTS=dir commander --selftest` saves each screen). **Not run on a real R36S:** the buttons, how it looks on the panel, speed on the
-SD card, and exFAT quirks (no permissions or links there, so copies of links to the card fail and say so).
+rename, new folder), the panels (sorting, hidden files, paging), every dialog, the viewer's tabs, and the formats: identification,
+Info and Contents of 30 small files made in code by `make_selftest_data.py` (which writes `selftest_data.h`), with every picture
+decoder checked against Pillow's pixels. Looked at as pictures
+(`R3I6NOS_FM_SHOTS=dir commander --selftest` saves each screen; `commander --view FILE --screenshot out.bmp` draws one file's viewer).
+`commander --info FILE` and `--content FILE` print the two pages as text, for trying formats on a laptop. **Not run on a real R36S:** the
+buttons, how it looks on the panel, speed on the SD card (and how long a big JPEG or a `.tar.gz` listing takes on the RK3326), and exFAT quirks (no permissions or links there, so copies of links to the card fail and say so).
 
 ## Adding an app: its own build, apart from the firmware
 

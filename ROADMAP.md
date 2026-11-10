@@ -21,6 +21,23 @@ document that has the detail. Nothing here has run on a real R36S yet.
   copy, move, rename, new folder, delete, tag, sort, hidden files; no overwrite, no links followed, delete asks with No first, work in slices with a progress bar and cancel.
   File operations, panels, dialogs and the viewer are tested on the laptop and under qemu; screens were looked at as pictures. **Untested on the R36S:** the buttons, the look on the panel,
   speed on the SD card, exFAT (no links or permissions). Not done: overwrite choices, a text-mode picker for long names, opening a `.love` from the list.
+  - [x] **The viewer reads as many formats as it can** (2026-11-10, maintainer's request: "use Diskette's abilities"; `apps/README.md`, "The viewer"):
+    Diskette's file identification and per-format details rewritten in C for the unit (`formats.h`, `fmt_media.h`, `fmt_archives.h`,
+    `fmt_misc.h`, no libraries), plus a DEFLATE decoder (`inflate.h`), picture decoders (`images.h`: PNG, baseline JPEG, GIF, BMP, ICO, TGA,
+    QOI, PCX, PNM) and a text-art renderer (`ansiart.h`: ANSI, NFO, BIN, XBin, ADF, IDF). Tabs: Info, Picture/Art/Contents/Text, the
+    file's Text, Hex. About 150 formats identified; details for pictures, sound, modules, MIDI, video, archives, packages, disk images,
+    programs (with "runs on the R36S?"), fonts, databases, documents and text; listings and document text for ZIP-family, TAR/.tar.gz,
+    RAR, CAB, cpio, LHA, ar/.deb, ISO, MBR/GPT, PDF, RTF, HTML, docx/pptx/xlsx, odt, EPUB. Tested by the self-test on 30 fixtures made
+    in code (`make_selftest_data.py`; pictures checked against Pillow), built with Clang on macOS. **Untested on the R36S:** how it
+    looks, and how long a big JPEG, PDF or `.tar.gz` takes on the RK3326.
+    - [ ] **Run the shorter format sweep** (maintainer, 2026-11-10: "run the shorter sweep later"; do this next, before committing more
+      Commander work): `docker run --rm -v "$PWD":/src -w /src debian:bookworm scripts/sweep_commander_formats.sh` (Colima; about
+      40 minutes). It builds with GCC (no warnings allowed), runs the self-test on ARM64 Linux (including the ELF "right kind" check),
+      then opens up to 5 files of each extension with an AddressSanitizer/UBSan build. A first, full sweep was stopped at 2,500 of
+      12,000 files with no problems found: each sanitizer start costs about a second. Fix whatever it finds and record the result here.
+    - [ ] **On the unit:** open every file in `Test files/` and a few big photos, PDFs and `.tar.gz` files; note the slow ones.
+    - [ ] **Next:** open a file inside an archive from its listing (view it, or extract it to the other panel); unpack xz and zstd
+      (a `.deb`'s data is usually xz); progressive JPEG; play a sound file (WAV, then the tracker formats through Neumetik?).
 - [x] **Per-app build workflows, apart from the firmware** (2026-11-07; `apps/README.md`, "Adding an app"): `app.conf` + `scripts/build_native_app.sh` + reusable `native-app.yml` + `app-commander.yml`
   (tag `commander-v*` releases the `.deb`). **Untested:** the workflows on GitHub and the build script in a Debian 12 container.
   - [x] `app-input-checker-native.yml` added the same way (tag `input-checker-native-v*`); now `app-io-checker-native.yml` (tag `io-checker-native-v*`).
@@ -347,8 +364,8 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
   `tests/test_configure_rootfs.sh`, `tests/test_flash_macos.sh`.
   - [x] **Its licence** (`NOTICE`): MIT, as the repository (maintainer, 2026-11-09). The files only: Neumetik, Composer, Painter and
     Animator, which made some of them, stay proprietary.
-  - [ ] **On the unit:** play every file in Neumetik's `Test files`, open the drawing in KlamANSI, view the text and binary files in
-    Commander, run the CLI tools on theirs, and install the `.love` and the `.deb` by copying them into their folders.
+  - [ ] **On the unit:** play every file in Neumetik's `Test files`, open the drawing in KlamANSI, view every file in Commander's
+    viewer (each now has an Info page, and the PNG, ANSI, `.love`, `.mxl` and `.deb` a Picture, Art or Contents page), run the CLI tools on theirs, and install the `.love` and the `.deb` by copying them into their folders.
   - [ ] **Not covered: about 100 more tracker formats** Neumetik reads (39 of them MOD packers). Nothing writes them yet; each needs its
     own small encoder in Neumetik. Not planned (maintainer, 2026-11-09: the corpus covers what can be generated); listed in `corpus/README.md`.
   - [ ] **When an app's formats change**, run `scripts/build_corpus.sh` and add the new format to `scripts/corpus_extra.py`'s `FORMATS`
