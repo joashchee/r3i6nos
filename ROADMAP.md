@@ -413,13 +413,13 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
 
 ## 17. TinyNTT (a new native app; code in the TinyNTT repo, `r36s/`; plan and decisions: `docs/TINYNTT.md`)
 
-- [x] **Built** (2026-11-10, maintainer's brief): "Tiny Ant", an 8-bar, 4-track music loop editor. `tinyntt/lib` (the song, 44 scales,
+- [x] **Built** (2026-11-10, maintainer's brief): "Tiny Ant", an 8-bar, 4-track music loop editor. `r36s/lib` (the song, 44 scales,
   265 tonal and 68 atonal instruments from Neumetik MIDI's built-in libraries, 20 styles, the engine with count-in, loop recording,
-  overdub and punch markers, `.ntt` with a `TINY` chunk, WAV, MIDI and TMF) behind a C API; `tinyntt/host` on the theme: Song,
+  overdub and punch markers, `.ntt` with a `TINY` chunk, WAV, MIDI and TMF) behind a C API; `r36s/host` on the theme: Song,
   Instruments, Tracks (a piano roll) and Files on an L1/R1 carousel, autosave and recovery. Tests: 35 library tests (a saved `.ntt`
-  played by Neumetik's own tracker note for note), the host's `--selftest` of every panel, `tinyntt/check.sh`. `flash-macos.sh`
+  played by Neumetik's own tracker note for note), the host's `--selftest` of every panel, `r36s/check.sh`. `flash-macos.sh`
   copies the `.deb` to `native_deb/`. **Never run on an R36S.**
-  - [x] **The arm64 package in Debian 12 and its clean-room install** (2026-11-10): `tinyntt/build-deb.sh --clean-room` built `TinyNTT.deb` (3.4 MB; needs SDL2, libc, libm, libgcc_s; newest glibc symbol 2.34) in Debian 12 arm64, its self-test passed there, `deb_watcher.py` installed it in a clean Debian 12 and the launcher ran it, and a device report there had 21 PASS and 2 FAIL (both for no pad under Docker). Those figures are a Mac's under Docker, not the unit's: 79x to 148x real time with up to 19 voices, every 256-frame buffer in under 5% of its time, a save in 43 ms, peak memory 14 MB. The Linux run found a bug the Mac did not (reopening the last song at start copied a path onto itself; fixed).
+  - [x] **The arm64 package in Debian 12 and its clean-room install** (2026-11-10): `r36s/build-deb.sh --clean-room` built `TinyNTT.deb` (3.4 MB; needs SDL2, libc, libm, libgcc_s; newest glibc symbol 2.34) in Debian 12 arm64, its self-test passed there, `deb_watcher.py` installed it in a clean Debian 12 and the launcher ran it, and a device report there had 21 PASS and 2 FAIL (both for no pad under Docker). Those figures are a Mac's under Docker, not the unit's: 79x to 148x real time with up to 19 voices, every 256-frame buffer in under 5% of its time, a save in 43 ms, peak memory 14 MB. The Linux run found a bug the Mac did not (reopening the last song at start copied a path onto itself; fixed).
 - [ ] **On the unit:** Files > Device report, then bring back `EASYROMS/TinyNTT/r36s-report.txt`: the pad's 17 buttons and 4 axes,
   the buffer ALSA gives (goal 512 frames or fewer), the engine's speed with four busy tracks (goals 2x real time, 99% of buffers in
   half their time), a save to the card (goal 1 s), memory. Then make a loop: the sticks' directions, Fn, whether recorded notes

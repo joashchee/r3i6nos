@@ -1,6 +1,6 @@
 # TinyNTT ("Tiny Ant"): an 8-bar music loop editor
 
-Status (2026-11-10): **the first version is built in the Neumetik repo's `tinyntt/` and tested without the unit (its README has the
+Status (2026-11-10): **the first version is built in the TinyNTT repo's `r36s/` and tested without the unit (its README has the
 detail); never run on a real R36S.** TinyNTT is a new ansiapps app, R36S first and other platforms later: short, seamless,
 8-bar loops for games, made on the spot on the pad (a game jam's music). It plays through Neumetik's synthesizer, by synthesis
 only (no SoundFonts), and saves Neumetik Tracker `.ntt` files. This file is the plan and the decisions, as
