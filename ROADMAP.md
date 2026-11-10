@@ -35,144 +35,21 @@ document that has the detail. Nothing here has run on a real R36S yet.
       `/usr`, `/etc`, `/var/cache` and `corpus/`) with **no problems**. GCC gave 4 truncation warnings (`dos_time`, two HTML end tags,
       a MIDI track name), all of them impossible or meant cuts; now explicit, and GCC 12 builds it with none at `-O2` and `-O1`.
     - [ ] **On the unit:** open every file in `Test files/` and a few big photos, PDFs and `.tar.gz` files; note the slow ones.
-    - [ ] **Next:** open a file inside an archive from its listing (view it, or extract it to the other panel); unpack xz and zstd
-      (a `.deb`'s data is usually xz); progressive JPEG; play a sound file (WAV, then the tracker formats through Neumetik?).
-- [x] **Per-app build workflows, apart from the firmware** (2026-11-07; `apps/README.md`, "Adding an app"): `app.conf` + `scripts/build_native_app.sh` + reusable `native-app.yml` + `app-commander.yml`
-  (tag `commander-v*` releases the `.deb`). **Untested:** the workflows on GitHub and the build script in a Debian 12 container.
-  - [x] `app-input-checker-native.yml` added the same way (tag `input-checker-native-v*`); now `app-io-checker-native.yml` (tag `io-checker-native-v*`).
-  - [x] **LÖVE apps' equivalent** (`TYPE=love`, `build_love_app.sh`, `love-app.yml`, `app-input-checker-love.yml`, now `app-io-checker-love.yml`). **Untested:** on GitHub; the `.love` is not run under real LÖVE by it.
-  - [ ] Ports (prebuilt or cross-built ARM64 games) have no workflow yet: decide their shape (a `TYPE=port` manifest that builds or fetches, then packs a `.deb`) when the first one lands.
-- [x] **Settings dialog with Shutdown** (2026-11-07; Start / S opens it, Shutdown asks "Yes / No" with No preselected, then the session
-  leaves a flag, exits 0, and `loveos.service`'s root `ExecStopPost` runs `r3i6nos-poweroff` -> `systemctl --no-block poweroff`).
-  Logic, session and poweroff script are tested on the laptop. **Untested on the R36S:** that the Start button (raw 14) opens it, that
-  systemd 252 on kernel 4.4 powers the board off (and not just halts), and that the games card is unmounted cleanly.
-- [x] **Settings > Network and SSH** (2026-11-07, `docs/NETWORK.md`): status, wired and Wi-Fi setup with an on-screen keyboard, tests, instructions, SSH start/stop/password; a root helper per request, nothing at boot.
-  Tested on the laptop with a fake system. **Untested on the R36S:**
-  - [ ] Does the stock kernel have a driver for any USB Ethernet or Wi-Fi adapter? Which ones? (Status lists none when it does not; write the working models in `docs/NETWORK.md`.)
-  - [ ] Does the unit's USB port work as a host?
-  - [ ] `wpa_supplicant`, `udhcpc` (does it fill `/etc/resolv.conf`?), `usermod` and `chpasswd` on the rootfs; the path unit under systemd 252; the rootfs CI build with the new packages.
-  - [ ] Decide whether a game being able to ask for SSH is acceptable, or build a confirmation it cannot fake.
-  - [ ] Optional, rule 6 permitting: auto-join the saved network at boot (not done: ask first).
-- [x] **Battery indicator and Settings > Battery** (2026-11-08, `docs/BATTERY.md`): the charge at the launcher's top right (low turns red, charging green), and a history sampled at boot, app start and end,
-  every 5 minutes in an app and at shutdown, with Status (health, drain, time left, abrupt ends), Use by app, History and Clear history. Tested on the laptop with a fake supply; CI green on `d182bb1` (including the rootfs build and `tests/test_image.sh`). **Untested on the R36S:**
-  - [ ] Which `power_supply` the fuel gauge is and what it reports (`scripts/device-info.sh` should list `/sys/class/power_supply`); check the indicator, health and cycle figures against it.
-  - [ ] That `StateDirectory=r3i6nos-battery` gives `loveos` a writable folder under systemd 252, and that the ticker does not disturb a game.
-  - [ ] Whether an app's name (its file name) is a good enough label for `.deb` apps.
-- [x] **Settings > About** (2026-11-09, `docs/ABOUT.md`): the build (`/etc/r3i6nos-release`, from `VERSION` and the commit), the unit, the pads' GUIDs, Check for updates against GitHub (only when chosen), Licences. Tested on the laptop with a fake system and a fake GitHub. **Untested on the R36S:**
-  - [ ] The pages on the panel; `ip` and `systemctl is-active` as `loveos`; the check over a USB adapter (needs the CA bundle and DNS).
-  - [x] `joashchee/r3i6nos` is public (maintainer, 2026-11-09), so GitHub answers the check without a token.
-  - [ ] The first release: tag `v0.1.0` and upload the image, so "the latest release" means something.
-- [x] **First push** to GitHub (`joashchee/r3i6nos`, 2026-11-06).
-
-## 2. Phase 1: ground truth from the working card (needs the R36S and a Mac)
-
-Why: the guide's image has no bootloader or kernel modules (`docs/build-plan.md`
-gaps 1 and 2). Everything after depends on what is on the user's own card.
-All of it goes in the gitignored `local_hardware_assets/`.
-
-- [x] **`scripts/capture-card.sh`** written (see phase 4); **now run it on your card** (needs `brew install e2fsprogs` for the modules).
-- [ ] **Run `scripts/device-info.sh` on the R36S** (stock OS booted, over SSH) and keep the output in `local_hardware_assets/info/`.
-- [x] **Confirm the board** is RK3326 (spec section 1): yes, see Phase 1b.
-- [x] **Capture the gamepad mapping** on a real unit (2026-11-07, `docs/hardware-findings.md` "Input layout"): `run_app.sh`'s `SDL_GAMECONTROLLERCONFIG` now has the measured buttons and axes (D-pad as buttons 8-11, not a hat; tested as text).
-  - [x] **Read the pad's real GUID** (2026-11-09, KlamANSI's device report): "GO-Super Gamepad", `1900bb3e4b4800000011000000010000`, now in `run_app.sh`'s mapping with and without the name's CRC (`docs/hardware-findings.md`, "First device report"). **Untested on the R36S:** whether an app using SDL's gamepad API then sees the right buttons.
-- [x] **Kernel:** reuse the stock 4.4.189 for now (it is what the DTBs and the Mali blob go with); mainline is phase C above.
-- [ ] **Decide gptokeyb:** keep or drop it, and `etc/love_keys.cfg` with it.
-
-## 2b. Phase 1b: what the card showed (2026-11-06; facts in `docs/hardware-findings.md`)
-
-- [x] **Board is supported:** genuine RK3326 DTBs, no clone markers. Card is MBR; BOOT at sector 32768, same as ours.
-- [x] **Bootloader captured** (15.1 MB from sector 64) and `boot.ini` understood; `inject-boot.sh` rewrites `root=` to the image's UUID.
-- [x] **Kernel is the Rockchip vendor 4.4.189.** Consequences below.
-- [ ] **Re-run `capture-card.sh`** (move `local_hardware_assets/` aside first): the first run predates the GPU
-  library capture (`rootfs/gpu/`, `info/stock-gpu-libs.txt`). Paste `stock-gpu-libs.txt` here.
-- [x] **GPU path decided: A** (2026-11-06): the stock `libmali` blob, captured from your own card and injected locally
-  into `/opt/libmali`; never in the repo, CI artifacts or releases. `LOVE_GRAPHICS_USE_OPENGLES=1` is set when it is present.
-  - [x] `capture-card.sh` copies the blob and records the stock links (`rootfs/gpu/`, `info/stock-gpu-libs.txt`).
-  - [x] `scripts/inject-rootfs.sh` + `inject_rootfs.py` (2026-11-06, **never run on a real card**; the planner has 9 unit tests and
-    CI's `tests/test_image.sh` runs it against real `debugfs` on a tiny image): modules and firmware to `/usr/lib`, the blob
-    to `/opt/libmali` with only the links that resolve to it; refuses unless `libEGL.so.1`, `libGLESv2.so.2` and `libgbm.so.1` are provided.
-  - [x] `loveos-session` puts `/opt/libmali` first on `LD_LIBRARY_PATH` when it exists (tested).
-  - [x] **Stock listing read** (2026-11-06; kept as `tests/fixtures/stock-gpu-libs.txt`): one blob, `libmali-bifrost-g31-rxp0-wayland-gbm.so`,
-    reached by `libMali.so`; `libEGL.so.1`, `libGLESv2.so.2` and `libgbm.so.1` all link to it, so the planner's assumption holds (tested on the real listing).
-    Stock Mesa/libdrm leftovers on that card are correctly left out.
-  - [x] **Wrong blob found on hardware** (2026-11-07): that listing was the `/usr/lib` blob (r6p0, API 10.6); the kernel wants 11.x
-    (`file /dev/mali0 is not of a compatible version`). The stock card also has `/usr/local/lib/aarch64-linux-gnu/libmali-bifrost-g31-rxp0-gbm.so`
-    (r13p0), first in its `ld.so.conf`, with its own EGL/GLES/gbm links. `capture-card.sh` now prefers it; the maintainer's local assets were
-    re-pulled from the backup. **Untested:** whether this blob opens the GPU and SDL's kmsdrm then works (next boot). See `docs/hardware-findings.md`.
-  - [x] (superseded) **Blob dependencies:** the wayland build links `libwayland-client`/`-server` (added to the rootfs, a guess). `inject-rootfs.sh` now prints the blob's
-    real `needs:` list: compare it with the rootfs packages the first time you run it.
-  - [x] **Does SDL's KMS/DRM driver work with the blob's gbm/EGL?** Yes (2026-11-09): native SDL2 apps draw through KMSDRM (KlamANSI, Neumetik), and LÖVE 12.0 gets OpenGL ES 3.2 on the Mali-G31 (blob `r13p0`, the NoCoGaMa spike). Fallback **B** (Mesa llvmpipe, remove `/opt/libmali`) stays available and shippable.
-  - [ ] **Legal note** for the README: images with the blob are not redistributable; say so wherever images are mentioned. (Written in `docs/making-a-card.md`.)
-- [x] **Getting the card's modules and blob into the image:** `debugfs` on the Mac (`docs/making-a-card.md`), no Linux needed.
-- [ ] **systemd 252 on kernel 4.4:** boots to the menu with **no failed units** (2026-11-09, r3i6nos's own report). Still unknown: whether the boot reaches "finished" (`systemd-analyze` did not answer; the report now says why, and lists waiting jobs and the system state). Watch for cgroup, seccomp and `/proc` errors in the journal.
-- [x] **Games card:** `flash-macos.sh` makes it by default (2026-11-07; `--no-games` skips it, `--games-only` adds it to a card already flashed) and adds partition 3 (exFAT, `EASYROMS`, the stock card used exfat too) in the
-  space after ROOTFS and creates `Love 11.5/`, `Love 12.0/`, `native_deb/`; the MBR edit is tested (`add_games_partition.py`). **Works on a real card** (2026-11-09, KlamANSI's report: exFAT `/dev/mmcblk0p3` on `/roms`, writable by `loveos`, rename over a file works; earlier, the first hardware try hit a root-owned MBR file, fixed; every failure now explains itself, tested with fake `diskutil`/`dd` in `tests/test_flash_macos.sh`). Without it, use a second card labelled `EASYROMS` in TF2 (`docs/making-a-card.md`).
-
-## 3. Phase 2: rootfs in CI (no hardware)
-
-- [x] **`scripts/build_rootfs.sh`** (written 2026-11-06, **never run**: needs root on Linux with
-  debootstrap and qemu): two-stage debootstrap, Bookworm arm64, `loveos` user, root locked; output under `build/`.
-- [x] **`scripts/configure_rootfs.sh`:** overlay, menu, hostname, fstab, volatile journal, unit
-  enabled, docs trimmed (licence texts kept). Tested on a fake tree by `tests/test_configure_rootfs.sh`.
-- [x] **systemd unit `loveos.service`** and `loveos-session` (replace `S99loveos`): restart on crash,
-  log to the journal. The session loop is tested with fakes; the unit is not yet verified by systemd.
-- [x] **fstab:** games card by label `EASYROMS` with `nofail`. Assumes FAT/exFAT (`uid=1000`); phase 1 confirms.
-- [x] **Manual CI job** `.github/workflows/build.yml (was rootfs.yml)` (2026-11-06, workflow_dispatch only): checks, build, sanity checks, `systemd-analyze verify`, uploads `r3i6nos-rootfs.tar.zst`.
-- [x] **First successful run of that job** (2026-11-06, after pinning `ubuntu-24.04` and unmounting `/proc` before `du`): rootfs builds, sanity checks pass, artifact uploaded (444 MB tree).
-- [x] **`systemd-analyze verify` fails the job** (2026-11-06; its only message was a false alarm from checking the runner's paths, now `--root=build/rootfs`).
-- [ ] **Confirm that run:** the `--root` form is not yet run; fix any real warnings it shows.
-- [ ] **Slim the 444 MB tree** (probably Mesa's LLVM stack); see phase 6.
-- [ ] **Chroot tests under qemu:** Python and Lua tests, `deb_watcher.py` with a real `.deb`, `systemd-analyze verify`.
-
-## 4. Phase 3: LÖVE runtimes (no hardware)
-
-- [x] **LÖVE 11.5** `scripts/build_love.sh` (2026-11-06, built in CI): cross-compiles the pinned release tarball in a
-  Debian 12 container, installed to `/opt/love/11.5/` by `configure_rootfs.sh`; the `love` job in `build.yml` builds it first.
-- [x] **LÖVE 12.0** (2026-11-06, built in CI): `build_love.sh 12.0`, pinned to `love2d/love` commit `def2451`
-  (2026-11-05), CMake. It needs **SDL3** (>= 3.1.3), which Bookworm lacks, so SDL3 3.4.20 is built too (KMS/DRM, ALSA,
-  no X11/Wayland) and shipped in the runtime's `lib/`. Both pins are sha256-checked. Matrix job in `build.yml`.
-- [x] **First green 12.0 build and smoke test** (2026-11-06, run reported all green; the 12.0 smoke output line was not
-  read): SDL3 needed `SDL_UNIX_CONSOLE_BUILD`; shellcheck notes fixed.
-- [ ] **Re-pin 12.0** when it matters: it is a moving nightly, so keep the commit, note why each move, and test games on both.
-- [x] **Smoke test** (2026-11-06, passed in CI: `R3I6NOS_SMOKE ok love=11.5.0 jit=LuaJIT 2.1.0-beta3`): `scripts/smoke_love.sh` runs the rootfs's `love` under
-  `qemu-aarch64-static -L`, dummy video and audio, on `tests/smoke/love` (data, zlib, filesystem, PNG, physics, sound
-  modules); a step in `build.yml` that runs on every runtime in the rootfs (11.5 and 12.0). Does not prove drawing.
-- [x] **Cache** the built runtime in CI (`actions/cache`, keyed on `build_love.sh`).
-- [x] **First green `love` job** (2026-11-06): LÖVE 11.5 cross-compiles for arm64 and links against the rootfs.
-
-## 5. Phase 4: image and flashing
-
-- [x] **`scripts/assemble_image.sh`** (2026-11-06, **not yet run**): MBR (signature `0x52333669`, so
-  `PARTUUID=52333669-02` is the root), BOOT FAT32 at 16 MiB, ROOTFS ext4; written straight into the image
-  with `mke2fs -d` and `mkfs.fat --offset`, no loop devices. Refuses a rootfs with a mounted `/proc`.
-- [x] **`scripts/check_image.sh`:** partition table, `fsck`, labels, and the files the device needs.
-- [x] **`scripts/inject-boot.sh`:** raw bootloader from sector 64 and the BOOT files, both read back
-  and compared; never touches the MBR. **Layout unverified:** sector 64 is the usual Rockchip start.
-- [x] **`scripts/flash-macos.sh`** (**never run on a card**; `diskutil` is blocked in the dev sandbox, so even its
-  refusals are unproven): internal, partition, huge or tiny disks refused; checksum; type the disk name; `rdisk`, `bs=4m`.
-- [x] **`.github/workflows/build.yml`** (was `rootfs.yml`): manual or `v*` tags; an `image` job runs the image tests,
-  assembles, checks, compresses and uploads `r36s-loveos.img.gz` with a checksum.
-- [x] **First green `image` job** (2026-11-07): `tests/test_image.sh` (assemble, check, inject-boot, inject-rootfs against real `debugfs`) and the image build pass in CI. Still never booted on hardware.
-- [x] **The ports go on with the games partition** (2026-11-09, `docs/making-a-card.md`): `flash-macos.sh` copies the newest local
-  build of each R36S port (KlamANSI, Neumetik, Composer, Painter, Animator as `.deb`; NoCoGaMa as `.love` for both runtimes) onto
-  `EASYROMS`, names the missing ones with the command that builds them, flags builds older than their repo's last commit, and removes
-  macOS's `._` files. Tested with fake disks and a fake ports folder, and a dry run against the real repos (KlamANSI and Painter had no
-  build); **not yet run onto a real card.**
-- [x] **Refusal tried** (2026-11-07, on the maintainer's Mac): `flash-macos.sh <image> disk0 --dry-run` says "disk0 is an INTERNAL disk. Refusing." The happy path then ran on a real 128 GB card (2026-11-07): 2.4 GB written in 38 s, ejected. Whether that card boots is not yet known.
-- [x] **`scripts/capture-card.sh`** (2026-11-06, **never run on a card**; the MBR parsing is unit-tested on synthetic cards):
-  read-only copy of the bootloader, BOOT files, modules and firmware into `local_hardware_assets/`, plus a report.
-  `scripts/device-info.sh` runs on the R36S itself for the real kernel command line and controller mapping.
-- [ ] **First-boot resize** of ROOTFS to fill the card (the image is ~2.3 GB; `resize2fs` in a oneshot unit).
-- [ ] **Match the stock kernel command line:** the stock `boot.ini` or `extlinux.conf` names its own `root=`;
-  it must point at partition 2 (or `PARTUUID=52333669-02`). Found out in phase 1.
-
-## 6. Phase 5: bring-up on the R36S (needs the unit)
-
-- [x] **First boot reaches the menu** (2026-11-07, one R36S, 128 GB card, rebuilt image with the matching Mali blob): the menu is drawn on the panel. Still to check on hardware: backlight, D-pad and buttons, audio, a game, `.deb`, reboot.
-- [x] **Default apps** (2026-11-07): the R36S Input Checker (spec: `docs/R36S_Input_Checker_Specification.md`) as a LÖVE 11.5 app, a LÖVE 12.0 app
-  and a native ARM64 `.deb` (C, SDL2), built into the image at `/opt/loveos/defaults`; the menu and `deb_watcher.py` list them beside the card's
-  files. Tested on a laptop (logic, fake LÖVE, native draw and self-test); the `native` CI job and qemu smoke are new and **not yet green**.
-  **Not yet seen on a real R36S.** The checker is how the real button layout gets recorded (below).
+    - [x] **A file inside an archive opens from its listing, and xz and zstd are unpacked** (2026-11-10, maintainer's request; `apps/README.md`,
+      "Files inside archives"): `apps/commander-native/lzma.h` (xz: LZMA2, any number of streams and blocks; the integrity check is not
+      verified; BCJ and delta filters are refused) and `zstd.h` (all frames, no dictionary; the checksum is not verified), each with no
+      library, and `arc_members.h` (the members of a ZIP, a TAR plain or in gzip, xz or zstd, an ar archive and a `.deb`'s data part, and
+      one member's bytes). `.xz`, `.zst`, `.tar.xz`, `.tar.zst` and a `.deb` with xz or zstd parts are now listed and unpacked. On the
+      Contents tab a member is picked (Up/Down, L1/R1 page), **A** opens it in the viewer from a temporary file (up to 4 archives deep, **B** back to
+      the same member, the file removed) and **Start** extracts it to the other panel, never over a file there. Tested: `tests/test_unpack.sh`
+      (616 cases against the real `xz` and `zstd`: every level, block sizes, checks, lc/lp/pb, several streams and frames, tiny to 3 MB, a cap,
+      and cut-short and damaged files under AddressSanitizer/UBSan), `commander --selftest` (fixtures `tarxz`, `tarzst`, `xz`, `zst`, `deb_xz`,
+      `deb_zst`, `zip_nested`, `tar_many`: open, back, extract, nested, a folder, paging, a long name, cleanup), and the screens looked at
+      as pictures. **Untested on the unit:** how long a `.tar.xz` of tens of MiB takes to list and to open a member from (the list is read
+      again on the way back), and the temporary files in `$TMPDIR` or `/tmp` (the unit's `/tmp` must be writable by the menu's user).
+    - [ ] **Next:** more archives to pick from (RAR, Cabinet, cpio, LHA and ISO list their members but cannot give them; cpio and ISO store
+      files plain, so they are the easy ones; bzip2 and 7-Zip need a decoder); extract a whole folder or tagged members; progressive JPEG;
+      play a sound file (WAV, then the tracker formats through Neumetik?).
 - [ ] **Commander and the native IO Checker start black on the unit** (reported 2026-11-09; any key then brings the screen up, which
   confirms the cause: a frame presented once is not shown, `docs/hardware-findings.md`). Fix in the theme, untested there: each
   change is now presented 4 times (`r3_video_draw`, `docs/R3I6NOS-ANSIAPPS-THEME.md`). Confirm on the unit that both draw at once.
@@ -221,7 +98,9 @@ All of it goes in the gitignored `local_hardware_assets/`.
     - [x] **Sound back on the unit, and which path plays** (2026-11-10, the maintainer): the mixer's test music heard. `HP` plays from
       the speaker, and from a 3.5 mm headphone jack when headphones are in; `SPK` was silent; the volume keys work (in Neumetik).
       `r3i6nos-sound` now sets `HP` always (`docs/SOUND.md`).
-    - [ ] **3.5 mm headphones in before boot: TinyNTT silent until the mixer played a sound** (2026-11-10, the maintainer): after boot no
+    - [x] **Sound heard with headphones and on the built-in speaker** (2026-11-10, the maintainer: "sound appears to work as expected now,
+      with headphones and without"). Cold boot with headphones in, in TinyNTT: heard (below). USB headphones: not tried yet.
+    - [x] **3.5 mm headphones in before boot: TinyNTT silent until the mixer played a sound** (2026-11-10, the maintainer; **heard on a cold boot with the jack in, after the `HP` fix, the same day**; the cause was never pinned down): after boot no
       sound in TinyNTT; after Settings > Sound mixer's test tone/music (heard), TinyNTT had sound. So `HP` is set at boot but a stream
       does not come out until something in the menu has played; cause **not found**. Suspects: `apply()` skips the `cset` when the
       restored state already says `HP` (`current == want`), so the driver never does its power-up from `OFF`; or the path must be set
@@ -387,9 +266,13 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
   - [x] **The arm64 package in Debian 12 and its clean-room install** (2026-11-10, `r36s/package/docker-package.sh`): `Crunchy.deb`
     (2 MB; SDL2, libc, libm, libgcc_s; glibc 2.34 at most) built and smoke-tested, installed by `deb_watcher.py` in a clean Debian 12,
     and its device report there: 12 PASS, 1 FAIL (no pad under Docker), the trash test moved its file and put it back.
-- [ ] **On the unit:** Start > Device report, then bring back `EASYROMS/Crunchy/r36s-report.txt`: the trash on exFAT (`.Trash-1000`
-  owned through the mount's `uid=1000`), BLAKE3 and scan speed on the Cortex-A35 (goals 20 and 10 MB/s), memory. Then a real scan and a
-  Move to Trash and Undo by hand: the pad, how the lists read.
+- [x] **Crunchy's report from the unit** (2026-11-10 21:42, the maintainer): 14 PASS, 0 FAIL. The trash works on the exFAT card: a duplicate
+  was found (1 group of three 1 MB files, two identical), moved to the Trash in 64 ms by a rename into the card's `.Trash-1000` (nothing
+  copied) and put back by Undo. The hash cache is SQLite (WAL) on the system card's ext4 root. BLAKE3 118 MB/s from memory (goal 20). Scan of
+  the games card: 102 files (15.1 MB) in 0.1 s, 35 groups (380 KB to free), 1211 files a second. Peak memory 63 MB.
+  - [ ] **Read speed from the card is still unmeasured:** only 833 KB was read (the card holds little), so 9.9 MB/s is "too little to judge" (goal 10).
+    The exFAT card read 62 MB/s in r3i6nos's own report, so the goal is likely fine; confirm on a card with real files.
+- [ ] **On the unit, by hand:** a real scan, Move to Trash and Undo: the pad's A, B, X, Y, L1/R1 and Start doing what the foot says, how the lists read.
 - [ ] **Decide the release terms** (maintainer): `r36s/package/copyright` is Neumetik's free grant marked DRAFT; the desktop Crunchy is paid.
 - [ ] **Decide Empty the Trash** (maintainer): a move frees no space on the card until its `.Trash-1000` is emptied, and nothing on
   r3i6nos empties it; an Empty action would delete for good, which the desktop Crunchy never does (`docs/CRUNCHY-PORT.md`, decision 6).
@@ -408,10 +291,9 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
     and its device report there: 18 PASS, 1 FAIL (no pad under Docker). Under Docker on a Mac (not the unit): 48x to 130x real time,
     99% of 256-frame buffers in 5% of their time, press to sound about 18 ms with the dummy driver. The 2 GB build VM needs the crates
     compiled one at a time (`r36s/package/build-deb.sh` does it under 4 GB).
-- [ ] **On the unit:** Start > Device report, then bring back `EASYROMS/Chordica/r36s-report.txt`: the buffer ALSA gives (goal 512
-  frames or fewer), a press's wait for the callback and press to sound (goal 25 ms), the engine's speed at that buffer (goals 4x real
-  time and 99% of buffers in half their time; Neumetik's MIDI ran 18 times slower on the unit than on a Mac, which would put this at
-  about 2.4x), memory. Then play it: the pad mapping, how the grid reads on the panel.
+- [x] **Chordica's report from the unit** (2026-11-10 21:42, the maintainer): 17 PASS, **2 FAIL**. ALSA gave the 256 frames asked (5.8 ms), 211 callbacks in 1.2 s; a press waits 2.7 ms on average (5.6 ms worst) for the callback, press to sound about 17.2 ms (goal 25); callback load 25%; screen paint 5.0 ms; start-up 557 ms; peak memory 51 MB. Speed, both hands every eighth note at 140 bpm: Acoustic Grand Piano 4.6x real time (99% of buffers in 29% of their time) and Electric Bass 6.3x (22%) pass; **String Ensemble 1 fails: 2.1x (goal 4x), 99% of buffers in 62% of their time (goal 50%)**, slowest buffer 64%. No buffer ran over, so there is no underrun, only less headroom than the goal; a sustained pad keeps more voices sounding than a piano's decay does.
+  - [ ] **String Ensemble 1 (and likely the other sustained pads and strings) miss the speed goal:** decide to cap the voices of a held sound, make the goal per sound kind, or accept 62% (a longer buffer, 512, would halve the load per press but add about 6 ms). Then rerun the report; play a long held chord with both hands to hear whether it crackles.
+- [ ] **On the unit, by hand:** play it: the pad mapping, how the grid reads on the panel. (The report's figures are above.)
 - [ ] **Decide the release terms** (maintainer): `r36s/package/copyright` is Neumetik's free grant marked DRAFT; the desktop Chordica is sold.
 - [ ] **Decide the pad mapping** (maintainer, after playing it): rows by button, columns by shoulder, Select as M (`docs/CHORDICA-PORT.md`, section 3).
 - [x] **Committed in the Chordica repo** (2026-11-10, maintainer's request): after the work in progress there, in its own commit (decision 8).
@@ -428,7 +310,8 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
   copies the `.deb` to `native_deb/`. **Never run on an R36S.**
   - [x] **The arm64 package in Debian 12 and its clean-room install** (2026-11-10): `r36s/build-deb.sh --clean-room` built `TinyNTT.deb` (3.4 MB; needs SDL2, libc, libm, libgcc_s; newest glibc symbol 2.34) in Debian 12 arm64, its self-test passed there, `deb_watcher.py` installed it in a clean Debian 12 and the launcher ran it, and a device report there had 21 PASS and 2 FAIL (both for no pad under Docker). Those figures are a Mac's under Docker, not the unit's: 79x to 148x real time with up to 19 voices, every 256-frame buffer in under 5% of its time, a save in 43 ms, peak memory 14 MB. The Linux run found a bug the Mac did not (reopening the last song at start copied a path onto itself; fixed).
 - [x] **Device report on the unit** (2026-11-10, the maintainer): 24 PASS, 0 FAIL. the pad has 17 buttons and 4 axes, no hats (GUID 1900bb3e…); ALSA gave the 256 frames asked (about 12 ms to a note); speed with four busy tracks 5.2x (Metal, 19 voices), 7.2x (Funk) and 10.5x (Ambient) real time, 100% of buffers in half their time, slowest 1.48 ms of 5.80 ms; a save of 592 notes in 14 ms; a screen paint 4.6 ms; start-up 564 ms; peak memory 49 MB (the Debian 12 run said 14 MB, so that was low). The report does not say whether the sound was heard, or the Playback Path (see section 6's headphones item).
-- [ ] **On the unit, by hand (the report is in):** Files > Device report, then bring back `EASYROMS/TinyNTT/r36s-report.txt`: the pad's 17 buttons and 4 axes,
+- [x] **TinyNTT's report from the unit** (2026-11-10 21:40, the maintainer): 24 PASS, 0 FAIL. The pad has 17 buttons and 4 axes, no hats (GUID 1900bb3e…); SDL 2.26.5 on KMSDRM, ALSA gave the 256 frames asked (about 12 ms to a note), 175 callbacks in 1.0 s; speed with four busy tracks 5.1x (Metal, 19 voices), 7.2x (Funk) and 10.4x (Ambient) real time, 100% of buffers in half their time, slowest 1.56 ms of 5.80 ms; a save of 592 notes in 10 ms; a screen paint 4.7 ms; start-up 560 ms; peak memory 48 MB. The new sound-route lines show `output: card 0 (no USB card)`, path `HP`. Still by hand, below.
+- [ ] **On the unit, by hand (the sticks, Fn, the beat, the panel):** Files > Device report, then bring back `EASYROMS/TinyNTT/r36s-report.txt`: the pad's 17 buttons and 4 axes,
   the buffer ALSA gives (goal 512 frames or fewer), the engine's speed with four busy tracks (goals 2x real time, 99% of buffers in
   half their time), a save to the card (goal 1 s), memory. Then make a loop: the sticks' directions, Fn, whether recorded notes
   land on the beat (the two-buffer latency guess), how the piano roll reads on the panel.

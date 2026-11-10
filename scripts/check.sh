@@ -85,6 +85,10 @@ if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     done
 else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
 
+step "xz and zstd decoders (apps/commander-native/lzma.h, zstd.h)"
+if command -v cc >/dev/null; then tests/test_unpack.sh || fail=1
+else echo "NOT RUN: needs a C compiler"; fi
+
 step "theme video: presenting (theme/r3i6nos_ansiapps.h)"
 if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     tv_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-tv.XXXXXX")"

@@ -2,17 +2,21 @@
 """Make selftest_data.h: one small file of each format Commander's viewer reads, for `commander --selftest`.
 
 Every file is made here in code (pictures drawn from gradients, archives of a few words, a MIDI of four notes), so none of it is
-anyone else's work. Needs Python 3 and Pillow (for the JPEG, GIF, TGA, PCX and ICO writers); run it in Debian 12 under Docker:
+anyone else's work. Needs Python 3, Pillow (for the JPEG, GIF, TGA, PCX and ICO writers) and the `zstd` program (Python 3.9 has no zstd writer); run it
+in Debian 12 under Docker:
 
     docker run --rm -v "$PWD":/src -w /src debian:bookworm bash -c \
-        'apt-get update -qq && apt-get install -y -qq python3-pil >/dev/null && python3 apps/commander-native/make_selftest_data.py'
+        'apt-get update -qq && apt-get install -y -qq python3-pil zstd >/dev/null && python3 apps/commander-native/make_selftest_data.py'
 
 It also writes the pixels Pillow decodes from each picture, so the C decoders are checked against an independent one.
 """
 import io
+import lzma
 import os
+import shutil
 import sqlite3
 import struct
+import subprocess
 import tarfile
 import tempfile
 import wave
@@ -184,6 +188,56 @@ import gzip
 with gzip.GzipFile(filename="notes.txt", mode="wb", fileobj=gz, mtime=1700000000) as g:
     g.write(b"gzip says hello\n" * 4)
 add("gz", "notes.txt.gz", gz.getvalue())
+
+def zstd(data):
+    return subprocess.run([shutil.which("zstd") or "zstd", "-q", "-19", "-c"], input=data, stdout=subprocess.PIPE, check=True).stdout
+
+
+def tar_bytes(members):
+    t = io.BytesIO()
+    with tarfile.open(fileobj=t, mode="w", format=tarfile.USTAR_FORMAT) as tf:
+        for name, text in members:
+            ti = tarfile.TarInfo(name)
+            ti.size = len(text)
+            ti.mtime = 1700000000
+            tf.addfile(ti, io.BytesIO(text))
+    return t.getvalue()
+
+
+GAME = [("game/main.lua", b"print('hi')\n"), ("game/readme.txt", b"read me\n" * 10)]
+# archives to pick members from: a ZIP holding a folder, a TAR and a text file; a TAR with many members and a very long name
+inner = io.BytesIO()
+with zipfile.ZipFile(inner, "w", zipfile.ZIP_DEFLATED) as z:
+    z.writestr("inner/", b"")
+    z.writestr("inner/game.tar.gz", [x for x in files if x[0] == "targz"][0][2])
+    z.writestr("hello.txt", b"hello from inside a zip\n")
+add("zip_nested", "bundle.zip", inner.getvalue())
+LONG = "deep/" * 12 + "this-is-a-very-long-member-name.txt"
+add("tar_many", "many.tar.gz", gzip.compress(tar_bytes([("many/f%02d.txt" % i, b"file number %d\n" % i) for i in range(40)] + [(LONG, b"long name\n")]), mtime=1700000000))
+
+add("tarxz", "game.tar.xz", lzma.compress(tar_bytes(GAME), format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC32))
+add("tarzst", "game.tar.zst", zstd(tar_bytes(GAME)))
+add("xz", "notes.txt.xz", lzma.compress(b"xz says hello\n" * 6, format=lzma.FORMAT_XZ, check=lzma.CHECK_CRC64))
+add("zst", "notes.txt.zst", zstd(b"zstd says hello\n" * 6))
+
+
+def ar_bytes(members):
+    out = b"!<arch>\n"
+    for name, data in members:
+        out += (name + "/").ljust(16).encode() + b"1700000000  0     0     100644  " + str(len(data)).ljust(10).encode() + b"`\n" + data
+        if len(data) % 2:
+            out += b"\n"
+    return out
+
+
+CONTROL = b"Package: hello-test\nVersion: 1.2-3\nArchitecture: arm64\nMaintainer: Nobody <no@example.com>\nDescription: a test package\n"
+DATA = [("./usr/bin/hello", b"#!/bin/sh\necho hello\n"), ("./usr/share/doc/hello/README", b"hello docs\n" * 5)]
+add("deb_xz", "hello-test_1.2-3_arm64.deb", ar_bytes([("debian-binary", b"2.0\n"),
+    ("control.tar.xz", lzma.compress(tar_bytes([("./control", CONTROL)]), format=lzma.FORMAT_XZ)),
+    ("data.tar.xz", lzma.compress(tar_bytes(DATA), format=lzma.FORMAT_XZ))]))
+add("deb_zst", "hello-test_1.2-3_arm64_zst.deb", ar_bytes([("debian-binary", b"2.0\n"),
+    ("control.tar.zst", zstd(tar_bytes([("./control", CONTROL)]))),
+    ("data.tar.zst", zstd(tar_bytes(DATA)))]))
 
 with tempfile.TemporaryDirectory() as d:
     db = os.path.join(d, "t.db")

@@ -1,7 +1,7 @@
 /* fmt_archives.h: archives, packages and disk images for Commander (included by formats.h): what is inside them, listed on the
  * Content page, and their details on the Info page. ZIP (and everything built on it: LÖVE games, Office and OpenDocument files, EPUB,
  * jar/apk, msix, .mxl), TAR (plain or gzip), gzip, ar and Debian packages, RAR 4 and 5, Microsoft Cabinet, cpio, LHA, ISO 9660, RPM,
- * 7-Zip/bzip2/xz/zstd/lzip (details only: their data is not unpacked here), and partitioned disk images (MBR and GPT, with each
+ * 7-Zip/bzip2/lzip (details only: their data is not unpacked here), and xz and zstd (unpacked, so a .tar.xz and a .tar.zst are listed), and partitioned disk images (MBR and GPT, with each
  * partition's filesystem and label). */
 #ifndef COMMANDER_FMT_ARCHIVES_H
 #define COMMANDER_FMT_ARCHIVES_H
@@ -467,8 +467,17 @@ static unsigned long long tar_num(const uint8_t *s, size_t len) {
     return v;
 }
 
-/* A TAR in memory: each entry to t (if given); `want` names a member whose bytes are copied out (a .deb's control). */
-static int tar_walk(const uint8_t *b, size_t n, FText *t, const char *want, char **found, size_t *foundn, unsigned long long *total) {
+/* One member of an archive that can be opened from its listing (arc_members.h). */
+enum { AM_FILE, AM_DIR, AM_LINK, AM_OTHER };
+typedef struct {
+    char name[400], target[104], when[24];
+    uint64_t size, off;      /* a TAR's data offset in the unpacked bytes; an ar member's in the file */
+    int type;
+} ArcMem;
+typedef struct { ArcMem *m; int n, max; } ArcIdx;
+
+/* A TAR in memory: each entry to t (if given) and to ix (if given); `want` names a member whose bytes are copied out (a .deb's control). */
+static int tar_walk_ix(const uint8_t *b, size_t n, FText *t, const char *want, char **found, size_t *foundn, unsigned long long *total, ArcIdx *ix) {
     size_t p = 0;
     int count = 0;
     char longname[1024] = "";
@@ -508,6 +517,18 @@ static int tar_walk(const uint8_t *b, size_t n, FText *t, const char *want, char
                 if (type == '2') { char ln[200]; snprintf(ln, sizeof ln, "%.100s", (const char *)h + 157); text_line(t, "%10s  %s  %s -> %s", "link", when, name, ln); }
                 else list_line(t, size, when, name, type == '5');
             }
+            if (ix && ix->n < ix->max) {
+                ArcMem *am = &ix->m[ix->n++];
+                memset(am, 0, sizeof *am);
+                size_t nl = strlen(name); /* a name over 399 bytes is cut: meant */
+                if (nl > sizeof am->name - 1) nl = sizeof am->name - 1;
+                memcpy(am->name, name, nl);
+                unix_time_short((long long)tar_num(h + 136, 12), am->when, sizeof am->when);
+                am->size = size;
+                am->off = data;
+                am->type = type == '5' ? AM_DIR : type == '2' || type == '1' ? AM_LINK : (type == '0' || type == 0 || type == '7') ? AM_FILE : AM_OTHER;
+                if (am->type == AM_LINK) snprintf(am->target, sizeof am->target, "%.100s", (const char *)h + 157);
+            }
             if (want && found && !*found && (!strcmp(name, want) || (!strncmp(name, "./", 2) && !strcmp(name + 2, want)))) {
                 size_t l = data + size <= n ? (size_t)size : (data < n ? n - data : 0);
                 *found = (char *)malloc(l + 1);
@@ -518,6 +539,10 @@ static int tar_walk(const uint8_t *b, size_t n, FText *t, const char *want, char
     }
     if (t && count > FF_MAX_LIST) text_line(t, "... and %d more", count - FF_MAX_LIST);
     return count;
+}
+
+static int tar_walk(const uint8_t *b, size_t n, FText *t, const char *want, char **found, size_t *foundn, unsigned long long *total) {
+    return tar_walk_ix(b, n, t, want, found, foundn, total, NULL);
 }
 
 /* A whole gzip file unpacked (at most cap). */
@@ -536,6 +561,64 @@ static uint8_t *gunzip_file(const FFile *f, size_t cap, size_t *outn, int *cut) 
     out[got] = 0;
     *outn = (size_t)got;
     return out;
+}
+
+/* A whole .xz or .zst file unpacked (at most cap), the same way. A file over FF_MAX_LOAD is read only that far, and so may not unpack. */
+static uint8_t *unxz_file(const FFile *f, size_t cap, size_t *outn, int *cut) {
+    *outn = 0;
+    size_t n;
+    uint8_t *b = ff_load(f, 0, FF_MAX_LOAD, &n);
+    if (!b) return NULL;
+    uint8_t *out = (uint8_t *)malloc(cap + FI_XZ_SLACK + 1);
+    if (!out) { free(b); return NULL; }
+    long got = fi_unxz(b, n, out, cap, cut);
+    free(b);
+    if (got < 0) { free(out); return NULL; }
+    out[got] = 0;
+    *outn = (size_t)got;
+    return out;
+}
+
+static uint8_t *unzstd_file(const FFile *f, size_t cap, size_t *outn, int *cut) {
+    *outn = 0;
+    size_t n;
+    uint8_t *b = ff_load(f, 0, FF_MAX_LOAD, &n);
+    if (!b) return NULL;
+    uint8_t *out = (uint8_t *)malloc(cap + 1);
+    if (!out) { free(b); return NULL; }
+    long got = fi_unzstd(b, n, out, cap, cut);
+    free(b);
+    if (got < 0) { free(out); return NULL; }
+    out[got] = 0;
+    *outn = (size_t)got;
+    return out;
+}
+
+/* A single-file compressed file (.gz, .xz, .zst) unpacked; NULL if it is not one or is damaged. */
+static uint8_t *unpack_file(const FFile *f, int kind, size_t cap, size_t *outn, int *cut) {
+    switch (kind) {
+    case K_GZIP: return gunzip_file(f, cap, outn, cut);
+    case K_XZ: return unxz_file(f, cap, outn, cut);
+    case K_ZSTD: return unzstd_file(f, cap, outn, cut);
+    default: *outn = 0; return NULL;
+    }
+}
+
+/* Info rows for what a compressed file holds: a TAR's entry count, or text or binary data. */
+static void info_unpacked(const FFile *f, int kind, FInfo *in) {
+    size_t n;
+    int cut = 0;
+    uint8_t *u = unpack_file(f, kind, FF_LIST_UNPACK, &n, &cut);
+    if (u && n >= 512 && !memcmp(u + 257, "ustar", 5)) {
+        unsigned long long total = 0;
+        int c = tar_walk(u, n, NULL, NULL, NULL, NULL, &total);
+        info_add(in, "Contents", "a TAR archive, %d entries%s", c, cut ? " (in the part unpacked)" : "");
+    } else if (u) {
+        info_add(in, "Contents", "%s", ff_looks_text(u, n < 4096 ? n : 4096) ? "text" : "binary data");
+    } else {
+        info_add(in, "Contents", "could not be unpacked (damaged, or over 32 MiB)");
+    }
+    free(u);
 }
 
 static void info_gzip(const FFile *f, FInfo *in) {
@@ -619,7 +702,7 @@ static int ar_list(const FFile *f, ArEnt *out, int max) {
     return n;
 }
 
-/* The deb's member named prefix* unpacked, if it is gzip (or not compressed). Sets *how to its compression. */
+/* The deb's member named prefix* unpacked (gzip, xz or zstd, or not compressed). Sets *how to its compression. */
 static uint8_t *deb_member(const FFile *f, const ArEnt *ents, int n, const char *prefix, size_t *outn, const char **how) {
     *outn = 0;
     *how = "";
@@ -631,10 +714,11 @@ static uint8_t *deb_member(const FFile *f, const ArEnt *ents, int n, const char 
         uint8_t *c = ff_load(f, ents[i].off, ents[i].size, &cn);
         if (!c) return NULL;
         if (!*ext) { *outn = cn; return c; }
-        if (strcmp(ext, ".gz")) { free(c); return NULL; }
-        uint8_t *out = (uint8_t *)malloc(FF_LIST_UNPACK + 1);
+        int is_gz = !strcmp(ext, ".gz"), is_xz = !strcmp(ext, ".xz"), is_zst = !strcmp(ext, ".zst");
+        if (!is_gz && !is_xz && !is_zst) { free(c); return NULL; }
+        uint8_t *out = (uint8_t *)malloc(FF_LIST_UNPACK + (is_xz ? FI_XZ_SLACK : 0) + 1);
         if (!out) { free(c); return NULL; }
-        long got = fi_gunzip(c, cn, out, FF_LIST_UNPACK, NULL);
+        long got = is_gz ? fi_gunzip(c, cn, out, FF_LIST_UNPACK, NULL) : is_xz ? fi_unxz(c, cn, out, FF_LIST_UNPACK, NULL) : fi_unzstd(c, cn, out, FF_LIST_UNPACK, NULL);
         free(c);
         if (got < 0) { free(out); return NULL; }
         *outn = (size_t)got;
@@ -643,7 +727,7 @@ static uint8_t *deb_member(const FFile *f, const ArEnt *ents, int n, const char 
     return NULL;
 }
 
-static void deb_control(const FFile *f, FInfo *in, FText *t) {
+static void deb_control_ex(const FFile *f, FInfo *in, FText *t, int files) {
     ArEnt ents[16];
     int n = ar_list(f, ents, 16);
     size_t cn;
@@ -671,17 +755,19 @@ static void deb_control(const FFile *f, FInfo *in, FText *t) {
         if (t) { text_line(t, "-- control --"); text_add(t, control, ctln); text_line(t, "%s", ""); }
         free(control);
     } else if (in) {
-        info_add(in, "Note", "the control part is %s compressed; only gzip is unpacked here", how);
+        info_add(in, "Note", "the control part is %s compressed; gzip, xz and zstd are unpacked here", how);
     }
-    if (t) {
+    if (t && files) {
         size_t dn;
         uint8_t *data = deb_member(f, ents, n, "data.tar", &dn, &how);
         text_line(t, "-- files (data.tar, %s) --", how);
         if (data) tar_walk(data, dn, t, NULL, NULL, NULL, NULL);
-        else text_line(t, "not listed: only gzip is unpacked here");
+        else text_line(t, "not listed: %s is not unpacked here, or the part is damaged", how);
         free(data);
     }
 }
+
+static void deb_control(const FFile *f, FInfo *in, FText *t) { deb_control_ex(f, in, t, 1); }
 
 static void content_ar(const FFile *f, FText *t) {
     ArEnt *ents = (ArEnt *)malloc(sizeof(ArEnt) * FF_MAX_LIST);
@@ -1053,7 +1139,10 @@ static int info_archive(const FFile *f, int kind, FInfo *in) {
     case K_LZH: n = lzh_list(f, NULL, &total); fmt_bytes(total, a, sizeof a); info_add(in, "Contents", "%d files, %s unpacked", n, a); return 1;
     case K_7Z: if (f->hn > 8) info_add(in, "Version", "%d.%d", f->head[6], f->head[7]); info_add(in, "Contents", "not listed: 7-Zip's list is itself packed"); return 1;
     case K_BZIP2: if (f->hn > 4) info_add(in, "Block size", "%d00 KB", f->head[3] - '0'); return 1;
-    case K_XZ: if (f->hn > 8) { static const char *chk[] = {"none", "CRC32", "", "", "CRC64", "", "", "", "", "", "SHA-256"}; int c = f->head[7] & 15; info_add(in, "Check", "%s", c <= 10 && chk[c][0] ? chk[c] : "other"); } return 1;
+    case K_XZ:
+        if (f->hn > 8) { static const char *chk[] = {"none", "CRC32", "", "", "CRC64", "", "", "", "", "", "SHA-256"}; int c = f->head[7] & 15; info_add(in, "Check", "%s", c <= 10 && chk[c][0] ? chk[c] : "other"); }
+        info_unpacked(f, kind, in);
+        return 1;
     case K_ZSTD:
         if (f->hn > 6) {
             int fhd = f->head[4], fcs = fhd >> 6, single = (fhd >> 5) & 1, did = fhd & 3;
@@ -1065,6 +1154,7 @@ static int info_archive(const FFile *f, int kind, FInfo *in) {
                 info_add(in, "Unpacked", "%s (first frame)", a);
             }
         }
+        info_unpacked(f, kind, in);
         return 1;
     case K_LZIP: if (f->hn > 6) { int ds = f->head[5]; fmt_bytes((1ull << (ds & 31)) - ((1ull << (ds & 31)) / 16) * ((ds >> 5) & 7), a, sizeof a); info_add(in, "Dictionary", "%s", a); } return 1;
     case K_RPM: if (f->hn > 76) { info_field(in, "Package", f->head + 10, 66); info_add(in, "RPM version", "%d.%d", f->head[4], f->head[5]); } return 1;
@@ -1102,11 +1192,11 @@ static int content_archive(const FFile *f, int kind, FText *t, uint8_t **raw, si
         if (b) { tar_walk(b, len, t, NULL, NULL, NULL, NULL); if ((off_t)len < f->size) text_line(t, "... (only the first 32 MiB are listed)"); free(b); }
         return 1;
     }
-    case K_GZIP: {
+    case K_GZIP: case K_XZ: case K_ZSTD: {
         size_t len;
         int cut = 0;
-        uint8_t *u = gunzip_file(f, FF_LIST_UNPACK, &len, &cut);
-        if (!u) { text_line(t, "Could not be unpacked: damaged, or not gzip after all."); return 1; }
+        uint8_t *u = unpack_file(f, kind, FF_LIST_UNPACK, &len, &cut);
+        if (!u) { text_line(t, "Could not be unpacked: damaged, over 32 MiB, or not %s after all.", kind == K_GZIP ? "gzip" : kind == K_XZ ? "xz" : "zstd"); return 1; }
         if (len >= 512 && !memcmp(u + 257, "ustar", 5)) {
             tar_walk(u, len, t, NULL, NULL, NULL, NULL);
             if (cut) text_line(t, "... (only the first 48 MiB unpacked are listed)");

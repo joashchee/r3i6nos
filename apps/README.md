@@ -72,7 +72,7 @@ the art or the contents when there is one, else the text, else Hex for unknown b
 | **Info** | the type and category, the exact size, and that format's details (below) |
 | **Picture** | PNG (every colour type and depth, interlaced), JPEG (baseline; a big photo is decoded at 1/8 size, which is still sharper than the screen; EXIF orientation applied), GIF (first frame), BMP (1-32 bits, RLE), ICO/CUR, TGA, QOI, PCX, PBM/PGM/PPM, drawn over the whole display view: a small one enlarged by a whole number, a big one shrunk, transparency on a dark checkerboard |
 | **Art** | ANSI art (escape codes, iCE colours, 256 and 24-bit colours brought to the 16), NFO and DIZ (code page 437), BIN, XBin (its palette and font, packed or not), ArtWorx ADF, iCE Draw IDF: drawn with the VGA font at its own 8x16, 25 rows a page (wider art in narrower cells, so nothing scrolls sideways) |
-| **Contents** / **Text** / ... | what is inside: the files of a ZIP (and LÖVE `.love`, jar/apk, msix, `.mxl`), TAR, `.tar.gz`, RAR 4/5, Cabinet, cpio, LHA, ar, ISO 9660 (the top folder); a `.deb`'s control file and file list; a disk image's partitions (MBR or GPT) with each one's filesystem and label; the text of a PDF, RTF, HTML, docx/pptx/xlsx, odt and EPUB; a `.gz` unpacked; a tracker module's instrument names and message; a MIDI's names, lyrics and markers; an SQLite database's tables; a dBase table's fields; a program's libraries |
+| **Contents** / **Text** / ... | what is inside: the files of a ZIP (and LÖVE `.love`, jar/apk, msix, `.mxl`), TAR, `.tar.gz`, `.tar.xz`, `.tar.zst`, RAR 4/5, Cabinet, cpio, LHA, ar, ISO 9660 (the top folder); a `.deb`'s control file and file list; a disk image's partitions (MBR or GPT) with each one's filesystem and label; the text of a PDF, RTF, HTML, docx/pptx/xlsx, odt and EPUB; a `.gz`, `.xz` or `.zst` unpacked; a tracker module's instrument names and message; a MIDI's names, lyrics and markers; an SQLite database's tables; a dBase table's fields; a program's libraries |
 | **Text** (**Source** next to a document's Text) | the file as text: UTF-8, UTF-16 with a byte-order mark, or code page 437 byte for byte when it is not UTF-8 (DOS text and NFO files) |
 | **Hex** | the bytes (the first 4 MiB) |
 
@@ -91,7 +91,7 @@ What **Info** knows, by family:
   AVI (size, frame rate, length, codecs), FLV, MPEG.
 - **Archives and disks:** the counts and sizes above, compression ratio, encryption, comments; Office/OpenDocument/EPUB properties
   (title, author, dates, pages, words); a `.love`'s title and save folder from `conf.lua` (and whether `main.lua` is there); a `.deb`'s
-  package, version, architecture and description; zstd, xz, bzip2, lzip, 7-Zip, RPM details; ISO volume, publisher, El Torito, Joliet.
+  package, version, architecture and description; bzip2, lzip, 7-Zip, RPM details (xz and zstd are unpacked: their Info says what is inside); ISO volume, publisher, El Torito, Joliet.
 - **Programs:** ELF kind, machine, loader, libraries, stripped or not, and **whether it runs on the R36S** (ARM64 Linux; 32-bit ARM and
   other machines are named as not); Windows PE (machine, GUI or console, .NET, build date), Mach-O, Java class version, WebAssembly, Lua
   and LuaJIT bytecode, scripts' interpreters.
@@ -102,11 +102,22 @@ What **Info** knows, by family:
 - **Text:** encoding, lines and the longest line, words, line endings, JSON well-formedness, CSV columns, XML root element, and counts
   for subtitles, playlists, calendars, contacts, cue sheets.
 
-Everything reads with limits (32 MiB read for one page, 16 MiB unpacked from one member, 48 MiB to list a `.tar.gz`, 5,000 entries
-listed, 24 megapixels decoded), so a huge or damaged file gives a shorter page, never a crash. Nothing is written. Not done: 7-Zip,
-xz, zstd, bzip2 and Brotli data are not unpacked (their archives are named and described, not listed), progressive and arithmetic-coded
-JPEGs, HEIC/AVIF/WebP pictures and video frames are described but not drawn, sound is not played, and a file inside an archive cannot be
-opened from the listing yet.
+Everything reads with limits (32 MiB read for one page, 16 MiB unpacked from one member, 48 MiB to list a `.tar.gz`, `.tar.xz` or
+`.tar.zst`, 5,000 entries listed, 24 megapixels decoded), so a huge or damaged file gives a shorter page, never a crash. Nothing is
+written, except what Start does (below). Not done: 7-Zip, bzip2 and Brotli data are not unpacked (their archives are named and
+described, not listed), progressive and arithmetic-coded JPEGs, HEIC/AVIF/WebP pictures and video frames are described but not drawn,
+and sound is not played.
+
+**Files inside archives.** On the Contents tab of a ZIP (and `.love`, jar/apk, msix), a TAR (plain, `.tar.gz`, `.tar.xz`, `.tar.zst`),
+an `ar` archive or a `.deb` (its data part's files, under the control file), one member is picked, shown in the select colours, and
+**Up/Down** move the pick (the page follows it), **L1/R1** go a page, **L2/R2** to the first and last member. **A** takes the picked
+member out into a temporary file and opens it in the viewer, as any other file (a picture, text, another archive, up to 4 deep);
+**B** goes back to the list at the same member, and the temporary file is removed. **Start** (Tab, F1 or `s` on a keyboard) extracts
+the member into the other panel's folder under its own name, without its folders, and never over a file that is already there
+(it says so). A folder, a link, an encrypted member, one packed by a method that is not supported (ZIP's deflate and stored are) and
+one over 48 MiB say why they cannot be opened. A document in a ZIP (docx, odt, EPUB) still shows its text instead. RAR, Cabinet, LHA,
+cpio, ISO and 7-Zip list their members but cannot give them yet. Reopening the list after B reads the archive again, so a big
+`.tar.xz` takes the same few seconds on the way back as on the way in (on the unit: untested).
 
 **What it will and won't do:** copy and move go to the other panel's folder and **never overwrite**: a name that already exists is skipped and
 counted in the result. Delete asks first with **No** preselected, says when folders are included, and never follows a link (a link is

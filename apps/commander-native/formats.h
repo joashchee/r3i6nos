@@ -31,6 +31,8 @@
 
 #include "images.h"
 #include "inflate.h"
+#include "lzma.h"
+#include "zstd.h"
 
 #define FF_HEAD 4096
 #define FF_MAX_LOAD (32u * 1024u * 1024u)  /* the most read into memory for one page */
@@ -560,6 +562,7 @@ static FType ff_identify(const FFile *f) {
 
 #include "fmt_media.h"
 #include "fmt_archives.h"
+#include "arc_members.h"
 #include "fmt_misc.h"
 
 #endif

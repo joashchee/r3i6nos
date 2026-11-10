@@ -740,12 +740,15 @@ typedef struct {
     Art art;
     int art_page;
     unsigned gen;              /* changes whenever the pixels shown change */
+    Arc arc;                   /* the members of an archive, when the Contents tab is a list to pick from */
+    int has_arc, arc_tab, arc_line0, sel; /* the tab, the line the first member is on, and the member picked */
 } Viewer;
 
 static void viewer_free(Viewer *w) {
     for (int i = 0; i < w->ntabs; i++) view_free(&w->tab[i].v);
     img_free(&w->pic);
     art_free(&w->art);
+    arc_free(&w->arc);
     unsigned gen = w->gen;
     memset(w, 0, sizeof *w);
     w->gen = gen + 1;
@@ -803,8 +806,47 @@ static int is_picture_kind(int k) {
 
 static int is_art_kind(int k) { return k == K_ANSI || k == K_BINART || k == K_XBIN || k == K_ADF || k == K_IDF; }
 
+/* An archive's members as lines, one each (a long name keeps its end, after "..."), so the line a member is on is its number plus the
+ * lines before it. A .deb's control file and a heading come first. Returns the line the first member is on. */
+static int view_from_members(View *v, const Arc *arc, const FText *head) {
+    if (head && head->s && head->n) view_from_bytes(v, (const unsigned char *)head->s, head->n, AS_TEXT);
+    if (v->n == 1 && v->len[0] == 0) v->n = 0; /* view_from_bytes makes one empty line for nothing */
+    if (arc->note[0]) {
+        int line = view_line(v);
+        if (line >= 0) for (const char *c = arc->note; *c; c++) view_put(v, line, (unsigned char)*c);
+    }
+    int line0 = v->n;
+    for (int i = 0; i < arc->n; i++) {
+        const ArcMem *m = &arc->m[i];
+        int line = view_line(v);
+        if (line < 0) break;
+        char sz[16], head_s[48];
+        if (m->type == AM_DIR) snprintf(sz, sizeof sz, "<DIR>");
+        else if (m->type == AM_LINK) snprintf(sz, sizeof sz, "link");
+        else fmt_bytes(m->size, sz, sizeof sz);
+        int hn = snprintf(head_s, sizeof head_s, "%9s  %-16.16s  ", sz, m->when);
+        for (int c = 0; c < hn; c++) view_put(v, line, (unsigned char)head_s[c]);
+        unsigned char cells[420];
+        int nn = r3_decode(m->name, cells, (int)sizeof cells);
+        int room = VIEW_W - hn;
+        if (nn <= room) { for (int c = 0; c < nn; c++) view_put(v, line, cells[c]); }
+        else {
+            for (int c = 0; c < 3; c++) view_put(v, line, '.');
+            for (int c = nn - (room - 3); c < nn; c++) view_put(v, line, cells[c]);
+        }
+    }
+    if (arc->more > 0) {
+        int line = view_line(v);
+        char more[48];
+        snprintf(more, sizeof more, "... and %d more", arc->more);
+        if (line >= 0) for (const char *c = more; *c; c++) view_put(v, line, (unsigned char)*c);
+    }
+    if (v->n == 0) view_line(v);
+    return line0;
+}
+
 /* Open a file in the viewer: work out what it is, then make its tabs. Returns -1 (and err) only when it cannot be read at all. */
-static int viewer_open(Viewer *w, const char *path, char *err, size_t errsz) {
+static int viewer_open_as(Viewer *w, const char *path, const char *title, char *err, size_t errsz) {
     viewer_free(w);
     FFile f;
     if (ff_open(&f, path, err, errsz) != 0) {
@@ -814,7 +856,7 @@ static int viewer_open(Viewer *w, const char *path, char *err, size_t errsz) {
         return -1;
     }
     copy_str(w->path, sizeof w->path, path);
-    copy_str(w->title, sizeof w->title, base_name(path));
+    copy_str(w->title, sizeof w->title, title ? title : base_name(path));
     w->filesize = f.size;
     w->type = ff_identify(&f);
     int k = w->type.kind;
@@ -842,6 +884,18 @@ static int viewer_open(Viewer *w, const char *path, char *err, size_t errsz) {
         char why[160];
         if (art_load(&w->art, &f, k, why, sizeof why) == 0) { content = w->ntabs; viewer_add(w, TAB_ART, "Art"); }
         else info_add(&info, "Art", "not shown: %s", why);
+    }
+    if (content < 0 && arc_kind_listable(k) && arc_open(&w->arc, path, k) == 0 && w->arc.n > 0) {
+        FText head = {0, 0, 0, 0, 0};
+        if (k == K_DEB) deb_control_ex(&f, NULL, &head, 0);
+        content = w->ntabs;
+        w->has_arc = 1;
+        w->arc_tab = content;
+        Tab *c = viewer_add(w, TAB_LINES, "Contents");
+        w->arc_line0 = view_from_members(&c->v, &w->arc, &head);
+        text_free(&head);
+    } else if (content < 0) {
+        arc_free(&w->arc);
     }
     if (content < 0) {
         FText txt = {0, 0, 0, 0, 0};
@@ -875,8 +929,11 @@ static int viewer_open(Viewer *w, const char *path, char *err, size_t errsz) {
     for (int i = 0; i < w->ntabs; i++) w->tab[i].v.filesize = w->filesize;
     int first = content >= 0 ? content : text >= 0 ? text : (k == K_UNKNOWN || k == K_EMPTY) ? hex : 0;
     viewer_show(w, first, err, errsz);
+    if (w->has_arc) set_page(w, w->arc_line0 / VIEW_ROWS);
     return 0;
 }
+
+static int viewer_open(Viewer *w, const char *path, char *err, size_t errsz) { return viewer_open_as(w, path, NULL, err, errsz); }
 
 /* The pixels over the display view while a picture or art tab shows. */
 static void viewer_overlay(const Viewer *w, uint32_t *px) {
@@ -905,6 +962,12 @@ static const struct { const char *label, *key; } MENU[C_COUNT] = {
     {"Other panel: this folder", ""}, {"Quit", "F10"},
 };
 
+#define VIEW_DEPTH 4
+typedef struct {
+    char path[PATH_MAX], title[256], tmpfile[PATH_MAX], tmpdir[PATH_MAX];
+    int sel, tab, page;
+} ViewFrame;
+
 typedef struct {
     Pane p[2];
     int act;
@@ -922,6 +985,9 @@ typedef struct {
     char in_prompt[200], in_old[256];
     /* the viewer and the running job */
     Viewer view;
+    ViewFrame vstack[VIEW_DEPTH]; /* the archives above the file in the viewer, which B goes back to */
+    int vdepth;
+    char vtmpfile[PATH_MAX], vtmpdir[PATH_MAX]; /* the viewer's file when it was taken out of an archive */
     Job job;
     int job_active;
     char **job_srcs;
@@ -952,6 +1018,152 @@ static void refresh_all(App *a) {
     refresh(a, 1, NULL);
 }
 
+/* ---- opening and extracting an archive's members from the viewer's Contents list ---------------------------------------------- */
+
+static void tmp_remove(char *file, char *dir) {
+    if (file[0]) unlink(file);
+    if (dir[0]) rmdir(dir);
+    file[0] = dir[0] = 0;
+}
+
+/* Close the viewer and every archive above it, taking away the files made to show members. */
+static void viewer_close_all(App *a) {
+    viewer_free(&a->view);
+    tmp_remove(a->vtmpfile, a->vtmpdir);
+    for (int i = 0; i < a->vdepth; i++) tmp_remove(a->vstack[i].tmpfile, a->vstack[i].tmpdir);
+    a->vdepth = 0;
+}
+
+/* B in the viewer: back to the archive a member was opened from, or out of the viewer. */
+static void viewer_up(App *a) {
+    if (a->vdepth == 0) { a->mode = M_BROWSE; viewer_free(&a->view); return; }
+    ViewFrame *fr = &a->vstack[--a->vdepth];
+    tmp_remove(a->vtmpfile, a->vtmpdir);
+    char err[256];
+    if (viewer_open_as(&a->view, fr->path, fr->title, err, sizeof err) != 0) {
+        say(a, R3_ST_ERROR, "%s", err);
+        tmp_remove(fr->tmpfile, fr->tmpdir);
+        viewer_close_all(a);
+        a->mode = M_BROWSE;
+        return;
+    }
+    copy_str(a->vtmpfile, sizeof a->vtmpfile, fr->tmpfile);
+    copy_str(a->vtmpdir, sizeof a->vtmpdir, fr->tmpdir);
+    fr->tmpfile[0] = fr->tmpdir[0] = 0;
+    char e2[64] = "";
+    viewer_show(&a->view, fr->tab, e2, sizeof e2);
+    if (a->view.has_arc) {
+        a->view.sel = fr->sel < a->view.arc.n ? fr->sel : 0;
+        set_page(&a->view, fr->page);
+    }
+}
+
+/* A member's name as a plain file name: what follows the last /, with nothing a file system would refuse for control characters. */
+static void member_file_name(const char *name, char *out, size_t cap) {
+    const char *b = strrchr(name, '/');
+    b = b ? b + 1 : name;
+    size_t k = 0;
+    for (; *b && k + 1 < cap && k < 200; b++) out[k++] = (unsigned char)*b < 32 || *b == 127 ? '_' : *b;
+    out[k] = 0;
+    if (!k || !strcmp(out, ".") || !strcmp(out, "..")) copy_str(out, cap, "member");
+}
+
+static int write_file_excl(const char *path, const uint8_t *b, size_t n, mode_t mode) {
+    int fd = open(path, O_WRONLY | O_CREAT | O_EXCL, mode);
+    if (fd < 0) return -1;
+    size_t done = 0;
+    while (done < n) {
+        ssize_t w = write(fd, b + done, n - done);
+        if (w < 0) { if (errno == EINTR) continue; int e = errno; close(fd); unlink(path); errno = e; return -1; }
+        done += (size_t)w;
+    }
+    if (close(fd) != 0) { int e = errno; unlink(path); errno = e; return -1; }
+    return 0;
+}
+
+/* A on a member: take it out into a temporary file and open that in the viewer; B comes back to the list. */
+static void member_open(App *a) {
+    Viewer *w = &a->view;
+    if (w->sel < 0 || w->sel >= w->arc.n) return;
+    const ArcMem *m = &w->arc.m[w->sel];
+    char fname[256], why[160];
+    member_file_name(m->name, fname, sizeof fname);
+    if (a->vdepth >= VIEW_DEPTH) { say(a, R3_ST_WARN, "Archives inside archives open %d deep at most", VIEW_DEPTH); return; }
+    size_t n;
+    uint8_t *b = arc_read(&w->arc, w->sel, &n, why, sizeof why);
+    if (!b) { say(a, R3_ST_WARN, "%s: %s", fname, why); return; }
+    const char *root = getenv("TMPDIR");
+    char dir[PATH_MAX], file[PATH_MAX];
+    snprintf(dir, sizeof dir, "%s/commander-XXXXXX", root && *root ? root : "/tmp");
+    if (!mkdtemp(dir)) { say(a, R3_ST_ERROR, "Cannot make a temporary folder: %s", strerror(errno)); free(b); return; }
+    path_join(file, sizeof file, dir, fname);
+    if (write_file_excl(file, b, n, 0600) != 0) {
+        say(a, R3_ST_ERROR, "Cannot write a temporary file: %s", strerror(errno));
+        rmdir(dir);
+        free(b);
+        return;
+    }
+    free(b);
+    char title[256];
+    const char *parent = strstr(w->title, " > ");
+    while (parent && strstr(parent + 3, " > ")) parent = strstr(parent + 3, " > ");
+    snprintf(title, sizeof title, "%.60s > %.150s", parent ? parent + 3 : w->title, m->name);
+    ViewFrame *fr = &a->vstack[a->vdepth];
+    copy_str(fr->path, sizeof fr->path, w->path);
+    copy_str(fr->title, sizeof fr->title, w->title);
+    copy_str(fr->tmpfile, sizeof fr->tmpfile, a->vtmpfile);
+    copy_str(fr->tmpdir, sizeof fr->tmpdir, a->vtmpdir);
+    fr->sel = w->sel;
+    fr->tab = w->cur;
+    fr->page = page_of(w);
+    a->vdepth++;
+    copy_str(a->vtmpfile, sizeof a->vtmpfile, file);
+    copy_str(a->vtmpdir, sizeof a->vtmpdir, dir);
+    char err[256];
+    if (viewer_open_as(w, file, title, err, sizeof err) != 0) {
+        viewer_up(a); /* back to the list, and the file made for it is removed */
+        say(a, R3_ST_ERROR, "%s", err);
+    }
+}
+
+/* Start on a member: write it into the other panel's folder, under its own name; never over a file that is there. */
+static void member_extract(App *a) {
+    Viewer *w = &a->view;
+    if (w->sel < 0 || w->sel >= w->arc.n) return;
+    const ArcMem *m = &w->arc.m[w->sel];
+    char fname[256], why[160], dest[PATH_MAX];
+    member_file_name(m->name, fname, sizeof fname);
+    size_t n;
+    uint8_t *b = arc_read(&w->arc, w->sel, &n, why, sizeof why);
+    if (!b) { say(a, R3_ST_WARN, "%s: %s", fname, why); return; }
+    Pane *to = other(a);
+    path_join(dest, sizeof dest, to->path, fname);
+    struct stat st;
+    if (lstat(dest, &st) == 0) { say(a, R3_ST_WARN, "%s is already in the other panel: not overwritten", fname); free(b); return; }
+    if (write_file_excl(dest, b, n, 0644) != 0) { say(a, R3_ST_ERROR, "Cannot extract %s: %s", fname, strerror(errno)); free(b); return; }
+    free(b);
+    char sz[16];
+    fmt_size(n, sz, sizeof sz);
+    say(a, R3_ST_OK, "Extracted %s (%s bytes) to the other panel", fname, sz);
+    refresh(a, 1 - a->act, fname);
+}
+
+/* Up/Down pick the member above or below; L1/R1 a page. The page follows the pick. */
+static void list_move(Viewer *w, int action) {
+    int n = w->arc.n, sel = w->sel;
+    if (action == R3_UP) sel--;
+    else if (action == R3_DOWN) sel++;
+    else if (action == R3_PAGEUP) sel -= VIEW_ROWS;
+    else if (action == R3_PAGEDOWN) sel += VIEW_ROWS;
+    else if (action == R3_HOME) sel = 0;
+    else if (action == R3_END) sel = n - 1;
+    if (sel < 0) sel = 0;
+    if (sel > n - 1) sel = n - 1;
+    w->sel = sel;
+    if (action == R3_HOME) set_page(w, 0);
+    else set_page(w, (w->arc_line0 + sel) / VIEW_ROWS);
+}
+
 static void app_init(App *a, const char *left, const char *right) {
     char err[256];
     memset(a, 0, sizeof *a);
@@ -966,7 +1178,7 @@ static void app_init(App *a, const char *left, const char *right) {
 static void app_free(App *a) {
     pane_free(&a->p[0]);
     pane_free(&a->p[1]);
-    viewer_free(&a->view);
+    viewer_close_all(a);
     job_free(&a->job);
     for (int i = 0; i < a->job_nsrcs; i++) free(a->job_srcs[i]);
     free(a->job_srcs);
@@ -1293,7 +1505,14 @@ static void app_action(App *a, int action) {
     case M_VIEW: {
         Viewer *w = &a->view;
         char err[256] = "";
-        if (action == R3_BACK || action == R3_ACCEPT) { a->mode = M_BROWSE; viewer_free(w); break; }
+        int on_list = w->has_arc && w->cur == w->arc_tab;
+        if (on_list && action == R3_ACCEPT) { member_open(a); break; }
+        if (on_list && action == R3_MORE) { member_extract(a); break; }
+        if (action == R3_BACK || action == R3_ACCEPT) { viewer_up(a); break; }
+        if (on_list && (action == R3_UP || action == R3_DOWN || action == R3_PAGEUP || action == R3_PAGEDOWN || action == R3_HOME || action == R3_END)) {
+            list_move(w, action);
+            break;
+        }
         if (action == R3_LEFT || action == R3_Y) viewer_show(w, (w->cur + w->ntabs - 1) % w->ntabs, err, sizeof err);
         else if (action == R3_RIGHT || action == R3_X) viewer_show(w, (w->cur + 1) % w->ntabs, err, sizeof err);
         else if (action == R3_UP || action == R3_PAGEUP) set_page(w, page_of(w) - 1);
@@ -1444,6 +1663,11 @@ static void app_compose(const App *a, R3Screen *s) {
                 int ln = v->page * VIEW_ROWS + r;
                 if (ln >= v->n) break;
                 const unsigned char *cells = v->cells + (size_t)ln * VIEW_W, *fg = v->fg + (size_t)ln * VIEW_W;
+                if (w->has_arc && w->cur == w->arc_tab && ln == w->arc_line0 + w->sel) { /* the member picked */
+                    r3_fill(s, 1, R3_DISPLAY_TOP + 1 + r, VIEW_W, 1, 32, R3_ST(R3_ST_SELECT));
+                    for (int c = 0; c < v->len[ln]; c++) r3_put(s, 1 + c, R3_DISPLAY_TOP + 1 + r, cells[c], r3_styles[R3_ST_SELECT][0], r3_styles[R3_ST_SELECT][1]);
+                    continue;
+                }
                 for (int c = 0; c < v->len[ln]; c++) r3_put(s, 1 + c, R3_DISPLAY_TOP + 1 + r, cells[c], fg[c] ? fg[c] : R3_LIGHT_GRAY, R3_BLACK);
             }
         } else {
@@ -1458,7 +1682,8 @@ static void app_compose(const App *a, R3Screen *s) {
         else snprintf(left, sizeof left, "%s, %s bytes", w->type.label, sz);
         static char reply[160];
         if (t->kind != TAB_LINES) snprintf(reply, sizeof reply, "%s  Left/Right tab", tabs);
-        else snprintf(reply, sizeof reply, "%s", t->v.truncated ? "Only the first part is shown" : "Left/Right tab  Up/Down page  B close");
+        else if (w->has_arc && w->cur == w->arc_tab) snprintf(reply, sizeof reply, "Up/Down pick  A open  Start extract  B %s", a->vdepth ? "back" : "close");
+        else snprintf(reply, sizeof reply, "%s", t->v.truncated ? "Only the first part is shown" : a->vdepth ? "Left/Right tab  Up/Down page  B back" : "Left/Right tab  Up/Down page  B close");
         c.reply = a->reply[0] && a->reply_style == R3_ST_ERROR ? a->reply : reply;
         c.reply_style = a->reply[0] && a->reply_style == R3_ST_ERROR ? R3_ST_ERROR : (t->kind == TAB_LINES && t->v.truncated ? R3_ST_WARN : R3_ST_HINT);
         c.line = w->title;
@@ -2130,7 +2355,7 @@ static void test_formats(const char *root) {
     static const struct { const char *id; int kind; } kinds[] = {
         {"jpeg_base", K_JPEG}, {"jpeg_prog", K_JPEG}, {"png_rgba", K_PNG}, {"png_adam7", K_PNG}, {"gif", K_GIF}, {"bmp8", K_BMP}, {"tga", K_TGA},
         {"pcx", K_PCX}, {"ppm", K_PNM}, {"ico", K_ICO}, {"qoi", K_QOI}, {"wav", K_WAV}, {"midi", K_MIDI}, {"mod", K_MOD}, {"mp3", K_MP3},
-        {"flac", K_FLAC}, {"docx", K_OOXML}, {"targz", K_GZIP}, {"gz", K_GZIP}, {"sqlite", K_SQLITE}, {"pdf", K_PDF}, {"rtf", K_RTF},
+        {"flac", K_FLAC}, {"docx", K_OOXML}, {"targz", K_GZIP}, {"gz", K_GZIP}, {"tarxz", K_XZ}, {"xz", K_XZ}, {"tarzst", K_ZSTD}, {"zst", K_ZSTD}, {"deb_xz", K_DEB}, {"deb_zst", K_DEB}, {"sqlite", K_SQLITE}, {"pdf", K_PDF}, {"rtf", K_RTF},
         {"html", K_HTML}, {"mbr", K_DISK}, {"ansi", K_ANSI}, {"xbin", K_XBIN},
     };
     for (size_t i = 0; i < sizeof kinds / sizeof kinds[0]; i++) {
@@ -2152,6 +2377,9 @@ static void test_formats(const char *root) {
     CHECK(fx_info("docx", "Title", "Docx title") && fx_info("docx", "Author", "Commander"), "docx properties");
     CHECK(fx_info("targz", "Contents", "a TAR archive, 2 entries"), "tar.gz holds a TAR");
     CHECK(fx_info("gz", "Original name", "notes.txt") && fx_info("gz", "Unpacked", "64 B"), "gzip name and size");
+    CHECK(fx_info("tarxz", "Contents", "a TAR archive, 2 entries") && fx_info("xz", "Contents", "text") && fx_info("xz", "Check", "CRC64"), ".tar.xz holds a TAR; an .xz of text");
+    CHECK(fx_info("tarzst", "Contents", "a TAR archive, 2 entries") && fx_info("zst", "Contents", "text"), ".tar.zst holds a TAR; a .zst of text");
+    CHECK(fx_info("deb_xz", "Package", "hello-test") && fx_info("deb_xz", "Control part", "xz") && fx_info("deb_zst", "Package", "hello-test") && fx_info("deb_zst", "Control part", "zstd"), "a .deb's control part in xz and in zstd");
     CHECK(fx_info("sqlite", "Tables", "songs") && fx_info("sqlite", "Schema", "1 tables, 1 indexes"), "SQLite schema");
     CHECK(fx_info("pdf", "Pages", "2") && fx_info("pdf", "Title", "PDF title") && fx_info("pdf", "Author", "Ann"), "PDF pages and info");
     CHECK(fx_info("rtf", "Title", "RTF title"), "RTF title");
@@ -2163,6 +2391,9 @@ static void test_formats(const char *root) {
     CHECK(fx_content("docx", "Hello from a docx") && fx_content("docx", "Second & last"), "docx text");
     CHECK(fx_content("targz", "game/main.lua") && fx_content("targz", "game/readme.txt"), "tar.gz listing");
     CHECK(fx_content("gz", "gzip says hello"), "gzip unpacked");
+    CHECK(fx_content("tarxz", "game/main.lua") && fx_content("tarxz", "game/readme.txt") && fx_content("xz", "xz says hello"), ".tar.xz listed, .xz unpacked");
+    CHECK(fx_content("tarzst", "game/main.lua") && fx_content("tarzst", "game/readme.txt") && fx_content("zst", "zstd says hello"), ".tar.zst listed, .zst unpacked");
+    CHECK(fx_content("deb_xz", "usr/bin/hello") && fx_content("deb_xz", "Version: 1.2-3") && fx_content("deb_zst", "usr/bin/hello") && fx_content("deb_zst", "Version: 1.2-3"), "a .deb's files and control, xz and zstd");
     CHECK(fx_content("pdf", "Hello PDF") && fx_content("pdf", "Second page"), "PDF text, plain and Flate");
     CHECK(fx_content("rtf", "Hello RTF") && fx_content("rtf", "Caf\xC3\xA9") && !fx_content_q("rtf", "Arial;", 1), "RTF text without the font table");
     CHECK(fx_content("html", "One & two") && fx_content("html", "Heading"), "HTML text");
@@ -2246,6 +2477,124 @@ static void test_formats(const char *root) {
 #endif
 }
 
+/* Opening a file inside an archive from the viewer's Contents list, and extracting it to the other panel. */
+static void test_archive_members(const char *root) {
+    char out[PATH_MAX], dest[PATH_MAX], body[256];
+    path_join(out, sizeof out, root, "extracted");
+    CHECK(mkdir_p(out) == 0, "extract folder");
+    App a;
+    app_init(&a, g_fxdir, out);
+    R3Screen s;
+
+    /* a tar.gz: the list, picking, opening a member, and back */
+    CHECK(start_viewer(&a, fx_path("targz"), 0, 0) == 0 && a.view.has_arc && a.view.arc.n == 2, "tar.gz opens as a list of 2 members");
+    CHECK(!strcmp(a.view.arc.m[0].name, "game/main.lua") && a.view.sel == 0, "the first member is picked");
+    app_compose(&a, &s);
+    CHECK(dump_has(&s, "game/main.lua") && dump_has(&s, "Up/Down pick  A open  Start extract  B close"), "the list and its hint are drawn");
+    app_action(&a, R3_DOWN);
+    CHECK(a.view.sel == 1, "Down picks the next member");
+    app_action(&a, R3_DOWN);
+    CHECK(a.view.sel == 1, "Down stops at the last member");
+    app_action(&a, R3_UP);
+    CHECK(a.view.sel == 0, "Up picks the one above");
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_VIEW && a.vdepth == 1 && !a.view.has_arc && strstr(a.view.title, "game/main.lua"), "A opens the member (title %s)", a.view.title);
+    char tmpfile[PATH_MAX];
+    copy_str(tmpfile, sizeof tmpfile, a.vtmpfile);
+    CHECK(tmpfile[0] && exists(tmpfile), "the member is a temporary file");
+    app_compose(&a, &s);
+    CHECK(dump_has(&s, "print('hi')") && dump_has(&s, "B back"), "the member's text is shown, and B goes back");
+    app_action(&a, R3_BACK);
+    CHECK(a.mode == M_VIEW && a.vdepth == 0 && a.view.has_arc && a.view.cur == a.view.arc_tab && a.view.sel == 0, "B returns to the list");
+    CHECK(!exists(tmpfile) && !a.vtmpfile[0], "the temporary file is gone");
+
+    /* extract the second member to the other panel */
+    app_action(&a, R3_DOWN);
+    app_action(&a, R3_MORE);
+    path_join(dest, sizeof dest, out, "readme.txt");
+    CHECK(exists(dest), "Start extracts into the other panel's folder");
+    FILE *f = fopen(dest, "rb");
+    size_t got = f ? fread(body, 1, sizeof body - 1, f) : 0;
+    if (f) fclose(f);
+    body[got] = 0;
+    CHECK(got == 80 && !strncmp(body, "read me\nread me\n", 16), "the extracted file has the member's bytes (%zu)", got);
+    CHECK(a.reply_style == R3_ST_OK && strstr(a.reply, "Extracted readme.txt"), "it says so: %s", a.reply);
+    int found = 0;
+    for (int i = 0; i < other(&a)->n; i++) if (!strcmp(other(&a)->e[i].name, "readme.txt")) found = 1;
+    CHECK(found, "the other panel lists it");
+    write_file(dest, "mine", 4);
+    app_action(&a, R3_MORE);
+    f = fopen(dest, "rb");
+    got = f ? fread(body, 1, sizeof body - 1, f) : 0;
+    if (f) fclose(f);
+    CHECK(got == 4 && a.reply_style == R3_ST_WARN && strstr(a.reply, "not overwritten"), "a name that is there is never overwritten: %s", a.reply);
+    app_action(&a, R3_BACK);
+    CHECK(a.mode == M_BROWSE, "B closes the viewer");
+
+    /* a ZIP holding a folder, a tar.gz and a text file: a folder says so, and archives open inside archives */
+    CHECK(start_viewer(&a, fx_path("zip_nested"), 0, 0) == 0 && a.view.has_arc && a.view.arc.n == 3, "a ZIP lists 3 members");
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.vdepth == 0 && a.reply_style == R3_ST_WARN && strstr(a.reply, "a folder"), "a folder member is not opened: %s", a.reply);
+    app_action(&a, R3_DOWN);
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.vdepth == 1 && a.view.has_arc && a.view.arc.n == 2 && strstr(a.view.title, "bundle.zip > inner/game.tar.gz"), "a tar.gz inside the ZIP opens as a list (title %s)", a.view.title);
+    char outer[PATH_MAX];
+    copy_str(outer, sizeof outer, a.vtmpfile);
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.vdepth == 2 && !a.view.has_arc && strstr(a.view.title, "bundle.zip > inner/game.tar.gz > game/main.lua") == NULL && strstr(a.view.title, "game/main.lua"), "and a member of that opens too (title %s)", a.view.title);
+    char innerf[PATH_MAX];
+    copy_str(innerf, sizeof innerf, a.vtmpfile);
+    app_action(&a, R3_BACK);
+    CHECK(a.vdepth == 1 && a.view.has_arc && a.view.sel == 0 && !exists(innerf) && exists(outer), "B goes up one level at a time");
+    app_action(&a, R3_BACK);
+    CHECK(a.vdepth == 0 && a.view.has_arc && a.view.sel == 1 && !exists(outer), "back in the ZIP at the member left from");
+    app_action(&a, R3_ACCEPT);
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.vdepth == 2, "opened again");
+    app_free(&a);
+    CHECK(!exists(outer) && !exists(innerf), "closing the app removes the temporary files");
+
+    /* xz, zstd and .deb members */
+    app_init(&a, g_fxdir, out);
+    CHECK(start_viewer(&a, fx_path("tarxz"), 0, 0) == 0 && a.view.has_arc && a.view.arc.n == 2, ".tar.xz is a list");
+    app_action(&a, R3_ACCEPT);
+    app_compose(&a, &s);
+    CHECK(a.vdepth == 1 && dump_has(&s, "print('hi')"), "a member of a .tar.xz opens");
+    app_action(&a, R3_BACK);
+    CHECK(start_viewer(&a, fx_path("tarzst"), 0, 0) == 0 && a.view.has_arc && a.view.arc.n == 2, ".tar.zst is a list");
+    app_action(&a, R3_DOWN);
+    app_action(&a, R3_ACCEPT);
+    app_compose(&a, &s);
+    CHECK(a.vdepth == 1 && dump_has(&s, "read me"), "a member of a .tar.zst opens");
+    app_action(&a, R3_BACK);
+    CHECK(start_viewer(&a, fx_path("deb_xz"), 0, 0) == 0 && a.view.has_arc && a.view.arc.n == 2 && !strcmp(a.view.arc.m[0].name, "./usr/bin/hello"), "a .deb (xz) lists its files");
+    app_compose(&a, &s);
+    CHECK(dump_has(&s, "-- files (data.tar, xz) --") && dump_has(&s, "usr/bin/hello"), "with its heading");
+    app_action(&a, R3_ACCEPT);
+    app_compose(&a, &s);
+    CHECK(a.vdepth == 1 && dump_has(&s, "echo hello"), "a file from a .deb opens");
+    app_action(&a, R3_BACK);
+    CHECK(start_viewer(&a, fx_path("deb_zst"), 0, 0) == 0 && a.view.has_arc && a.view.arc.n == 2, "a .deb (zstd) lists its files");
+
+    /* many members: paging with the pick, a long name keeps its end */
+    CHECK(start_viewer(&a, fx_path("tar_many"), 0, 0) == 0 && a.view.has_arc && a.view.arc.n == 41, "41 members");
+    int rows = VIEW_ROWS;
+    for (int i = 0; i < rows; i++) app_action(&a, R3_DOWN);
+    CHECK(a.view.sel == rows && viewer_tab(&a.view)->v.page == (a.view.arc_line0 + rows) / rows && viewer_tab(&a.view)->v.page == 1, "the page follows the pick (sel %d page %d)", a.view.sel, viewer_tab(&a.view)->v.page);
+    app_action(&a, R3_PAGEDOWN);
+    CHECK(a.view.sel == 2 * rows && viewer_tab(&a.view)->v.page == 2, "R1 pages down");
+    app_action(&a, R3_END);
+    app_compose(&a, &s);
+    CHECK(a.view.sel == 40 && dump_has(&s, "...") && dump_has(&s, "long-member-name.txt"), "a long name is cut at its start, so its end shows");
+    app_action(&a, R3_HOME);
+    CHECK(a.view.sel == 0 && viewer_tab(&a.view)->v.page == 0, "Home goes to the first member");
+    app_action(&a, R3_LEFT);
+    CHECK(a.view.cur != a.view.arc_tab, "Left still switches tabs");
+    app_action(&a, R3_BACK);
+    CHECK(a.mode == M_BROWSE && a.vdepth == 0, "B on another tab closes the viewer at the top level");
+    app_free(&a);
+}
+
 /* The viewer's tabs on real files, through the app. */
 static void test_viewer_tabs(const char *root) {
     (void)root;
@@ -2321,6 +2670,7 @@ static int selftest_logic(void) {
     test_ui(real ? real : root);
     test_formats(real ? real : root);
     test_viewer_tabs(real ? real : root);
+    test_archive_members(real ? real : root);
     rm_rf(root);
     if (real) { rm_rf(real); free(real); }
     return g_fail;
