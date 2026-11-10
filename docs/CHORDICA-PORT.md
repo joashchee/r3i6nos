@@ -24,8 +24,8 @@ ports"), each the port convention's default; **the ones marked open need the mai
    Compose and the score, sessions with other devices, Notation, Cue and SoundFonts are later (section 5).
 4. **Rule 8 with no departure:** 64 x 24 cells, the top bar, the display view (the grid), the three-row command line, list
    dialogs by whole pages, nothing scrolls. The 2009 buttons keep their colours, as VGA pairs that pass 4.5:1.
-5. **Open: the release terms.** Chordica is sold on the App Stores. `r36s/package/copyright` carries Neumetik's grant (free on the
-   R36S, unmodified) marked **DRAFT**; `CHORDICA_RELEASE=1` refuses to build until the maintainer confirms or changes it.
+5. **Decided (2026-11-11, maintainer): the release terms.** Chordica is sold on the App Stores; the R36S package carries
+   Neumetik's grant (free on the R36S, unmodified), as every R36S port does. The DRAFT marker is gone from `r36s/package/copyright`.
 6. **Open: the pad mapping** (section 3) is a first guess at holding the 2009 grid in two thumbs and two index fingers. Only a
    player on the unit can say whether the rows, the shoulders and Select as M feel right; it is one table in `r36s/lib/src/pad.rs`.
 7. **Open: a GitHub workflow.** Chordica's repo has no CI; none was added. The package is built locally (`r36s/build-deb.sh`).

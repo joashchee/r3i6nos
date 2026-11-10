@@ -197,7 +197,9 @@ Command-line tools other apps can call (NoCoGaMa's sprites, jingles and animatio
   A second run (2026-11-09 22:30, same unit): 20 of 20, within 2% of those times (ambient 16.08 s), 11.6 MB peak. Composer now has its own `ROADMAP.md`.
   - [ ] **For apps calling it on the unit** (NoCoGaMa first): make ambient loops and jingles ahead of time, never while a person waits; and look at why `kits` takes 4 s (0.23 s on the Mac) if an app needs it at run time.
 - [x] **Painter on a real R36S** (2026-11-09, its report, Painter repo `r36s/reports/`): 15 of 16, 18-21 times the Mac's QuickJS build. The FAIL, `sheet item` (610 variants on one 10-megapixel PNG) past the 300 s limit, is now a `!SLOW` line; `sheet icon` is timed instead. Half its time was this repo's deflate shim, now table-driven with byte-identical output (10.1 s to 6.3 s on its 41 MB of pixels in `qjs` on a Mac; `tests/test_qjs_node.mjs` checks it against the old one). `convert` takes 103 s for a 16 x 16 PNG (Painter's colour search, on its `ROADMAP.md`).
-  - [ ] **Rebuild and repackage Painter** for the card and run its report again (`sheet icon` should pass in about 13 s).
+  - [x] **Painter rebuilt and repackaged** (2026-11-11, `r36s/build-deb.sh`): `sprites.deb` with the faster deflate and the `!SLOW`/`sheet icon` `commands.txt`;
+    installed by `deb_watcher.py` in Debian 12 arm64 under Docker, report there 16 PASS, 0 FAIL (a Mac's figures, not the unit's).
+  - [ ] **Run Painter's report on the unit again** with the new package (`sheet icon` should pass in about 13 s).
 - [ ] Painter's ANSI-to-PNG render needs its VGA atlas embedded (CC BY-SA credit); a stronger deflate if PNG size matters; a `tools.lua` helper for LÖVE apps (quoting, exit status); the first real use in NoCoGaMa.
 
 ## 11. Neumetik (a native port; code in the Neumetik repo, `joashchee/neumetik`, `r36s/`; plan and decisions: `docs/NEUMETIK-PORT.md`)
@@ -276,9 +278,11 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
   - [ ] **Read speed from the card is still unmeasured:** only 833 KB was read (the card holds little), so 9.9 MB/s is "too little to judge" (goal 10).
     The exFAT card read 62 MB/s in r3i6nos's own report, so the goal is likely fine; confirm on a card with real files.
 - [ ] **On the unit, by hand:** a real scan, Move to Trash and Undo: the pad's A, B, X, Y, L1/R1 and Start doing what the foot says, how the lists read.
-- [ ] **Decide the release terms** (maintainer): `r36s/package/copyright` is Neumetik's free grant marked DRAFT; the desktop Crunchy is paid.
-- [ ] **Decide Empty the Trash** (maintainer): a move frees no space on the card until its `.Trash-1000` is emptied, and nothing on
-  r3i6nos empties it; an Empty action would delete for good, which the desktop Crunchy never does (`docs/CRUNCHY-PORT.md`, decision 6).
+- [x] **The release terms** (2026-11-11, maintainer: every R36S port gets Neumetik's free grant): the DRAFT marker is out of `r36s/package/copyright`.
+- [x] **Empty the Trash** (2026-11-11, maintainer's request; `docs/CRUNCHY-PORT.md`, decision 6): Start > Empty the Trash, or X on the Undo panel, asks and
+  deletes for good only the files Crunchy's own log shows it moved there, each checked by size and BLAKE3 first (a changed one stays; a
+  person's own trashed files are never touched); Undo stops offering what is gone. Engine tests and the host's self-test pass on a Mac.
+  **Untested on the unit:** that it frees space on the exFAT card, and the pad's X on the Undo panel.
 - [ ] **A GitHub workflow** for the package (maintainer: Crunchy's repo has no CI yet).
 - [ ] **Later:** Smart Move on the pad, the `.diskettehashes` export, Compress image (oxipng and WebP first).
 
@@ -297,7 +301,7 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
 - [x] **Chordica's report from the unit** (2026-11-10 21:42, the maintainer): 17 PASS, **2 FAIL**. ALSA gave the 256 frames asked (5.8 ms), 211 callbacks in 1.2 s; a press waits 2.7 ms on average (5.6 ms worst) for the callback, press to sound about 17.2 ms (goal 25); callback load 25%; screen paint 5.0 ms; start-up 557 ms; peak memory 51 MB. Speed, both hands every eighth note at 140 bpm: Acoustic Grand Piano 4.6x real time (99% of buffers in 29% of their time) and Electric Bass 6.3x (22%) pass; **String Ensemble 1 fails: 2.1x (goal 4x), 99% of buffers in 62% of their time (goal 50%)**, slowest buffer 64%. No buffer ran over, so there is no underrun, only less headroom than the goal; a sustained pad keeps more voices sounding than a piano's decay does.
   - [ ] **String Ensemble 1 (and likely the other sustained pads and strings) miss the speed goal:** decide to cap the voices of a held sound, make the goal per sound kind, or accept 62% (a longer buffer, 512, would halve the load per press but add about 6 ms). Then rerun the report; play a long held chord with both hands to hear whether it crackles.
 - [ ] **On the unit, by hand:** play it: the pad mapping, how the grid reads on the panel. (The report's figures are above.)
-- [ ] **Decide the release terms** (maintainer): `r36s/package/copyright` is Neumetik's free grant marked DRAFT; the desktop Chordica is sold.
+- [x] **The release terms** (2026-11-11, maintainer: every R36S port gets Neumetik's free grant): the DRAFT marker is out of `r36s/package/copyright`.
 - [ ] **Decide the pad mapping** (maintainer, after playing it): rows by button, columns by shoulder, Select as M (`docs/CHORDICA-PORT.md`, section 3).
 - [x] **Committed in the Chordica repo** (2026-11-10, maintainer's request): after the work in progress there, in its own commit (decision 8).
 - [ ] **A GitHub workflow** for the package (Chordica's repo has no CI yet).
@@ -319,7 +323,7 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
   half their time), a save to the card (goal 1 s), memory. Then make a loop: the sticks' directions, Fn, whether recorded notes
   land on the beat (the two-buffer latency guess), how the piano roll reads on the panel.
 - [x] **Its own repo** (2026-11-10, maintainer's request): moved out of the Neumetik repo to `~/Coding/tinyntt`, `r36s/`; it builds against `../neumetik` and `../r3i6nos`, and its `r36s/build-deb.sh --clean-room` passed from there (21 PASS, 2 FAIL for no pad under Docker).
-- [ ] **Decide the release terms** (maintainer): `r36s/package/copyright` is Neumetik's free grant marked DRAFT.
+- [x] **The release terms** (2026-11-11, maintainer: every R36S port gets Neumetik's free grant; TinyNTT's `copyright` already said so).
 - [ ] **Decide Select and Start** (maintainer, after trying it): each acts alone (rewind, play) and together, held a second, they leave.
 - [x] **Committed** in the TinyNTT repo, Neumetik (removed) and here.
 - [ ] **A GitHub workflow** for the package.

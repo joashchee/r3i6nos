@@ -21,12 +21,15 @@ Taken without the maintainer on 2026-11-10 (asked for: "do as much as you can wi
 3. **The first version: Find duplicates, Move to Trash, Undo.** Smart Move, Compress audio, Compress image, the `.diskettehashes`
    export and Diskette catalog sync are left out (section 5).
 4. **Rule 8 with no departure:** the menu's 64 x 24 layout, list dialogs, the three-row command line, nothing scrolls.
-5. **Open: the release terms.** The desktop Crunchy is sold on itch.io. `r36s/package/copyright` carries Neumetik's grant (free on
-   the R36S, unmodified) marked **DRAFT**; `CRUNCHY_RELEASE=1` refuses to build until the maintainer confirms or changes it.
-6. **Open: emptying the Trash.** Move to Trash on the R36S renames a file into the card's own `.Trash-<uid>` folder (the
-   freedesktop.org rule for a file on another filesystem than home), so **no space is freed until that folder is emptied**, and
-   nothing on r3i6nos empties it (on a desktop the OS does). An "Empty the Trash" action would delete for good, which the desktop
-   Crunchy never does itself. Until decided, the files can be deleted from `.Trash-1000` with a computer.
+5. **Decided (2026-11-11, maintainer): the release terms.** The desktop Crunchy is sold on itch.io; the R36S package carries
+   Neumetik's grant (free on the R36S, unmodified), as every R36S port does. The DRAFT marker is gone from `r36s/package/copyright`.
+6. **Decided (2026-11-11, maintainer): Empty the Trash.** Move to Trash on the R36S renames a file into the card's own
+   `.Trash-<uid>` folder (the freedesktop.org rule for a file on another filesystem than home), so no space is freed until that
+   folder is emptied, and nothing else on r3i6nos empties it (on a desktop the OS does). So the app has **Start > Empty the Trash**
+   (and X on the Undo panel), after a question. It deletes for good, which the desktop Crunchy never does, so it is narrow: only
+   files this app's own trash log lists as trashed and not undone, each checked against its logged size and BLAKE3 (a changed file
+   stays in the Trash and is listed), with its `.trashinfo`; nothing else in the Trash is looked at (a person's own trashed files
+   stay), and links are never followed. Undo stops offering what was deleted (the log row is marked `emptied`).
 7. **Open: a GitHub workflow.** Neumetik's `r36s.yml` builds the package on GitHub; Crunchy's repo has no CI at all, so none was
    added. The package is built locally (`r36s/build-deb.sh`).
 
@@ -86,7 +89,7 @@ autoSelect: oldest, then shortest path; never a read-only file); nothing moves u
 
 Smart Move (merge a folder into another by rules: needs a folder picker and its rule editor on the pad), Compress audio and Compress
 image (their encoders are large C libraries, and slow on the Cortex-A35), the `.diskettehashes` export and Diskette catalog sync
-(Diskette does not run on the R36S), APFS clones and resource forks (macOS only), and Empty the Trash (decision 6).
+(Diskette does not run on the R36S), APFS clones and resource forks (macOS only), (Empty the Trash is in, decision 6).
 
 ## 6. Testing
 
@@ -114,5 +117,5 @@ group, Move to Trash puts the copy in `games card/.Trash-<uid>`, Undo puts it ba
    `deb_watcher.py` installed it in a clean Debian 12 and the launcher ran it, and a device report there had 12 PASS and 1 FAIL (no
    pad, as expected under Docker): the trash test moved and put back its file, the scan found the pretend card's copy.
 2. **On the unit:** copy `Crunchy.deb` to `native_deb/` (`flash-macos.sh` does it), run Start > Device report, bring the report back.
-3. **The open decisions** (section 0): the release terms, Empty the Trash, a workflow.
+3. **The open decisions** (section 0): a workflow. (The release terms and Empty the Trash are decided.)
 4. **Later:** Smart Move on the pad, the hash export, Compress image (oxipng and WebP first: they have no `cmake` C builds).
