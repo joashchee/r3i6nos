@@ -48,8 +48,12 @@ end
 
 1. **The header:** app, version, package, date, how it was started, and the line telling the maintainer what to do with it.
 2. **`== system ==`:** kernel and architecture; CPU model, count and top speed (`/proc/cpuinfo`, cpufreq); total and available memory
-   (`/proc/meminfo`); for SDL apps, SDL's version, video and audio drivers, the sound devices (`/proc/asound/cards`, SDL's output devices) and every
-   pad (name, **GUID**, buttons, axes, hats).
+   (`/proc/meminfo`); the **sound route**, from `r3i6nos-sound status` (`docs/SOUND.md`): INFO lines `output` (card 0 or a USB card),
+   `card N playback path` (the codec's current path and the ones it lists, e.g. `HP (of OFF SPK HP SPK_HP)`), `jack` and `headphones`
+   (`in` or `out`), or one SKIP `sound route` where the helper gives nothing (a laptop); for SDL apps, SDL's version, video and audio
+   drivers, the sound devices (`/proc/asound/cards`, SDL's output devices) and every pad (name, **GUID**, buttons, axes, hats). The route
+   says what the output was set to, not whether sound was heard: a person says that. `r3_report_system` and `tools/qjs-node/report.py`
+   write them; `R3I6NOS_SOUND` names another helper (tests).
 3. **`== card ==`:** in the app's own folder: make it, write a file, write a second and rename it over the first, read it back, delete it; the
    filesystem type (from `/proc/mounts`: exFAT or FAT32 decide what works) and free space.
 4. **The app's own sections:** every open question its roadmap marks "untested on the unit" that a program can answer: speed against the
