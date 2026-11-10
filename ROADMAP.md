@@ -411,7 +411,7 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
 - [ ] **A GitHub workflow** for the package (Chordica's repo has no CI yet).
 - [ ] **Later:** the mode keyboard on the pad, SoundFonts from the card, the metronome, takes and the score, sessions over Wi-Fi.
 
-## 17. TinyNTT (a new native app; code in the Neumetik repo, `tinyntt/`; plan and decisions: `docs/TINYNTT.md`)
+## 17. TinyNTT (a new native app; code in the TinyNTT repo, `r36s/`; plan and decisions: `docs/TINYNTT.md`)
 
 - [x] **Built** (2026-11-10, maintainer's brief): "Tiny Ant", an 8-bar, 4-track music loop editor. `tinyntt/lib` (the song, 44 scales,
   265 tonal and 68 atonal instruments from Neumetik MIDI's built-in libraries, 20 styles, the engine with count-in, loop recording,
@@ -424,8 +424,9 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
   the buffer ALSA gives (goal 512 frames or fewer), the engine's speed with four busy tracks (goals 2x real time, 99% of buffers in
   half their time), a save to the card (goal 1 s), memory. Then make a loop: the sticks' directions, Fn, whether recorded notes
   land on the beat (the two-buffer latency guess), how the piano roll reads on the panel.
-- [ ] **Decide where it lives** (maintainer): the Neumetik repo's `tinyntt/`, or a repo of its own (then `r36s/build-deb.sh`, rule 10's name).
-- [ ] **Decide the release terms** (maintainer): `tinyntt/package/copyright` is Neumetik's free grant marked DRAFT.
+- [x] **Its own repo** (2026-11-10, maintainer's request): moved out of the Neumetik repo to `~/Coding/tinyntt`, `r36s/`; it builds against `../neumetik` and `../r3i6nos`, and its `r36s/build-deb.sh --clean-room` passed from there (21 PASS, 2 FAIL for no pad under Docker).
+- [ ] **Decide the release terms** (maintainer): `r36s/package/copyright` is Neumetik's free grant marked DRAFT.
 - [ ] **Decide Select and Start** (maintainer, after trying it): each acts alone (rewind, play) and together, held a second, they leave.
-- [ ] **Commit** in the Neumetik repo and here (not asked for yet), and a GitHub workflow for the package.
+- [x] **Committed** in the TinyNTT repo, Neumetik (removed) and here.
+- [ ] **A GitHub workflow** for the package.
 - [ ] **Later:** velocity per note, swing, copy and paste of bars, more styles, Ogg or FLAC export, other platforms.

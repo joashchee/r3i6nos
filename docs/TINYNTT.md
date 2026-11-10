@@ -4,7 +4,7 @@ Status (2026-11-10): **the first version is built in the Neumetik repo's `tinynt
 detail); never run on a real R36S.** TinyNTT is a new ansiapps app, R36S first and other platforms later: short, seamless,
 8-bar loops for games, made on the spot on the pad (a game jam's music). It plays through Neumetik's synthesizer, by synthesis
 only (no SoundFonts), and saves Neumetik Tracker `.ntt` files. This file is the plan and the decisions, as
-`docs/NEUMETIK-PORT.md` is for Neumetik; the code is never here (rule 2). `ROADMAP.md` section 17 tracks it.
+`docs/NEUMETIK-PORT.md` is for Neumetik; the code is in the TinyNTT repo, never here (rule 2). `ROADMAP.md` section 17 tracks it.
 
 ## 0. Decisions
 
@@ -12,10 +12,7 @@ The brief is the maintainer's (2026-11-10). What it left open was decided as bel
 
 1. **Shape: a C and SDL2 host linking a Rust static library**, as Neumetik and Chordica. The library depends on `neumetik-midi`
    (the synthesizer) and `neumetik-tracker` without its repository or cover painter (UMF, for the `.ntt`), both unchanged.
-2. **Open: where the code lives.** It is in the **Neumetik repo, `tinyntt/`**, because it is made of Neumetik's crates and a new
-   repo could not be made from this session. It builds as its own package and could move to a repo of its own unchanged but
-   for two paths. Its local build script is therefore `tinyntt/build-deb.sh`, not `r36s/build-deb.sh` (rule 10's name is
-   already Neumetik's own port's there).
+2. **Where the code lives: its own repo, `~/Coding/tinyntt`** (maintainer, 2026-11-10; first built in the Neumetik repo's `tinyntt/`, then moved), in `r36s/` as the other ports. It builds against `../neumetik` (the `midi/` and `tracker/` crates, unchanged, and the licence list its NOTICE follows) and `../r3i6nos` (the theme). Its local build script is `r36s/build-deb.sh` (rule 10).
 3. **Rule 8 with one departure, asked for in the brief:** row 0 is the panel carousel (the panel before with `L1`, the one
    showing in the middle, the one after with `R1`), so the app's name and the battery are not on it. Everything else is the
    theme's: 64 x 24 cells, the display view, the three-row command line, list dialogs by whole pages, nothing scrolls (the
@@ -32,20 +29,19 @@ The brief is the maintainer's (2026-11-10). What it left open was decided as bel
    what it saved, and says why not otherwise.
 8. **Exports: WAV, MIDI and TMF** (Neumetik's MIDI as text). The WAV is the loop itself: the song is played twice and the
    second pass kept, so the reverb and notes ringing past the end are already sounding at the start.
-9. **Open: the release terms.** `tinyntt/package/copyright` carries Neumetik's grant (free on the R36S, unmodified; the music
+9. **Open: the release terms.** `r36s/package/copyright` carries Neumetik's grant (free on the R36S, unmodified; the music
    made is the composer's) marked **DRAFT**; `TINYNTT_RELEASE=1` refuses to build until the maintainer confirms it.
 10. **Open: Select and Start.** The brief makes Select rewind and Start play, and every r3i6nos app leaves on Select + Start.
     Both hold: pressing the second while the first is down does nothing but start a one-second count, after which the app
     leaves. The first button pressed still acts (a rewind, or a play that goes on for that second).
 11. **Open: a GitHub workflow.** None was added; the package is built locally.
-12. **Not committed** in either repo: the maintainer has not asked.
 
 ## 1. Shape
 
-- **`libtinyntt.a`** (`tinyntt/lib`): `song.rs` (the song and its edits), `scales.rs`, `patches.rs`, `styles.rs`, `engine.rs`
+- **`libtinyntt.a`** (`r36s/lib`): `song.rs` (the song and its edits), `scales.rs`, `patches.rs`, `styles.rs`, `engine.rs`
   (the synthesizer, the loop, recording), `file.rs`, `bench.rs`, `capi.rs` (`tinyntt.h`). Standard library only. The binary
   needs only SDL2, glibc and libgcc, all in the rootfs.
-- **`tinyntt`** (`tinyntt/host`): `tinyntt.c`, `app.h`, `panels.h`, `input.h`, `selftest.h`, with `theme/r3i6nos_ansiapps.h`
+- **`tinyntt`** (`r36s/host`): `tinyntt.c`, `app.h`, `panels.h`, `input.h`, `selftest.h`, with `theme/r3i6nos_ansiapps.h`
   and `theme/r3i6nos_report.h` read from this repo. Sound through SDL2's audio callback at 44100 Hz, stereo float, a
   **256-frame buffer** (Files > Sound buffer: 128 to 1024).
 - **Time is the engine's.** Notes are started in the audio callback to within 32 frames (0.7 ms), not on the screen's timer. A
@@ -141,7 +137,7 @@ Neumetik", and nothing changes.
   hand, so time is exact): typing a name, lists, the carousel both ways, previews, the keyboard, Fill, Clear, Undo, drawing,
   moving a note by its middle, end and start, deleting, a recorded take and an overdub, punch markers, save, `.bak`, the three
   exports, the library, the foreign-file warning, **a simulated crash and its recovery**, the report, Select + Start.
-- **`tinyntt/build-deb.sh --clean-room`:** section 8.
+- **`r36s/build-deb.sh --clean-room`:** section 8.
 - **Not testable here:** the engine's speed and the callback's load on the unit, latency felt, the sticks' directions and Fn
   as events, the roll on the panel.
 
@@ -155,9 +151,9 @@ songs (goals 2x real time and 99% of buffers in half their time) and the WAV exp
 
 ## 8. Phases (mirrored in `ROADMAP.md` section 17)
 
-1. **Built** (2026-11-10): the library, the host, the package, the self-test, the report. `tinyntt/build-deb.sh --clean-room` built `TinyNTT.deb` (3.4 MB; needs SDL2, libc, libm, libgcc_s; newest glibc symbol 2.34) in Debian 12 arm64, its self-test passed there, `deb_watcher.py` installed it in a clean Debian 12 and the launcher ran it, and a device report there had 21 PASS and 2 FAIL (both for no pad under Docker). Those figures are a Mac's under Docker, not the unit's: 79x to 148x real time with up to 19 voices, every 256-frame buffer in under 5% of its time, a save in 43 ms, peak memory 14 MB. The Linux run found a bug the Mac did not (reopening the last song at start copied a path onto itself; fixed).
+1. **Built** (2026-11-10): the library, the host, the package, the self-test, the report. `r36s/build-deb.sh --clean-room` built `TinyNTT.deb` (3.4 MB; needs SDL2, libc, libm, libgcc_s; newest glibc symbol 2.34) in Debian 12 arm64, its self-test passed there, `deb_watcher.py` installed it in a clean Debian 12 and the launcher ran it, and a device report there had 21 PASS and 2 FAIL (both for no pad under Docker). Those figures are a Mac's under Docker, not the unit's: 79x to 148x real time with up to 19 voices, every 256-frame buffer in under 5% of its time, a save in 43 ms, peak memory 14 MB. The Linux run found a bug the Mac did not (reopening the last song at start copied a path onto itself; fixed).
 2. **On the unit:** `TinyNTT.deb` to `native_deb/` (`flash-macos.sh` does it), Files > Device report, bring the report back;
    then make a loop: the sticks, Fn, the note buttons' feel, whether takes land on the beat, the roll on the panel.
-3. **The open decisions** (section 0): its own repo or Neumetik's, the release terms, Select and Start, a workflow.
+3. **The open decisions** (section 0): the release terms, Select and Start, a workflow.
 4. **Later:** velocity per note and swing; copy, paste and transpose of bars; more styles; Ogg or FLAC export; opening its
    songs from Neumetik's player on the unit; other platforms (the brief: R36S first).

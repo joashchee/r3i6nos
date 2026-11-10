@@ -98,7 +98,7 @@ if the file is missing or has no `end`, that the report stopped and where its `.
 |---|---|---|---|
 | r3i6nos itself (the system, boot, both card slots) | `overlay/usr/local/bin/r3i6nos-report` (`docs/STORAGE.md`) | Settings > Device reports > r3i6nos (this system), or `r3i6nos-report` | `r3i6nos/r36s-report.txt` on the data card (`/roms2`), else the system card |
 | Neumetik | Neumetik repo `r36s/` | Start > Device report, `neumetik --report` | `/roms/Neumetik/r36s-report.txt` |
-| TinyNTT | Neumetik repo `tinyntt/` | Files > Device report, `tinyntt --report` | `/roms/TinyNTT/r36s-report.txt` |
+| TinyNTT | TinyNTT repo `r36s/` | Files > Device report, `tinyntt --report` | `/roms/TinyNTT/r36s-report.txt` |
 | KlamANSI | KlamANSI repo `r36s/` | Start > Device report, `klamansi --report` | `/roms/KlamANSI/r36s-report.txt` |
 | NoCoGaMa (device spike) | NoCoGaMa repo `spike/device/` | its Report page | `/roms/NoCoGaMa/r36s-report-11.5.txt` and `-12.0.txt` (one a runtime) |
 | IO Checker (the hardware: input, video, sound, cards) | `apps/io-checker-love/`, `apps/io-checker-native/` | its Device report item, or `io-checker-native --report` | `/roms/IO_Checker/r36s-report-11.5.txt`, `-12.0.txt`, `-native.txt` (one a build) |

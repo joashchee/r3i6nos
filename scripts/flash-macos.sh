@@ -58,7 +58,7 @@ PORTS=(
     "Animator|animator|deb|r36s/build/pkg/animate.deb|r36s/build-deb.sh"
     "Crunchy|crunchy|deb|r36s/build/pkg/Crunchy.deb|r36s/build-deb.sh"
     "Chordica|chordica|deb|r36s/build/pkg/Chordica.deb|r36s/build-deb.sh"
-    "TinyNTT|neumetik|deb|tinyntt/build/pkg/TinyNTT.deb|tinyntt/build-deb.sh"
+    "TinyNTT|tinyntt|deb|r36s/build/pkg/TinyNTT.deb|r36s/build-deb.sh"
     "NoCoGaMa|nocogama|love|build/Love {v}/*.love|scripts/build.sh"
 )
 PORT_COPY=()      # "source<TAB>path on EASYROMS"
