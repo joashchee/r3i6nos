@@ -127,7 +127,7 @@ end
 M.HINTS = {
   Volume = "Quieter or louder (2 dB a step); the volume keys do the same",
   Boost = "Louder for quiet sound; it distorts sound that is already loud",
-  ["Playback Path"] = "Where the sound goes; set by itself from the headphone jack",
+  ["Playback Path"] = "HP: the speaker, or the headphones when in; SPK is silent",
 }
 
 -- ---- the dialog (Settings > Sound mixer) -------------------------------------------------------------------------------------------

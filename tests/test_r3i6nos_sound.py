@@ -68,7 +68,8 @@ class Sound(unittest.TestCase):
         (t / "amixer").chmod(0o755)
         (t / "state").write_text("0")
         self.env = {"R3I6NOS_PROC": str(t / "proc"), "R3I6NOS_SYS": str(t / "sys"), "R3I6NOS_DEV": str(t / "dev"),
-                    "R3I6NOS_AMIXER": str(t / "amixer"), "R3I6NOS_SOUND_WAIT": "0"}
+                    "R3I6NOS_AMIXER": str(t / "amixer"), "R3I6NOS_SOUND_WAIT": "0",
+                    "R3I6NOS_ASOUND_OUT": str(t / "run/asound-out.conf")}
         os.environ["FAKE_STATE"] = str(t / "state")
         os.environ["FAKE_LOG"] = str(t / "log")
         os.environ["FAKE_MIXER"] = str(t / "mixer")
@@ -99,20 +100,33 @@ class Sound(unittest.TestCase):
             rc = self.m.main(["r3i6nos-sound", *args])
         return rc, out.getvalue(), err.getvalue()
 
-    def test_off_becomes_speaker(self):
+    def start(self):
+        """main("start") without its endless loop: returns (rc, the devices it would follow)."""
+        with mock.patch.object(self.m, "follow", return_value=0) as follow:
+            rc, _, err = self.main("start")
+        follow.assert_called_once()
+        return rc, [n for _, n in follow.call_args[0][0]], err
+
+    def test_off_becomes_hp(self):
+        # HP plays from the speaker, and from the jack when headphones are in; SPK was silent on the unit (2026-11-10)
         rc, _, err = self.main("set")
         self.assertEqual(rc, 0)
-        self.assertEqual(self.current(), "SPK")
-        self.assertIn("OFF -> SPK", err)
+        self.assertEqual(self.current(), "HP")
+        self.assertIn("OFF -> HP", err)
+
+    def test_spk_becomes_hp(self):
+        (self.t / "state").write_text("2")
+        self.main("set")
+        self.assertEqual(self.current(), "HP")
 
     def test_already_set_is_left_alone(self):
-        (self.t / "state").write_text("2")
+        (self.t / "state").write_text("3")
         self.main("set")
         self.assertNotIn("cset", (self.t / "log").read_text())
 
     def test_cards_without_the_control_are_skipped(self):
         (self.t / "proc/asound/cards").write_text(" 1 [usb]: USB-Audio - Some USB DAC\n")
-        rc, _, err = self.main("start")
+        rc, _, err = self.start()
         self.assertEqual(rc, 0)
         self.assertIn("the output is left as it is", err)
         self.assertNotIn("cset", (self.t / "log").read_text())
@@ -123,11 +137,12 @@ class Sound(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("no sound card", err)
 
-    def test_start_without_a_jack_sets_and_exits(self):
+    def test_start_without_a_jack_still_watches_for_usb(self):
         self.input_dev(0, "adc-keys", "0")
-        rc, _, _ = self.main("start")
+        rc, devices, _ = self.start()
         self.assertEqual(rc, 0)
-        self.assertEqual(self.current(), "SPK")
+        self.assertEqual(devices, [])
+        self.assertEqual(self.current(), "HP")
 
     def test_finds_the_headphone_jack(self):
         self.input_dev(0, "odroidgo3-joypad", "0")
@@ -142,17 +157,98 @@ class Sound(unittest.TestCase):
             self._jack_events()
 
     def _jack_events(self):
-        self.m.handle(event(0x05, 0x02, 1) + event(0, 0, 0))
-        self.assertEqual(self.current(), "HP")
+        (self.t / "state").write_text("2")                       # SPK, chosen by hand in the mixer
         self.m.handle(event(0x01, 0x02, 0))                      # a key event, not the switch: ignored
-        self.assertEqual(self.current(), "HP")
-        self.m.handle(event(0x05, 0x02, 0))
         self.assertEqual(self.current(), "SPK")
+        self.m.handle(event(0x05, 0x02, 1) + event(0, 0, 0))     # headphones in: HP
+        self.assertEqual(self.current(), "HP")
+        self.m.handle(event(0x05, 0x02, 0))                      # out: still HP (the speaker plays on HP)
+        self.assertEqual(self.current(), "HP")
 
     def test_choice_falls_back(self):
-        self.assertEqual(self.m.choose(["OFF", "SPK_HP"], False), "SPK_HP")
-        self.assertEqual(self.m.choose(["OFF", "HP_NO_MIC", "SPK"], True), "HP_NO_MIC")
-        self.assertIsNone(self.m.choose(["OFF", "RCV"], False))
+        self.assertEqual(self.m.choose(["OFF", "SPK", "HP", "SPK_HP"]), "HP")   # this unit's four items
+        self.assertEqual(self.m.choose(["OFF", "SPK_HP", "SPK"]), "SPK_HP")
+        self.assertEqual(self.m.choose(["OFF", "HP_NO_MIC", "SPK"]), "HP_NO_MIC")
+        self.assertIsNone(self.m.choose(["OFF", "RCV"]))
+
+    # ---- USB sound cards ----
+
+    USB = (" 0 [rockchiprk817c]: rockchip_rk817- - rockchip,rk817-codec\n                      rockchip,rk817-codec\n"
+           " 1 [Device         ]: USB-Audio - USB Audio Device\n                      Generic USB Audio Device at usb-ff300000.usb-1\n")
+
+    def plug_usb(self, playback=True):
+        (self.t / "proc/asound/cards").write_text(self.USB)
+        (self.t / "proc/asound/card1").mkdir(exist_ok=True)
+        if playback:
+            (self.t / "proc/asound/card1/pcm0p").mkdir(exist_ok=True)
+
+    def unplug_usb(self):
+        (self.t / "proc/asound/cards").write_text(" 0 [rockchiprk817c]: rockchip_rk817- - rockchip,rk817-codec\n")
+
+    def out_conf(self):
+        f = self.t / "run/asound-out.conf"
+        return f.read_text() if f.exists() else None
+
+    def test_no_usb_card_no_out_conf(self):
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(self.m.route(), 0)
+        self.assertIsNone(self.out_conf())
+
+    def test_a_usb_card_becomes_the_output(self):
+        self.plug_usb()
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.assertEqual(self.m.route(), 1)
+        conf = self.out_conf()
+        self.assertIn("pcm.!r3i6nos_out {", conf)
+        self.assertIn("card 1", conf)
+        self.assertIn("output: USB card 1 (USB-Audio - USB Audio Device)", err.getvalue())
+        self.assertEqual(list((self.t / "run").iterdir()), [self.t / "run/asound-out.conf"], "no .tmp left behind")
+
+    def test_unplugged_goes_back_to_the_codec(self):
+        self.plug_usb()
+        with redirect_stderr(io.StringIO()):
+            self.m.route()
+            self.unplug_usb()
+            self.assertEqual(self.m.route(), 0)
+        self.assertIsNone(self.out_conf())
+
+    def test_unchanged_is_not_rewritten(self):
+        self.plug_usb()
+        err = io.StringIO()
+        with redirect_stderr(err):
+            self.m.route()
+            self.m.route()
+        self.assertEqual(err.getvalue().count("output:"), 1)
+
+    def test_a_usb_card_that_cannot_play_is_not_used(self):
+        self.plug_usb(playback=False)   # a USB microphone: capture only
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(self.m.route(), 0)
+        self.assertIsNone(self.out_conf())
+
+    def test_set_routes_before_making_the_volumes(self):
+        self.plug_usb()
+        self.main("set")
+        self.assertIn("card 1", self.out_conf())
+
+    def test_follow_looks_for_usb_cards(self):
+        with mock.patch.object(self.m, "POLL", 0), redirect_stderr(io.StringIO()):
+            self.plug_usb()
+            self.assertEqual(self.m.follow([], rounds=1), 0)
+            self.assertIn("card 1", self.out_conf())
+            self.unplug_usb()
+            self.m.follow([], rounds=1)
+        self.assertIsNone(self.out_conf())
+
+    def test_status_names_the_cards_and_the_output(self):
+        _, out, _ = self.main("status")
+        self.assertIn("card 0: rockchip_rk817- - rockchip,rk817-codec", out)
+        self.assertIn("output: card 0 (no USB card)", out)
+        self.plug_usb()
+        _, out, _ = self.main("status")
+        self.assertIn("cards: 2", out)
+        self.assertIn("output: card 1, USB (USB-Audio - USB Audio Device)", out)
 
     def test_status_for_the_report(self):
         self.input_dev(1, "rk817-sound Headphone Jack", "4")
@@ -231,7 +327,7 @@ class Sound(unittest.TestCase):
         self.assertNotIn("sset Boost", self.log())
 
     def test_start_does_not_open_the_device_again(self):
-        self.main("start")
+        self.start()
         self.assertNotIn("aplay", self.log())
 
     def test_no_volume_control_is_said(self):
@@ -264,10 +360,8 @@ class Sound(unittest.TestCase):
 
     def test_start_follows_the_keys_without_a_jack(self):
         self.key_dev(0, "gpio-keys-vol", "c000000000000 0")
-        with mock.patch.object(self.m, "follow", return_value=0) as follow:
-            self.main("start")
-        follow.assert_called_once()
-        self.assertEqual([n for _, n in follow.call_args[0][0]], ["gpio-keys-vol"])
+        _, devices, _ = self.start()
+        self.assertEqual(devices, ["gpio-keys-vol"])
 
     def test_status_lists_the_mixer_and_keys(self):
         (self.t / "mixer").write_text(self.MIXER)

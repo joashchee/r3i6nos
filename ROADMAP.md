@@ -202,7 +202,14 @@ All of it goes in the gitignored `local_hardware_assets/`.
     the volume keys; the mixer screen with a test sound. Tested on a Mac only (fake `amixer`, `aplay`, `alsactl`; the menu's logic in luajit).
     - **Broke all sound on the unit** (2026-11-10): alsa-lib refused Boost's `min_dB 0.0`, so nothing could open the default device.
       Fixed (Boost from -3 dB, its silent step 0 never used; `tests/test_asound_conf.py`); **untested on the unit**: a new image first.
-    - [ ] **On the unit:** read r3i6nos's report (`sound`: Volume and Boost present, the volume-key device); in Settings > Sound mixer
+    - [x] **Sound back on the unit, and which path plays** (2026-11-10, the maintainer): the mixer's test music heard. `HP` plays from
+      the speaker, and from a 3.5 mm headphone jack when headphones are in; `SPK` was silent; the volume keys work (in Neumetik).
+      `r3i6nos-sound` now sets `HP` always (`docs/SOUND.md`).
+    - [ ] **USB headphones** (2026-11-10): silent on every path, because `/etc/asound.conf` played only on card 0. Now the output moves
+      to a USB sound card while one is plugged in (`/run/r3i6nos/asound-out.conf`, `docs/SOUND.md`); tested on a Mac and in Debian 12's
+      alsa-lib. **On the unit:** plug them in before boot, read the report's `sound` section (`card 1: USB-Audio ...`, `output: card 1`),
+      listen in the mixer; then plug and pull while an app is closed. If no `card 1` shows, the port is not giving a USB host for them.
+    - [ ] **On the unit:** `HP` from a cold boot, read r3i6nos's report (`sound`: Volume and Boost present, the volume-key device); in Settings > Sound mixer
       play the music and move Volume and Boost (heard, and Boost's clipping); press the volume keys in an app; restart and see the
       levels kept. Then update `docs/SOUND.md` and `docs/hardware-findings.md`.
   - Done (2026-11-07, one R36S, Panel 4 DTB from the stock card): ArkOS splash, kernel, initramfs, root by UUID, systemd to

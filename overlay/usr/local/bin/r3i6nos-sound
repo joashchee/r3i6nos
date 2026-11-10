@@ -1,15 +1,20 @@
 #!/usr/bin/env python3
 """r3i6nos-sound - the R36S's sound: the output on, the volume and the volume keys, the headphone jack (docs/SOUND.md).
 
-    r3i6nos-sound start     the mixer and output once (as set), then follow the headphone jack and the volume keys until stopped
-    r3i6nos-sound set       the mixer's controls made and restored, the output set (speaker, or headphones when plugged in); exit
+    r3i6nos-sound start     the output once (as set), then follow the volume keys and USB sound cards until stopped
+    r3i6nos-sound set       the mixer's controls made and restored, the output set (the codec's HP path; a USB card if plugged in); exit
     r3i6nos-sound save      keep the mixer's levels for the next boot (alsactl store; at shutdown)
     r3i6nos-sound status    one "key: value" a line: each card's Playback Path, the jack, every mixer control (the device report reads it)
 
 The output: the stock 4.4 kernel's RK817 codec driver (Rockchip BSP) powers its outputs only through the ALSA control "Playback Path"
 (OFF, RCV, SPK, HP, ...), which starts at OFF; on Android the audio HAL sets it, on Debian nothing did, so nothing was heard. The
-device tree's simple-audio-card has a headphone-detect GPIO ("Headphone Jack", SW_HEADPHONE_INSERT on an input device); the codec does
-not move the path itself, so this does: HP when plugged in, SPK when not.
+unit's codec lists OFF SPK HP SPK_HP. Heard on the unit (2026-11-10, the menu's Sound mixer): HP plays from the speaker, and from the
+headphone jack when headphones are in (the jack cuts the speaker off by itself); SPK, chosen after OFF while sound played, was silent on
+both. So the path is HP always, whatever the jack (the jack's switch is still read, for the report).
+
+USB sound (headphones, a DAC): the kernel has snd-usb-audio built in, and a USB card appears as card 1 or later. /etc/asound.conf plays
+on "r3i6nos_out", card 0 unless /run/r3i6nos/asound-out.conf (written here) names a USB card instead. This writes it at boot and again
+whenever a USB card comes or goes; a program already playing keeps its device, the next one to open sound gets the new one.
 
 The volume: the driver has no volume control (its DAC level is fixed by the device tree's spk-volume, about -1 dB, near full), so
 /etc/asound.conf sends every app's sound through two software volumes on card 0: "Volume" (-40 to 0 dB) and "Boost" (0 to +18 dB, for
@@ -40,6 +45,8 @@ APLAY = ENV("R3I6NOS_APLAY", "aplay")
 ALSACTL = ENV("R3I6NOS_ALSACTL", "alsactl")
 STATE = Path(ENV("R3I6NOS_ALSA_STATE", "/var/lib/alsa/asound.state"))
 WAIT = float(ENV("R3I6NOS_SOUND_WAIT", "10"))
+OUT_CONF = Path(ENV("R3I6NOS_ASOUND_OUT", "/run/r3i6nos/asound-out.conf"))   # /etc/asound.conf loads it (errors ignored if missing)
+POLL = 2.0   # seconds between looks for a USB card plugged in or out
 CONTROL = "Playback Path"
 VOLUME, BOOST = "Volume", "Boost"         # the software volumes /etc/asound.conf makes on card 0
 DEFAULTS = ((VOLUME, "80%"), (BOOST, "3"))  # Boost steps are 3 dB from -3 dB: 1 is 0 dB, 3 is +6 dB
@@ -56,13 +63,48 @@ def log(msg):
     print("r3i6nos-sound: " + msg, file=sys.stderr, flush=True)
 
 
-def cards():
-    """The ALSA card numbers, from /proc/asound/cards (" 0 [rockchiprk817c]: ...")."""
+def card_names():
+    """{card number: "driver - name"}, from /proc/asound/cards (" 0 [rockchiprk817c]: rockchip_rk817- - rockchip,rk817-codec")."""
     try:
         text = (PROC / "asound/cards").read_text(errors="replace")
     except OSError:
-        return []
-    return [int(m.group(1)) for m in re.finditer(r"^\s*(\d+) \[", text, re.M)]
+        return {}
+    return {int(m.group(1)): m.group(2).strip() for m in re.finditer(r"^\s*(\d+) \[[^\]]*\]:\s*(.*)$", text, re.M)}
+
+
+def cards():
+    """The ALSA card numbers."""
+    return sorted(card_names())
+
+
+def usb_card():
+    """The first USB sound card that can play (snd-usb-audio's driver name is "USB-Audio"), or None."""
+    for card, name in sorted(card_names().items()):
+        if card != 0 and name.startswith("USB-Audio") and (PROC / f"asound/card{card}/pcm0p").exists():
+            return card
+    return None
+
+
+def route():
+    """Point /etc/asound.conf's r3i6nos_out at a USB card when there is one, or back at the codec (card 0). Returns the card."""
+    card = usb_card()
+    want = "" if card is None else f"# r3i6nos-sound: the output is the USB card {card}\npcm.!r3i6nos_out {{\n    type hw\n    card {card}\n    device 0\n}}\n"
+    try:
+        have = OUT_CONF.read_text() if OUT_CONF.exists() else ""
+        if have == want:
+            return card if card is not None else 0
+        if card is None:
+            OUT_CONF.unlink()
+        else:   # whole or not at all: a broken file here stops every program from opening sound
+            OUT_CONF.parent.mkdir(parents=True, exist_ok=True)
+            tmp = OUT_CONF.with_suffix(".tmp")
+            tmp.write_text(want)
+            os.replace(tmp, OUT_CONF)
+    except OSError as e:
+        log(f"cannot write {OUT_CONF}: {e}")
+        return 0
+    log("output: " + (f"USB card {card} ({card_names().get(card, '?')})" if card is not None else "card 0 (the speaker and the jack)"))
+    return card if card is not None else 0
 
 
 def run(cmd, data=None):
@@ -90,20 +132,20 @@ def path_control(card):
     return [items[k] for k in sorted(items)], current
 
 
-def choose(items, headphones):
-    want = ("HP", "HP_NO_MIC", "SPK_HP") if headphones else ("SPK", "SPK_HP")
-    return next((w for w in want if w in items), None)
+def choose(items):
+    """HP whatever the jack: on the unit it plays from the speaker, or the jack when headphones are in (2026-11-10). SPK was silent."""
+    return next((w for w in ("HP", "HP_NO_MIC", "SPK_HP", "SPK") if w in items), None)
 
 
-def apply(headphones):
-    """Set every card's Playback Path for the speaker or the headphones. Returns how many cards were set."""
+def apply():
+    """Set every card's Playback Path to HP (choose says why). Returns how many cards were set."""
     done = 0
     for card in cards():
         ctl = path_control(card)
         if ctl is None:
             continue
         items, current = ctl
-        want = choose(items, headphones)
+        want = choose(items)
         if want is None:
             log(f"card {card}: no speaker or headphone item in {items}")
             continue
@@ -275,36 +317,46 @@ def wait_for_card():
     return bool(cards())
 
 
-def follow(devices):
-    """Read the jack's switch and the volume keys and act on them, until stopped."""
+def follow(devices, rounds=None):
+    """Read the jack's switch and the volume keys and act on them, and look for USB cards every POLL seconds, until stopped."""
     fds = {}
     for path, name in devices:
         try:
             fds[os.open(path, os.O_RDONLY)] = name
         except OSError as e:
             log(f"cannot read {path} ({name}): {e}")
-    if not fds:
-        return 0
-    log("following: " + ", ".join(sorted(set(fds.values()))))
-    while True:
-        ready, _, _ = select.select(list(fds), [], [])
+    if fds:
+        log("following: " + ", ".join(sorted(set(fds.values()))))
+    while rounds is None or rounds > 0:
+        if rounds is not None:
+            rounds -= 1
+        ready, _, _ = select.select(list(fds), [], [], POLL)
         for fd in ready:
             handle(os.read(fd, EVENT.size * 16))
+        route()
+    return 0
 
 
 def handle(data):
-    """Act on each event in a read from an event device: the headphone switch moves the path; a volume key (pressed or held) steps Volume."""
+    """Act on each event in a read from an event device: the headphone switch sets the path again; a volume key (pressed or held) steps Volume."""
     for i in range(0, len(data) - EVENT.size + 1, EVENT.size):
         _, _, etype, code, value = EVENT.unpack_from(data, i)
         if etype == EV_SW and code == SW_HEADPHONE_INSERT:
-            apply(bool(value))
+            apply()   # HP either way; this puts it back if it was changed by hand
         elif etype == EV_KEY and code in (KEY_VOLUMEUP, KEY_VOLUMEDOWN) and value in (1, 2):
             step_volume(code == KEY_VOLUMEUP)
 
 
 def status():
-    found = cards()
+    names = card_names()
+    found = sorted(names)
     print(f"cards: {len(found)}")
+    for card in found:
+        print(f"card {card}: {names[card]}")
+    usb = usb_card()
+    print("output: " + (f"card {usb}, USB ({names[usb]})" if usb is not None else "card 0" + (" (no USB card)" if found else "")))
+    if usb is None and OUT_CONF.exists():
+        print(f"output conf: {OUT_CONF} names a USB card that is gone")
     for card in found:
         ctl = path_control(card)
         if ctl is None:
@@ -334,12 +386,13 @@ def main(argv):
     if not wait_for_card():
         log("no sound card")
         return 0
+    route()            # before the volumes are made: they are made on the output that will be used
     if cmd == "set":
         mixer_init()   # once a boot: ExecStartPre runs set, then start
     jack, keys = jack_devices(), key_devices()
-    if apply(headphones_in(jack)) == 0:
+    if apply() == 0:
         log(f"no card has a {CONTROL} control; the output is left as it is")
-    if cmd == "start" and (jack or keys):
+    if cmd == "start":
         return follow(jack + keys)
     return 0
 

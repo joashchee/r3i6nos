@@ -212,6 +212,18 @@ ran; only its first screen was missing.
   `/run/r3i6nos/boot-state`, and the report reads it when `systemctl` will not answer. How the first report got "no failed units" is not
   known (it may have been run as root over SSH; the report does not say who ran it).
 
+## Which Playback Path plays, and USB headphones (2026-11-10)
+
+- Seen (the maintainer, Settings > Sound mixer's test music, Volume 30%, Boost 14%): with nothing in the 3.5 mm jack, `OFF` and `SPK` were
+  silent and `HP` played from the speaker; once `HP` had played, `SPK` and `SPK_HP` kept the speaker playing. With headphones in the jack,
+  `HP` and `SPK_HP` played in them and the speaker was never heard on any path. **USB headphones were silent on every path.**
+- So: the jack cuts the speaker off in hardware, and `HP` serves both. `SPK` chosen after `OFF` while a stream runs stays silent (it
+  did play when set at boot before any stream, 2026-11-09). `r3i6nos-sound` now sets `HP` always (`docs/SOUND.md`).
+- USB: `/etc/asound.conf` played only on card 0. The stock kernel has `snd-usb-audio` built in (`modules.builtin`); whether the port gives
+  a USB card at all is not known (the report did not list the cards then; it does now). The output now moves to a USB card while one is
+  plugged in. **Untested on the unit.**
+- The volume keys work in Neumetik (the maintainer); which input device sends them is still unread.
+
 ## No sound at all: alsa-lib refused the Boost softvol (2026-11-10)
 
 - Seen (the maintainer, image with `/etc/asound.conf`): every app failed to open sound, "cannot open: ALSA: Couldn't open audio device"

@@ -42,7 +42,47 @@ def load(path, name):
     return mod
 
 
+def null_output(text, out_conf):
+    """The conf with the null device in place of the codec, and its USB-output file at out_conf."""
+    text = re.sub(r"pcm\.r3i6nos_out \{.*?\n\}", "pcm.r3i6nos_out {\n    type null\n}", text, flags=re.S)
+    return text.replace('"/run/r3i6nos/asound-out.conf"', f'"{out_conf}"')
+
+
+def play(dev, base, conf):
+    p = subprocess.run(["aplay", "-q", "-D", dev, "-t", "raw", "-f", "S16_LE", "-c", "2", "-r", "44100"], input=bytes(4096),
+                       capture_output=True, env=dict(os.environ, ALSA_CONFIG_PATH=f"{base}:{conf}"), timeout=20)
+    return p.returncode, p.stderr.decode(errors="replace")
+
+
 class AsoundConf(unittest.TestCase):
+    def test_the_output_is_the_codec_unless_r3i6nos_sound_says(self):
+        text = re.sub(r"#.*", "", CONF.read_text())
+        self.assertRegex(text, r"pcm\.r3i6nos_out \{\s*type hw\s*card 0\s*device 0\s*\}")
+        self.assertIn('slave.pcm "r3i6nos_out"', text)
+        hook = re.search(r"@hooks \[(.*?)\n\]", text, re.S)
+        self.assertTrue(hook, "the hook that loads the USB output")
+        self.assertIn("errors false", hook.group(1), "a missing file must not stop sound")
+        snd = load(ROOT / "overlay/usr/local/bin/r3i6nos-sound", "r3i6nos_sound_conf2")
+        self.assertIn(f'"{snd.OUT_CONF}"', hook.group(1), "the file r3i6nos-sound writes")
+        self.assertGreater(text.index("@hooks"), text.index("pcm.r3i6nos_out"), "loaded after the default, so it wins")
+
+    @unittest.skipUnless(shutil.which("aplay"), "aplay (alsa-utils) not installed")
+    def test_alsa_lib_takes_the_usb_output_file(self):
+        base = "/usr/share/alsa/alsa.conf"
+        if not os.path.exists(base):
+            self.skipTest("no /usr/share/alsa/alsa.conf")
+        with tempfile.TemporaryDirectory() as d:
+            out = Path(d) / "asound-out.conf"
+            conf = Path(d) / "asound.conf"
+            # the codec as card 0 (absent here: it fails to open) and the "USB" output as null (opens): which one plays tells
+            conf.write_text(re.sub(r"pcm\.r3i6nos_out \{.*?\n\}", "pcm.r3i6nos_out {\n    type hw\n    card 7\n    device 0\n}",
+                                   CONF.read_text(), flags=re.S).replace('"/run/r3i6nos/asound-out.conf"', f'"{out}"'))
+            rc, err = play("r3i6nos_out", base, conf)
+            self.assertNotEqual(rc, 0, "card 7 should not exist here")
+            out.write_text("pcm.!r3i6nos_out {\n    type null\n}\n")
+            rc, err = play("r3i6nos_out", base, conf)
+            self.assertEqual(rc, 0, err)
+
     def test_the_two_volumes_are_there(self):
         sv = softvols()
         self.assertEqual(sorted(v["control"] for v in sv.values()), ["Boost", "Volume"])
@@ -72,16 +112,14 @@ class AsoundConf(unittest.TestCase):
     def test_alsa_lib_opens_the_chain(self):
         with tempfile.TemporaryDirectory() as d:
             conf = Path(d) / "asound.conf"
-            conf.write_text(CONF.read_text().replace('slave.pcm "hw:0,0"', 'slave.pcm "null"'))
+            conf.write_text(null_output(CONF.read_text(), Path(d) / "absent.conf"))
             base = next((p for p in ("/usr/share/alsa/alsa.conf",) if os.path.exists(p)), None)
             if base is None:
                 self.skipTest("no /usr/share/alsa/alsa.conf")
             for dev in ("r3i6nos_boost", "r3i6nos_volume", "default"):
-                p = subprocess.run(["aplay", "-q", "-D", dev, "-t", "raw", "-f", "S16_LE", "-c", "2", "-r", "44100"], input=bytes(4096),
-                                   capture_output=True, env=dict(os.environ, ALSA_CONFIG_PATH=f"{base}:{conf}"), timeout=20)
-                err = p.stderr.decode(errors="replace")
+                rc, err = play(dev, base, conf)
                 self.assertNotIn("_snd_pcm_softvol_open", err, f"{dev}: alsa-lib refused the softvol's settings:\n{err}")
-                self.assertTrue(p.returncode == 0 or "softvol_load_control" in err or "CTL" in err, f"{dev}: {err}")
+                self.assertTrue(rc == 0 or "softvol_load_control" in err or "CTL" in err, f"{dev}: {err}")
 
 
 if __name__ == "__main__":
