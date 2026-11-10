@@ -30,11 +30,10 @@ document that has the detail. Nothing here has run on a real R36S yet.
     RAR, CAB, cpio, LHA, ar/.deb, ISO, MBR/GPT, PDF, RTF, HTML, docx/pptx/xlsx, odt, EPUB. Tested by the self-test on 30 fixtures made
     in code (`make_selftest_data.py`; pictures checked against Pillow), built with Clang on macOS. **Untested on the R36S:** how it
     looks, and how long a big JPEG, PDF or `.tar.gz` takes on the RK3326.
-    - [ ] **Run the shorter format sweep** (maintainer, 2026-11-10: "run the shorter sweep later"; do this next, before committing more
-      Commander work): `docker run --rm -v "$PWD":/src -w /src debian:bookworm scripts/sweep_commander_formats.sh` (Colima; about
-      40 minutes). It builds with GCC (no warnings allowed), runs the self-test on ARM64 Linux (including the ELF "right kind" check),
-      then opens up to 5 files of each extension with an AddressSanitizer/UBSan build. A first, full sweep was stopped at 2,500 of
-      12,000 files with no problems found: each sanitizer start costs about a second. Fix whatever it finds and record the result here.
+    - [x] **The shorter format sweep** (2026-11-10, `scripts/sweep_commander_formats.sh` in Debian 12 arm64 under Docker): the
+      self-test passes under GCC on ARM64, and the AddressSanitizer/UBSan build opened 557 files (up to 5 of each extension under
+      `/usr`, `/etc`, `/var/cache` and `corpus/`) with **no problems**. GCC gave 4 truncation warnings (`dos_time`, two HTML end tags,
+      a MIDI track name), all of them impossible or meant cuts; now explicit, and GCC 12 builds it with none at `-O2` and `-O1`.
     - [ ] **On the unit:** open every file in `Test files/` and a few big photos, PDFs and `.tar.gz` files; note the slow ones.
     - [ ] **Next:** open a file inside an archive from its listing (view it, or extract it to the other panel); unpack xz and zstd
       (a `.deb`'s data is usually xz); progressive JPEG; play a sound file (WAV, then the tracker formats through Neumetik?).
@@ -371,3 +370,21 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
   - [ ] **When an app's formats change**, run `scripts/build_corpus.sh` and add the new format to `scripts/corpus_extra.py`'s `FORMATS`
     (the manifest test fails until it is).
 
+
+## 15. Crunchy (a native port; code in the Crunchy repo, `r36s/`; plan and decisions: `docs/CRUNCHY-PORT.md`)
+
+- [x] **Built** (2026-11-10, maintainer's request): `r36s/lib` compiles the desktop's own core (scan, hash cache, Move to Trash with its
+  checks, Undo) from `src-tauri/src` unchanged behind a C API; `r36s/host/crunchy.c` is the host on the theme (Folders, Duplicates,
+  Undo; a group's copies; a confirm dialog; the Start menu); `Crunchy.deb` (`r36s-crunchy`). Tests: six engine tests, the host's
+  `--selftest` of every screen on a pretend card, `r36s/check.sh`. `flash-macos.sh` copies the `.deb` to `native_deb/`. **Never run on an R36S.**
+  - [x] **The arm64 package in Debian 12 and its clean-room install** (2026-11-10, `r36s/package/docker-package.sh`): `Crunchy.deb`
+    (2 MB; SDL2, libc, libm, libgcc_s; glibc 2.34 at most) built and smoke-tested, installed by `deb_watcher.py` in a clean Debian 12,
+    and its device report there: 12 PASS, 1 FAIL (no pad under Docker), the trash test moved its file and put it back.
+- [ ] **On the unit:** Start > Device report, then bring back `EASYROMS/Crunchy/r36s-report.txt`: the trash on exFAT (`.Trash-1000`
+  owned through the mount's `uid=1000`), BLAKE3 and scan speed on the Cortex-A35 (goals 20 and 10 MB/s), memory. Then a real scan and a
+  Move to Trash and Undo by hand: the pad, how the lists read.
+- [ ] **Decide the release terms** (maintainer): `r36s/package/copyright` is Neumetik's free grant marked DRAFT; the desktop Crunchy is paid.
+- [ ] **Decide Empty the Trash** (maintainer): a move frees no space on the card until its `.Trash-1000` is emptied, and nothing on
+  r3i6nos empties it; an Empty action would delete for good, which the desktop Crunchy never does (`docs/CRUNCHY-PORT.md`, decision 6).
+- [ ] **A GitHub workflow** for the package (maintainer: Crunchy's repo has no CI yet).
+- [ ] **Later:** Smart Move on the pad, the `.diskettehashes` export, Compress image (oxipng and WebP first).

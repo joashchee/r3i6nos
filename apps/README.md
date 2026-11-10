@@ -145,6 +145,7 @@ Each native app builds on its own; the firmware only bundles the results.
   user-installed `.deb` files in `native_deb/`, never part of the image, and may link only what the rootfs has. The first planned one is KlamANSI (`docs/KLAMANSI-PORT.md`).
 - **NoCoGaMa** (`docs/NOCOGAMA-PORT.md`) is a user-installed **LÖVE** app of the maintainer's, built in its own private repo as one `.love` per runtime for `Love 11.5/` and `Love 12.0/`; nothing of it is in this repo.
 - **Neumetik** (`docs/NEUMETIK-PORT.md`) is a user-installed native `.deb` (`Neumetik.deb`, built and tested under Docker, not yet on a unit): a C and SDL2 host over a Rust static library of Neumetik's crates, built in the Neumetik repo's `r36s/`; nothing of it is in this repo.
+- **Crunchy** (`docs/CRUNCHY-PORT.md`) is a user-installed native `.deb` (`Crunchy.deb`, not yet on a unit): a C and SDL2 host over a Rust static library that compiles the desktop Crunchy's own core files, built in the Crunchy repo's `r36s/`; nothing of it is in this repo.
 - **Command-line tools** (Composer, Painter, Animator; `docs/QJS-CLI-PORTS.md`) are `.deb` packages with `usr/share/r3i6nos/tool`: no menu entry, their commands in `/opt/loveos/bin` on every app's `PATH`. `tools/qjs-node/build.sh` makes them from a Node CLI.
 - Not tried yet: the workflows themselves (they run on GitHub; first push will show) and `build_native_app.sh` in a Debian 12 container (no Docker here).
 

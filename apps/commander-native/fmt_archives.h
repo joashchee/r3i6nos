@@ -10,7 +10,7 @@
 
 static void dos_time(unsigned date, unsigned tm, char *out, size_t cap) {
     if (!date) { snprintf(out, cap, "%16s", ""); return; }
-    snprintf(out, cap, "%04u-%02u-%02u %02u:%02u", 1980 + (date >> 9), (date >> 5) & 15, date & 31, tm >> 11, (tm >> 5) & 63);
+    snprintf(out, cap, "%04u-%02u-%02u %02u:%02u", 1980 + ((date >> 9) & 127), (date >> 5) & 15, date & 31, (tm >> 11) & 31, (tm >> 5) & 63);
 }
 
 static void unix_time_short(long long t, char *out, size_t cap) {
@@ -239,10 +239,10 @@ static void xml_to_text(const char *s, size_t n, FText *t) {
             const char *e = memchr(s + i, '>', n - i);
             size_t after = e ? (size_t)(e - s) + 1 : n;
             if (!closing && (!strcmp(name, "script") || !strcmp(name, "style"))) {
-                char endtag[16];
+                char endtag[40];   /* name holds 31: "</" and it always fit (GCC checks that) */
                 snprintf(endtag, sizeof endtag, "</%s", name);
                 const char *x = strstr(s + after, endtag);
-                if (!x) { char up[16]; snprintf(up, sizeof up, "</%c%s", toupper((unsigned char)name[0]), name + 1); x = strstr(s + after, up); }
+                if (!x) { char up[40]; snprintf(up, sizeof up, "</%c%s", toupper((unsigned char)name[0]), name + 1); x = strstr(s + after, up); }
                 i = x ? (size_t)(x - s) : n;
                 continue;
             }

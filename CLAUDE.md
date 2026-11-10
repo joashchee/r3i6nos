@@ -59,6 +59,11 @@ is blocked and on what.
    **`/roms/<App>/r36s-report.txt`** for Claude to read: `STATUS key: value` lines (PASS, FAIL, INFO, SKIP), sections, a summary,
    and `end` last. Native ports use `theme/r3i6nos_report.h`; tools get `tools/qjs-node/report.py` from `package-tool.sh`. A new port
    is not done until its report exists and is tested; when a report comes back, update the port and both roadmaps from it.
+10. **Every R36S port has a local build script** that makes its card file on this Mac with one command and no arguments: a native or
+   tool port's **`r36s/build-deb.sh`** in its own repo (Docker only; it builds in Debian 12 arm64 and runs the package's self-test;
+   `--clean-room` also installs it with `deb_watcher.py` in a clean Debian 12), a LÖVE port's `scripts/build.sh`. It fetches what it
+   needs (a pinned tarball, checked by hash) or says where to put it, and leaves the file where `flash-macos.sh`'s `PORTS` list looks
+   for it; that list names the script as the port's build command. A new port is not done until its script has been run.
 
 ## Check before committing
 

@@ -125,7 +125,7 @@ cmp -s corpus/files/midi.mid "$T/mnt/Test files/midi.mid" || fail "corpus file n
 [ ! -e "$T/mnt/native_deb/r3i6nos-test-tool.deb" ] || fail "the corpus's package must not be installed"
 [ ! -e "$T/mnt/Love 11.5/hello.love" ] || fail "the corpus's app must not be installed"
 echo "$out" | grep -q 'Test corpus copied: ' || fail "corpus copy not reported: $out"
-echo "$out" | grep -q 'KlamANSI: no r36s/build/pkg/KlamANSI.deb (build it: cd .*klamansi && r36s/package/docker-package.sh)' || fail "missing KlamANSI not named: $out"
+echo "$out" | grep -q 'KlamANSI: no r36s/build/pkg/KlamANSI.deb (build it: cd .*klamansi && r36s/build-deb.sh)' || fail "missing KlamANSI not named: $out"
 echo "$out" | grep -q 'Animator: no repo at' || fail "a port with no repo not named: $out"
 
 # --- the dry run lists the ports; --no-games says they are not copied

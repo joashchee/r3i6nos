@@ -777,7 +777,7 @@ static void midi_parse(const uint8_t *b, size_t n, FInfo *in, FText *text) {
                 } else if (type >= 1 && type <= 7) {
                     char v[200];
                     ff_clean(v, sizeof v, d, l);
-                    if (type == 3 && t == 0 && !first_name[0]) snprintf(first_name, sizeof first_name, "%s", v);
+                    if (type == 3 && t == 0 && !first_name[0]) snprintf(first_name, sizeof first_name, "%.*s", (int)sizeof first_name - 1, v);   /* a long name is cut */
                     if (in && type == 2 && v[0]) info_add(in, "Copyright", "%s", v);
                     static const char *kinds[] = {"", "Text", "Copyright", "Track name", "Instrument", "Lyric", "Marker", "Cue"};
                     if (text && v[0]) text_line(text, "%-5u %-10s %s", t + 1, kinds[type], v);
