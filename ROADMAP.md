@@ -221,6 +221,13 @@ All of it goes in the gitignored `local_hardware_assets/`.
     - [x] **Sound back on the unit, and which path plays** (2026-11-10, the maintainer): the mixer's test music heard. `HP` plays from
       the speaker, and from a 3.5 mm headphone jack when headphones are in; `SPK` was silent; the volume keys work (in Neumetik).
       `r3i6nos-sound` now sets `HP` always (`docs/SOUND.md`).
+    - [ ] **3.5 mm headphones in before boot: TinyNTT silent until the mixer played a sound** (2026-11-10, the maintainer): after boot no
+      sound in TinyNTT; after Settings > Sound mixer's test tone/music (heard), TinyNTT had sound. So `HP` is set at boot but a stream
+      does not come out until something in the menu has played; cause **not found**. Suspects: `apply()` skips the `cset` when the
+      restored state already says `HP` (`current == want`), so the driver never does its power-up from `OFF`; or the path must be set
+      while a stream is open (the 23 ms `aplay` in `set` is too early or too short). **On the unit:** from a cold boot with the jack
+      in, over SSH before opening anything: `r3i6nos-sound status` (Playback Path), then in TinyNTT; if silent, `amixer -c 0 cset
+      name='Playback Path' OFF` then `HP` while TinyNTT plays, and see which brings the sound back. Then fix in `r3i6nos-sound`.
     - [ ] **USB headphones** (2026-11-10): silent on every path, because `/etc/asound.conf` played only on card 0. Now the output moves
       to a USB sound card while one is plugged in (`/run/r3i6nos/asound-out.conf`, `docs/SOUND.md`); tested on a Mac and in Debian 12's
       alsa-lib. **On the unit:** plug them in before boot, read the report's `sound` section (`card 1: USB-Audio ...`, `output: card 1`),
@@ -420,7 +427,8 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
   played by Neumetik's own tracker note for note), the host's `--selftest` of every panel, `r36s/check.sh`. `flash-macos.sh`
   copies the `.deb` to `native_deb/`. **Never run on an R36S.**
   - [x] **The arm64 package in Debian 12 and its clean-room install** (2026-11-10): `r36s/build-deb.sh --clean-room` built `TinyNTT.deb` (3.4 MB; needs SDL2, libc, libm, libgcc_s; newest glibc symbol 2.34) in Debian 12 arm64, its self-test passed there, `deb_watcher.py` installed it in a clean Debian 12 and the launcher ran it, and a device report there had 21 PASS and 2 FAIL (both for no pad under Docker). Those figures are a Mac's under Docker, not the unit's: 79x to 148x real time with up to 19 voices, every 256-frame buffer in under 5% of its time, a save in 43 ms, peak memory 14 MB. The Linux run found a bug the Mac did not (reopening the last song at start copied a path onto itself; fixed).
-- [ ] **On the unit:** Files > Device report, then bring back `EASYROMS/TinyNTT/r36s-report.txt`: the pad's 17 buttons and 4 axes,
+- [x] **Device report on the unit** (2026-11-10, the maintainer): 24 PASS, 0 FAIL. the pad has 17 buttons and 4 axes, no hats (GUID 1900bb3e…); ALSA gave the 256 frames asked (about 12 ms to a note); speed with four busy tracks 5.2x (Metal, 19 voices), 7.2x (Funk) and 10.5x (Ambient) real time, 100% of buffers in half their time, slowest 1.48 ms of 5.80 ms; a save of 592 notes in 14 ms; a screen paint 4.6 ms; start-up 564 ms; peak memory 49 MB (the Debian 12 run said 14 MB, so that was low). The report does not say whether the sound was heard, or the Playback Path (see section 6's headphones item).
+- [ ] **On the unit, by hand (the report is in):** Files > Device report, then bring back `EASYROMS/TinyNTT/r36s-report.txt`: the pad's 17 buttons and 4 axes,
   the buffer ALSA gives (goal 512 frames or fewer), the engine's speed with four busy tracks (goals 2x real time, 99% of buffers in
   half their time), a save to the card (goal 1 s), memory. Then make a loop: the sticks' directions, Fn, whether recorded notes
   land on the beat (the two-buffer latency guess), how the piano roll reads on the panel.

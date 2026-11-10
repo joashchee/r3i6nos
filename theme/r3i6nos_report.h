@@ -207,6 +207,26 @@ static inline void r3_report_system(R3Report *r) {
     }
     if (r3_report_slurp_line("/proc/asound/cards", v, sizeof v) == 0) r3_report_line(r, R3_INFO, "sound cards", "%s", v[0] ? v : "none");
     else r3_report_line(r, R3_SKIP, "sound cards", "no /proc/asound here");
+    /* The output route, from the root helper's own status (docs/SOUND.md): the codec's Playback Path and the jack. R3I6NOS_SOUND names it. */
+    {
+        const char *helper = getenv("R3I6NOS_SOUND");
+        char cmd[PATH_MAX + 32];
+        snprintf(cmd, sizeof cmd, "%s status 2>/dev/null", helper && *helper ? helper : "r3i6nos-sound");
+        FILE *p = popen(cmd, "r");
+        int shown = 0;
+        char ln[256];
+        while (p && fgets(ln, sizeof ln, p)) {
+            ln[strcspn(ln, "\n")] = 0;
+            if (strstr(ln, " playback path: ") || !strncmp(ln, "output: ", 8) || !strncmp(ln, "headphones: ", 12) || !strncmp(ln, "jack: ", 6)) {
+                char *c = strchr(ln, ':');
+                *c = 0;
+                r3_report_line(r, R3_INFO, ln, "%s", c + 2);
+                shown++;
+            }
+        }
+        if (p) pclose(p);
+        if (!shown) r3_report_line(r, R3_SKIP, "sound route", "r3i6nos-sound status gave nothing (not the R36S image)");
+    }
 
     SDL_version sv;
     SDL_GetVersion(&sv);

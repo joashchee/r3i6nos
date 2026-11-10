@@ -103,6 +103,19 @@ def system(r):
         r.line("INFO", "memory", f"total {total}, available {field('/proc/meminfo', 'MemAvailable') or '?'}")
     else:
         r.line("SKIP", "memory", "no /proc/meminfo here (not Linux)")
+    # The output route, from the root helper's own status (docs/SOUND.md): the codec's Playback Path and the jack.
+    try:
+        out = subprocess.run([os.environ.get("R3I6NOS_SOUND") or "r3i6nos-sound", "status"], capture_output=True, text=True, timeout=10).stdout
+    except (OSError, subprocess.SubprocessError):
+        out = ""
+    shown = 0
+    for ln in out.splitlines():
+        if " playback path: " in ln or ln.startswith(("output: ", "headphones: ", "jack: ")):
+            key, _, val = ln.partition(": ")
+            r.line("INFO", key, val)
+            shown += 1
+    if not shown:
+        r.line("SKIP", "sound route", "r3i6nos-sound status gave nothing (not the R36S image)")
 
 
 def fstype(path):

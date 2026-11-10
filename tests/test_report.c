@@ -14,6 +14,16 @@ int main(void) {
     if (!base) { perror("mkdtemp"); return 1; }
     char dir[PATH_MAX + 16];
     snprintf(dir, sizeof dir, "%s/Test App", base); /* a space, as a card folder may have */
+    /* A stand-in for the root helper: the report must pass on its playback path, jack and output lines and nothing else. */
+    char fake[PATH_MAX + 32];
+    snprintf(fake, sizeof fake, "%s/fake-sound", base);
+    FILE *fs = fopen(fake, "w");
+    if (!fs) { perror("fake"); return 1; }
+    fputs("#!/bin/sh\necho 'cards: 1'\necho 'output: card 0'\necho 'card 0 playback path: HP (of OFF SPK HP SPK_HP)'\n"
+          "echo 'jack: rk817 Headphones'\necho 'headphones: in'\necho 'mixer Volume: 80%'\n", fs);
+    fclose(fs);
+    chmod(fake, 0755);
+    setenv("R3I6NOS_SOUND", fake, 1);
     R3Report r = {0};
     r.quiet = 1;
     CHECK(r3_report_open(&r, dir, "Test App", "1.2.3", "r36s-test", "--report") == 0, "open");
@@ -32,7 +42,7 @@ int main(void) {
     FILE *f = fopen(path, "r");
     CHECK(f != NULL, "the report is on the card");
     char line[1024], last[1024] = "", summary[128];
-    int n = 0, bad = 0, sections = 0, header = 0;
+    int n = 0, bad = 0, sections = 0, header = 0, route = 0;
     snprintf(summary, sizeof summary, "PASS %d  FAIL %d  INFO %d  SKIP %d", pass, fail, info, skip);
     int saw_summary = 0;
     while (f && fgets(line, sizeof line, f)) {
@@ -44,12 +54,16 @@ int main(void) {
         if (!line[0]) continue;
         if (!strncmp(line, "== ", 3)) { sections++; continue; }
         if (!strcmp(line, summary)) { saw_summary = 1; continue; }
+        if (!strcmp(line, "INFO card 0 playback path: HP (of OFF SPK HP SPK_HP)")) route |= 1;
+        if (!strcmp(line, "INFO headphones: in")) route |= 2;
+        if (!strncmp(line, "INFO mixer ", 11) || !strncmp(line, "INFO cards: ", 12)) route |= 4;
         if (!strcmp(line, "end")) { snprintf(last, sizeof last, "%s", line); continue; }
         int ok = (!strncmp(line, "PASS ", 5) || !strncmp(line, "FAIL ", 5) || !strncmp(line, "INFO ", 5) || !strncmp(line, "SKIP ", 5)) && strstr(line, ": ");
         if (!ok) { bad++; fprintf(stderr, "not in the grammar: %s\n", line); }
         snprintf(last, sizeof last, "%s", line);
     }
     if (f) fclose(f);
+    CHECK(route == 3, "the Playback Path and the headphones line are in the report, the mixer's lines are not");
     CHECK(header == 4, "the four header lines");
     CHECK(sections == 4, "system, card, speed, summary");
     CHECK(bad == 0, "every line is STATUS key: value");
