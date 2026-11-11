@@ -102,7 +102,7 @@ Its sibling, **Rec demo** (`docs/DEMO-RECORDINGS.md`, CLAUDE.md rule 11), sits r
 
 | Port | Where it lives | How it is started | File |
 |---|---|---|---|
-| r3i6nos itself (the system, boot, both card slots) | `overlay/usr/local/bin/r3i6nos-report` (`docs/STORAGE.md`) | Settings > Device reports > r3i6nos (this system), or `r3i6nos-report` | `r3i6nos/r36s-report.txt` on the data card (`/roms2`), else the system card |
+| r3i6nos itself (the system, boot, both card slots, and the battery cost of its background work: `docs/POWER.md`) | `overlay/usr/local/bin/r3i6nos-report` (`docs/STORAGE.md`) | Settings > Device reports > r3i6nos (this system), or `r3i6nos-report` | `r3i6nos/r36s-report.txt` on the data card (`/roms2`), else the system card |
 | Neumetik | Neumetik repo `r36s/` | Start > Device report, `neumetik --report` | `/roms/Neumetik/r36s-report.txt` |
 | TinyNTT | TinyNTT repo `r36s/` | Files > Device report, `tinyntt --report` | `/roms/TinyNTT/r36s-report.txt` |
 | KlamANSI | KlamANSI repo `r36s/` | Start > Device report, `klamansi --report` | `/roms/KlamANSI/r36s-report.txt` |

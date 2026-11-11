@@ -9,17 +9,23 @@ starts it (it is linked into /opt/loveos/bin as a report); over SSH, run `r3i6no
 
 Sections: system (the build, kernel, CPU, memory), boot (units that failed, how long boot took), sound (the RK817's Playback
 Path, the headphone jack, the volume keys and the mixer, from r3i6nos-sound), clock (r3i6nos-clock status), storage (every mmc disk and slot, what
-r3i6nos-cards mounted, the kernel's filesystems, loop devices, and on each mounted card a write/rename/read/delete check and its speed).
+r3i6nos-cards mounted, the kernel's filesystems, loop devices, and on each mounted card a write/rename/read/delete check and its speed),
+power (what the background work costs the battery: the hot-plug daemon, the menu, the periodic jobs; the idle draw in mW; docs/POWER.md).
 
 Standard library only. Overrides, for tests: R3I6NOS_ETC (/etc), R3I6NOS_PROC (/proc), R3I6NOS_SYS (/sys), R3I6NOS_DEV (/dev),
 R3I6NOS_CARDS_STATE (/run/r3i6nos/cards), R3I6NOS_REPORT_DIR (the folder to write in), R3I6NOS_REPORT_MB (16: the speed test's size),
 R3I6NOS_SOUND (r3i6nos-sound), R3I6NOS_HOTPLUG (r3i6nos-hotplug),
-R3I6NOS_CLOCK (r3i6nos-clock).
+R3I6NOS_CLOCK (r3i6nos-clock), and for the power section (docs/POWER.md): R3I6NOS_REPORT_POWER_S (30: seconds per measuring window),
+R3I6NOS_BATTERY (r3i6nos-battery), R3I6NOS_BOOTSTATE_CMD (r3i6nos-bootstate), R3I6NOS_MENU_MATCH (/opt/loveos/menu: how the menu's process
+is told), R3I6NOS_POWER_AB (1: do the stop-and-compare even when not root, tests).
 """
 import os
 import re
+import resource
+import signal
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -38,6 +44,15 @@ HOTPLUG = ENV("R3I6NOS_HOTPLUG", "/usr/local/bin/r3i6nos-hotplug")
 CLOCK = ENV("R3I6NOS_CLOCK", "/usr/local/bin/r3i6nos-clock")
 BOOTSTATE = Path(ENV("R3I6NOS_BOOTSTATE", "/run/r3i6nos/boot-state"))   # r3i6nos-bootstate (root) writes it: systemctl answers only root
 PROGRESS = ENV("R3I6NOS_REPORT_PROGRESS")   # set by the menu (menu/reports.lua): where to say how far it has got
+POWER_S = float(ENV("R3I6NOS_REPORT_POWER_S", "30"))
+BATTERY_CMD = ENV("R3I6NOS_BATTERY", "/usr/local/bin/r3i6nos-battery")
+BOOTSTATE_CMD = ENV("R3I6NOS_BOOTSTATE_CMD", "/usr/local/bin/r3i6nos-bootstate")
+MENU_MATCH = ENV("R3I6NOS_MENU_MATCH", "/opt/loveos/menu")
+# the goals the power section checks against (docs/POWER.md): a goal missed is a FAIL line, not a silent number
+GOAL_DAEMON_CPU = 1.0        # % of one core, the hot-plug daemon
+GOAL_DAEMON_WAKEUPS = 4.0    # context switches a second, the hot-plug daemon (its poll is 2 a second)
+GOAL_JOBS_CPU = 0.05         # % of one core, the periodic jobs together, averaged over an hour
+GOAL_DAEMON_MW = 20.0        # mW the daemon may cost beyond the measuring noise
 WANT_FS = ("exfat", "vfat", "ext4", "squashfs")
 
 
@@ -419,6 +434,251 @@ def where(cards):
     return os.path.join(root, "r3i6nos"), card
 
 
+# ---- power: what the background work costs (docs/POWER.md) ------------------------------------------------------------------------
+
+CLK = os.sysconf("SC_CLK_TCK") if hasattr(os, "sysconf") else 100
+
+
+def find_pids(*needles):
+    """Pids whose command line holds every needle (a name, an argument)."""
+    out = []
+    try:
+        names = [p.name for p in PROC.iterdir() if p.name.isdigit()]
+    except OSError:
+        return out
+    for n in names:
+        cmd = (read(PROC / n / "cmdline") or "").replace("\0", " ")
+        if cmd and all(x in cmd for x in needles) and n != str(os.getpid()):
+            out.append(int(n))
+    return sorted(out)
+
+
+def proc_snap(pid):
+    """CPU ticks, context switches and resident kB of one process, or None when it is gone."""
+    stat = read(PROC / str(pid) / "stat")
+    if not stat or ")" not in stat:
+        return None
+    rest = stat.rsplit(")", 1)[1].split()
+    try:
+        ticks = int(rest[11]) + int(rest[12])
+    except (IndexError, ValueError):
+        return None
+    st = {k: v for k, _, v in (ln.partition(":") for ln in (read(PROC / str(pid) / "status") or "").splitlines())}
+    num = lambda k: int((st.get(k) or "0").split()[0])
+    return {"ticks": ticks, "ctx": num("voluntary_ctxt_switches") + num("nonvoluntary_ctxt_switches"), "rss": num("VmRSS"),
+            "name": (st.get("Name") or str(pid)).strip()}
+
+
+def sys_snap():
+    """Total and idle CPU ticks, interrupts and context switches since boot, from /proc/stat."""
+    out = {"total": 0, "idle": 0, "intr": 0, "ctxt": 0}
+    for ln in (read(PROC / "stat") or "").splitlines():
+        p = ln.split()
+        if p and p[0] == "cpu":
+            v = [int(x) for x in p[1:]]
+            out["total"], out["idle"] = sum(v), v[3] + (v[4] if len(v) > 4 else 0)
+        elif p and p[0] in ("intr", "ctxt") and len(p) > 1:
+            out[p[0]] = int(p[1])
+    return out
+
+
+def all_snaps():
+    out = {}
+    try:
+        names = [p.name for p in PROC.iterdir() if p.name.isdigit()]
+    except OSError:
+        return out
+    for n in names:
+        s = proc_snap(int(n))
+        if s:
+            out[int(n)] = s
+    return out
+
+
+def pct(before, after, wall):
+    """CPU as % of one core between two snapshots of one process."""
+    return max(0, after["ticks"] - before["ticks"]) / CLK / wall * 100 if wall > 0 else 0.0
+
+
+def supply():
+    base = SYS / "class/power_supply"
+    try:
+        names = sorted(p.name for p in base.iterdir())
+    except OSError:
+        return None
+    for n in names:
+        if (read(base / n / "type") or "").lower() == "battery":
+            return base / n
+    for n in names:
+        if "bat" in n.lower() or n.lower().startswith("bms"):
+            return base / n
+    return None
+
+
+def num(path):
+    try:
+        return int(read(path))
+    except (TypeError, ValueError):
+        return None
+
+
+def draw_mw(b):
+    """The battery's draw now in mW (current x voltage), or None when it does not report both."""
+    i, v = num(b / "current_now"), num(b / "voltage_now")
+    return abs(i) * v / 1e9 if i is not None and v else None
+
+
+def measure(seconds, pids, b=None):
+    """Watch for `seconds`: CPU and wakeups of `pids` (a name -> pid map), of the whole system and of every process, and the battery's draw once a second."""
+    names = list(pids)
+    s0, p0, a0, t0 = sys_snap(), {n: proc_snap(p) for n, p in pids.items()}, all_snaps(), time.monotonic()
+    draws = []
+    end = t0 + seconds
+    while True:
+        if b is not None and (d := draw_mw(b)) is not None:
+            draws.append(d)
+        left = end - time.monotonic()
+        if left <= 0:
+            break
+        time.sleep(min(1.0, left))
+    wall = max(time.monotonic() - t0, 1e-6)
+    s1, a1 = sys_snap(), all_snaps()
+    procs = {}
+    for n in names:
+        p1 = proc_snap(pids[n])
+        if p0[n] and p1:
+            procs[n] = {"cpu": pct(p0[n], p1, wall), "wake": max(0, p1["ctx"] - p0[n]["ctx"]) / wall, "rss": p1["rss"]}
+    dt = s1["total"] - s0["total"]
+    top = sorted(((pct(a0[p], a1[p], wall), a1[p]["name"], p) for p in a1 if p in a0), reverse=True)[:5]
+    return {"wall": wall, "procs": procs, "draws": draws, "top": top,
+            "busy": (100.0 * (dt - (s1["idle"] - s0["idle"])) / dt) if dt > 0 else None,
+            "intr": (s1["intr"] - s0["intr"]) / wall, "ctxt": (s1["ctxt"] - s0["ctxt"]) / wall}
+
+
+def mean(xs):
+    return sum(xs) / len(xs) if xs else None
+
+
+def job_cost(cmd, env, runs=3):
+    """CPU seconds and wall seconds one run of a periodic job takes, or None when it could not run (it may be root's)."""
+    cpu, wall, ok = 0.0, 0.0, 0
+    for _ in range(runs):
+        r0, t0 = resource.getrusage(resource.RUSAGE_CHILDREN), time.monotonic()
+        try:
+            subprocess.run(cmd, env=dict(os.environ, **env), capture_output=True, timeout=30)
+        except (OSError, subprocess.SubprocessError):
+            return None
+        r1 = resource.getrusage(resource.RUSAGE_CHILDREN)
+        cpu += (r1.ru_utime + r1.ru_stime) - (r0.ru_utime + r0.ru_stime)
+        wall += time.monotonic() - t0
+        ok += 1
+    return cpu / ok, wall / ok
+
+
+def power_section(r):
+    r.section("power")
+    b = supply()
+    if b is None:
+        r.line("SKIP", "battery", "no battery supply found, so no draw can be measured (the CPU and wake-up costs below still are)")
+        status = None
+    else:
+        status = read(b / "status")
+        r.line("INFO", "battery supply", f"{b.name}: {read(b / 'capacity') or '?'}%, {status or 'status not reported'}")
+        i, v = num(b / "current_now"), num(b / "voltage_now")
+        r.line("INFO" if i is not None else "SKIP", "current_now", f"{abs(i) / 1000:.0f} mA" + (f" at {v / 1e6:.2f} V" if v else "") if i is not None else "not reported: the draw cannot be measured here, only CPU time and wake-ups")
+    discharging = b is not None and status == "Discharging" and draw_mw(b) is not None
+    if b is not None and status != "Discharging":
+        r.line("SKIP", "draw", f"the battery says {status or 'nothing'}, not Discharging: unplug the power and run again for the draw in mW")
+
+    hp = find_pids("r3i6nos-hotplug", "start")
+    menu = find_pids(MENU_MATCH)
+    pids = {}
+    if hp:
+        pids["hotplug"] = hp[0]
+    if menu:
+        pids["menu"] = menu[0]
+
+    r.step(f"the unit idle for {POWER_S:.0f} s: CPU, wake-ups, draw")
+    base = measure(POWER_S, pids, b if discharging else None)
+    r.line("INFO", "window", f"{base['wall']:.0f} s with the menu showing, nothing pressed")
+    if base["busy"] is not None:
+        r.line("INFO", "system busy", f"{base['busy']:.1f}% of all CPUs, {base['intr']:.0f} interrupts/s, {base['ctxt']:.0f} context switches/s")
+    for cpu, name, pid in base["top"]:
+        r.line("INFO", f"busiest {name}", f"{cpu:.2f}% of a core (pid {pid})")
+    if discharging and base["draws"]:
+        d = base["draws"]
+        r.line("INFO", "idle draw", f"{mean(d):.0f} mW mean (min {min(d):.0f}, max {max(d):.0f}, {len(d)} readings)")
+        full, volt = num(b / "charge_full"), num(b / "voltage_now")
+        cap = num(b / "capacity")
+        if full and volt and cap is not None:
+            wh = full * volt / 1e12 * cap / 100
+            r.line("INFO", "idle time left", f"{wh / (mean(d) / 1000):.1f} h at this draw ({cap}% of {full / 1000:.0f} mAh)")
+
+    r.step("the hot-plug daemon")
+    h = base["procs"].get("hotplug")
+    if h is None:
+        r.line("FAIL", "hotplug daemon", "r3i6nos-hotplug start is not running, so its cost cannot be measured (docs/HOTPLUG.md)")
+    else:
+        r.line("PASS" if h["cpu"] <= GOAL_DAEMON_CPU else "FAIL", "hotplug cpu", f"{h['cpu']:.2f}% of a core (goal at most {GOAL_DAEMON_CPU:.1f}%)")
+        r.line("PASS" if h["wake"] <= GOAL_DAEMON_WAKEUPS else "FAIL", "hotplug wakeups", f"{h['wake']:.1f}/s (goal at most {GOAL_DAEMON_WAKEUPS:.1f}; its poll is 2 a second)")
+        r.line("INFO", "hotplug memory", f"{h['rss']} kB resident")
+    cost = job_cost([HOTPLUG, "status"], {})
+    r.line("INFO" if cost else "SKIP", "hotplug one look", f"{cost[0] * 1000:.0f} ms CPU, {cost[1] * 1000:.0f} ms wall (status: every sysfs read the daemon does each poll, plus Python's start)" if cost else "r3i6nos-hotplug status would not run")
+    m = base["procs"].get("menu")
+    if m is None:
+        r.line("SKIP", "menu", f"no process matching {MENU_MATCH} (run from Settings > Device reports, so the menu is showing)")
+    else:
+        r.line("INFO", "menu cpu", f"{m['cpu']:.1f}% of a core while showing, {m['rss']} kB resident (every frame polls the toast; the battery is read every 10 s)")
+
+    r.step("the periodic jobs")
+    jobs, total = [], 0.0
+    with tempfile.TemporaryDirectory(prefix="r3i6nos-power.") as tmp:
+        for name, cmd, env, per_hour in (
+            ("battery sample tick", [BATTERY_CMD, "sample", "tick", "power-report"], {"R3I6NOS_BATTERY_DIR": tmp}, 12),
+            ("bootstate", [BOOTSTATE_CMD], {"R3I6NOS_BOOTSTATE": os.path.join(tmp, "boot-state")}, 12),
+        ):
+            c = job_cost(cmd, env)
+            if c is None or not Path(cmd[0]).exists():
+                r.line("SKIP", f"job {name}", f"{cmd[0]} would not run here")
+                continue
+            share = c[0] * per_hour / 3600 * 100
+            total += share
+            r.line("INFO", f"job {name}", f"{c[0] * 1000:.0f} ms CPU, {c[1] * 1000:.0f} ms wall a run, {per_hour} runs an hour = {share:.4f}% of a core")
+            jobs.append(name)
+    if jobs:
+        r.line("PASS" if total <= GOAL_JOBS_CPU else "FAIL", "jobs cpu", f"{total:.4f}% of a core averaged, for {', '.join(jobs)} (goal at most {GOAL_JOBS_CPU}%; bootstate run as this user, so systemctl fails fast and its cost here is a lower bound)")
+    r.line("SKIP", "job clock save", "hourly, root, writes the card: not run here; one small file an hour")
+
+    r.step("the hot-plug daemon stopped, then started again")
+    if not discharging:
+        r.line("SKIP", "hotplug draw", "needs the battery discharging with current_now (see above)")
+    elif h is None:
+        r.line("SKIP", "hotplug draw", "the daemon is not running")
+    elif os.geteuid() != 0 and not ENV("R3I6NOS_POWER_AB"):
+        r.line("SKIP", "hotplug draw", "stopping a root service needs root: run `sudo r3i6nos-report` over SSH for the stop-and-compare")
+    else:
+        pid = pids["hotplug"]
+        try:
+            os.kill(pid, signal.SIGSTOP)
+            try:
+                off = measure(POWER_S, {}, b)
+            finally:
+                os.kill(pid, signal.SIGCONT)        # always started again, whatever happened
+        except OSError as e:
+            r.line("SKIP", "hotplug draw", f"could not stop the daemon: {e}")
+            off = None
+        if off and off["draws"]:
+            on2 = measure(POWER_S, {}, b)
+            a, c, d = mean(base["draws"]), mean(off["draws"]), mean(on2["draws"])
+            noise = abs(a - d)
+            cost_mw = (a + d) / 2 - c
+            r.line("INFO", "draw running / stopped / running", f"{a:.0f} / {c:.0f} / {d:.0f} mW (the two running windows differ by {noise:.0f} mW: that is the noise)")
+            over = cost_mw - noise
+            r.line("PASS" if over <= GOAL_DAEMON_MW else "FAIL", "hotplug draw",
+                   f"about {cost_mw:.0f} mW ({cost_mw / ((a + d) / 2) * 100:.1f}% of the idle draw), {max(over, 0):.0f} mW beyond the noise (goal at most {GOAL_DAEMON_MW:.0f} mW)")
+    r.line("INFO", "reading this", "one window each, on one battery: a short test. Repeat on charge levels 100%, 50%, 20% and on a warm unit before trusting a small number")
+
+
 def demo_recording():
     """True while a Rec demo holds /run/loveos/demo/lock with a live pid (docs/DEMO-RECORDINGS.md: the unit's whole power is its)."""
     try:
@@ -442,11 +702,11 @@ def main(argv):
     try:
         folder, card = where(cards)
         r = Report(folder, how, rel.get("VERSION", "?"), card, quiet)
-        r.steps = 5 + 2 * len(mounted_cards(cards))
+        r.steps = 9 + 2 * len(mounted_cards(cards))
     except OSError as e:
         print(f"r3i6nos-report: cannot write the report: {e}", file=sys.stderr)
         return 1
-    for part in (lambda: system(r, rel), lambda: boot(r), lambda: sound(r), lambda: clock(r), lambda: storage(r, cards)):
+    for part in (lambda: system(r, rel), lambda: boot(r), lambda: sound(r), lambda: clock(r), lambda: storage(r, cards), lambda: power_section(r)):
         try:
             part()
         except Exception as e:  # a broken check is a line in the report, never a missing report

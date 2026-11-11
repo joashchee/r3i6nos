@@ -23,6 +23,7 @@ is blocked and on what.
 - `tests/`: Python (`unittest`) and Lua tests; no hardware needed.
 - `vendor/`, `build/`, `local_hardware_assets/`: fetched, built or captured, gitignored.
 - `docs/DEVICE-REPORTS.md`: the device report every R36S port has (rule 9) and its file format.
+- `docs/POWER.md`: what the background work (the hot-plug daemon, the toast poll, the periodic jobs) costs the battery, and the `== power ==` section of `r3i6nos-report` that measures it on the unit.
 - `docs/HOTPLUG.md`: the toast over the top bar when headphones, a USB device or DC power is plugged in or out (rule 13); `r3i6nos-hotplug` writes the events, `theme/r3i6nos_toast.{h,lua}` show them.
 - `docs/DEMO-RECORDINGS.md`: Rec demo, the screenshots and video every R36S port records to a `Demo` folder (rule 11).
 - `docs/STORAGE.md`: the two card slots: the system card (TF1, `/roms`) and the data card (TF2, `/roms2`), mounted by role by `r3i6nos-cards`.

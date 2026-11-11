@@ -24,7 +24,9 @@ def load(env):
     return mod
 
 
-class SystemReport(unittest.TestCase):
+class Fake(unittest.TestCase):
+    """A fake /etc, /proc, /sys and two cards, and helpers to run the report against them."""
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         t = self.t = Path(self.tmp.name)
@@ -58,7 +60,7 @@ class SystemReport(unittest.TestCase):
             (t / "bin" / f).chmod(0o755)
         self.env = {"R3I6NOS_ETC": str(t / "etc"), "R3I6NOS_PROC": str(t / "proc"), "R3I6NOS_SYS": str(t / "sys"), "R3I6NOS_DEV": str(t / "dev"),
                     "R3I6NOS_CARDS_STATE": str(t / "run/cards"), "R3I6NOS_REPORT_MB": "2", "R3I6NOS_SOUND": str(t / "bin/r3i6nos-sound"), "R3I6NOS_CLOCK": str(t / "bin/r3i6nos-clock"),
-                    "R3I6NOS_BOOTSTATE": str(t / "run/boot-state"), "PATH": f"{t / 'bin'}:{os.environ.get('PATH', '')}"}
+                    "R3I6NOS_BOOTSTATE": str(t / "run/boot-state"), "R3I6NOS_REPORT_POWER_S": "0.3", "PATH": f"{t / 'bin'}:{os.environ.get('PATH', '')}"}
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -86,6 +88,8 @@ class SystemReport(unittest.TestCase):
                 self.assertRegex(ln, LINE)
         return text
 
+
+class SystemReport(Fake):
     def test_written_on_the_data_card_with_every_section(self):
         self.report()
         text = self.text(self.t / "sys2/r3i6nos")
@@ -187,8 +191,8 @@ class SystemReport(unittest.TestCase):
         with mock.patch.object(m.Report, "step", watch), mock.patch.dict(os.environ, {"PATH": self.env["PATH"]}), mock.patch("sys.stdout", io.StringIO()):
             self.assertEqual(m.main(["--from-settings", "--quiet"]), 0)
         steps = [dict(l.split("=", 1) for l in text.splitlines()) for text in seen]
-        self.assertEqual([s["steps"] for s in steps], ["9"] * 10, "5 sections and 2 checks on each of the two cards, then done")
-        self.assertEqual([s["step"] for s in steps], ["1", "2", "3", "4", "5", "6", "7", "8", "9", "9"])
+        self.assertEqual([s["steps"] for s in steps], ["13"] * 14, "5 sections, 2 checks on each of the two cards and 4 in power, then done")
+        self.assertEqual([s["step"] for s in steps], [str(i) for i in range(1, 14)] + ["13"])
         self.assertIn("speed", steps[6]["doing"])
         self.assertEqual(steps[-1]["doing"], "done")
         self.assertEqual(steps[-1]["file"], str(self.t / "sys2/r3i6nos/r36s-report.txt"))
@@ -200,6 +204,147 @@ class SystemReport(unittest.TestCase):
     def test_the_menu_finds_its_name(self):
         head = SRC.read_text().splitlines()[:40]
         self.assertTrue(any(re.match(r'^APP\s*=\s*"r3i6nos"', ln) for ln in head), "menu/reports.lua reads APP = \"...\" in the first 40 lines")
+
+
+class PowerSection(Fake):
+    """The power section (docs/POWER.md): fake /proc processes, a fake battery, and the root-only stop-and-compare with os.kill mocked."""
+
+    def proc(self, pid, name, cmdline, ticks=0, ctx=0, rss=1000):
+        d = self.t / "proc" / str(pid)
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "cmdline").write_bytes(cmdline.replace(" ", "\0").encode())
+        fields = ["S"] + ["0"] * 10 + [str(ticks), "0"] + ["0"] * 20
+        (d / "stat").write_text(f"{pid} ({name}) " + " ".join(fields) + "\n")
+        (d / "status").write_text(f"Name:\t{name}\nVmRSS:\t{rss} kB\nvoluntary_ctxt_switches:\t{ctx}\nnonvoluntary_ctxt_switches:\t0\n")
+
+    def battery(self, status="Discharging", ua=300000, uv=3900000):
+        b = self.t / "sys/class/power_supply/rk817-battery"
+        b.mkdir(parents=True, exist_ok=True)
+        for k, v in (("type", "Battery"), ("status", status), ("capacity", "80"), ("current_now", -ua), ("voltage_now", uv), ("charge_full", 3000000)):
+            (b / k).write_text(f"{v}\n")
+
+    def power_text(self, **env):
+        self.report(**env)
+        text = self.text(self.t / "sys2/r3i6nos")
+        return text[text.index("== power =="):]
+
+    def test_pct_is_ticks_over_seconds(self):
+        m = load(self.env)
+        self.assertAlmostEqual(m.pct({"ticks": 0}, {"ticks": m.CLK}, 10.0), 10.0)
+        self.assertEqual(m.pct({"ticks": 5}, {"ticks": 3}, 10.0), 0)
+        self.assertEqual(m.pct({"ticks": 0}, {"ticks": 9}, 0), 0.0)
+
+    def test_no_battery_no_daemon(self):
+        p = self.power_text()
+        self.assertIn("SKIP battery: no battery supply found", p)
+        self.assertIn("FAIL hotplug daemon: r3i6nos-hotplug start is not running", p)
+        self.assertIn("SKIP menu: no process matching /opt/loveos/menu", p)
+        self.assertIn("SKIP job clock save", p)
+        self.assertIn("SKIP hotplug draw: needs the battery discharging", p)
+
+    def test_daemon_within_its_goals_and_the_menu_measured(self):
+        self.proc(300, "python3", "python3 /usr/local/bin/r3i6nos-hotplug start", ticks=10, ctx=50, rss=9000)
+        self.proc(301, "love", "/opt/loveos/bin/love /opt/loveos/menu", ticks=500, ctx=900, rss=40000)
+        p = self.power_text()
+        self.assertIn("PASS hotplug cpu: 0.00% of a core (goal at most 1.0%)", p)
+        self.assertIn("PASS hotplug wakeups: 0.0/s (goal at most 4.0", p)
+        self.assertIn("INFO hotplug memory: 9000 kB resident", p)
+        self.assertIn("INFO menu cpu: 0.0% of a core while showing, 40000 kB resident", p)
+        self.assertNotIn("FAIL", p.split("== summary ==")[0])
+
+    def test_a_busy_daemon_fails_its_goal(self):
+        self.proc(300, "python3", "python3 r3i6nos-hotplug start", ticks=0, ctx=0)
+        m = load(self.env)
+        real = m.proc_snap
+        calls = {"n": 0}
+
+        def busy(pid):
+            s = real(pid)
+            if s and pid == 300:
+                calls["n"] += 1
+                s["ticks"] += (calls["n"] - 1) * 100 * m.CLK     # 100 s of CPU in the window: far over any goal
+                s["ctx"] += (calls["n"] - 1) * 5000
+            return s
+
+        with mock.patch.object(m, "proc_snap", busy), mock.patch.dict(os.environ, {"PATH": self.env["PATH"]}), mock.patch("sys.stdout", io.StringIO()):
+            self.assertEqual(m.main(["--from-settings", "--quiet"]), 0)
+        p = self.text(self.t / "sys2/r3i6nos")
+        self.assertRegex(p, r"FAIL hotplug cpu: [0-9.]+% of a core \(goal at most 1.0%\)")
+        self.assertRegex(p, r"FAIL hotplug wakeups: ")
+
+    def test_charging_says_to_unplug(self):
+        self.battery(status="Charging")
+        p = self.power_text()
+        self.assertIn("INFO battery supply: rk817-battery: 80%, Charging", p)
+        self.assertIn("SKIP draw: the battery says Charging, not Discharging", p)
+        self.assertNotIn("INFO idle draw", p)
+
+    def test_discharging_gives_the_draw_in_mw(self):
+        self.battery()
+        p = self.power_text()
+        self.assertIn("INFO current_now: 300 mA at 3.90 V", p)
+        self.assertIn("INFO idle draw: 1170 mW mean", p)
+        self.assertIn("INFO idle time left:", p)
+        self.assertIn("SKIP hotplug draw: the daemon is not running", p)
+
+    def test_stop_and_compare_always_continues_the_daemon(self):
+        self.battery()
+        self.proc(300, "python3", "python3 r3i6nos-hotplug start", ticks=0, ctx=0)
+        m = load(self.env)
+        sent = []
+        with mock.patch.object(m.os, "kill", lambda pid, sig: sent.append((pid, sig))), mock.patch.object(m.os, "geteuid", lambda: 0), \
+                mock.patch.dict(os.environ, {"PATH": self.env["PATH"]}), mock.patch("sys.stdout", io.StringIO()):
+            self.assertEqual(m.main(["--from-settings", "--quiet"]), 0)
+        self.assertEqual([s for _, s in sent], [m.signal.SIGSTOP, m.signal.SIGCONT])
+        p = self.text(self.t / "sys2/r3i6nos")
+        self.assertIn("INFO draw running / stopped / running: 1170 / 1170 / 1170 mW", p)
+        self.assertIn("PASS hotplug draw: about 0 mW", p)
+
+    def test_the_daemon_is_continued_even_if_the_measuring_crashes(self):
+        self.battery()
+        self.proc(300, "python3", "python3 r3i6nos-hotplug start", ticks=0, ctx=0)
+        m = load(self.env)
+        sent = []
+        calls = {"n": 0}
+        real = m.measure
+
+        def boom(seconds, pids, b=None):
+            calls["n"] += 1
+            if calls["n"] == 2:
+                raise RuntimeError("measuring broke")
+            return real(seconds, pids, b)
+
+        with mock.patch.object(m.os, "kill", lambda pid, sig: sent.append(sig)), mock.patch.object(m.os, "geteuid", lambda: 0), mock.patch.object(m, "measure", boom), \
+                mock.patch.dict(os.environ, {"PATH": self.env["PATH"]}), mock.patch("sys.stdout", io.StringIO()):
+            self.assertEqual(m.main(["--from-settings", "--quiet"]), 0)
+        self.assertEqual(sent, [m.signal.SIGSTOP, m.signal.SIGCONT])
+        self.assertIn("FAIL report: a check crashed: measuring broke", self.text(self.t / "sys2/r3i6nos"))
+
+    def test_not_root_does_not_try_to_stop_it(self):
+        self.battery()
+        self.proc(300, "python3", "python3 r3i6nos-hotplug start", ticks=0, ctx=0)
+        m = load(self.env)
+        with mock.patch.object(m.os, "kill", side_effect=AssertionError("must not signal")), mock.patch.object(m.os, "geteuid", lambda: 1000), \
+                mock.patch.dict(os.environ, {"PATH": self.env["PATH"]}), mock.patch("sys.stdout", io.StringIO()):
+            self.assertEqual(m.main(["--from-settings", "--quiet"]), 0)
+        self.assertIn("SKIP hotplug draw: stopping a root service needs root", self.text(self.t / "sys2/r3i6nos"))
+
+    def test_periodic_jobs_are_costed_with_throwaway_state(self):
+        sample = self.t / "bin/r3i6nos-battery"
+        sample.write_text('#!/bin/sh\n[ -n "$R3I6NOS_BATTERY_DIR" ] && touch "$R3I6NOS_BATTERY_DIR/ran"\n')
+        sample.chmod(0o755)
+        boot = self.t / "bin/r3i6nos-bootstate"
+        boot.write_text('#!/bin/sh\n[ -n "$R3I6NOS_BOOTSTATE" ] && echo x > "$R3I6NOS_BOOTSTATE"\n')
+        boot.chmod(0o755)
+        p = self.power_text(R3I6NOS_BATTERY=str(sample), R3I6NOS_BOOTSTATE_CMD=str(boot))
+        self.assertRegex(p, r"INFO job battery sample tick: \d+ ms CPU, \d+ ms wall a run, 12 runs an hour = [0-9.]+% of a core")
+        self.assertRegex(p, r"INFO job bootstate: ")
+        self.assertRegex(p, r"PASS jobs cpu: [0-9.]+% of a core averaged, for battery sample tick, bootstate")
+        self.assertFalse((self.t / "run/boot-state").exists(), "the real boot state is not touched")
+
+    def test_the_power_section_is_in_the_progress_steps(self):
+        self.report()
+        self.assertIn("== power ==", self.text(self.t / "sys2/r3i6nos"))
 
 
 if __name__ == "__main__":
