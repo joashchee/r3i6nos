@@ -1,5 +1,5 @@
 #!/bin/bash
-# shellcheck disable=SC2329  # the gen_* functions are called by name, through mk
+# shellcheck disable=SC2317,SC2329  # the gen_* functions are called by name, through mk
 # test_unpack.sh: Commander's own xz and zstd decoders (apps/commander-native/lzma.h, zstd.h) against the real xz and zstd, on
 # inputs of every kind: text, binaries, random data, one repeated byte, empty and tiny files, big files (many blocks and chunks),
 # every compression level, and files cut short or damaged (which must fail or cut, never crash: built with the sanitizers).

@@ -138,7 +138,7 @@ static inline int r3_demo_png(const char *path, const R3Screen *s) {
     }
     r3_demo_be32(z + zo, (b << 16) | a);
     zo += 4;
-    char tmp[PATH_MAX + 8];
+    char tmp[PATH_MAX + 96 + 8]; /* r3_demo_shot passes PATH_MAX + 96 */
     snprintf(tmp, sizeof tmp, "%s.tmp", path);
     FILE *f = fopen(tmp, "wb");
     int ok = f != NULL;
@@ -233,14 +233,14 @@ static inline void r3_demo_status(const char *app, int percent, const char *doin
 
 /* The recording has ended: exit=N, and `running` is removed. Call it before r3_demo_unlock. */
 static inline void r3_demo_status_done(int code) {
-    char text[32], p[PATH_MAX], dir[PATH_MAX];
+    char text[32], p[PATH_MAX], dir[PATH_MAX], running[PATH_MAX + 16];
     snprintf(text, sizeof text, "exit=%d\n", code);
     r3_demo_status_write("done", text);
     r3_demo_lock_path(p, sizeof p);
     snprintf(dir, sizeof dir, "%s", p);
     *strrchr(dir, '/') = 0;
-    snprintf(p, sizeof p, "%s/running", dir);
-    unlink(p);
+    snprintf(running, sizeof running, "%s/running", dir);
+    unlink(running);
 }
 
 /* ---- the checklist: which hero features a run shows -------------------------------------------------------------------------- */
@@ -473,7 +473,7 @@ static inline void r3_demo_quote(char *out, size_t cap, const char *s) {
 /* Makes dir/demo-<stamp>.mp4 from the newest dir/demo-<stamp>-frames.r3f and demo-<stamp>.wav. 0 when made; else -1 and `msg` says why. On success the two
  * files and the ffmpeg log are removed. Also the port's `--encode-demo DIR`, for a card whose unit has no ffmpeg. */
 static inline int r3_demo_encode_p(const char *dir, char *msg, size_t cap, void (*on_progress)(void *, int), void *ctx) {
-    char ff[PATH_MAX], qdir[PATH_MAX * 2], q1[PATH_MAX * 2], q2[PATH_MAX * 2], q3[PATH_MAX * 2], cmd[PATH_MAX * 8], p[PATH_MAX + 64], stamp[24] = "";
+    char ff[PATH_MAX], qdir[PATH_MAX * 2], q1[PATH_MAX * 2], q2[PATH_MAX * 2], q3[PATH_MAX * 2], cmd[PATH_MAX * 9], p[PATH_MAX + 64], stamp[24] = "";
     {   /* the newest kept recording: the greatest demo-<stamp>-frames.r3f (the stamps sort) */
         DIR *dd = opendir(dir);
         struct dirent *e;
