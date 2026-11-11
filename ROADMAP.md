@@ -21,6 +21,8 @@ document that has the detail. Nothing here has run on a real R36S yet.
   copy, move, rename, new folder, delete, tag, sort, hidden files; no overwrite, no links followed, delete asks with No first, work in slices with a progress bar and cancel.
   File operations, panels, dialogs and the viewer are tested on the laptop and under qemu; screens were looked at as pictures. **Untested on the R36S:** the buttons, the look on the panel,
   speed on the SD card, exFAT (no links or permissions). Not done: overwrite choices, a text-mode picker for long names, opening a `.love` from the list.
+  - [x] **Play tab: opens, views and plays what Rec demo makes** (2026-11-11, maintainer's request; `apps/commander-native/player.h`, `apps/README.md`): frames (`.r3f`) and PCM WAV by themselves, the mp4 and other video and sound through ffmpeg. Tested with a stand-in ffmpeg and SDL's dummy sound driver. **Untested on the unit:**
+    - [ ] does the image have `ffmpeg` (if not, the `.mp4` only shows Info; the kept frames and `.wav` play, but a finished recording keeps only the mp4: a native H.264 decoder is not built, a decision for the maintainer), does it decode 640x400 at 30 fps in time (the player drops late frames), does the RK817 sound device open at the recording's rate, and do A / Left / Right feel right.
   - [x] **The viewer reads as many formats as it can** (2026-11-10, maintainer's request: "use Diskette's abilities"; `apps/README.md`, "The viewer"):
     Diskette's file identification and per-format details rewritten in C for the unit (`formats.h`, `fmt_media.h`, `fmt_archives.h`,
     `fmt_misc.h`, no libraries), plus a DEFLATE decoder (`inflate.h`), picture decoders (`images.h`: PNG, baseline JPEG, GIF, BMP, ICO, TGA,

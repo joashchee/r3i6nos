@@ -74,7 +74,10 @@ the art or the contents when there is one, else the text, else Hex for unknown b
 | **Art** | ANSI art (escape codes, iCE colours, 256 and 24-bit colours brought to the 16), NFO and DIZ (code page 437), BIN, XBin (its palette and font, packed or not), ArtWorx ADF, iCE Draw IDF: drawn with the VGA font at its own 8x16, 25 rows a page (wider art in narrower cells, so nothing scrolls sideways) |
 | **Contents** / **Text** / ... | what is inside: the files of a ZIP (and LÖVE `.love`, jar/apk, msix, `.mxl`), TAR, `.tar.gz`, `.tar.xz`, `.tar.zst`, RAR 4/5, Cabinet, cpio, LHA, ar, ISO 9660 (the top folder); a `.deb`'s control file and file list; a disk image's partitions (MBR or GPT) with each one's filesystem and label; the text of a PDF, RTF, HTML, docx/pptx/xlsx, odt and EPUB; a `.gz`, `.xz` or `.zst` unpacked; a tracker module's instrument names and message; a MIDI's names, lyrics and markers; an SQLite database's tables; a dBase table's fields; a program's libraries |
 | **Text** (**Source** next to a document's Text) | the file as text: UTF-8, UTF-16 with a byte-order mark, or code page 437 byte for byte when it is not UTF-8 (DOS text and NFO files) |
+| **Play** | sound and video, which start at once: **A** pauses and plays on (or plays again from the start once it has finished), Left/Right leave the tab and stop the sound, B closes. **A Rec demo's own files** (`docs/DEMO-RECORDINGS.md`): the kept `demo-<time>-frames.r3f` plays by itself, drawn with the theme's renderer and with the `demo-<time>.wav` beside it as its sound; a PCM `.wav` (8 or 16 bit, mono or stereo) plays by itself; the `demo-<time>.mp4` and any other video or sound (MP3, Ogg, FLAC, AIFF, a WAV that is not PCM) play **through `ffmpeg` when the unit has one** (no H.264 or AAC decoder is built in): it decodes to raw frames and PCM on pipes, so the picture shows in the display view and nothing else opens. Without ffmpeg the Info tab says so. Picture and sound keep time by the sound's own clock. |
 | **Hex** | the bytes (the first 4 MiB) |
+
+The rest of what Rec demo writes needs nothing new: the numbered PNGs open as pictures, `rec-demo.txt` and `demo-ffmpeg.log` as text, and the copy of the demo file by its own type.
 
 What **Info** knows, by family:
 
@@ -141,7 +144,9 @@ Each native app builds on its own; the firmware only bundles the results.
 
 - `apps/<name>-native/app.conf` is the app's manifest (deb name, binary, package, source file, `THEME=1` to compile against `theme/`,
   `DEFAULT=1` to put it in the image, description). `scripts/build_native_app.sh <name>-native [--smoke]` builds that one app in a Debian 12 container
-  into `build/native/<NAME>.deb`, and `--smoke` runs its `--selftest` under qemu. `scripts/check.sh` compiles and self-tests every `app.conf`.
+  into `build/native/<NAME>.deb`, and `--smoke` runs its `--selftest` under qemu. **`scripts/build-commander.sh`** is that for Commander with no arguments, on this
+  Mac (Docker or Colima only, CLAUDE.md rule 10): it takes the version from `commander.c`, builds in `debian:bookworm` arm64, smoke-tests, and leaves `build/native/Commander.deb`
+  (`--no-smoke` skips the test); it needs no firmware workflow. `scripts/check.sh` compiles and self-tests every `app.conf`.
 - `.github/workflows/native-app.yml` is the reusable build (cache keyed on that app's files, smoke test, artifact `native-<name>-native-arm64`).
   An app's own `.github/workflows/app-<name>.yml` calls it on changes to that app (paths filter), by hand, and on a `<name>-v*` tag, which also publishes
   a GitHub release with the `.deb`. Copy `app-commander.yml` for a new app.

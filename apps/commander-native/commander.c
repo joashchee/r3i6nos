@@ -43,6 +43,7 @@
 #include "r3i6nos_toast.h"
 #include "formats.h"
 #include "ansiart.h"
+#include "player.h"
 #include "selftest_data.h"
 
 #define VERSION "1.1"
@@ -720,7 +721,7 @@ static void view_from_info(View *v, const FInfo *in) {
     if (v->n == 0) view_line(v);
 }
 
-enum { TAB_LINES, TAB_PICTURE, TAB_ART };
+enum { TAB_LINES, TAB_PICTURE, TAB_ART, TAB_PLAY };
 enum { LOAD_READY, LOAD_TEXT, LOAD_HEX };
 #define MAX_TABS 4
 
@@ -740,6 +741,7 @@ typedef struct {
     int pic_w, pic_h;          /* as decoded */
     Art art;
     int art_page;
+    Player pl;                 /* the Play tab: a Rec demo, a WAV or a video (player.h) */
     unsigned gen;              /* changes whenever the pixels shown change */
     Arc arc;                   /* the members of an archive, when the Contents tab is a list to pick from */
     int has_arc, arc_tab, arc_line0, sel; /* the tab, the line the first member is on, and the member picked */
@@ -749,6 +751,7 @@ static void viewer_free(Viewer *w) {
     for (int i = 0; i < w->ntabs; i++) view_free(&w->tab[i].v);
     img_free(&w->pic);
     art_free(&w->art);
+    pl_close(&w->pl);
     arc_free(&w->arc);
     unsigned gen = w->gen;
     memset(w, 0, sizeof *w);
@@ -770,6 +773,7 @@ static Tab *viewer_add(Viewer *w, int kind, const char *name) {
 /* Show tab i, reading the file for it the first time. */
 static void viewer_show(Viewer *w, int i, char *err, size_t errsz) {
     if (i < 0 || i >= w->ntabs) return;
+    if (w->tab[w->cur].kind == TAB_PLAY && w->cur != i) pl_pause(&w->pl, 1);   /* leaving the Play tab stops the sound */
     w->cur = i;
     w->gen++;
     Tab *t = &w->tab[i];
@@ -782,13 +786,13 @@ static void viewer_show(Viewer *w, int i, char *err, size_t errsz) {
 static int pages_of(const Viewer *w) {
     const Tab *t = &w->tab[w->cur];
     if (t->kind == TAB_ART) return art_pages(&w->art, PIC_H);
-    if (t->kind == TAB_PICTURE) return 1;
+    if (t->kind == TAB_PICTURE || t->kind == TAB_PLAY) return 1;
     return view_pages(&t->v);
 }
 
 static int page_of(const Viewer *w) {
     const Tab *t = &w->tab[w->cur];
-    return t->kind == TAB_ART ? w->art_page : t->kind == TAB_PICTURE ? 0 : t->v.page;
+    return t->kind == TAB_ART ? w->art_page : (t->kind == TAB_PICTURE || t->kind == TAB_PLAY) ? 0 : t->v.page;
 }
 
 static void set_page(Viewer *w, int page) {
@@ -803,6 +807,15 @@ static void set_page(Viewer *w, int page) {
 
 static int is_picture_kind(int k) {
     return k == K_PNG || k == K_JPEG || k == K_GIF || k == K_BMP || k == K_ICO || k == K_TGA || k == K_QOI || k == K_PCX || k == K_PNM;
+}
+
+/* How a kind plays (player.h): a Rec demo's frames and a PCM WAV by themselves, other sound and video through ffmpeg. */
+static int play_mode(int k) {
+    if (k == K_R3F) return PL_R3F;
+    if (k == K_WAV) return PL_WAV;
+    if (k == K_MP4 || k == K_AVI || k == K_MKV || k == K_ASF || k == K_FLV || k == K_MPEGPS || k == K_MPEGTS) return PL_VIDEO;
+    if (k == K_AIFF || k == K_FLAC || k == K_MP3 || k == K_OGG || k == K_WAVPACK) return PL_AUDIO;
+    return PL_NONE;
 }
 
 static int is_art_kind(int k) { return k == K_ANSI || k == K_BINART || k == K_XBIN || k == K_ADF || k == K_IDF; }
@@ -886,6 +899,16 @@ static int viewer_open_as(Viewer *w, const char *path, const char *title, char *
         if (art_load(&w->art, &f, k, why, sizeof why) == 0) { content = w->ntabs; viewer_add(w, TAB_ART, "Art"); }
         else info_add(&info, "Art", "not shown: %s", why);
     }
+    if (content < 0 && play_mode(k) != PL_NONE) {
+        const char *why = NULL;
+        int mode = play_mode(k);
+        if (pl_open(&w->pl, path, mode, (double)SDL_GetTicks(), &why) != 0 && mode == PL_WAV) {
+            const char *via = NULL;    /* a WAV that is not plain PCM may still play through ffmpeg */
+            if (pl_open(&w->pl, path, PL_AUDIO, (double)SDL_GetTicks(), &via) == 0) why = NULL;
+        }
+        if (w->pl.mode) { content = w->ntabs; viewer_add(w, TAB_PLAY, "Play"); }
+        else info_add(&info, "Play", "not played: %s", why ? why : "it could not be opened");
+    }
     if (content < 0 && arc_kind_listable(k) && arc_open(&w->arc, path, k) == 0 && w->arc.n > 0) {
         FText head = {0, 0, 0, 0, 0};
         if (k == K_DEB) deb_control_ex(&f, NULL, &head, 0);
@@ -942,6 +965,8 @@ static void viewer_overlay(const Viewer *w, uint32_t *px) {
     if (w->ntabs == 0) return;
     if (t->kind == TAB_ART && w->art.ch) {
         art_draw(&w->art, w->art_page, px, PIC_Y, PIC_H);
+    } else if (t->kind == TAB_PLAY && w->pl.has_video && w->pl.px) {
+        memcpy(px + (size_t)PIC_Y * R3_W, w->pl.px, (size_t)PIC_W * PIC_H * sizeof(uint32_t));
     } else if (t->kind == TAB_PICTURE && w->pic.px) {
         for (int y = 0; y < PIC_H; y++) memset(px + (size_t)(PIC_Y + y) * R3_W, 0, R3_W * sizeof(uint32_t));
         int x0 = (PIC_W - w->pic.w) / 2, y0 = PIC_Y + (PIC_H - w->pic.h) / 2;
@@ -1265,8 +1290,17 @@ static void run_cmd(App *a, int cmd);
 
 /* One slice of a running job; called from the main loop. */
 static void app_tick(App *a, unsigned budget_ms) {
+    if (a->mode == M_VIEW && a->view.ntabs && a->view.tab[a->view.cur].kind == TAB_PLAY) {
+        if (pl_pump(&a->view.pl, (double)SDL_GetTicks())) a->view.gen++;
+        return;
+    }
     if (a->mode != M_JOB || !a->job_active) return;
     if (!job_step(&a->job, budget_ms) || a->job.finished) finish_job(a);
+}
+
+/* A Play tab is playing: the loop wakes about every frame. */
+static int app_playing(const App *a) {
+    return a->mode == M_VIEW && a->view.ntabs && a->view.tab[a->view.cur].kind == TAB_PLAY && a->view.pl.playing && !a->view.pl.ended;
 }
 
 static void run_cmd(App *a, int cmd) {
@@ -1509,6 +1543,20 @@ static void app_action(App *a, int action) {
         int on_list = w->has_arc && w->cur == w->arc_tab;
         if (on_list && action == R3_ACCEPT) { member_open(a); break; }
         if (on_list && action == R3_MORE) { member_extract(a); break; }
+        if (w->tab[w->cur].kind == TAB_PLAY && action == R3_ACCEPT) {   /* A: pause, resume, or play again from the start */
+            Player *pl = &w->pl;
+            if (pl->ended) {
+                char path[sizeof pl->path];
+                const char *why = NULL;
+                int mode = pl->mode;
+                copy_str(path, sizeof path, pl->path);
+                if (pl_open(pl, path, mode, (double)SDL_GetTicks(), &why) != 0) say(a, R3_ST_ERROR, "Cannot play again: %s", why ? why : "?");
+            } else {
+                pl_pause(pl, pl->playing);
+            }
+            w->gen++;
+            break;
+        }
         if (action == R3_BACK || action == R3_ACCEPT) { viewer_up(a); break; }
         if (on_list && (action == R3_UP || action == R3_DOWN || action == R3_PAGEUP || action == R3_PAGEDOWN || action == R3_HOME || action == R3_END)) {
             list_move(w, action);
@@ -1673,16 +1721,34 @@ static void app_compose(const App *a, R3Screen *s) {
             }
         } else {
             r3_fill(s, 0, R3_DISPLAY_TOP, R3_COLS, R3_DISPLAY_ROWS, 32, R3_ST(R3_ST_BODY)); /* the pixels go over this */
+            if (t->kind == TAB_PLAY && !w->pl.has_video) {   /* sound only: a title, the state and a bar, in cells */
+                const Player *pl = &w->pl;
+                R3Box b = {1, w->title, NULL, tabs, 0};
+                r3_box(s, 0, R3_DISPLAY_TOP, R3_COLS, R3_DISPLAY_ROWS, &b);
+                char now[16], tot[16], line[96];
+                pl_time(now, sizeof now, pl->now);
+                pl_time(tot, sizeof tot, pl->total);
+                snprintf(line, sizeof line, "%s  %s / %s", pl->ended ? "Finished" : pl->playing ? "Playing" : "Paused", now, pl->total > 0 ? tot : "?:??");
+                r3_text(s, 4, R3_DISPLAY_TOP + 8, line, R3_LIGHT_GRAY, R3_BLACK);
+                int cells = R3_COLS - 8, done = pl->total > 0 ? (int)(cells * (pl->now > pl->total ? 1.0 : pl->now / pl->total)) : 0;
+                for (int i = 0; i < cells; i++) r3_put(s, 4 + i, R3_DISPLAY_TOP + 10, i < done ? 219 : 176, R3_LIGHT_GREEN, R3_BLACK);
+            }
         }
         char sz[16];
         fmt_size((unsigned long long)w->filesize, sz, sizeof sz);
         if (t->kind == TAB_PICTURE)
             snprintf(left, sizeof left, "%s, %dx%d%s", w->type.label, w->pic_w, w->pic_h,
                      w->pic.w > w->pic_w ? " (enlarged)" : w->pic.w < w->pic_w ? " (made smaller)" : "");
-        else if (t->kind == TAB_ART) snprintf(left, sizeof left, "%s, %d columns  %s", w->type.label, w->art.w, pages > 1 ? pg : "");
+        else if (t->kind == TAB_PLAY) {
+            char now[16], tot[16];
+            pl_time(now, sizeof now, w->pl.now);
+            pl_time(tot, sizeof tot, w->pl.total);
+            snprintf(left, sizeof left, "%s  %s / %s", w->type.label, now, w->pl.total > 0 ? tot : "?:??");
+        } else if (t->kind == TAB_ART) snprintf(left, sizeof left, "%s, %d columns  %s", w->type.label, w->art.w, pages > 1 ? pg : "");
         else snprintf(left, sizeof left, "%s, %s bytes", w->type.label, sz);
         static char reply[160];
-        if (t->kind != TAB_LINES) snprintf(reply, sizeof reply, "%s  Left/Right tab", tabs);
+        if (t->kind == TAB_PLAY) snprintf(reply, sizeof reply, "%s", w->pl.note[0] ? w->pl.note : w->pl.ended ? "A play again  Left/Right tab  B close" : "A pause or play  Left/Right tab  B close");
+        else if (t->kind != TAB_LINES) snprintf(reply, sizeof reply, "%s  Left/Right tab", tabs);
         else if (w->has_arc && w->cur == w->arc_tab) snprintf(reply, sizeof reply, "Up/Down pick  A open  Start extract  B %s", a->vdepth ? "back" : "close");
         else snprintf(reply, sizeof reply, "%s", t->v.truncated ? "Only the first part is shown" : a->vdepth ? "Left/Right tab  Up/Down page  B back" : "Left/Right tab  Up/Down page  B close");
         c.reply = a->reply[0] && a->reply_style == R3_ST_ERROR ? a->reply : reply;
@@ -2666,6 +2732,171 @@ static void test_viewer_tabs(const char *root) {
     app_free(&a);
 }
 
+/* ---- Play: what Rec demo makes, a WAV, and video through a stand-in ffmpeg ------------------------------------------------------- */
+
+static void put_le(unsigned char *p, unsigned long v, int n) { for (int i = 0; i < n; i++) p[i] = (unsigned char)(v >> (8 * i)); }
+
+/* A mono 16-bit 8000 Hz WAV of `seconds` of silence. */
+static void write_wav(const char *path, int seconds) {
+    unsigned long data = 8000ul * 2 * (unsigned long)seconds;
+    unsigned char h[44] = "RIFF\0\0\0\0WAVEfmt \x10\0\0\0\1\0\1\0\0\0\0\0\0\0\0\0\2\0\x10\0data";
+    put_le(h + 4, 36 + data, 4);
+    put_le(h + 24, 8000, 4);
+    put_le(h + 28, 16000, 4);
+    put_le(h + 40, data, 4);
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    fwrite(h, 1, 44, f);
+    for (unsigned long i = 0; i < data; i++) fputc(0, f);
+    fclose(f);
+}
+
+/* Rec demo's kept frames: three screens that stay 30, 15 and 45 frames (3.0 s). */
+static void write_r3f(const char *path) {
+    static const struct { uint32_t run; const char *text; } rec[3] = {{30, "ONE"}, {15, "TWO"}, {45, "THREE"}};
+    FILE *f = fopen(path, "wb");
+    if (!f) return;
+    for (int i = 0; i < 3; i++) {
+        R3Screen s;
+        r3_clear(&s);
+        r3_text(&s, 2, 2, rec[i].text, R3_WHITE, R3_BLUE);
+        fwrite(&rec[i].run, sizeof rec[i].run, 1, f);
+        fwrite(&s, sizeof s, 1, f);
+    }
+    fclose(f);
+}
+
+static FType fx_type_of(const char *path) {
+    FFile f;
+    char err[256];
+    FType t = {"", "", -1};
+    if (ff_open(&f, path, err, sizeof err) != 0) return t;
+    t = ff_identify(&f);
+    ff_close(&f);
+    return t;
+}
+
+static void test_play(const char *root) {
+    char p[PATH_MAX], wav[PATH_MAX], err[256];
+    App a;
+    app_init(&a, root, root);
+    setenv("R3I6NOS_FM_NOAUDIO", "1", 1);   /* silent, on the test's own clock */
+    path_join(p, sizeof p, root, "demo-20261111-143005-frames.r3f");
+    path_join(wav, sizeof wav, root, "demo-20261111-143005.wav");
+    write_r3f(p);
+    write_wav(wav, 3);
+
+    CHECK(fx_type_of(p).kind == K_R3F, "a kept frames file is recognised");
+    {
+        FFile f;
+        FInfo in = {0, 0, 0};
+        int ok = ff_open(&f, p, err, sizeof err) == 0;
+        if (ok) { ff_info(&f, ff_identify(&f), &in); ff_close(&f); }
+        int screens = 0, dur = 0;
+        for (int i = 0; i < in.n; i++) {
+            if (!strcmp(in.r[i].k, "Screens") && strstr(in.r[i].v, "3 different, 90 frames")) screens = 1;
+            if (!strcmp(in.r[i].k, "Duration") && strstr(in.r[i].v, "3.0 s")) dur = 1;
+        }
+        CHECK(ok && screens && dur, "frames Info: screens and duration");
+        info_free(&in);
+    }
+    CHECK(start_viewer(&a, p, 0, 0) == 0 && viewer_tab(&a.view)->kind == TAB_PLAY, "a Rec demo's frames open on Play");
+    Player *pl = &a.view.pl;
+    CHECK(pl->mode == PL_R3F && pl->has_video && pl->has_audio && pl->playing && !pl->ended, "frames play, with the .wav beside them");
+    CHECK(pl->total > 2.99 && pl->total < 3.01, "length 3 s (%.2f)", pl->total);
+    CHECK(app_playing(&a), "the loop wakes while it plays");
+    double t0 = pl->last_ms;
+    CHECK(pl->px && pl->px[(size_t)(2 * R3_CELL_H + 4) * PL_W + 20 + (PL_W - PL_W * PL_H / R3_H) / 2] != 0, "the first screen is drawn");
+    pl_pump(pl, t0 + 100);
+    CHECK(pl->frame_end == 30 && pl->rec_left == 2, "0.1 s: still the first screen");
+    CHECK(pl_pump(pl, t0 + 1100) && pl->frame_end == 45 && pl->rec_left == 1, "1.1 s: the second screen");
+    pl_pump(pl, t0 + 1600);
+    CHECK(pl->frame_end == 90 && pl->rec_left == 0 && !pl->ended, "1.6 s: the third");
+    app_action(&a, R3_ACCEPT);
+    CHECK(!pl->playing && a.mode == M_VIEW, "A pauses");
+    double held = pl->now;
+    pl_pump(pl, t0 + 2600);
+    CHECK(pl->now == held, "a paused recording does not move");
+    app_action(&a, R3_ACCEPT);
+    CHECK(pl->playing, "A plays on");
+    pl_pump(pl, t0 + 2700);
+    pl_pump(pl, t0 + 4800);
+    CHECK(pl->ended && pl->now > 2.99, "it ends at 3 s");
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_VIEW && pl->playing && !pl->ended && pl->now == 0 && pl->rec_left == 2, "A after the end plays again from the start");
+    app_action(&a, R3_RIGHT);
+    CHECK(!pl->playing && viewer_tab(&a.view)->kind != TAB_PLAY, "leaving the Play tab pauses");
+    app_action(&a, R3_BACK);
+    CHECK(a.mode == M_BROWSE, "B closes");
+
+    /* a damaged frames file does not play, and Info says so */
+    char bad[PATH_MAX];
+    path_join(bad, sizeof bad, root, "demo-20261111-150000-frames.r3f");
+    write_file(bad, "xyz", 3);
+    CHECK(start_viewer(&a, bad, 0, 0) == 0 && viewer_tab(&a.view)->kind != TAB_PLAY, "a damaged frames file opens on Info");
+    app_action(&a, R3_BACK);
+
+    /* a WAV, by itself */
+    char plain[PATH_MAX];
+    path_join(plain, sizeof plain, root, "plain.wav");
+    write_wav(plain, 2);
+    CHECK(start_viewer(&a, plain, 0, 0) == 0 && viewer_tab(&a.view)->kind == TAB_PLAY, "a WAV opens on Play");
+    pl = &a.view.pl;
+    CHECK(pl->mode == PL_WAV && !pl->has_video && pl->total > 1.99 && pl->total < 2.01, "WAV: sound only, 2 s");
+    t0 = pl->last_ms;
+    pl_pump(pl, t0 + 1000);
+    CHECK(!pl->ended && pl->now > 0.9, "WAV: one second in");
+    pl_pump(pl, t0 + 2500);
+    CHECK(pl->ended, "WAV: ends");
+    R3Screen s;
+    app_compose(&a, &s);
+    CHECK(dump_has(&s, "Finished"), "a sound-only Play tab says it finished");
+    app_action(&a, R3_BACK);
+
+    /* the sound device itself (SDL's dummy driver in CI drains in real time; with no driver the note says so and it plays silently) */
+    unsetenv("R3I6NOS_FM_NOAUDIO");
+    CHECK(start_viewer(&a, plain, 0, 0) == 0 && viewer_tab(&a.view)->kind == TAB_PLAY, "a WAV opens with the sound device");
+    pl = &a.view.pl;
+    t0 = pl->last_ms;
+    for (int i = 0; i < 10; i++) { usleep(50000); pl_pump(pl, t0 + 50.0 * (i + 1)); }
+    CHECK(pl->dev ? (pl->fed > 0 && pl->primed && pl->now > 0) : pl->note[0] != 0, "sound: queued and heard, or a note says why not (fed %llu, now %.2f, %s)", pl->fed, pl->now, pl->note);
+    app_action(&a, R3_BACK);
+    setenv("R3I6NOS_FM_NOAUDIO", "1", 1);
+
+    /* a video, with a stand-in ffmpeg that writes ten white frames and a second of sound */
+    char mp4[PATH_MAX], ff[PATH_MAX];
+    path_join(mp4, sizeof mp4, root, "demo-20261111-143005.mp4");
+    write_file(mp4, "\0\0\0\x18" "ftypisom\0\0\0\0isommp41", 24);
+    path_join(ff, sizeof ff, root, "fake-ffmpeg");
+    FILE *fx = fopen(ff, "w");
+    if (fx) {
+        fputs("#!/bin/sh\nexport LC_ALL=C\ncase \"$*\" in\n *-an*) head -c $((640*400*4*10)) /dev/zero | tr '\\000' '\\377' ;;\n *) head -c 176400 /dev/zero ;;\nesac\n", fx);
+        fclose(fx);
+        chmod(ff, 0755);
+    }
+    setenv("R3I6NOS_FFMPEG", "/nonexistent/ffmpeg", 1);
+    CHECK(start_viewer(&a, mp4, 0, 0) == 0 && viewer_tab(&a.view)->kind != TAB_PLAY, "no ffmpeg: a video opens on Info");
+    CHECK(strstr(a.view.tab[0].name, "Info") != NULL, "Info is the first tab");
+    app_compose(&a, &s);
+    CHECK(dump_has(&s, "needs ffmpeg"), "Info says playing needs ffmpeg");
+    app_action(&a, R3_BACK);
+    setenv("R3I6NOS_FFMPEG", ff, 1);
+    CHECK(start_viewer(&a, mp4, 0, 0) == 0 && viewer_tab(&a.view)->kind == TAB_PLAY, "with ffmpeg a video opens on Play");
+    pl = &a.view.pl;
+    CHECK(pl->mode == PL_VIDEO && pl->has_video, "video through ffmpeg");
+    t0 = pl->last_ms;
+    for (int i = 0; i < 200 && pl->vidx < 3; i++) { usleep(20000); pl_pump(pl, t0 + 400 + 50.0 * i); }
+    CHECK(pl->vidx >= 3, "frames arrive from the pipe (%ld)", pl->vidx);
+    CHECK(pl->px[0] == 0xFFFFFFFFu && pl->px[PL_FRAME_BYTES / 4 - 1] == 0xFFFFFFFFu, "and are drawn (%08x)", pl->px[0]);
+    for (int i = 0; i < 200 && !pl->ended; i++) { usleep(20000); pl_pump(pl, t0 + 400 + 50.0 * (200 + i)); }
+    CHECK(pl->ended, "the video ends when ffmpeg's output does");
+    app_action(&a, R3_BACK);
+    CHECK(a.view.pl.vpid == 0 && a.view.pl.vfd <= 0, "closing leaves no ffmpeg running");
+    unsetenv("R3I6NOS_FFMPEG");
+    unsetenv("R3I6NOS_FM_NOAUDIO");
+    app_free(&a);
+}
+
 static int selftest_logic(void) {
     char templ[PATH_MAX];
     const char *tmp = getenv("TMPDIR");
@@ -2679,6 +2910,7 @@ static int selftest_logic(void) {
     test_formats(real ? real : root);
     test_viewer_tabs(real ? real : root);
     test_archive_members(real ? real : root);
+    test_play(real ? real : root);
     rm_rf(root);
     if (real) { rm_rf(real); free(real); }
     return g_fail;
@@ -2803,7 +3035,7 @@ int main(int argc, char **argv) {
     while (!app.quit) {
         SDL_Event e;
         /* a job polls; so does a screen still being presented (app_video_draw owes presents after a change); else wait */
-        int have = (app.mode == M_JOB) ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, (force || video.settle > 0 || r3_toast_active(&toast)) ? 16 : 250);
+        int have = (app.mode == M_JOB) ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, (force || video.settle > 0 || app_playing(&app) || r3_toast_active(&toast)) ? 16 : 250);
         while (have) {
             switch (e.type) {
             case SDL_QUIT: app.quit = 1; break;

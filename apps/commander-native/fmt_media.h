@@ -1031,6 +1031,25 @@ static void mp4_boxes(const uint8_t *b, size_t n, FInfo *in, Mp4State *st, int d
     }
 }
 
+/* Rec demo's kept frames (theme/r3i6nos_demo.h): records of {run: u32, one 64x24 cell screen}, a run being how many frames the screen stays. */
+static void info_r3f(const FFile *f, FInfo *in) {
+    const off_t rec = (off_t)(sizeof(uint32_t) + sizeof(R3Screen));
+    off_t n = f->size / rec;
+    info_add(in, "Made by", "Rec demo (docs/DEMO-RECORDINGS.md): the cells of each screen, not pixels");
+    if (f->size % rec || n == 0) { info_add(in, "Records", "damaged: %lld bytes is not a whole number of %lld-byte records", (long long)f->size, (long long)rec); return; }
+    unsigned long long frames = 0;
+    for (off_t i = 0; i < n; i++) {
+        uint8_t b[4];
+        if (ff_read(f, i * rec, b, 4) != 4) break;
+        uint32_t run = rd32le(b);
+        frames += run ? run : 1;
+    }
+    info_add(in, "Screens", "%lld different, %llu frames at 30 a second", (long long)n, frames);
+    info_add(in, "Duration", "%.1f s", (double)frames / 30.0);
+    info_add(in, "Size", "64 x 24 cells (640 x 480 pixels when drawn)");
+    info_add(in, "Sound", "the demo-<time>.wav beside it, if it is there");
+}
+
 static void info_mp4(const FFile *f, FInfo *in) {
     off_t p = 0;
     for (int guard = 0; p + 8 <= f->size && guard < 1000; guard++) {
@@ -1169,6 +1188,7 @@ static int info_media(const FFile *f, int kind, FInfo *in) {
     case K_OGG: info_ogg(f, in); return 1;
     case K_MIDI: case K_RMID: midi_file(f, kind, in, NULL); return 1;
     case K_MOD: case K_S3M: case K_XM: case K_IT: case K_MTM: case K_STM: case K_UMF: module_file(f, kind, in, NULL); return 1;
+    case K_R3F: info_r3f(f, in); return 1;
     case K_MP4: info_mp4(f, in); return 1;
     case K_AVI: info_avi(f, in); return 1;
     case K_MKV: info_mkv(f, in); return 1;
