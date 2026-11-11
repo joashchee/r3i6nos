@@ -4,7 +4,7 @@ Why: the firmware image has no ffmpeg, and Debian's own package costs **161.2 Mi
 (`apps/commander-native/player.h`) needs one only to decode video and the sound formats it cannot read itself. This is the same program built with
 `--disable-everything` and only what the player, Rec demo's encode and Diskette's audio and video lists use: **one stripped binary, 5,579,800 bytes (5.32 MiB;
 5,582,848 on a 4 KiB-block disk), linking only libc and libm** (x264 and zlib are linked in statically). Tier A alone was 4,465,016 bytes; Tier B and the
-stills add 1,114,784. Nothing is installed on the image yet (ROADMAP section 20).
+stills add 1,114,784. `scripts/configure_rootfs.sh` installs it in the image as `/usr/bin/ffmpeg` with the GPL text, NOTICE and this build script (see "In the image"); no image has been built with it yet (ROADMAP section 20).
 
 ## Build and check
 
@@ -22,6 +22,19 @@ stills add 1,114,784. Nothing is installed on the image yet (ROADMAP section 20)
 **Licence and source: GPL-2.0-or-later** (`--enable-gpl --enable-libx264`; x264 is GPL-2.0-or-later, which makes the whole binary GPL; the maintainer accepted
 this on 2026-11-11; no `--enable-nonfree`). Source: the two pinned tarballs above (ffmpeg.org and code.videolan.org), built with the flags in `build.sh`; the image
 must ship that offer of source (NOTICE has the entry). Debian's own package is not used in the image; it is only the reference the checks compare with.
+
+## In the image
+
+- **`scripts/configure_rootfs.sh`** copies `build/ffmpeg-min/ffmpeg` (`R3I6NOS_FFMPEG_BUILD` names another folder) to `/usr/bin/ffmpeg`, mode 755. Without the binary it
+  warns (the image then has no ffmpeg: Commander shows only Info for video, WebP, TIFF and PSD, and Rec demo cannot make its `.mp4`) and does not fail.
+- **The GPL's terms ship with it** in `/usr/share/ffmpeg-min/`: `GPL-2` (from the rootfs's own `base-files`, else the build machine's), `NOTICE` (both sources' URLs and
+  hashes), `build.sh` and `README.md` (the configure flags). `/usr/share/doc/ffmpeg-min/copyright` points at them; it is the only file `configure_rootfs.sh`'s trim of
+  `/usr/share/doc` leaves, which is why the rest is not under `doc/`. `tests/test_configure_rootfs.sh` checks all of it, and that a missing binary leaves no stray licence files.
+- **CI:** the `ffmpeg` job of `.github/workflows/build.yml` runs `tools/ffmpeg-min/build.sh` in a Debian 12 arm64 container on an arm64 runner (`ubuntu-24.04-arm`, or the
+  label in the repository variable `R3I6NOS_ARM_RUNNER`; on an x86 runner it runs under qemu, which takes much longer), cached on everything that goes into it, and uploads
+  `ffmpeg-min-arm64`; the `rootfs` job unpacks it before `build_rootfs.sh` and smoke-tests it under qemu against the rootfs's own libc. **That job has never run on
+  GitHub**; whether the arm64 runner is available to this repository is not known.
+- Locally: `scripts/build-ffmpeg-min.sh`, then `sudo scripts/build_rootfs.sh` (Linux).
 
 ## What is in it (Tier A, Tier B and the stills, 2026-11-11)
 

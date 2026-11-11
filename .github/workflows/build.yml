@@ -59,6 +59,44 @@ jobs:
     with:
       app: ${{ matrix.app }}
 
+  ffmpeg:
+    # The minimal ffmpeg (tools/ffmpeg-min/README.md): Commander's Play and Picture tabs and Rec demo's encode. Built natively in a Debian 12 arm64
+    # container, which also decodes and encodes with it and compares the bytes with Debian's own ffmpeg (tools/ffmpeg-min/build.sh). GPL-2.0-or-later.
+    # Cached on everything that goes into it, so only an edit rebuilds it. Needs an arm64 runner (variable R3I6NOS_ARM_RUNNER overrides the label);
+    # on an x86 runner it runs under qemu, which works but takes much longer, hence the timeout. NOT RUN YET: this job has never been through GitHub.
+    runs-on: ${{ vars.R3I6NOS_ARM_RUNNER || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/cache@v6
+        id: cache
+        with:
+          path: build/ffmpeg-min
+          key: ffmpeg-min-${{ hashFiles('tools/ffmpeg-min/**', 'scripts/build-ffmpeg-min.sh', 'theme/**', 'tests/test_demo.c', 'NOTICE') }}
+
+      - name: Emulation, only if this is not an arm64 runner
+        if: ${{ steps.cache.outputs.cache-hit != 'true' && runner.arch != 'ARM64' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support
+
+      - name: Build and check (arm64, Debian 12)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p build/ffmpeg-min
+          docker run --rm --platform linux/arm64 -v "$PWD":/src -e OUT=/src/build/ffmpeg-min -w /src debian:bookworm tools/ffmpeg-min/build.sh
+
+      # A tar: upload-artifact zips and drops the executable bit.
+      - name: Pack
+        run: tar -C build -cf ffmpeg-min.tar ffmpeg-min
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: ffmpeg-min-arm64
+          path: ffmpeg-min.tar
+          retention-days: 7
+
   loveapps:
     # The LÖVE default apps, each built (checked, tested, packed) by its own reusable workflow, the same one its
     # app-<name>.yml uses; the firmware only bundles the .love files.
@@ -71,7 +109,7 @@ jobs:
       app: ${{ matrix.app }}
 
   rootfs:
-    needs: [love, native, loveapps]
+    needs: [love, native, loveapps, ffmpeg]
     # Build the rootfs with whatever runtimes were built, so a failing 12.0 does
     # not hide the rest. The run is still red: the love job failed.
     if: ${{ !cancelled() }}
@@ -96,6 +134,16 @@ jobs:
           pattern: loveapp-*
           path: build/love-apps
           merge-multiple: true
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: ffmpeg-min-arm64
+          path: .
+        continue-on-error: true   # a failed ffmpeg job must not hide the rest: the image then has no ffmpeg and configure_rootfs.sh says so
+
+      - name: Unpack ffmpeg
+        run: |
+          if [ -f ffmpeg-min.tar ]; then tar -C build -xf ffmpeg-min.tar; ls -l build/ffmpeg-min; else echo "::warning::no ffmpeg-min artifact: the image will have no ffmpeg"; fi
 
       - name: Unpack LÖVE
         run: |
@@ -137,6 +185,18 @@ jobs:
           D=build/rootfs/opt/loveos/defaults/native_deb
           scripts/smoke_native.sh build/rootfs "$D/IO_Checker_Native.deb" io-checker-native
           scripts/smoke_native.sh build/rootfs "$D/Commander.deb" commander
+
+      - name: Smoke test ffmpeg under qemu
+        # The binary in the rootfs runs against the rootfs's own libc, decodes and encodes: not that it is fast enough on the unit.
+        if: ${{ hashFiles('build/ffmpeg-min/ffmpeg') != '' }}
+        run: |
+          R=build/rootfs
+          F="sudo qemu-aarch64-static -L $R $R/usr/bin/ffmpeg -hide_banner"
+          $F -version | head -n 1
+          $F -encoders | grep -q libx264
+          $F -demuxers | grep -q psd_pipe
+          sudo test -s "$R/usr/share/ffmpeg-min/GPL-2"
+          sudo test -s "$R/usr/share/ffmpeg-min/NOTICE"
 
       - name: Sanity check the tree
         run: |

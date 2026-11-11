@@ -71,6 +71,33 @@ if [ -z "$have_native" ]; then
 fi
 find "$DEFAULTS" -type d -exec chmod 755 {} + -o -type f -exec chmod 644 {} +
 
+# The minimal ffmpeg (tools/ffmpeg-min/README.md, built by scripts/build-ffmpeg-min.sh): Commander's Play tab and Picture tab (video, WebP, TIFF, PSD) and
+# Rec demo's H.264 + AAC encode find it as /usr/bin/ffmpeg. It is GPL-2.0-or-later (x264), so what that licence asks of whoever ships the binary
+# ships with it: the licence text, NOTICE (the source's URLs and hashes) and the build script and README (the configure flags). Under
+# /usr/share/ffmpeg-min, because the trim below deletes every other file in /usr/share/doc; only `copyright` stays there, pointing at it.
+FFMPEG_BUILD="${R3I6NOS_FFMPEG_BUILD:-$REPO/build/ffmpeg-min}"
+if [ -f "$FFMPEG_BUILD/ffmpeg" ]; then
+    mkdir -p "$ROOTFS/usr/bin" "$ROOTFS/usr/share/ffmpeg-min" "$ROOTFS/usr/share/doc/ffmpeg-min"
+    FFDOC="$ROOTFS/usr/share/ffmpeg-min"
+    cp "$FFMPEG_BUILD/ffmpeg" "$ROOTFS/usr/bin/ffmpeg"
+    chmod 755 "$ROOTFS/usr/bin/ffmpeg"
+    cp "$REPO/NOTICE" "$REPO/tools/ffmpeg-min/build.sh" "$REPO/tools/ffmpeg-min/README.md" "$FFDOC/"
+    chmod 644 "$FFDOC/NOTICE" "$FFDOC/build.sh" "$FFDOC/README.md"
+    for gpl in "$ROOTFS/usr/share/common-licenses/GPL-2" /usr/share/common-licenses/GPL-2; do
+        if [ -f "$gpl" ]; then cp "$gpl" "$FFDOC/GPL-2"; chmod 644 "$FFDOC/GPL-2"; break; fi
+    done
+    [ -f "$FFDOC/GPL-2" ] || echo "[!] No GPL-2 text found (the rootfs's base-files or this machine's): /usr/share/ffmpeg-min/GPL-2 is missing, and shipping ffmpeg needs it" >&2
+    cat > "$ROOTFS/usr/share/doc/ffmpeg-min/copyright" <<'EOF'
+/usr/bin/ffmpeg is FFmpeg 5.1.6 built with x264 by tools/ffmpeg-min/build.sh of https://github.com/joashchee/r3i6nos.
+Licence: GNU General Public License, version 2 or (at your option) any later version (the whole binary: x264 is GPL-2.0-or-later).
+The licence text, the exact source (URLs and SHA-256 of both tarballs) and the build script with its configure flags are in /usr/share/ffmpeg-min/
+(GPL-2, NOTICE, build.sh, README.md). No patches were applied to either source.
+EOF
+    chmod 644 "$ROOTFS/usr/share/doc/ffmpeg-min/copyright"
+else
+    echo "[!] No minimal ffmpeg in $FFMPEG_BUILD: run scripts/build-ffmpeg-min.sh (the image will have no ffmpeg: Commander shows only Info for video, WebP, TIFF and PSD, and Rec demo cannot make its .mp4)" >&2
+fi
+
 # Mount points and places the boot scripts write to.
 mkdir -p "$ROOTFS"/{roms,roms2,boot,opt/love,opt/native_apps,opt/launchers/native}
 
