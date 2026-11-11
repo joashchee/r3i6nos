@@ -388,6 +388,32 @@ static int pl_pump(Player *p, double now_ms) {
     return changed || (int)p->now != (int)before;
 }
 
+/* A still picture (WebP, TIFF, PSD) decoded by ffmpeg to `w` x `h` BGRA, which is also ARGB in a uint32: the first frame at its own size. The size comes
+ * from the file's own header (Info), so exactly w*h*4 bytes are read; a stalled ffmpeg is given up on after 15 s. 0 and `px` (w*h) filled, else -1 and `*why`. */
+static int pl_still(const char *path, int w, int h, uint32_t *px, const char **why) {
+    char ff[PATH_MAX];
+    if (!pl_find_ffmpeg(ff, sizeof ff)) { *why = "needs ffmpeg, not installed here"; return -1; }
+    char *argv[] = {ff, "-v", "error", "-i", (char *)path, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1", NULL};
+    int fd = -1;
+    pid_t pid = 0;
+    if (pl_spawn(argv, &fd, &pid) != 0) { *why = "ffmpeg would not start"; return -1; }
+    size_t want = (size_t)w * h * 4, got = 0;
+    unsigned char *dst = (unsigned char *)px;
+    double t0 = (double)SDL_GetTicks();
+    *why = NULL;
+    while (got < want) {
+        ssize_t n = read(fd, dst + got, want - got);
+        if (n > 0) { got += (size_t)n; continue; }
+        if (n == 0) break;
+        if (errno != EAGAIN && errno != EINTR) break;
+        if ((double)SDL_GetTicks() - t0 > 15000.0) { *why = "ffmpeg took too long"; break; }
+        usleep(5000);
+    }
+    pl_stop_child(&fd, &pid);
+    if (got != want && !*why) *why = "ffmpeg could not decode it";
+    return got == want ? 0 : -1;
+}
+
 /* "1:05" */
 static void pl_time(char *out, size_t cap, double s) {
     int t = s < 0 ? 0 : (int)s;

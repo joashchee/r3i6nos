@@ -10,12 +10,13 @@ Status: **specified 2026-11-11; TinyNTT is the first port to have it** (2026-11-
 ## What it makes
 
 Everything goes in **`/roms/<App>/Demo/`** (`EASYROMS/<App>/Demo/` on a computer), a folder of its own so a run never touches the app's other files
-(CLAUDE.md rule 7: the games card is theirs). A new run replaces the earlier run's screenshots, demo file and log (they describe the latest run) and **keeps every earlier `demo-*.mp4`**, nothing else.
+(CLAUDE.md rule 7: the games card is theirs). A new run replaces the earlier run's screenshots, demo file, log, frames and sound (they describe the latest run) and **keeps every earlier `demo-*.mp4`**, nothing else.
 
 | File | What |
 |---|---|
 | `01-<name>.png`, `02-<name>.png`, ... | Screenshots of the **actual running app**: the frame the app drew, at the screen's own size (640x480), one per hero feature or screen, in tour order. Names say what is shown (`01-song-playing.png`). |
 | `demo-<timestamp>.mp4` | A short video (30-90 seconds; H.264 and AAC, 640x480, 30 fps) of the same tour, **with the app's own audio**. The name carries the time the recording started, `demo-20261111-143005.mp4`, so runs and builds can be told apart. **A new run never replaces or deletes an earlier video**: the timestamp is why two runs' names cannot collide, and every `demo-*.mp4` stays until the person deletes it. |
+| `demo-<timestamp>-frames.r3f` and `demo-<timestamp>.wav` | The recording itself, kept after the video is made (only the latest run's): the 64x24 cell screens and the 16-bit stereo sound the video was encoded from, **up to about 30 MB** (the sound is 176 KB a second at 44.1 kHz). **Commander plays them by itself, with no ffmpeg** (`apps/README.md`, the Play tab), which is why they stay: the image has no ffmpeg, so the `.mp4` cannot be played on the unit. `--encode-demo` on a computer remakes the video from them. |
 | `demo-file.<ext>` | A copy of the demo file the tour loaded, so a viewer can open it in the desktop version. |
 | `rec-demo.txt` | The log, in the device report's grammar (`STATUS key: value`, sections, `end` last): what was shown, which hero feature each shot and each second of video covers, any SKIP, the length, the sizes. |
 
@@ -104,8 +105,8 @@ Rec demo owns the unit until it ends: the **whole power of the unit goes to this
 
 ## Encoding the video
 
-The frames (PNG) and the audio (WAV) are written to a temporary folder first; the encode then makes `demo-<timestamp>.mp4` and deletes them. The encoder is
-`ffmpeg` (libx264 and AAC). **Open:** the Debian 12 arm64 image has no ffmpeg, and the RK3326 has four Cortex-A35
+The frames (PNG) and the audio (WAV) are written to a temporary folder first; the encode then makes `demo-<timestamp>.mp4`; they stay in `Demo/` (as `demo-<timestamp>-frames.r3f` and `.wav`, until the next run clears them), and only the ffmpeg log is deleted. The encoder is
+`ffmpeg` (libx264 and AAC). **Open:** the Debian 12 arm64 image has no ffmpeg yet (`tools/ffmpeg-min/`, ROADMAP section 20, is the 5.3 MiB GPL build with exactly this encode in it, checked on a laptop VM, not timed on the unit), and the RK3326 has four Cortex-A35
 cores and 1 GB: whether ffmpeg is a dependency of each port's `.deb`, one shared package, or a step on the Mac (`scripts/` host tool run on the
 card) is decided by timing it on the unit. The rule does not change with the answer: **`Demo/demo-<timestamp>.mp4` is there when Rec demo says done**, or the
 log says FAIL with why, and the frames (`demo-frames.r3f`) and the audio (`demo.wav`) are left in `Demo/` so nothing is lost, and `--encode-demo DIR` on a computer with ffmpeg makes the video from them.
@@ -156,4 +157,4 @@ the IO Checker (r3i6nos's menu, being the system, has a Device report but no tou
 
 **TinyNTT's first recording on a Mac (2026-11-11):** 16 screenshots, a 51-second video (H.264 640x480 30 fps, AAC, mean -23 dB), the demo song and the log, in
 about 2 seconds; two recordings are byte-identical in frames, audio and every PNG. Not run on the unit; the unit's image has no ffmpeg, so there the
-video step fails in the log and `--encode-demo` finishes it on a computer.
+video step fails in the log and `--encode-demo` finishes it on a computer; the kept frames and sound play in Commander either way.

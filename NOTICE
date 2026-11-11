@@ -16,3 +16,10 @@ Test corpus (corpus/files, installed at /opt/loveos/test-files and copied to EAS
   them stay under their own licences.
 
 LÖVE is zlib-licensed; the base system and runtimes keep their own licences.
+
+ffmpeg and x264 (tools/ffmpeg-min/; built by scripts/build-ffmpeg-min.sh; intended for the firmware image, not in it yet)
+  FFmpeg 5.1.6 (https://ffmpeg.org/releases/ffmpeg-5.1.6.tar.xz, SHA-256 f4fa066278f7a47feab316fef905f4db0d5e9b589451949740f83972b30901bd) and
+  x264 (stable, commit baee400fa9ced6f5481a728138fed6e867b0ff7f, build 164, https://code.videolan.org/videolan/x264).
+  Licence: the built binary is GPL-2.0-or-later (FFmpeg with --enable-gpl --enable-libx264; x264 is GPL-2.0-or-later); chosen by the maintainer (2026-11-11).
+  Source: those two tarballs and the configure flags in tools/ffmpeg-min/build.sh. Changed: nothing (no patches). Any image that ships the binary
+  must carry the GPL text and this offer of the source.

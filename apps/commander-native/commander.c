@@ -818,6 +818,9 @@ static int play_mode(int k) {
     return PL_NONE;
 }
 
+/* Pictures drawn by ffmpeg (player.h pl_still) when the unit has one: Info reads their size from the header, ffmpeg gives the pixels. */
+static int is_ffmpeg_still_kind(int k) { return k == K_WEBP || k == K_TIFF || k == K_PSD; }
+
 static int is_art_kind(int k) { return k == K_ANSI || k == K_BINART || k == K_XBIN || k == K_ADF || k == K_IDF; }
 
 /* An archive's members as lines, one each (a long name keeps its end, after "..."), so the line a member is on is its number plus the
@@ -894,6 +897,23 @@ static int viewer_open_as(Viewer *w, const char *path, const char *title, char *
             info_add(&info, "Picture", "not shown: %s", why[0] ? why : "the file could not be read");
         }
         free(b);
+    } else if (is_ffmpeg_still_kind(k)) {
+        int sw = 0, sh = 0;
+        for (int i = 0; i < info.n; i++) if (!strcmp(info.r[i].k, "Dimensions")) sscanf(info.r[i].v, "%d x %d", &sw, &sh);
+        const char *why = NULL;
+        FImage full = {0, 0, NULL};
+        if (sw <= 0 || sh <= 0 || (long long)sw * sh > 24000000LL) why = "its size is not known or is over 24 megapixels";
+        else if ((full.px = (uint32_t *)malloc((size_t)sw * sh * sizeof(uint32_t))) == NULL) why = "out of memory";
+        else if (pl_still(path, sw, sh, full.px, &why) == 0) {
+            full.w = sw;
+            full.h = sh;
+            w->pic_w = sw;
+            w->pic_h = sh;
+            if (img_fit(&full, PIC_W, PIC_H, &w->pic) == 0) { content = w->ntabs; viewer_add(w, TAB_PICTURE, "Picture"); }
+            why = NULL;
+        }
+        if (content < 0) info_add(&info, "Picture", "not shown: %s", why ? why : "it could not be drawn");
+        free(full.px);
     } else if (is_art_kind(k)) {
         char why[160];
         if (art_load(&w->art, &f, k, why, sizeof why) == 0) { content = w->ntabs; viewer_add(w, TAB_ART, "Art"); }
@@ -2892,6 +2912,26 @@ static void test_play(const char *root) {
     CHECK(pl->ended, "the video ends when ffmpeg's output does");
     app_action(&a, R3_BACK);
     CHECK(a.view.pl.vpid == 0 && a.view.pl.vfd <= 0, "closing leaves no ffmpeg running");
+
+    /* a Photoshop file (only its header matters here: 4 x 2 pixels), drawn by a stand-in ffmpeg that writes 4 x 2 x 4 white bytes */
+    char psd[PATH_MAX], ffs[PATH_MAX];
+    path_join(psd, sizeof psd, root, "pic.psd");
+    path_join(ffs, sizeof ffs, root, "fake-ffmpeg-still");
+    {
+        static const unsigned char hdr[] = "8BPS\0\1\0\0\0\0\0\0\0\3\0\0\0\2\0\0\0\4\0\10\0\3\0\0\0\0\0\0\0\0\0\0\0\0\0\0";
+        write_file(psd, (const char *)hdr, sizeof hdr - 1);
+        FILE *fs = fopen(ffs, "w");
+        if (fs) { fputs("#!/bin/sh\nexport LC_ALL=C\nhead -c 32 /dev/zero | tr '\\000' '\\377'\n", fs); fclose(fs); chmod(ffs, 0755); }
+    }
+    setenv("R3I6NOS_FFMPEG", "/nonexistent/ffmpeg", 1);
+    CHECK(start_viewer(&a, psd, 0, 0) == 0 && viewer_tab(&a.view)->kind != TAB_PICTURE, "no ffmpeg: a Photoshop file opens on Info");
+    app_compose(&a, &s);
+    CHECK(dump_has(&s, "needs ffmpeg"), "Info says the picture needs ffmpeg");
+    app_action(&a, R3_BACK);
+    setenv("R3I6NOS_FFMPEG", ffs, 1);
+    CHECK(start_viewer(&a, psd, 0, 0) == 0 && viewer_tab(&a.view)->kind == TAB_PICTURE, "with ffmpeg a Photoshop file opens on Picture");
+    CHECK(a.view.pic_w == 4 && a.view.pic_h == 2 && a.view.pic.px && a.view.pic.px[0] == 0xFFFFFFFFu, "drawn from ffmpeg's pixels (%dx%d %08x)", a.view.pic_w, a.view.pic_h, a.view.pic.px ? a.view.pic.px[0] : 0);
+    app_action(&a, R3_BACK);
     unsetenv("R3I6NOS_FFMPEG");
     unsetenv("R3I6NOS_FM_NOAUDIO");
     app_free(&a);

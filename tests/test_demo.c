@@ -260,7 +260,7 @@ int main(void) {
     }
     setenv("R3I6NOS_DEMO_STAMP", "20261111-100000", 1);
 
-    /* with a real ffmpeg, if there is one: the video is made and the temporary files go */
+    /* with a real ffmpeg, if there is one: the video is made; the frames and the sound are kept, the ffmpeg log goes */
     unsetenv("R3I6NOS_FFMPEG");
     char ff[PATH_MAX];
     if (r3_demo_find_ffmpeg(ff, sizeof ff)) {
@@ -277,7 +277,11 @@ int main(void) {
         snprintf(p, sizeof p, "%s/demo-20261111-100000.mp4", dir);
         CHECK(file_size(p) > 1000, "demo-<stamp>.mp4 is made from the kept frames and WAV");
         snprintf(p, sizeof p, "%s/demo-20261111-100000.wav", dir);
-        CHECK(access(p, F_OK) != 0, "the WAV is removed after a good encode");
+        CHECK(access(p, F_OK) == 0, "the WAV is kept after a good encode");
+        snprintf(p, sizeof p, "%s/demo-20261111-100000-frames.r3f", dir);
+        CHECK(access(p, F_OK) == 0, "the frames are kept after a good encode");
+        snprintf(p, sizeof p, "%s/demo-ffmpeg.log", dir);
+        CHECK(access(p, F_OK) != 0, "the ffmpeg log is removed after a good encode");
         snprintf(p, sizeof p, "%s/demo-20261110-090000.mp4", dir);
         CHECK(access(p, F_OK) == 0, "the earlier run's video is still there");
         setenv("R3I6NOS_DEMO_STAMP", "20261111-120000", 1);

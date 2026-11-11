@@ -470,8 +470,8 @@ static inline void r3_demo_quote(char *out, size_t cap, const char *s) {
     out[n] = 0;
 }
 
-/* Makes dir/demo-<stamp>.mp4 from the newest dir/demo-<stamp>-frames.r3f and demo-<stamp>.wav. 0 when made; else -1 and `msg` says why. On success the two
- * files and the ffmpeg log are removed. Also the port's `--encode-demo DIR`, for a card whose unit has no ffmpeg. */
+/* Makes dir/demo-<stamp>.mp4 from the newest dir/demo-<stamp>-frames.r3f and demo-<stamp>.wav. 0 when made; else -1 and `msg` says why. On success the
+ * ffmpeg log is removed; the frames and the .wav are KEPT (until the next run), so a unit without ffmpeg can still play them. Also the port's `--encode-demo DIR`, for a card whose unit has no ffmpeg. */
 static inline int r3_demo_encode_p(const char *dir, char *msg, size_t cap, void (*on_progress)(void *, int), void *ctx) {
     char ff[PATH_MAX], qdir[PATH_MAX * 2], q1[PATH_MAX * 2], q2[PATH_MAX * 2], q3[PATH_MAX * 2], cmd[PATH_MAX * 9], p[PATH_MAX + 64], stamp[24] = "";
     {   /* the newest kept recording: the greatest demo-<stamp>-frames.r3f (the stamps sort) */
@@ -532,8 +532,7 @@ static inline int r3_demo_encode_p(const char *dir, char *msg, size_t cap, void 
         return -1;
     }
     snprintf(msg, cap, "demo-%s.mp4, %ld bytes", stamp, (long)sb.st_size);
-    snprintf(p, sizeof p, "%s/demo-%s-frames.r3f", dir, stamp); unlink(p);
-    snprintf(p, sizeof p, "%s/demo-%s.wav", dir, stamp); unlink(p);
+    /* the frames and the sound stay (Commander plays them without ffmpeg, and --encode-demo can remake the video); the next run clears them */
     snprintf(p, sizeof p, "%s/demo-ffmpeg.log", dir); unlink(p);
     return 0;
 }
