@@ -48,7 +48,8 @@ if [ -f /usr/share/common-licenses/GPL-2 ]; then [ -s "$R/usr/share/ffmpeg-min/G
 [ -f "$R/opt/loveos/test-files/MANIFEST.tsv" ] || fail "the test corpus is not on the boot disk"
 [ -f "$R/opt/loveos/test-files/README.md" ]    || fail "the test corpus's README is not on the boot disk"
 for f in $(cd corpus/files && find . -type f | sed 's|^\./||'); do cmp -s "corpus/files/$f" "$R/opt/loveos/test-files/$f" || fail "test corpus file not installed: $f"; done
-[ -f "$R/opt/loveos/test-files/music/midi/midi.mid" ] && [ -f "$R/opt/loveos/test-files/video/clip.mp4" ] || fail "the corpus's sub-folders are not on the boot disk"
+[ -f "$R/opt/loveos/test-files/music/midi/midi.mid" ] || fail "the corpus's sub-folders are not on the boot disk (midi)"
+[ -f "$R/opt/loveos/test-files/video/clip.mp4" ] || fail "the corpus's sub-folders are not on the boot disk (video)"
 [ "$(cat "$R/etc/hostname")" = r3i6nos ]        || fail "hostname"
 # the games cards are mounted by role, not by label (docs/STORAGE.md): no fstab line, the service enabled, the session waits for it
 ! grep -q 'EASYROMS' "$R/etc/fstab"             || fail "fstab still mounts a card by the EASYROMS label (two cards race for /roms)"
@@ -106,7 +107,8 @@ R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/nothing-here" R3I6NOS_LOVE
 grep -q 'No native default app' "$T/warn.txt" || fail "no warning when the native app is missing"
 grep -q 'No LÖVE default app' "$T/warn.txt" || fail "no warning when the LÖVE app is missing"
 grep -q 'No minimal ffmpeg' "$T/warn.txt"   || fail "no warning when ffmpeg is missing"
-[ ! -e "$R2/usr/bin/ffmpeg" ] && [ ! -e "$R2/usr/share/ffmpeg-min" ] || fail "phantom ffmpeg or its licence files without a binary"
+[ ! -e "$R2/usr/bin/ffmpeg" ] || fail "phantom ffmpeg without a binary"
+[ ! -e "$R2/usr/share/ffmpeg-min" ] || fail "phantom ffmpeg licence files without a binary"
 [ ! -e "$R2/opt/loveos/defaults/native_deb/IO_Checker_Native.deb" ] || fail "phantom native deb"
 [ -x "$R/usr/local/bin/r3i6nos-bootlog" ]        || fail "r3i6nos-bootlog not installed executable"
 [ -L "$R/etc/systemd/system/multi-user.target.wants/r3i6nos-bootlog.service" ] || fail "bootlog unit not enabled"
