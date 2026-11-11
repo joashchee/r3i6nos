@@ -70,7 +70,7 @@ the art or the contents when there is one, else the text, else Hex for unknown b
 | Tab | Shows |
 |---|---|
 | **Info** | the type and category, the exact size, and that format's details (below) |
-| **Picture** | PNG (every colour type and depth, interlaced), JPEG (baseline; a big photo is decoded at 1/8 size, which is still sharper than the screen; EXIF orientation applied), GIF (first frame), BMP (1-32 bits, RLE), ICO/CUR, TGA, QOI, PCX, PBM/PGM/PPM, and WebP, TIFF and PSD (these three through `ffmpeg` when the unit has one, otherwise Info says so), drawn over the whole display view: a small one enlarged by a whole number, a big one shrunk, transparency on a dark checkerboard |
+| **Picture** | PNG (every colour type and depth, interlaced), JPEG (baseline; a big photo is decoded at 1/8 size, which is still sharper than the screen; EXIF orientation applied; a **progressive** one through `ffmpeg` when the unit has one, otherwise Info says so), GIF (first frame), BMP (1-32 bits, RLE), ICO/CUR, TGA, QOI, PCX, PBM/PGM/PPM, and WebP, TIFF and PSD (these three through `ffmpeg` when the unit has one, otherwise Info says so), drawn over the whole display view: a small one enlarged by a whole number, a big one shrunk, transparency on a dark checkerboard |
 | **Art** | ANSI art (escape codes, iCE colours, 256 and 24-bit colours brought to the 16), NFO and DIZ (code page 437), BIN, XBin (its palette and font, packed or not), ArtWorx ADF, iCE Draw IDF: drawn with the VGA font at its own 8x16, 25 rows a page (wider art in narrower cells, so nothing scrolls sideways) |
 | **Contents** / **Text** / ... | what is inside: the files of a ZIP (and LÖVE `.love`, jar/apk, msix, `.mxl`), TAR, `.tar.gz`, `.tar.xz`, `.tar.zst`, RAR 4/5, Cabinet, cpio, LHA, ar, ISO 9660 (the top folder); a `.deb`'s control file and file list; a disk image's partitions (MBR or GPT) with each one's filesystem and label; the text of a PDF, RTF, HTML, docx/pptx/xlsx, odt and EPUB; a `.gz`, `.xz` or `.zst` unpacked; a tracker module's instrument names and message; a MIDI's names, lyrics and markers; an SQLite database's tables; a dBase table's fields; a program's libraries |
 | **Text** (**Source** next to a document's Text) | the file as text: UTF-8, UTF-16 with a byte-order mark, or code page 437 byte for byte when it is not UTF-8 (DOS text and NFO files) |
@@ -108,7 +108,7 @@ What **Info** knows, by family:
 Everything reads with limits (32 MiB read for one page, 16 MiB unpacked from one member, 48 MiB to list a `.tar.gz`, `.tar.xz` or
 `.tar.zst`, 5,000 entries listed, 24 megapixels decoded), so a huge or damaged file gives a shorter page, never a crash. Nothing is
 written, except what Start does (below). Not done: 7-Zip, bzip2 and Brotli data are not unpacked (their archives are named and
-described, not listed), progressive and arithmetic-coded JPEGs, HEIC and AVIF pictures are described but not drawn (WebP, TIFF and PSD are drawn through ffmpeg, when the unit has one), and
+described, not listed), arithmetic-coded JPEGs, HEIC and AVIF pictures are described but not drawn (WebP, TIFF and PSD are drawn through ffmpeg, when the unit has one), and
 sound and video play only as the Play tab allows (above: WAV and Rec demo's frames by themselves, the rest through ffmpeg).
 
 **Files inside archives.** On the Contents tab of a ZIP (and `.love`, jar/apk, msix), a TAR (plain, `.tar.gz`, `.tar.xz`, `.tar.zst`),

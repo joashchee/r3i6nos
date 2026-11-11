@@ -821,6 +821,21 @@ static int play_mode(int k) {
 /* Pictures drawn by ffmpeg (player.h pl_still) when the unit has one: Info reads their size from the header, ffmpeg gives the pixels. */
 static int is_ffmpeg_still_kind(int k) { return k == K_WEBP || k == K_TIFF || k == K_PSD; }
 
+/* The picture ffmpeg decodes, at the size Info read from its header: full.px (w*h ARGB) is allocated, 0; else -1 and `*why`. */
+static int still_via_ffmpeg(const char *path, const FInfo *info, FImage *full, const char **why) {
+    int sw = 0, sh = 0;
+    for (int i = 0; i < info->n; i++) if (!strcmp(info->r[i].k, "Dimensions")) sscanf(info->r[i].v, "%d x %d", &sw, &sh);
+    memset(full, 0, sizeof *full);
+    if (sw <= 0 || sh <= 0 || (long long)sw * sh > 24000000LL) { *why = "its size is not known or is over 24 megapixels"; return -1; }
+    full->px = (uint32_t *)malloc((size_t)sw * sh * sizeof(uint32_t));
+    if (!full->px) { *why = "out of memory"; return -1; }
+    *why = NULL;
+    if (pl_still(path, sw, sh, full->px, why) != 0) { free(full->px); full->px = NULL; return -1; }
+    full->w = sw;
+    full->h = sh;
+    return 0;
+}
+
 static int is_art_kind(int k) { return k == K_ANSI || k == K_BINART || k == K_XBIN || k == K_ADF || k == K_IDF; }
 
 /* An archive's members as lines, one each (a long name keeps its end, after "..."), so the line a member is on is its number plus the
@@ -894,26 +909,32 @@ static int viewer_open_as(Viewer *w, const char *path, const char *title, char *
             if (img_fit(&full, PIC_W, PIC_H, &w->pic) == 0) { content = w->ntabs; viewer_add(w, TAB_PICTURE, "Picture"); }
             img_free(&full);
         } else {
-            info_add(&info, "Picture", "not shown: %s", why[0] ? why : "the file could not be read");
+            /* a progressive JPEG (not drawn by images.h) goes to ffmpeg, which reads it exactly as a baseline one; arithmetic coding fails there too */
+            const char *fwhy = NULL;
+            FImage via;
+            if (k == K_JPEG && still_via_ffmpeg(path, &info, &via, &fwhy) == 0) {
+                img_orient(&via, ff_jpeg_orientation(&f));
+                w->pic_w = via.w;
+                w->pic_h = via.h;
+                if (img_fit(&via, PIC_W, PIC_H, &w->pic) == 0) { content = w->ntabs; viewer_add(w, TAB_PICTURE, "Picture"); }
+                img_free(&via);
+            }
+            if (content < 0) {
+                if (k == K_JPEG && fwhy) info_add(&info, "Picture", "not shown: %s; ffmpeg: %s", why[0] ? why : "the file could not be read", fwhy);
+                else info_add(&info, "Picture", "not shown: %s", why[0] ? why : "the file could not be read");
+            }
         }
         free(b);
     } else if (is_ffmpeg_still_kind(k)) {
-        int sw = 0, sh = 0;
-        for (int i = 0; i < info.n; i++) if (!strcmp(info.r[i].k, "Dimensions")) sscanf(info.r[i].v, "%d x %d", &sw, &sh);
         const char *why = NULL;
-        FImage full = {0, 0, NULL};
-        if (sw <= 0 || sh <= 0 || (long long)sw * sh > 24000000LL) why = "its size is not known or is over 24 megapixels";
-        else if ((full.px = (uint32_t *)malloc((size_t)sw * sh * sizeof(uint32_t))) == NULL) why = "out of memory";
-        else if (pl_still(path, sw, sh, full.px, &why) == 0) {
-            full.w = sw;
-            full.h = sh;
-            w->pic_w = sw;
-            w->pic_h = sh;
+        FImage full;
+        if (still_via_ffmpeg(path, &info, &full, &why) == 0) {
+            w->pic_w = full.w;
+            w->pic_h = full.h;
             if (img_fit(&full, PIC_W, PIC_H, &w->pic) == 0) { content = w->ntabs; viewer_add(w, TAB_PICTURE, "Picture"); }
-            why = NULL;
+            img_free(&full);
         }
         if (content < 0) info_add(&info, "Picture", "not shown: %s", why ? why : "it could not be drawn");
-        free(full.px);
     } else if (is_art_kind(k)) {
         char why[160];
         if (art_load(&w->art, &f, k, why, sizeof why) == 0) { content = w->ntabs; viewer_add(w, TAB_ART, "Art"); }
@@ -2742,10 +2763,35 @@ static void test_viewer_tabs(const char *root) {
     CHECK(dump_has(&s, "<!DOCTYPE html>"), "Source shows the markup");
     app_action(&a, R3_BACK);
 
+    setenv("R3I6NOS_FFMPEG", "/nonexistent/ffmpeg", 1);   /* the host may have an ffmpeg: this checks the picture without one */
     CHECK(start_viewer(&a, fx_path("jpeg_prog"), 0, 0) == 0 && a.view.cur == 0, "a picture that cannot be drawn opens on Info");
     app_compose(&a, &s);
     CHECK(dump_has(&s, "progressive"), "Info says why");
     app_action(&a, R3_BACK);
+    /* with ffmpeg (a stand-in that writes the picture's w*h*4 bytes) the progressive JPEG is drawn, as a baseline one is */
+    {
+        FFile jf;
+        FInfo ji = {0, 0, 0};
+        int jw = 0, jh = 0;
+        if (ff_open(&jf, fx_path("jpeg_prog"), err, sizeof err) == 0) { ff_info(&jf, ff_identify(&jf), &ji); ff_close(&jf); }
+        for (int i = 0; i < ji.n; i++) if (!strcmp(ji.r[i].k, "Dimensions")) sscanf(ji.r[i].v, "%d x %d", &jw, &jh);
+        info_free(&ji);
+        char ffs[PATH_MAX], script[256];
+        path_join(ffs, sizeof ffs, root, "fake-ffmpeg-jpeg");
+        snprintf(script, sizeof script, "#!/bin/sh\nexport LC_ALL=C\nhead -c %d /dev/zero | tr '\\000' '\\377'\n", jw * jh * 4);
+        write_file(ffs, script, strlen(script));
+        chmod(ffs, 0755);
+        setenv("R3I6NOS_FFMPEG", ffs, 1);
+        CHECK(jw > 0 && jh > 0 && start_viewer(&a, fx_path("jpeg_prog"), 0, 0) == 0 && viewer_tab(&a.view)->kind == TAB_PICTURE, "a progressive JPEG opens on Picture with ffmpeg (%dx%d)", jw, jh);
+        CHECK(a.view.pic_w == jw && a.view.pic_h == jh && a.view.pic.px && a.view.pic.px[0] == 0xFFFFFFFFu, "drawn from ffmpeg's pixels");
+        app_action(&a, R3_BACK);
+        setenv("R3I6NOS_FFMPEG", "/nonexistent/ffmpeg", 1);
+        CHECK(start_viewer(&a, fx_path("jpeg_prog"), 0, 0) == 0 && viewer_tab(&a.view)->kind != TAB_PICTURE, "without ffmpeg it is Info again");
+        app_compose(&a, &s);
+        CHECK(dump_has(&s, "ffmpeg"), "Info says ffmpeg could not draw it");
+        app_action(&a, R3_BACK);
+    }
+    unsetenv("R3I6NOS_FFMPEG");
 
     CHECK(viewer_open(&a.view, "/nonexistent/file", err, sizeof err) != 0 && strstr(err, "file"), "a missing file is an error");
     free(px);

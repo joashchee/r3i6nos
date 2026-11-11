@@ -22,7 +22,7 @@ REPO="$(cd "$(dirname "$0")/../.." && pwd)"
 if [ "$(id -u)" -ne 0 ] || ! grep -q '^12' /etc/debian_version 2>/dev/null; then echo "ffmpeg-min: run as root in Debian 12 (scripts/build-ffmpeg-min.sh does)" >&2; exit 1; fi
 apt-get update -qq >/dev/null
 # the full Debian ffmpeg is only the reference the minimal one is compared with; it is not part of the result
-apt-get install -y -qq --no-install-recommends build-essential ca-certificates curl xz-utils bzip2 pkg-config zlib1g-dev libsdl2-dev ffmpeg >/dev/null
+apt-get install -y -qq --no-install-recommends build-essential ca-certificates curl xz-utils bzip2 pkg-config zlib1g-dev libsdl2-dev libjpeg-turbo-progs ffmpeg >/dev/null
 
 W="$(mktemp -d)"
 cd "$W"
@@ -44,7 +44,7 @@ mkdir "$W/zs"; ln -s "$(dpkg -L zlib1g-dev | grep 'libz\.a$' | head -n 1)" "$W/z
 export PKG_CONFIG_PATH="$W/x264/lib/pkgconfig"
 cd "ffmpeg-$VER"
 
-DEMUXERS=mov,matroska,avi,asf,flv,mpegps,mpegts,mpegvideo,wav,mp3,ogg,flac,aiff,aac,wv,ac3,eac3,dts,rawvideo,image2,image2pipe,image_webp_pipe,image_tiff_pipe,image_psd_pipe   # mpegvideo: a program stream identifies its video by probing it
+DEMUXERS=mov,matroska,avi,asf,flv,mpegps,mpegts,mpegvideo,wav,mp3,ogg,flac,aiff,aac,wv,ac3,eac3,dts,rawvideo,image2,image2pipe,image_jpeg_pipe,image_webp_pipe,image_tiff_pipe,image_psd_pipe   # mpegvideo: a program stream identifies its video by probing it
 PARSERS=webp,h264,hevc,aac,ac3,dca,mpegaudio,mpeg4video,mpegvideo,h263,mjpeg,vc1,vorbis,flac,opus,vp8,vp9
 VIDEO=webp,tiff,psd,rawvideo,h264,hevc,mpeg4,mpeg2video,mpeg1video,vp8,vp9,wmv1,wmv2,wmv3,vc1,mjpeg,msmpeg4v1,msmpeg4v2,msmpeg4v3,h263,h263p,flv,vp6,vp6f,vp6a,cinepak,msvideo1,qtrle,svq1,svq3,prores
 AUDIO=aac,aac_latm,mp1,mp1float,mp2,mp2float,mp3,mp3float,ac3,eac3,dca,flac,vorbis,opus,wavpack,alac,wmav1,wmav2,wmapro,pcm_s16le,pcm_s16be,pcm_u8,pcm_s24le,pcm_s32le,pcm_f32le,adpcm_ms,adpcm_ima_wav
@@ -70,7 +70,7 @@ fail=0
 for d in $(echo "$VIDEO,$AUDIO" | tr ',' ' ' | sed 's/msmpeg4v3/msmpeg4/'); do "$MIN" -hide_banner -decoders 2>/dev/null | awk '{print $2}' | grep -qx "$d" || { echo "    MISSING decoder: $d"; fail=1; }; done
 
 # the same for demuxers, muxers and encoders (their names in `-demuxers` are not always the configure names: image_psd_pipe is psd_pipe)
-for d in mov matroska avi asf flv mpeg mpegts mpegvideo wav mp3 ogg flac aiff aac wv ac3 eac3 dts rawvideo image2 image2pipe webp_pipe tiff_pipe psd_pipe; do
+for d in mov matroska avi asf flv mpeg mpegts mpegvideo wav mp3 ogg flac aiff aac wv ac3 eac3 dts rawvideo image2 image2pipe jpeg_pipe webp_pipe tiff_pipe psd_pipe; do
     "$MIN" -hide_banner -demuxers 2>/dev/null | awk '{print $2}' | tr ',' '\n' | grep -qx "$d" || { echo "    MISSING demuxer: $d"; fail=1; }
 done
 for m in mp4 rawvideo s16le; do "$MIN" -hide_banner -muxers 2>/dev/null | awk '{print $2}' | grep -qx "$m" || { echo "    MISSING muxer: $m"; fail=1; }; done
@@ -152,6 +152,13 @@ ffmpeg -v error -i "$T/s.png" -c:v tiff -compression_algo raw -y "$T/raw.tiff"; 
 ffmpeg -v error -i "$T/s.png" -c:v tiff -compression_algo lzw -y "$T/lzw.tiff"; scase "tiff lzw" "$T/lzw.tiff"
 ffmpeg -v error -i "$T/s.png" -c:v tiff -compression_algo deflate -y "$T/deflate.tiff"; scase "tiff deflate" "$T/deflate.tiff"
 ffmpeg -v error -i "$T/s.png" -c:v tiff -compression_algo packbits -y "$T/pack.tiff"; scase "tiff packbits" "$T/pack.tiff"
+# JPEG, baseline and progressive (Commander draws a progressive one through ffmpeg: images.h does not), by extension and by content alone
+ffmpeg -v error -f lavfi -i gradients=s=320x240:n=4:seed=7 -frames:v 1 -y "$T/g.ppm"
+cjpeg -quality 90 "$T/g.ppm" > "$T/base.jpg"; scase "jpeg baseline" "$T/base.jpg"
+cjpeg -quality 90 -progressive "$T/g.ppm" > "$T/prog.jpg"; scase "jpeg progressive" "$T/prog.jpg"
+cp "$T/prog.jpg" "$T/prog-no-extension"; scase "jpeg progressive, found by its content (no extension)" "$T/prog-no-extension"
+a="$("$MIN" -v error -i "$T/base.jpg" -frames:v 1 -f rawvideo -pix_fmt bgra pipe:1 | md5sum | cut -c1-12)"; b="$("$MIN" -v error -i "$T/prog.jpg" -frames:v 1 -f rawvideo -pix_fmt bgra pipe:1 | md5sum | cut -c1-12)"
+if [ "$a" = "$b" ]; then echo "    ok    a progressive JPEG decodes to the same pixels as the baseline one"; else echo "    FAIL  progressive and baseline decode differently"; fail=1; fi
 # a hand-made Photoshop file (no ffmpeg encoder exists): 320x240, 8-bit RGB, raw, planes of 0x40, 0x80 and 0xC0
 { printf '8BPS\000\001\000\000\000\000\000\000\000\003\000\000\000\360\000\000\001\100\000\010\000\003'; head -c 12 /dev/zero; printf '\000\000'
   for v in '\100' '\200' '\300'; do head -c $((320 * 240)) /dev/zero | tr '\000' "$v"; done; } > "$T/hand.psd"

@@ -43,7 +43,7 @@ must ship that offer of source (NOTICE has the entry). Debian's own package is n
 | Containers | mp4/mov/m4a/3gp, Matroska/WebM, AVI, ASF (wmv/wma), FLV, MPEG program and transport streams (`mpegvideo` is there because a program stream identifies its video by probing it), WAV, MP3, Ogg, FLAC, AIFF, ADTS AAC, WavPack, raw AC-3, E-AC-3 and DTS |
 | Video decoders | H.264, HEVC, MPEG-1/2/4, VP8, VP9, WMV1/2/3, VC-1, MJPEG, MS-MPEG4 v1/2/3, H.263, FLV1, VP6, Cinepak, MS Video 1, QuickTime RLE, SVQ1, SVQ3, ProRes |
 | Audio decoders | AAC (and LATM), MP1, MP2, MP3, AC-3, E-AC-3, DTS, FLAC, Vorbis, Opus, WavPack, ALAC, WMA v1/v2/Pro, PCM (8, 16, 24, 32 bit and float), MS and IMA ADPCM |
-| Stills | WebP (lossy, lossless, alpha), TIFF (uncompressed, LZW, deflate, PackBits) and PSD (raw and RLE) decoders; zlib is linked in for TIFF's deflate |
+| Stills | WebP (lossy, lossless, alpha), TIFF (uncompressed, LZW, deflate, PackBits) and PSD (raw and RLE) decoders; zlib is linked in for TIFF's deflate. **JPEG too, recognised by its content** (`image_jpeg_pipe`, so a file with no or a wrong extension decodes): Commander draws a **progressive** JPEG through it, which its own decoder does not. Arithmetic-coded JPEG decodes in neither (only libjpeg-turbo reads it) |
 | Encoding (Tier B) | **libx264** (`-preset veryfast -crf 18 -tune animation -pix_fmt yuv420p`) and the native **AAC** encoder into an **MP4** (`-movflags +faststart`), from raw BGRA frames on a pipe (`rawvideo` demuxer and decoder) and a WAV: exactly what `r3_demo_encode_p` in `theme/r3i6nos_demo.h` runs |
 | Other output | rawvideo and 16-bit PCM, through the filters `scale fps pad format aresample aformat null anull setpts` |
 
@@ -51,7 +51,7 @@ must ship that offer of source (NOTICE has the entry). Debian's own package is n
 (avi, mov), H.263 (mov), FLV1 (flv), Cinepak, MS Video 1 (avi), QuickTime RLE, SVQ1, ProRes (mov), WMV1 and WMV2 (asf), MPEG-1 (mpg), MPEG-2 (ts), VP8, VP9
 (webm), HEVC (mkv); MP2 (mp2, ts), AC-3 (ac3, mkv), E-AC-3, DTS (mkv), WMA v1 and v2 (asf), AAC (m4a), MP3, Opus, Vorbis (ogg), FLAC, WAV, AIFF, WavPack.
 
-**Stills (byte-identical to the full ffmpeg):** WebP lossy, lossless and with alpha; TIFF uncompressed, LZW, deflate and PackBits; a hand-made raw-RGB PSD (no ffmpeg
+**Stills (byte-identical to the full ffmpeg):** JPEG baseline, progressive (also with no extension), and a progressive one decodes to the same pixels as the baseline file it was made from; WebP lossy, lossless and with alpha; TIFF uncompressed, LZW, deflate and PackBits; a hand-made raw-RGB PSD (no ffmpeg
 encoder exists for PSD; RLE-compressed PSDs have not been tried). Run end to end: Commander (built with GCC in Debian 12) draws a real WebP, TIFF and PSD
 through this binary (`--view FILE --screenshot`, 221,184 pixels of the picture's colour each).
 

@@ -393,7 +393,7 @@ static int pl_pump(Player *p, double now_ms) {
 static int pl_still(const char *path, int w, int h, uint32_t *px, const char **why) {
     char ff[PATH_MAX];
     if (!pl_find_ffmpeg(ff, sizeof ff)) { *why = "needs ffmpeg, not installed here"; return -1; }
-    char *argv[] = {ff, "-v", "error", "-i", (char *)path, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1", NULL};
+    char *argv[] = {ff, "-v", "error", "-noautorotate", "-i", (char *)path, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1", NULL};
     int fd = -1;
     pid_t pid = 0;
     if (pl_spawn(argv, &fd, &pid) != 0) { *why = "ffmpeg would not start"; return -1; }
