@@ -50,7 +50,8 @@ is blocked and on what.
 5. **The menu never scrolls:** whole pages, `Page n/m` in the foot.
 6. **No telemetry, no network at boot, no accounts.** Settings > Network and SSH (`docs/NETWORK.md`) and About's Check for updates (`docs/ABOUT.md`) only act when a person chooses them; SSH is off and has no shared host keys in the image.
 7. **Keep the user's data safe:** the games card (`EASYROMS`) is theirs. Boot
-   scripts only read it; never format, repartition or delete from it.
+   scripts only read it; never format, repartition or delete from it. **One exception (2026-11-11, `docs/TWO-SLOT-SETUP.md`):** the setup service may add and
+   format the games partition on the card it is setting up, only when that card has no partition 3 and the space after ROOTFS is empty; never on any other card.
 8. **Every app made for r3i6nos starts from the r3i6nos-ansiapps theme** (`theme/`, `docs/R3I6NOS-ANSIAPPS-THEME.md`): the IBM VGA
    8x16 font scaled to 10x20, **64 columns by 24 rows** on the 640x480 screen, row 0 the reserved top bar, rows 1-20 the display view, rows 21-23
    the three-row command line (reply, prompt, status), list dialogs and their button rules as KlamANSI does them, only the 16 VGA colours in

@@ -138,7 +138,7 @@ document that has the detail. Nothing here has run on a real R36S yet.
 - [ ] **Strip** services; measure free RAM and boot time against the spec's claims.
 - [ ] **Boot splash** with progress, errors shown on screen, never a blank panel.
 - [ ] **Release:** image uploaded by hand with `gh release upload`, checksums in the notes.
-- [ ] **Flashing guide** for macOS (from the script), Windows and Linux.
+- [ ] **Flashing guide** for macOS (from the script), Windows and Linux. Started 2026-11-11: README has the beginner steps (balenaEtcher, Mac scripts, Linux by the same scripts, untested). Reference kit: `docs/reference-kit/` (2026-11-11), with the proposed order of tools in its `tool-ideas.md`. **Open:** a Windows path for the board-files step (capture and inject need Mac or Linux), a published release for Step 2, and a try on each platform.
 - [ ] **Native apps:** dependency handling beyond bundled libs; choosing which binary a package launches.
 
 ## 8. Ports (apps built from other people's or the maintainer's source; `docs/KLAMANSI-PORT.md`)
@@ -393,3 +393,19 @@ the unit were not tested. libbz2, liblzma, libxml2, libicu72, libssl3, zlib, lz4
 - [ ] **Option 3: `bzip2` alone.** +43,442 B of files, +94,208 B on disk (92 KiB), 1 package. Only `.bz2` and `.tar.bz2` (GNU `tar` is already in the base); nothing for 7-Zip or the member extraction of the others. Worth it only if bzip2 is all that matters, and Commander still needs the glue to spawn it.
 - **Not worth it (measured, not a roadmap item):** `p7zip-full` +6,688,140 B (**+6,778,880 B on disk, 6.46 MiB**), mostly exotic formats and disk images Commander already identifies, and RAR only with the non-free `p7zip-rar`; `p7zip` (`7zr`) +1,072,099 B (1.06 MiB on disk) reads only the 7z format, so it does less than option 1 for the same size.
 - [ ] **Whichever is chosen:** extraction whole-folder and tagged members stay separate (section above); a NOTICE entry if a package or source is added (BSD-2 for libarchive); update `apps/README.md`, which still says "ISO and 7-Zip list their members" although 7-Zip is only named; run it in Debian 12 under `-Werror` and ASan like the rest of Commander.
+
+## 22. Two-slot setup: the unit prepares its own card (`docs/TWO-SLOT-SETUP.md`; reference: `docs/reference-kit/`)
+
+Design finished 2026-11-11; nothing built. Answers to its section 8 first (they decide the code), then the trials in order.
+
+- [x] **Maintainer's decisions** (2026-11-11, `docs/TWO-SLOT-SETUP.md` section 8): the device may create and format partition 3 on the new card (CLAUDE.md rule 7 amended); the host step is a web page, not a tool per OS; backup off by default; a screenshot-led page.
+- [x] **The web app: built as a test version and handed over** (2026-11-11). It now lives in the **ansiapps-site** repo at `r3i6nos/public/bootdisk/` and is served at **r3i6nos.ansiapps.com/bootdisk** (**public as a test version since 2026-11-11**, the maintainer's call; rule 6 exceptions allowed; plain style, not the site themes); **its build and testing phases are tracked in that repo's `ROADMAP.md`** ("r3i6nos.ansiapps.com/bootdisk"), not here. This repo keeps only `tests/test_bootdisk_parity.py` (the web app's `boot.ini` rewrite, pattern and `ROOT_UUID` against `inject-boot.sh` and `image-layout.sh`; run by `scripts/check.sh`; skipped when `../ansiapps-site` is absent). **Blocked on this repo:** the wizard's steps 8-10 describe `r3i6nos-setup`, which is not built (items below), and its step 5 needs a published release.
+- [ ] **T0, offline:** the `root=` rewrite and the rootfs plan checked against `local_hardware_assets/`, in `scripts/check.sh`.
+- [ ] **T1-T2, the carrier boot by hand, and is the original left alone:** blocked on the unit and a spare card (hash the clone before and after).
+- [ ] **T3-T4, read the source read-only and install into the running ROOTFS, by hand:** blocked on T1.
+- [ ] **T5, the target boots alone in TF1** after the boot area is written by hand: blocked on T4.
+- [ ] **Code:** `r3i6nos-setup` and its service (backup off by default; makes partition 3 on the new card), the shared `boot_files.py`, `inject_rootfs.py` on a mounted directory, `r3i6nos-cards` skipping the source in setup mode, the report's `setup` section, `tests/test_r3i6nos_setup.py` (fake cards). Start after T1 passes.
+- [ ] **T6-T8, the whole flow, failure injection, the backup and its restore:** blocked on the code.
+- [ ] **T9-T10, three first-time readers (Windows, Mac, Linux) and a second board:** blocked on a release and on the guide.
+- [ ] **The guide** in `README.md` and `docs/making-a-card.md`, per platform, from what the trials show (replaces README Step 3's Mac scripts as the main path).
+
