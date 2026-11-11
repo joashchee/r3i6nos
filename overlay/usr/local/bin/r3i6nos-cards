@@ -12,7 +12,7 @@ program on either card (CLAUDE.md rule 7); it only mounts them. It never fails t
 
 Standard library only (it runs at boot on a 1 GB board); it calls blkid and mount. Overrides, for tests: R3I6NOS_SYS (/sys),
 R3I6NOS_DEV (/dev), R3I6NOS_ROOT_DEV ("MAJ:MIN" of the root filesystem, else stat /), R3I6NOS_ROMS (/roms), R3I6NOS_ROMS2 (/roms2),
-R3I6NOS_CARDS_STATE (/run/r3i6nos/cards), R3I6NOS_PROC (/proc), R3I6NOS_CARD_WAIT (seconds to wait for a second card: 1).
+R3I6NOS_CARDS_STATE (/run/r3i6nos/cards), R3I6NOS_SETUP_SOURCE (/run/r3i6nos/setup-source), R3I6NOS_PROC (/proc), R3I6NOS_CARD_WAIT (seconds to wait for a second card: 1).
 """
 import os
 import re
@@ -28,6 +28,7 @@ PROC = Path(ENV("R3I6NOS_PROC", "/proc"))
 ROMS = ENV("R3I6NOS_ROMS", "/roms")
 ROMS2 = ENV("R3I6NOS_ROMS2", "/roms2")
 STATE = Path(ENV("R3I6NOS_CARDS_STATE", "/run/r3i6nos/cards"))
+SETUP_SOURCE = Path(ENV("R3I6NOS_SETUP_SOURCE", "/run/r3i6nos/setup-source"))
 WAIT = float(ENV("R3I6NOS_CARD_WAIT", "1"))
 ROOT_DEV = ENV("R3I6NOS_ROOT_DEV")
 FAT = {"vfat", "exfat"}
@@ -91,7 +92,9 @@ def other_disks(boot):
         names = sorted(p.name for p in (SYS / "block").iterdir())
     except OSError:
         return []
-    return [n for n in names if re.fullmatch(r"mmcblk\d+", n) and n != boot and has_size(n)]
+    # The original card of a setup boot (r3i6nos-setup, docs/TWO-SLOT-SETUP.md) is never a data card: it is only ever read.
+    skip = read(SETUP_SOURCE)
+    return [n for n in names if re.fullmatch(r"mmcblk\d+", n) and n != boot and n != skip and has_size(n)]
 
 
 def fstype(dev):

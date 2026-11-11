@@ -7,13 +7,14 @@ Checks and measures what only the unit can answer about the system, and writes r
 mounted (so the boot card can stay in), else on the system card, for Claude to read in the r3i6nos repo. Settings > Device reports
 starts it (it is linked into /opt/loveos/bin as a report); over SSH, run `r3i6nos-report`. It runs as loveos and needs no root.
 
-Sections: system (the build, kernel, CPU, memory), boot (units that failed, how long boot took), sound (the RK817's Playback
+Sections: system (the build, kernel, CPU, memory), setup (whether r3i6nos-setup made this card, docs/TWO-SLOT-SETUP.md), boot (units that failed, how long boot took), sound (the RK817's Playback
 Path, the headphone jack, the volume keys and the mixer, from r3i6nos-sound), clock (r3i6nos-clock status), storage (every mmc disk and slot, what
 r3i6nos-cards mounted, the kernel's filesystems, loop devices, and on each mounted card a write/rename/read/delete check and its speed),
 power (what the background work costs the battery: the hot-plug daemon, the menu, the periodic jobs; the idle draw in mW; docs/POWER.md).
 
 Standard library only. Overrides, for tests: R3I6NOS_ETC (/etc), R3I6NOS_PROC (/proc), R3I6NOS_SYS (/sys), R3I6NOS_DEV (/dev),
 R3I6NOS_CARDS_STATE (/run/r3i6nos/cards), R3I6NOS_REPORT_DIR (the folder to write in), R3I6NOS_REPORT_MB (16: the speed test's size),
+R3I6NOS_SETUP_VAR, R3I6NOS_SETUP_RUN, R3I6NOS_SETUP_BOOT (where r3i6nos-setup leaves its record, state and report),
 R3I6NOS_SOUND (r3i6nos-sound), R3I6NOS_HOTPLUG (r3i6nos-hotplug),
 R3I6NOS_CLOCK (r3i6nos-clock), and for the power section (docs/POWER.md): R3I6NOS_REPORT_POWER_S (30: seconds per measuring window),
 R3I6NOS_BATTERY (r3i6nos-battery), R3I6NOS_BOOTSTATE_CMD (r3i6nos-bootstate), R3I6NOS_MENU_MATCH (/opt/loveos/menu: how the menu's process
@@ -43,6 +44,9 @@ SOUND = ENV("R3I6NOS_SOUND", "/usr/local/bin/r3i6nos-sound")
 HOTPLUG = ENV("R3I6NOS_HOTPLUG", "/usr/local/bin/r3i6nos-hotplug")
 CLOCK = ENV("R3I6NOS_CLOCK", "/usr/local/bin/r3i6nos-clock")
 BOOTSTATE = Path(ENV("R3I6NOS_BOOTSTATE", "/run/r3i6nos/boot-state"))   # r3i6nos-bootstate (root) writes it: systemctl answers only root
+SETUP_VAR = Path(ENV("R3I6NOS_SETUP_VAR", "/var/lib/r3i6nos"))        # r3i6nos-setup's record (docs/TWO-SLOT-SETUP.md)
+SETUP_RUN = Path(ENV("R3I6NOS_SETUP_RUN", "/run/r3i6nos"))
+SETUP_BOOT = Path(ENV("R3I6NOS_SETUP_BOOT", "/boot"))
 PROGRESS = ENV("R3I6NOS_REPORT_PROGRESS")   # set by the menu (menu/reports.lua): where to say how far it has got
 POWER_S = float(ENV("R3I6NOS_REPORT_POWER_S", "30"))
 BATTERY_CMD = ENV("R3I6NOS_BATTERY", "/usr/local/bin/r3i6nos-battery")
@@ -169,6 +173,25 @@ def system(r, rel):
         mem[k] = v.strip()
     if "MemTotal" in mem:
         r.line("INFO", "memory", f"total {mem['MemTotal']}, available {mem.get('MemAvailable', '?')}")
+
+
+def setup_section(r):
+    """How this card was made: by r3i6nos-setup (the unit prepared it from the original card), or not."""
+    r.section("setup")
+    done = keyvals(SETUP_VAR / "setup-done")
+    state = keyvals(SETUP_RUN / "setup-state")
+    if done:
+        r.line("INFO", "made by r3i6nos-setup", f"{done.get('DATE', '?')}, build {done.get('VERSION', '?')}, original card id {done.get('SOURCE_ID', '?')}")
+        r.line("INFO", "backup of the original", done.get("BACKUP", "none"))
+    else:
+        r.line("SKIP", "made by r3i6nos-setup", "no record: this card was not set up by the unit (or it was made with the host scripts)")
+    if state:
+        r.line("INFO", "this boot", state.get("mode", "?") + (f", {state['why']}" if state.get("why") else ""))
+    text = read(SETUP_BOOT / "r3i6nos-setup-report.txt")
+    if text:
+        m = re.search(r"^PASS (\d+)  FAIL (\d+)", text, re.M)
+        if m:
+            r.line("PASS" if m.group(2) == "0" else "FAIL", "setup report on BOOT", f"{m.group(1)} PASS, {m.group(2)} FAIL (r3i6nos-setup-report.txt on the BOOT drive)")
 
 
 def boot_state():
@@ -706,7 +729,7 @@ def main(argv):
     except OSError as e:
         print(f"r3i6nos-report: cannot write the report: {e}", file=sys.stderr)
         return 1
-    for part in (lambda: system(r, rel), lambda: boot(r), lambda: sound(r), lambda: clock(r), lambda: storage(r, cards), lambda: power_section(r)):
+    for part in (lambda: (system(r, rel), setup_section(r)), lambda: boot(r), lambda: sound(r), lambda: clock(r), lambda: storage(r, cards), lambda: power_section(r)):
         try:
             part()
         except Exception as e:  # a broken check is a line in the report, never a missing report

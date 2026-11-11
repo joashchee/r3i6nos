@@ -206,8 +206,10 @@ jobs:
           sudo test -x $R/usr/local/bin/loveos-session
           sudo test -f $R/opt/loveos/menu/main.lua
           # every module the boot scripts import must exist in the rootfs (python3-minimal lacks shutil)
-          sudo python3 -I scripts/check_py_imports.py $R overlay/usr/local/bin/deb_watcher.py overlay/usr/local/bin/r3i6nos-net overlay/usr/local/bin/r3i6nos-about overlay/usr/local/bin/r3i6nos-cards overlay/usr/local/bin/r3i6nos-report
+          sudo python3 -I scripts/check_py_imports.py $R overlay/usr/local/bin/deb_watcher.py overlay/usr/local/bin/r3i6nos-net overlay/usr/local/bin/r3i6nos-about overlay/usr/local/bin/r3i6nos-cards overlay/usr/local/bin/r3i6nos-setup overlay/usr/local/bin/r3i6nos-report
           sudo test -x $R/opt/love/11.5/bin/love
+          # r3i6nos-setup (docs/TWO-SLOT-SETUP.md) calls these: partx and mount (util-linux), blkid, mkfs.exfat (exfatprogs)
+          for t in partx mount umount blkid mkfs.exfat; do sudo sh -c "ls $R/usr/bin/$t $R/bin/$t $R/usr/sbin/$t $R/sbin/$t 2>/dev/null | head -1 | grep -q ." || { echo "missing in the rootfs: $t"; exit 1; }; done
           # Settings > About: the build says which commit it is, and HTTPS to GitHub has its certificates
           sudo grep -Eq '^COMMIT=[0-9a-f]{40}$' $R/etc/r3i6nos-release
           sudo grep -qx 'BUILT_BY=github' $R/etc/r3i6nos-release

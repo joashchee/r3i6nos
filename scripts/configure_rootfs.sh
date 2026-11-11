@@ -149,6 +149,9 @@ ln -sfn /etc/systemd/system/r3i6nos-bootlog.service \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-bootlog.service"
 ln -sfn /etc/systemd/system/r3i6nos-cards.service \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-cards.service"
+# The console prepares its own card from the original (docs/TWO-SLOT-SETUP.md): a no-op on every ordinary boot.
+ln -sfn /etc/systemd/system/r3i6nos-setup.service \
+    "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-setup.service"
 # The RK817 codec's outputs stay off until its "Playback Path" is set (r3i6nos-sound): without this no app is heard.
 ln -sfn /etc/systemd/system/r3i6nos-sound.service \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-sound.service"

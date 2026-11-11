@@ -1,6 +1,6 @@
 # Two-slot setup: the R36S prepares its own r3i6nos card
 
-**Status: design and trial plan (2026-11-11), maintainer's decisions in section 8. Nothing here is built or has run on a unit.** Every "the unit will..." below
+**Status (2026-11-11): the console side is written (section 12) and tested on a laptop with fake cards; the maintainer's decisions are in section 8. Nothing here has run on a real R36S: trials T1 to T10 (section 9) are all still to do.** Every "the unit will..." below
 is a hypothesis with a trial that can break it (section 9). Reference: `docs/reference-kit/` (why this, what others do).
 
 ## 1. Goal
@@ -241,3 +241,50 @@ What each trial must leave behind: the exact command or the screen it used, the 
 - Booting from TF2 (the U-Boot looks at slot 1 only).
 - Editing the original's `boot.ini` for any reason but the root.
 - A host script that rewrites the original card's other files.
+
+## 12. What was built (2026-11-11)
+
+`overlay/usr/local/bin/r3i6nos-setup` (Python standard library, root, about 1,200 lines), `overlay/etc/systemd/system/r3i6nos-setup.service` (enabled in
+every image by `configure_rootfs.sh`; ordered before `r3i6nos-cards.service` and `loveos.service`), a change to `r3i6nos-cards` (it never mounts the disk
+named in `/run/r3i6nos/setup-source`), a `setup` section in `r3i6nos-report`, and checks in `check_image.sh`, `tests/test_configure_rootfs.sh` and CI
+(`build.yml`: `r3i6nos-setup` joins the stdlib-import check; `partx`, `mount`, `umount`, `blkid` and `mkfs.exfat` must be in the rootfs).
+Tests: `tests/test_r3i6nos_setup.py` (45), plus new cases in `test_r3i6nos_cards.py` and `test_r3i6nos_report.py`. They run on a Mac and in Debian 12 under Docker.
+
+How it follows section 5, and where it differs:
+
+- **State test:** as designed (`r3i6nos-setup detect` prints what it would do). A normal boot reads 4 KiB, writes a line to `/run/r3i6nos/setup-state` and exits.
+- **Checks first, writes after:** the original is read-only mounted (`ro`, ext4 `ro,noload`); the genuine check (Allwinner `eGON.BT0` in the first 16 MiB, the clone board
+  files, a kernel `Image`, an `rk3326-*.dtb`, a `boot.ini`), the new card's disk signature, the room for the drivers and the Mali blob's required libraries are all
+  checked **before anything is written to the new card**. A refusal leaves both cards as they were and the reason on the screen and in the report.
+- **No shared `boot_files.py`:** the device cannot import from `scripts/`, so the script is self-contained and **tests pin it to the host scripts**: the `root=` pattern
+  and `ROOT_UUID` to `inject-boot.sh` and `image-layout.sh`, the games-partition entry to `add_games_partition.py` (same alignment, minimum size, byte for byte), the ELF
+  reader to `inject_rootfs.py`; `tests/test_bootdisk_parity.py` pins the web guide's patch to the same.
+- **Lookups inside the original are chroot-style** (`resolve_in`): an absolute symlink such as `/lib -> /usr/lib` is followed inside the card, never onto the running system.
+- **BOOT is mounted by device, not by label** (new, found while writing it): `/etc/fstab` mounts `LABEL=BOOT` at `/boot`, and the original's boot partition may have the
+  same label. In a setup boot it could be what is mounted at `/boot`, read-write, and the new card's boot files would be written onto the original. `ensure_boot_mounted`
+  unmounts the original if it is there, mounts this card's partition 1 explicitly, and stops if some third device is there. **Whether the original is mounted at `/boot` in
+  practice is untested** (trial T1 reads `/proc/mounts`).
+- **Installing the drivers:** each piece (modules, firmware, `/opt/libmali`) is copied to `<name>.r3new`, renamed into place (the old one aside, removed after) and compared
+  with the original by size and SHA-256. A power cut leaves either the old state or a finished piece, and a re-run replaces leftovers.
+- **The backup is off by default, as decided, and is only offered when this card has room for it** (maintainer, 2026-11-11). Before asking, `backup_room` measures the room: the free
+  space of an existing games partition (mounted read-only for a moment), or what `make_games` would give a new one after ROOTFS. A backup is guessed at a third of the original's system
+  area plus 256 MB. If it does not fit, nothing is asked, no ten seconds are spent, the screen says why and the report has `SKIP backup: not offered: ...`; forcing it (a pressed button, or
+  `R3I6NOS_SETUP_BACKUP=1`) cannot override that. If it fits, for 10 seconds the screen asks, with a **countdown bar**: **any button** (not a particular one: the pad's raw codes are only
+  partly known) turns it on, read from `/dev/input/event*` and `js*`; volume and power keys do not count. It is made on the new card's games partition
+  (`Backup/stock-<date>-<id>.img.gz` with a `.sha256`), from sector 0 to the end of the original's system partitions (not its exFAT games partition), read back and compared, and removed
+  if it does not match.
+- **The games partition** is made with `partx -a`, `mkfs.exfat -L EASYROMS` and the three folders, only when partition 3 is absent and the first MiB after ROOTFS is zero.
+- **The screen** is the kernel console on tty1, 64 columns, redrawn from the top (nothing scrolls): the step list, a message (up to three lines), **two progress bars that are always there**
+  (*This step*, and *Overall*, where each step is worth a share of the whole: checks 4, this card 2, boot area 6, drivers 40, games area 6, finish 1, and the backup 60 only if chosen), and a
+  tip to keep the console charged or plugged in with the battery's level; a low battery (under 25% and not charging) is a loud line and a `FAIL battery` line in the report, but does not stop
+  the setup. Every phase reports a bar: the checks and the card steps by stage, the boot files by file, the drivers by **bytes** (each byte is copied once and read back once), the games
+  area by stage, the backup by bytes read and again by bytes checked, and the wait for a button by time left. It redraws only when the words or a whole percent change. On success it says to swap the cards and
+  powers off (`systemctl --no-block poweroff`, as `r3i6nos-poweroff` does); **on a failure it stays on the screen** (the unit never finishes, so the menu cannot start over it)
+  until a button is pressed, then powers off.
+- **The report** is `r3i6nos-setup-report.txt` on BOOT, in the report grammar, `end` last; `r3i6nos-report`'s `setup` section reads the record, this boot's state and that file.
+
+**Untested on a unit, so every one a trial must answer:** the battery's sysfs name (`class/power_supply/*/type` = Battery) and that the percent and status read there; that the stock U-Boot and kernel start r3i6nos from TF2 (T1); what is mounted at `/boot`; that `mount -o ro,noload`
+leaves the original byte-identical (T2, T3); the real copy time and memory of about 520 MB of modules and firmware; `partx -a` and `mkfs.exfat` on a card that is also the root disk;
+that the console shows the screen (and not the vendor's splash) and takes a button; a pad's presses as `event*` or `js*`; the whole flow (T6); a power cut at each step (T7); the backup's
+speed (T8). **Known limits:** a genuine R36S whose board file is not named `rk3326-*.dtb` would be refused (T10); `needed` libraries missing for the Mali blob are a FAIL line, not a stop.
+

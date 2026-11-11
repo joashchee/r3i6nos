@@ -27,6 +27,7 @@ is blocked and on what.
 - `docs/POWER.md`: what the background work (the hot-plug daemon, the toast poll, the periodic jobs) costs the battery, and the `== power ==` section of `r3i6nos-report` that measures it on the unit.
 - `docs/HOTPLUG.md`: the toast over the top bar when headphones, a USB device or DC power is plugged in or out (rule 13); `r3i6nos-hotplug` writes the events, `theme/r3i6nos_toast.{h,lua}` show them.
 - `docs/DEMO-RECORDINGS.md`: Rec demo, the screenshots and video every R36S port records to a `Demo` folder (rule 11).
+- `docs/TWO-SLOT-SETUP.md`: the console prepares its own card from the original (`overlay/usr/local/bin/r3i6nos-setup`, a no-op on every normal boot; the web guide at r3i6nos.ansiapps.com/bootdisk is in the ansiapps-site repo); trials T1-T10 are untested on a unit.
 - `docs/STORAGE.md`: the two card slots: the system card (TF1, `/roms`) and the data card (TF2, `/roms2`), mounted by role by `r3i6nos-cards`.
 - `docs/hardware-findings.md`: what the stock card showed (kernel 4.4.189, no panfrost, boot flow). Read it before touching boot or graphics.
 

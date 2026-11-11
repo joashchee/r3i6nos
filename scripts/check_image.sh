@@ -59,7 +59,7 @@ e2fsck -fn "$ROOT_DEV" >/dev/null || fail "e2fsck"
 
 mount -o ro "$ROOT_DEV" "$MNT"
 for f in etc/fstab etc/systemd/system/loveos.service usr/local/bin/loveos-session \
-         usr/local/bin/run_app.sh usr/local/bin/deb_watcher.py usr/local/bin/r3i6nos-poweroff usr/local/bin/r3i6nos-about etc/r3i6nos-release usr/local/bin/r3i6nos-cards usr/local/bin/r3i6nos-report etc/systemd/system/r3i6nos-cards.service \
+         usr/local/bin/run_app.sh usr/local/bin/deb_watcher.py usr/local/bin/r3i6nos-poweroff usr/local/bin/r3i6nos-about etc/r3i6nos-release usr/local/bin/r3i6nos-cards usr/local/bin/r3i6nos-setup usr/local/bin/r3i6nos-report etc/systemd/system/r3i6nos-cards.service etc/systemd/system/r3i6nos-setup.service \
          opt/loveos/menu/main.lua opt/loveos/menu/settings.lua opt/loveos/menu/reports.lua opt/loveos/menu/view.lua \
          opt/loveos/theme/r3i6nos_ansiapps.lua opt/loveos/theme/vga8x16.lua opt/loveos/theme/font/LICENSE.TXT; do
     [ -e "$MNT/$f" ] || fail "missing in rootfs: /$f"
@@ -69,6 +69,7 @@ for f in usr/local/bin/loveos-session usr/local/bin/run_app.sh usr/local/bin/r3i
 done
 [ -L "$MNT/etc/systemd/system/multi-user.target.wants/loveos.service" ] || fail "loveos.service not enabled"
 [ -L "$MNT/etc/systemd/system/multi-user.target.wants/r3i6nos-cards.service" ] || fail "r3i6nos-cards.service not enabled"
+[ -L "$MNT/etc/systemd/system/multi-user.target.wants/r3i6nos-setup.service" ] || fail "r3i6nos-setup.service not enabled"
 grep -q '^loveos:x:1000:' "$MNT/etc/passwd" || fail "no loveos user (uid 1000)"
 ls "$MNT"/opt/love/*/bin/love >/dev/null 2>&1 || fail "no LÖVE runtime in /opt/love"
 [ -z "$(find "$MNT/proc" -mindepth 1 -maxdepth 1 | head -1)" ] || fail "/proc not empty in the image"

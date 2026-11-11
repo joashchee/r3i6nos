@@ -1,0 +1,26 @@
+[Unit]
+Description=r3i6nos setup: the console prepares its own card from the original (docs/TWO-SLOT-SETUP.md)
+Documentation=file:/usr/local/bin/r3i6nos-setup
+# A normal boot: exits in milliseconds. A setup boot (no bootloader on this card, the original in the other slot): the whole setup,
+# then power off. Before the cards are mounted, so the original is never mounted as a data card, and before the menu, which must not
+# draw over the setup screen.
+After=local-fs.target
+Before=r3i6nos-cards.service loveos.service
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/usr/local/bin/r3i6nos-setup
+StandardInput=tty-force
+StandardOutput=tty
+StandardError=journal
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+# Copying the drivers and, if asked, backing up the original take minutes.
+TimeoutStartSec=infinity
+
+[Install]
+WantedBy=multi-user.target

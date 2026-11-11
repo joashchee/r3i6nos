@@ -151,6 +151,18 @@ class Cards(unittest.TestCase):
         self.assertEqual(st["DATA_DEV"], "none")
         self.assertEqual(len(mounted), 1)
 
+    def test_the_original_card_of_a_setup_boot_is_never_a_data_card(self):
+        """docs/TWO-SLOT-SETUP.md: r3i6nos-setup names the original card; it is only ever read, so it must not be mounted read-write at /roms2."""
+        self.disk("mmcblk1", 62521344, {1: "vfat"}, first_minor=32)
+        marker = self.t / "run/setup-source"
+        marker.write_text("mmcblk1\n")
+        st, mounted = self.run_mount(R3I6NOS_SETUP_SOURCE=str(marker))
+        self.assertEqual((st["DATA_DEV"], st["DATA_AT"]), ("none", "none"))
+        self.assertEqual(len(mounted), 1)
+        marker.unlink()                                   # no marker: an ordinary second card, as before
+        st, mounted = self.run_mount(R3I6NOS_SETUP_SOURCE=str(marker))
+        self.assertEqual(st["DATA_AT"], str(self.t / "roms2"))
+
     def test_status(self):
         self.run_mount()
         m = load(self.env)

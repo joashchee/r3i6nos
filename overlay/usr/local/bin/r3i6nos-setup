@@ -1,0 +1,1191 @@
+#!/usr/bin/env python3
+"""r3i6nos-setup - the R36S prepares its own r3i6nos card from the original card (docs/TWO-SLOT-SETUP.md).
+
+    r3i6nos-setup          run at boot (r3i6nos-setup.service, as root, before the card mounts and the menu): does nothing and
+                           exits at once unless this boot is a SETUP boot (below); then does the whole setup and powers off
+    r3i6nos-setup detect   print what a run would do ("mode=setup source=mmcblk0" or "mode=normal why=...") and change nothing
+
+A SETUP boot is one where the disk the root filesystem is on has no bootloader of its own (nothing at sector 64) and another card in
+the other slot has the layout of an original R36S card. That is what happens when the original card sits in the left slot (TF1) with
+its boot.ini pointed at the r3i6nos root on the new card in the right slot (TF2): the original's bootloader and kernel start r3i6nos.
+
+It then, in this order, and stops at the first thing it cannot do (the new card is only ever written after every check passed):
+  1. checks the original is a genuine RK3326 R36S board (CLAUDE.md rule 3) and refuses a clone, saying why;
+  2. checks the new card is an r3i6nos card (its disk signature) and has room;
+  3. offers to back the original up, but only if this card has room for it (off unless a button is pressed within the first seconds);
+  4. writes the original's bootloader to sector 64 of the new card and its boot files, with root= pointed at this root, to BOOT;
+  5. installs the kernel modules, firmware and the Mali GPU driver from the original into this root (/usr/lib/modules, /usr/lib/firmware,
+     /opt/libmali), checks them, and makes the games partition on the new card if it has none and the space after ROOTFS is empty;
+  6. writes r3i6nos-setup-report.txt on BOOT (readable on any computer), tells the reader to swap the cards, and powers off.
+
+The screen always shows two progress bars (this step, and overall) and a tip to keep the console charged or plugged in.
+The original card is mounted read-only (ext4 with noload, so the journal is not replayed onto it) and nothing is ever written to it
+(CLAUDE.md rule 7). Nothing from it is uploaded or kept anywhere but on the reader's own new card (rule 2). Standard library only.
+
+Overrides, for tests on a laptop: R3I6NOS_SYS, R3I6NOS_DEV, R3I6NOS_PROC, R3I6NOS_ROOT_DEV (as r3i6nos-cards), R3I6NOS_ROOT (the target
+root filesystem, /), R3I6NOS_BOOT (the target BOOT, /boot), R3I6NOS_RUN (/run/r3i6nos), R3I6NOS_INPUT (/dev/input), R3I6NOS_VAR
+(/var/lib/r3i6nos), R3I6NOS_SETUP_BACKUP (1 or 0: skip the button wait), R3I6NOS_SETUP_WAIT (seconds to wait for a button: 10),
+R3I6NOS_SETUP_COLS (0 turns the screen drawing off), R3I6NOS_SETUP_NOTE (seconds a "no backup offered" note stays: 3),
+R3I6NOS_SETUP_PAUSE (seconds before powering off; set, it also keeps a failed run from waiting for a button), R3I6NOS_GPU_ALLOW_PARTIAL (1: install a GPU blob that lacks libEGL/libGLESv2/libgbm).
+"""
+import datetime
+import gzip
+import hashlib
+import os
+import re
+import select
+import shutil
+import subprocess
+import sys
+import textwrap
+import time
+import zlib
+from pathlib import Path
+
+ENV = os.environ.get
+SYS = Path(ENV("R3I6NOS_SYS", "/sys"))
+DEV = Path(ENV("R3I6NOS_DEV", "/dev"))
+PROC = Path(ENV("R3I6NOS_PROC", "/proc"))
+ROOT = Path(ENV("R3I6NOS_ROOT", "/"))
+BOOT = Path(ENV("R3I6NOS_BOOT", "/boot"))
+RUN = Path(ENV("R3I6NOS_RUN", "/run/r3i6nos"))
+INPUT = Path(ENV("R3I6NOS_INPUT", "/dev/input"))
+VAR = Path(ENV("R3I6NOS_VAR", "/var/lib/r3i6nos"))
+ROOT_DEV = ENV("R3I6NOS_ROOT_DEV")
+BACKUP_ENV = ENV("R3I6NOS_SETUP_BACKUP")
+WAIT = float(ENV("R3I6NOS_SETUP_WAIT", "10"))
+ALLOW_PARTIAL = ENV("R3I6NOS_GPU_ALLOW_PARTIAL") == "1"
+
+SECTOR = 512
+LOADER_SECTOR = 64                      # Rockchip idbloader (scripts/image-layout.sh)
+HEAD_SECTORS = 32768                    # the first 16 MiB: partition table, bootloader, the gap before BOOT
+DISK_SIGNATURE = 0x52333669             # scripts/image-layout.sh
+ROOT_UUID = "52333669-0000-4000-8000-000000000002"   # scripts/image-layout.sh: ext4 UUID of ROOTFS
+ROOT_PATTERN = r"""root=(?:UUID=)?(['"]?)[^\s'"]+\1"""   # scripts/inject-boot.sh
+FAT_TYPES = {0x01, 0x04, 0x06, 0x0B, 0x0C, 0x0E}
+ALIGN = 8192                            # sectors (4 MiB), scripts/add_games_partition.py
+MIN_GAMES_SECTORS = 2 * 1024 * 1024     # 1 GiB
+MAX_LBA = 0xFFFFFFFF
+GPU_REQUIRED = ("libEGL.so.1", "libGLESv2.so.2", "libgbm.so.1")
+GPU_DIRS = ("/usr/local/lib/aarch64-linux-gnu", "/usr/lib/aarch64-linux-gnu")
+GPU_NAME = re.compile(r"mali|libgbm|libegl|libgles|libopencl", re.I)
+CLONE_MARKERS = ("rk3326-evb-lp3-v12", "rf3536k4ka", "rf3536k3ka")
+JUNK = {".ds_store", ".fseventsd", ".spotlight-v100", ".trashes", "system volume information"}
+GAMES_FOLDERS = ("Love 11.5", "Love 12.0", "native_deb")
+KEY_IGNORED = {114, 115, 116}           # volume down, volume up, power
+BACKUP_DIV = 3                          # a backup is guessed at a third of the raw size (the card's free space compresses well)
+BACKUP_MARGIN = 256 << 20               # and must leave this much free
+STEP_WEIGHTS = [4, 2, 0, 6, 40, 6, 1]   # how much of the overall bar each step is worth; the backup's (index 2) is set when it is chosen
+BACKUP_WEIGHT = 60
+TIP = "Keep the console charged or plugged in until it switches off."
+
+
+class Stop(Exception):
+    """A reason the setup cannot go on. The message is what the reader sees."""
+
+
+def log(msg):
+    print(f"r3i6nos-setup: {msg}", file=sys.stderr)
+
+
+def read_text(path):
+    try:
+        return Path(path).read_text().strip()
+    except OSError:
+        return None
+
+
+def read_at(path, offset, size):
+    with open(path, "rb") as f:
+        f.seek(offset)
+        return f.read(size)
+
+
+def sha_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def run(cmd, timeout=600):
+    return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+
+
+# ---- which disk is which --------------------------------------------------------------------------------------------------------
+def root_devnum():
+    if ROOT_DEV:
+        return ROOT_DEV
+    st = os.stat("/")
+    return f"{os.major(st.st_dev)}:{os.minor(st.st_dev)}"
+
+
+def root_disk():
+    """The disk the root filesystem is on (mmcblk1 in a setup boot), or None."""
+    try:
+        real = Path(os.path.realpath(SYS / "dev" / "block" / root_devnum()))
+    except OSError:
+        return None
+    if not real.exists():
+        return None
+    return real.parent.name if (real / "partition").exists() else real.name
+
+
+def other_disks(root):
+    try:
+        names = sorted(p.name for p in (SYS / "block").iterdir())
+    except OSError:
+        return []
+    out = []
+    for n in names:
+        s = read_text(SYS / "block" / n / "size")
+        if re.fullmatch(r"mmcblk\d+", n) and n != root and s and s.isdigit() and int(s) > 0:
+            out.append(n)
+    return out
+
+
+def part_dev(disk, n):
+    return DEV / f"{disk}p{n}"
+
+
+def mbr_parts(sector0):
+    """[{number, type, start, size}] of an MBR, or None when there is no 0x55AA signature."""
+    if len(sector0) < 512 or sector0[510:512] != b"\x55\xaa":
+        return None
+    out = []
+    for i in range(4):
+        e = sector0[446 + 16 * i:446 + 16 * (i + 1)]
+        start, size = int.from_bytes(e[8:12], "little"), int.from_bytes(e[12:16], "little")
+        if e[4] and size:
+            out.append({"number": i + 1, "type": e[4], "start": start, "size": size})
+    return out
+
+
+def disk_sectors(disk):
+    s = read_text(SYS / "block" / disk / "size")
+    return int(s) if s and s.isdigit() else 0
+
+
+def battery():
+    """(percent or None, status) of the battery, or None when there is none to read."""
+    try:
+        for d in sorted((SYS / "class" / "power_supply").iterdir()):
+            if read_text(d / "type") == "Battery":
+                cap = read_text(d / "capacity")
+                return (int(cap) if cap and cap.isdigit() else None), (read_text(d / "status") or "")
+    except OSError:
+        pass
+    return None
+
+
+def battery_note():
+    b = battery()
+    if not b:
+        return ""
+    cap, status = b
+    charging = status.lower() in ("charging", "full")
+    if cap is not None and cap < 25 and not charging:
+        return f"LOW BATTERY ({cap}%): plug in the charger now."
+    return f"Battery {cap}%{', ' + status.lower() if status else ''}" if cap is not None else ""
+
+
+def detect():
+    """(mode, info): mode is "setup" with info["source"] and info["head"], or "normal" with info["why"]."""
+    root = root_disk()
+    if not root:
+        return "normal", {"why": "cannot tell which disk the root filesystem is on"}
+    try:
+        own = read_at(DEV / root, LOADER_SECTOR * SECTOR, 8 * SECTOR)
+    except OSError as e:
+        return "normal", {"why": f"cannot read {root}: {e}"}
+    if any(own):
+        return "normal", {"why": f"{root} has its own bootloader"}
+    for disk in other_disks(root):
+        try:
+            head = read_at(DEV / disk, 0, HEAD_SECTORS * SECTOR)
+        except OSError:
+            continue
+        parts = mbr_parts(head[:512])
+        if not parts or not any(head[LOADER_SECTOR * SECTOR:(LOADER_SECTOR + 8) * SECTOR]):
+            continue
+        p1 = next((p for p in parts if p["number"] == 1), None)
+        if p1 and p1["type"] in FAT_TYPES:
+            return "setup", {"source": disk, "root": root, "head": head, "parts": parts}
+    return "normal", {"why": f"{root} has no bootloader, but no original card is in the other slot"}
+
+
+# ---- mounting ---------------------------------------------------------------------------------------------------------------------
+def fstype(dev):
+    try:
+        r = run(["blkid", "-o", "value", "-s", "TYPE", str(dev)], 10)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return r.stdout.strip() or None
+
+
+def mounted_at(target):
+    for line in (read_text(PROC / "mounts") or "").splitlines():
+        p = line.split()
+        if len(p) >= 2 and p[1] == str(target):
+            return p[0]
+    return None
+
+
+class Mounts:
+    """Read-only mounts of the original card, always undone."""
+
+    def __init__(self):
+        self.done = []
+
+    def ro(self, dev, target, fs):
+        target = Path(target)
+        target.mkdir(parents=True, exist_ok=True)
+        opts = "ro,noload" if fs.startswith("ext") else "ro"
+        r = run(["mount", "-t", fs, "-o", opts, str(dev), str(target)], 60)
+        if r.returncode != 0:
+            raise Stop(f"could not read {dev} ({fs}): {r.stderr.strip() or 'mount failed'}")
+        self.done.append(target)
+        return target
+
+    def close_last(self):
+        if self.done:
+            t = self.done.pop()
+            try:
+                run(["umount", str(t)], 60)
+            except (OSError, subprocess.SubprocessError):
+                pass
+
+    def close(self):
+        for t in reversed(self.done):
+            try:
+                run(["umount", str(t)], 60)
+            except (OSError, subprocess.SubprocessError):
+                pass
+        self.done = []
+
+
+# ---- the screen and the report --------------------------------------------------------------------------------------------------
+class Screen:
+    """The kernel console, 64 columns, redrawn from the top so nothing scrolls (CLAUDE.md rule 5's spirit; this runs before the theme exists).
+
+    Always two bars: "This step" and "Overall" (each step is worth STEP_WEIGHTS of the whole), so there is always feedback, and a tip
+    to keep the console charged. It redraws only when the words or a whole percent change."""
+
+    def __init__(self, steps, weights=None):
+        self.steps, self.weights = steps, list(weights or [1] * len(steps))
+        self.marks, self.msg, self.sub, self.current = {}, "", 0.0, None
+        self.on = ENV("R3I6NOS_SETUP_COLS", "64") != "0"
+        self._last = None
+
+    def overall(self):
+        total = sum(self.weights) or 1
+        done = sum(w for i, w in enumerate(self.weights) if self.marks.get(i) in ("done", "skip"))
+        cur = self.weights[self.current] * self.sub if self.marks.get(self.current) == "now" else 0
+        return min(1.0, (done + cur) / total)
+
+    def mark(self, i, state):
+        self.marks[i] = state
+        if state == "now":
+            self.current, self.sub = i, 0.0
+        elif state in ("done", "skip") and i == self.current:
+            self.sub = 1.0
+        self.draw(force=True)
+
+    def weight(self, i, w):
+        self.weights[i] = w
+
+    def say(self, msg, sub=None):
+        if sub is not None:
+            self.sub = max(0.0, min(1.0, sub))
+        self.msg = msg
+        self.draw()
+
+    @staticmethod
+    def bar(label, frac):
+        n = int(max(0.0, min(1.0, frac)) * 36)
+        return f"  {label:<10}[{'#' * n}{'.' * (36 - n)}] {int(frac * 100):3d}%"
+
+    def draw(self, force=False):
+        if not self.on:
+            return
+        key = (self.msg, int(self.sub * 100), int(self.overall() * 100))
+        if not force and key == self._last:
+            return
+        self._last = key
+        w = 62
+        lines = ["", "  r3i6nos setup", "  " + "-" * w, ""]
+        for i, name in enumerate(self.steps):
+            m = {"done": "[x]", "now": "[>]", "skip": "[-]", "fail": "[!]"}.get(self.marks.get(i), "[ ]")
+            lines.append(f"  {m} {name}"[:w + 2])
+        words = [ln for part in self.msg.split("\n") for ln in (textwrap.wrap(part, w - 2) or [""])][:3]
+        lines += [""] + ["  " + ln for ln in words] + [self.bar("This step", self.sub), self.bar("Overall", self.overall()), "", ("  " + TIP)[:w + 2]]
+        note = battery_note()
+        if note:
+            lines.append(("  " + note)[:w + 2])
+        sys.stdout.write("\033[2J\033[H" + "\n".join(lines[:22]) + "\n")
+        sys.stdout.flush()
+
+    def final(self, lines):
+        if not self.on:
+            return
+        sys.stdout.write("\033[2J\033[H\n  r3i6nos setup\n  " + "-" * 62 + "\n\n" + "\n".join("  " + l for l in lines) + "\n")
+        sys.stdout.flush()
+
+
+class Report:
+    def __init__(self):
+        self.items, self.section = [], "setup"
+
+    def add(self, status, key, value):
+        self.items.append((self.section, status, " ".join(str(key).replace(":", " ").split()), " ".join(str(value).split())))
+
+    def text(self, version="?"):
+        counts = {"PASS": 0, "FAIL": 0, "INFO": 0, "SKIP": 0}
+        out = ["# r3i6nos device report", f"app: r3i6nos-setup {version} (r3i6nos)", f"made: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+               "how: r3i6nos-setup, the first boot of a card made with the original in the left slot",
+               "for: Claude. Copy r3i6nos-setup-report.txt from the BOOT drive to a computer and give it to Claude in the r3i6nos repo.", ""]
+        last = None
+        for sec, st, k, v in self.items:
+            if sec != last:
+                out += ["", f"== {sec} =="]
+                last = sec
+            counts[st] += 1
+            out.append(f"{st} {k}: {v}")
+        out += ["", "== summary ==", f"PASS {counts['PASS']}  FAIL {counts['FAIL']}  INFO {counts['INFO']}  SKIP {counts['SKIP']}", "end", ""]
+        return "\n".join(out)
+
+    def write(self, version="?"):
+        text = self.text(version)
+        for folder in (BOOT, RUN):
+            try:
+                folder.mkdir(parents=True, exist_ok=True)
+                tmp = folder / "r3i6nos-setup-report.txt.tmp"
+                tmp.write_text(text, encoding="ascii", errors="replace")
+                os.replace(tmp, folder / "r3i6nos-setup-report.txt")
+                return str(folder / "r3i6nos-setup-report.txt")
+            except OSError:
+                continue
+        return None
+
+
+# ---- a button press (to offer the backup) --------------------------------------------------------------------------------------
+def button_pressed(timeout, tick=None):
+    """True if any button is pressed within timeout seconds, on any /dev/input/event* (64-bit input_event) or js* (joydev) device.
+    tick(fraction of the wait used) is called about twice a second, for a countdown bar."""
+    fds = {}
+    try:
+        for p in sorted(INPUT.iterdir()):
+            kind = "event" if p.name.startswith("event") else "js" if re.fullmatch(r"js\d+", p.name) else None
+            if kind:
+                try:
+                    fds[os.open(p, os.O_RDONLY | os.O_NONBLOCK)] = kind
+                except OSError:
+                    pass
+    except OSError:
+        return False
+    if not fds:
+        return False                          # no pad to press a button on: nothing to wait for
+    try:
+        end = time.monotonic() + timeout
+        while True:
+            left = end - time.monotonic()
+            if left <= 0:
+                return False
+            if tick:
+                tick(1 - left / timeout)
+            if not fds:                       # every device reached its end (a plain file in a test): keep the countdown honest
+                time.sleep(min(left, 0.5))
+                continue
+            ready, _, _ = select.select(list(fds), [], [], min(left, 0.5))
+            for fd in ready:
+                try:
+                    data = os.read(fd, 4096)
+                except OSError:
+                    continue
+                if not data:                      # a plain file (tests) has an end; a device does not
+                    fds.pop(fd)
+                    os.close(fd)
+                    continue
+                size = 24 if fds[fd] == "event" else 8
+                for i in range(0, len(data) - size + 1, size):
+                    rec = data[i:i + size]
+                    if fds[fd] == "event":
+                        typ, code, val = int.from_bytes(rec[16:18], "little"), int.from_bytes(rec[18:20], "little"), int.from_bytes(rec[20:24], "little", signed=True)
+                        if typ == 1 and val == 1 and code not in KEY_IGNORED:
+                            return True
+                    else:
+                        val, typ = int.from_bytes(rec[4:6], "little", signed=True), rec[6]
+                        if typ & 0x7F == 1 and not typ & 0x80 and val == 1:
+                            return True
+    finally:
+        for fd in fds:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+
+
+# ---- what the original card says it is -------------------------------------------------------------------------------------------
+def walk_names(top):
+    names = []
+    for d, dirs, files in os.walk(top):
+        names += [n.lower() for n in files]
+    return names
+
+
+def check_genuine(head, boot_dir):
+    """Reasons this card is not a genuine RK3326 R36S (CLAUDE.md rule 3; docs/hardware-findings.md); empty when it is."""
+    why = []
+    if b"eGON.BT0" in head:
+        why.append("it carries Allwinner boot code (eGON.BT0): an Allwinner clone, not an RK3326 board")
+    names = walk_names(boot_dir)
+    for m in CLONE_MARKERS:
+        if any(m in n for n in names):
+            why.append(f"its boot files include {m}, a clone board file")
+    top = {n.lower() for n in os.listdir(boot_dir)}
+    if "image" not in top:
+        why.append("its boot partition has no kernel (Image)")
+    if not any(n.endswith(".dtb") and "rk3326" in n for n in names):
+        why.append("it has no RK3326 board file (rk3326-*.dtb)")
+    if "boot.ini" not in top:
+        why.append("its boot partition has no boot.ini")
+    return why
+
+
+def rewrite_root(text):
+    """The same rewrite as scripts/inject-boot.sh and the boot disk guide: every root=... becomes root=UUID=<ROOT_UUID>, quotes kept."""
+    n = 0
+
+    def sub(m):
+        nonlocal n
+        n += 1
+        return f"root=UUID={m.group(1)}{ROOT_UUID}{m.group(1)}"
+
+    return re.sub(ROOT_PATTERN, sub, text), n
+
+
+def loader_of(head, parts):
+    """The raw bootloader area: from sector 64 to the first partition (at most 16 MiB), trailing zero sectors dropped."""
+    first = min(p["start"] for p in parts)
+    if first <= LOADER_SECTOR:
+        raise Stop(f"the original's first partition starts at sector {first}, inside the bootloader area")
+    loader = head[LOADER_SECTOR * SECTOR:min(first, HEAD_SECTORS) * SECTOR]
+    stripped = loader.rstrip(b"\x00")
+    if not stripped:
+        raise Stop("the original has no bootloader at sector 64")
+    return loader[: -(-len(stripped) // SECTOR) * SECTOR]
+
+
+# ---- chroot-style lookups in the mounted original (an absolute symlink must not leave it) --------------------------------------
+def resolve_in(root, path, limit=40):
+    """The real path of `path` inside the mounted tree `root`, following symlinks as if root were /; None if it does not exist."""
+    root = Path(root)
+    parts = [p for p in str(path).split("/") if p]
+    cur = []
+    while parts:
+        limit -= 1
+        if limit < 0:
+            return None
+        p = parts.pop(0)
+        if p == ".":
+            continue
+        if p == "..":
+            if cur:
+                cur.pop()
+            continue
+        nxt = root.joinpath(*cur, p)
+        if nxt.is_symlink():
+            target = os.readlink(nxt)
+            if target.startswith("/"):
+                cur = []
+            parts = [q for q in target.split("/") if q] + parts
+            continue
+        cur.append(p)
+        if not nxt.exists():
+            return None
+    return root.joinpath(*cur)
+
+
+def elf_needed(data):
+    """DT_NEEDED names of a 64-bit little-endian ELF shared object (what it links against); [] if it is not one."""
+    if data[:4] != b"\x7fELF" or len(data) < 64 or data[4] != 2 or data[5] != 1:
+        return []
+    u16 = lambda o: int.from_bytes(data[o:o + 2], "little")
+    u32 = lambda o: int.from_bytes(data[o:o + 4], "little")
+    u64 = lambda o: int.from_bytes(data[o:o + 8], "little")
+    try:
+        phoff, phentsize, phnum = u64(32), u16(54), u16(56)
+        loads, dynamic = [], None
+        for i in range(phnum):
+            ph = phoff + i * phentsize
+            ptype, offset, vaddr, filesz = u32(ph), u64(ph + 8), u64(ph + 16), u64(ph + 32)
+            if ptype == 1:
+                loads.append((vaddr, offset, filesz))
+            elif ptype == 2:
+                dynamic = (offset, filesz)
+        if dynamic is None:
+            return []
+        names, strtab = [], None
+        for pos in range(dynamic[0], dynamic[0] + dynamic[1], 16):
+            tag, val = u64(pos), u64(pos + 8)
+            if tag == 0:
+                break
+            if tag == 1:
+                names.append(val)
+            elif tag == 5:
+                strtab = next(o + val - v for v, o, s in loads if v <= val < v + s)
+        return [data[strtab + n:data.index(b"\0", strtab + n)].decode("ascii", "replace") for n in names]
+    except (IndexError, ValueError, StopIteration):
+        return []
+
+
+# ---- the plan: what is copied from the original into this root -----------------------------------------------------------------
+def tree_size(top):
+    total = 0
+    for d, dirs, files in os.walk(top):
+        for n in files:
+            p = os.path.join(d, n)
+            if not os.path.islink(p):
+                total += os.path.getsize(p)
+    return total
+
+
+def gpu_plan(src_root):
+    """{files: [paths], links: {name: target}, dir} for the Mali blob, or Stop. Same rules as scripts/inject_rootfs.py."""
+    for cand in GPU_DIRS:
+        d = resolve_in(src_root, cand)
+        if not d or not d.is_dir():
+            continue
+        files, links = [], {}
+        for p in sorted(d.iterdir()):
+            if not GPU_NAME.search(p.name):
+                continue
+            if p.is_symlink():
+                links[p.name] = os.path.basename(os.readlink(p))
+            elif p.is_file() and p.name.lower().startswith("libmali"):
+                files.append(p)
+        if files:
+            names = {p.name for p in files}
+
+            def resolves(n):
+                for _ in range(10):
+                    if n in names:
+                        return True
+                    n = links.get(n)
+                    if n is None:
+                        return False
+                return False
+
+            kept = {n: t for n, t in links.items() if resolves(n) and n not in names}
+            missing = [n for n in GPU_REQUIRED if n not in names and n not in kept]
+            if missing and not ALLOW_PARTIAL:
+                raise Stop("the original's graphics driver does not provide " + ", ".join(missing) + " (set R3I6NOS_GPU_ALLOW_PARTIAL=1 to go on anyway)")
+            return {"files": files, "links": kept, "dir": cand}
+    raise Stop("no Mali graphics driver (libmali) found on the original card")
+
+
+def vendor_plan(src_root):
+    plan = {"trees": []}
+    for name in ("modules", "firmware"):
+        d = resolve_in(src_root, f"/lib/{name}") or resolve_in(src_root, f"/usr/lib/{name}")
+        if d and d.is_dir():
+            plan["trees"].append((name, d, ROOT / "usr" / "lib" / name))
+    if not any(n == "modules" for n, _, _ in plan["trees"]):
+        raise Stop("no kernel modules (/lib/modules) found on the original card")
+    plan["gpu"] = gpu_plan(src_root)
+    return plan
+
+
+def copy_tree(src, dst, tick=None):
+    """Copy a tree with symlinks kept as links; files keep their modes and times."""
+    os.makedirs(dst)
+    for d, dirs, files in os.walk(src):
+        rel = os.path.relpath(d, src)
+        base = dst if rel == "." else os.path.join(dst, rel)
+        for n in list(dirs):
+            p = os.path.join(d, n)
+            if os.path.islink(p):
+                os.symlink(os.readlink(p), os.path.join(base, n))
+                dirs.remove(n)
+            else:
+                os.makedirs(os.path.join(base, n), exist_ok=True)
+        for n in files:
+            p = os.path.join(d, n)
+            q = os.path.join(base, n)
+            if os.path.islink(p):
+                os.symlink(os.readlink(p), q)
+            elif os.path.isfile(p):
+                shutil.copy2(p, q)
+                if tick:
+                    tick(os.path.getsize(p))
+
+
+def verify_tree(src, dst, tick=None):
+    problems = []
+    for d, dirs, files in os.walk(src):
+        rel = os.path.relpath(d, src)
+        base = dst if rel == "." else os.path.join(dst, rel)
+        for n in list(dirs):
+            p, q = os.path.join(d, n), os.path.join(base, n)
+            if os.path.islink(p):
+                dirs.remove(n)
+                if not os.path.islink(q) or os.readlink(q) != os.readlink(p):
+                    problems.append(f"symlink differs: {os.path.join(rel, n)}")
+            elif not os.path.isdir(q):
+                problems.append(f"missing directory: {os.path.join(rel, n)}")
+        for n in files:
+            p, q = os.path.join(d, n), os.path.join(base, n)
+            if os.path.islink(p):
+                if not os.path.islink(q) or os.readlink(q) != os.readlink(p):
+                    problems.append(f"symlink differs: {os.path.join(rel, n)}")
+            elif os.path.isfile(p):
+                if not os.path.isfile(q) or sha_file(p) != sha_file(q):
+                    problems.append(f"content differs: {os.path.join(rel, n)}")
+                if tick:
+                    tick(os.path.getsize(p))
+    return problems
+
+
+def replace_dir(tmp, final):
+    """Put a finished tree in place. The old one (a previous, interrupted setup) goes aside first and is removed after."""
+    old = None
+    if os.path.lexists(final):
+        old = str(final) + ".r3old"
+        shutil.rmtree(old, ignore_errors=True)
+        os.rename(final, old)
+    os.makedirs(os.path.dirname(str(final)), exist_ok=True)
+    os.rename(tmp, final)
+    if old:
+        shutil.rmtree(old, ignore_errors=True)
+
+
+def install_vendor(plan, say):
+    """Copy modules, firmware and the GPU blob into this root. Each piece is built beside its final place and renamed into it.
+    The bar counts bytes: every file is copied once and read back once."""
+    notes = []
+    pieces = [(n, s, d) for n, s, d in plan["trees"]]
+    gpu, gdst = plan["gpu"], ROOT / "opt" / "libmali"
+    total = max(1, 2 * (sum(tree_size(s) for _, s, _ in pieces) + sum(p.stat().st_size for p in gpu["files"])))
+    done, cur = [0], [""]
+
+    def tick(n):
+        done[0] += n
+        say(cur[0], done[0] / total)
+
+    def with_msg(msg):
+        cur[0] = msg
+        say(msg, done[0] / total)
+
+    for name, src, dst in pieces:
+        with_msg(f"Copying the kernel {name} ({tree_size(src) // 1048576} MB)...")
+        tmp = str(dst) + ".r3new"
+        shutil.rmtree(tmp, ignore_errors=True)
+        os.makedirs(os.path.dirname(tmp), exist_ok=True)
+        copy_tree(src, tmp, tick)
+        replace_dir(tmp, dst)
+        with_msg(f"Checking the kernel {name} against the original...")
+        bad = verify_tree(src, dst, tick)
+        if bad:
+            raise Stop(f"the copy of the kernel {name} does not match the original ({len(bad)} differences, first: {bad[0]})")
+        notes.append((name, sum(len(f) for _, _, f in os.walk(dst))))
+    with_msg("Installing the graphics driver...")
+    tmp = str(gdst) + ".r3new"
+    shutil.rmtree(tmp, ignore_errors=True)
+    os.makedirs(tmp)
+    for p in gpu["files"]:
+        shutil.copy2(p, os.path.join(tmp, p.name))
+        tick(p.stat().st_size)
+    for n, t in gpu["links"].items():
+        os.symlink(t, os.path.join(tmp, n))
+    replace_dir(tmp, gdst)
+    with_msg("Checking the graphics driver against the original...")
+    bad = []
+    for p in gpu["files"]:
+        if sha_file(p) != sha_file(gdst / p.name):
+            bad.append(p.name)
+        tick(p.stat().st_size)
+    if bad:
+        raise Stop("the copy of the graphics driver does not match the original: " + ", ".join(bad))
+    notes.append(("libmali", len(gpu["files"]) + len(gpu["links"])))
+    say("Drivers installed.", 1.0)
+    return notes
+
+
+def needed_problems():
+    """Libraries the installed Mali blob links against that this root lacks (a warning, not a stop)."""
+    out, search = [], [ROOT / "opt" / "libmali", ROOT / "usr/lib/aarch64-linux-gnu", ROOT / "lib/aarch64-linux-gnu", ROOT / "usr/lib", ROOT / "lib"]
+    blob = ROOT / "opt" / "libmali"
+    info = []
+    for p in sorted(blob.glob("libmali*")):
+        if p.is_symlink() or not p.is_file():
+            continue
+        need = elf_needed(p.read_bytes())
+        info.append((p.name, need))
+        for n in need:
+            if not any((d / n).exists() for d in search):
+                out.append(f"{p.name} needs {n}, which this system does not have")
+    return info, out
+
+
+# ---- the boot area of this card ---------------------------------------------------------------------------------------------------
+def ensure_boot_mounted(root, src):
+    """This card's own BOOT (partition 1 of `root`) at BOOT, read-write.
+
+    /etc/fstab mounts LABEL=BOOT at /boot, and the original card's boot partition may carry the same label: in a setup boot the
+    original could be what is mounted there, read-write. Writing the new card's boot files onto it would be the one way this
+    program could damage the original, so what is mounted at BOOT is checked, and the original is unmounted if it is there."""
+    dev = mounted_at(BOOT)
+    if dev and Path(dev).name.startswith(src):
+        r = run(["umount", str(BOOT)], 60)
+        if r.returncode != 0:
+            raise Stop(f"the original card's boot partition is mounted at {BOOT} and could not be unmounted: {r.stderr.strip()}")
+        dev = None
+    elif dev and not Path(dev).name.startswith(root):
+        raise Stop(f"{dev} is mounted at {BOOT}, which is neither card in this setup, so nothing was written")
+    if dev:
+        return
+    BOOT.mkdir(parents=True, exist_ok=True)
+    r = run(["mount", "-t", "vfat", "-o", "rw,noatime", str(part_dev(root, 1)), str(BOOT)], 60)
+    if r.returncode != 0:
+        raise Stop(f"cannot open this card's BOOT partition: {r.stderr.strip() or 'mount failed'}")
+
+
+def copy_boot(src_boot, say=None):
+    """The original's boot files into this card's BOOT, root= pointed here. Returns (files, roots rewritten)."""
+    staged, roots = [], 0
+    for d, dirs, files in os.walk(src_boot):
+        dirs[:] = [x for x in dirs if x.lower() not in JUNK]
+        for n in files:
+            if n.lower() in JUNK or n.startswith("._"):
+                continue
+            p = Path(d) / n
+            rel = p.relative_to(src_boot)
+            if n.lower().endswith((".ini", ".conf")):
+                raw = p.read_bytes()
+                new, k = rewrite_root(raw.decode("utf-8", "surrogateescape"))
+                roots += k
+                staged.append((rel, None, new.encode("utf-8", "surrogateescape")))
+            else:
+                staged.append((rel, p, None))
+    if not staged:
+        raise Stop("the original's boot partition is empty")
+    if roots == 0:
+        raise Stop("no root= found in any boot.ini or .conf of the original: this card would not find its root")
+    n = len(staged)
+    for k, (rel, p, data) in enumerate(staged):
+        if say:
+            say("Writing the boot files...", k / (2 * n))
+        dst = BOOT / rel
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        tmp = dst.with_name(dst.name + ".r3tmp")
+        if data is None:
+            shutil.copyfile(p, tmp)
+        else:
+            tmp.write_bytes(data)
+        os.replace(tmp, dst)
+    os.sync()
+    for k, (rel, p, data) in enumerate(staged):
+        if say:
+            say("Checking the boot files...", 0.5 + k / (2 * n))
+        dst = BOOT / rel
+        want = hashlib.sha256(data).hexdigest() if data is not None else sha_file(p)
+        if not dst.is_file() or sha_file(dst) != want:
+            raise Stop(f"a boot file was not written correctly: {rel}")
+    return len(staged), roots
+
+
+def write_loader(root, loader):
+    dev = DEV / root
+    fd = os.open(dev, os.O_RDWR)
+    try:
+        os.pwrite(fd, loader, LOADER_SECTOR * SECTOR)
+        os.fsync(fd)
+        back = os.pread(fd, len(loader), LOADER_SECTOR * SECTOR)
+    finally:
+        os.close(fd)
+    if back != loader:
+        raise Stop("the bootloader did not read back the same from this card")
+
+
+# ---- the games partition ---------------------------------------------------------------------------------------------------------
+def games_entry(mbr, total_sectors):
+    """(new MBR, start, size) with partition 3 added after ROOTFS, as scripts/add_games_partition.py does, or (None, reason)."""
+    if mbr[510:512] != b"\x55\xaa":
+        return None, "this card has no partition table"
+    if int.from_bytes(mbr[440:444], "little") != DISK_SIGNATURE:
+        return None, "this card is not an r3i6nos image (disk signature differs)"
+    ent = lambda n: mbr[446 + 16 * n:446 + 16 * n + 16]
+    if ent(0)[4] == 0 or ent(1)[4] == 0:
+        return None, "partitions 1 and 2 are not both there"
+    if any(ent(2)) or any(ent(3)):
+        return None, "partition 3 or 4 is already in use"
+    p2 = ent(1)
+    end2 = int.from_bytes(p2[8:12], "little") + int.from_bytes(p2[12:16], "little")
+    start = -(-end2 // ALIGN) * ALIGN
+    size = min(total_sectors, MAX_LBA) - start
+    if size < MIN_GAMES_SECTORS:
+        return None, f"only {max(size, 0) * 512 // 1000000} MB is free after ROOTFS: not enough for a games partition"
+    new = b"\x00" + b"\xfe\xff\xff" + b"\x07" + b"\xfe\xff\xff" + start.to_bytes(4, "little") + size.to_bytes(4, "little")
+    out = bytearray(mbr)
+    out[446 + 32:446 + 48] = new
+    return (bytes(out), start, size), None
+
+
+def make_games(root, say):
+    """Make and format partition 3 on this card (decided 2026-11-11, CLAUDE.md rule 7's exception). Returns ("created"|"exists"|"skipped", detail)."""
+    dev = DEV / root
+    mbr = read_at(dev, 0, SECTOR)
+    parts = mbr_parts(mbr) or []
+    if any(p["number"] == 3 for p in parts):
+        return "exists", "this card already has a games partition"
+    got, why = games_entry(mbr, disk_sectors(root))
+    if got is None:
+        return "skipped", why
+    new, start, size = got
+    probe = read_at(dev, start * SECTOR, 1 << 20)
+    if any(probe):
+        return "skipped", "the space after ROOTFS is not empty, so it was left alone"
+    say("Making the games partition...", 0.1)
+    fd = os.open(dev, os.O_RDWR)
+    try:
+        os.pwrite(fd, new, 0)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    say("Telling the kernel about it...", 0.3)
+    r = run(["partx", "-a", "-n", "3", str(dev)], 30)
+    p3 = part_dev(root, 3)
+    for _ in range(50):
+        if p3.exists():
+            break
+        time.sleep(0.1)
+    if not p3.exists():
+        raise Stop(f"the kernel did not show the new games partition ({r.stderr.strip() or 'partx gave no error'})")
+    say("Formatting the games partition (EASYROMS)...", 0.5)
+    r = run(["mkfs.exfat", "-L", "EASYROMS", str(p3)], 600)
+    if r.returncode != 0:
+        raise Stop(f"could not format the games partition: {(r.stderr or r.stdout).strip()}")
+    mnt = RUN / "setup" / "games"
+    mnt.mkdir(parents=True, exist_ok=True)
+    r = run(["mount", "-t", "exfat", "-o", "rw,noatime", str(p3), str(mnt)], 60)
+    if r.returncode != 0:
+        raise Stop(f"could not open the new games partition: {r.stderr.strip()}")
+    try:
+        say("Making the folders for games and apps...", 0.85)
+        for f in GAMES_FOLDERS:
+            (mnt / f).mkdir(exist_ok=True)
+        os.sync()
+    finally:
+        run(["umount", str(mnt)], 60)
+    return "created", f"{size * 512 // 1000000} MB exFAT, label EASYROMS"
+
+
+# ---- the backup (only when asked) -------------------------------------------------------------------------------------------------
+def backup_end(parts):
+    """Sectors to back up: everything up to the end of the last system partition (not the exFAT games one)."""
+    return max(p["start"] + p["size"] for p in parts if p["type"] != 0x07)
+
+
+def backup_need(parts):
+    """Bytes a backup of this original is expected to need on the new card: a third of the raw size, plus a margin."""
+    return backup_end(parts) * SECTOR // BACKUP_DIV + BACKUP_MARGIN
+
+
+def backup_room(root, parts, mounts):
+    """(enough, available bytes, why) for a backup on the new card's games partition, measured before a backup is offered.
+
+    With a games partition already there, its free space is read (mounted read-only for a moment); without one, the room after ROOTFS
+    that make_games would give it."""
+    need = backup_need(parts)
+    mbr = read_at(DEV / root, 0, SECTOR)
+    have = {p["number"]: p for p in (mbr_parts(mbr) or [])}
+    if 3 in have:
+        try:
+            mnt = mounts.ro(part_dev(root, 3), RUN / "setup" / "games-probe", fstype(part_dev(root, 3)) or "exfat")
+            avail = shutil.disk_usage(mnt).free
+        except (Stop, OSError):
+            return False, 0, "the games partition on this card cannot be read"
+        finally:
+            mounts.close_last()
+    else:
+        got, why = games_entry(mbr, disk_sectors(root))
+        if got is None:
+            return False, 0, why
+        avail = got[2] * SECTOR
+    if avail < need:
+        return False, avail, f"this card has {avail // 1048576} MB for it and a backup needs about {need // 1048576} MB"
+    return True, avail, f"{avail // 1048576} MB free, about {need // 1048576} MB needed"
+
+
+def do_backup(src_disk, parts, sig, dest, say):
+    """Read the original from sector 0 to the end of its system partitions, gzip it into dest, check it by reading it back."""
+    total = backup_end(parts) * SECTOR
+    free = shutil.disk_usage(dest.parent).free
+    if free < backup_need(parts):
+        return None, f"not enough room for a backup ({free // 1048576} MB free, about {backup_need(parts) // 1048576} MB needed)"
+    dest.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    name = f"stock-{stamp}-{sig}.img.gz"
+    part = dest / (name + ".part")
+    raw = hashlib.sha256()
+    comp = zlib.compressobj(1, zlib.DEFLATED, 31)
+    done = 0
+    with open(DEV / src_disk, "rb") as src, open(part, "wb") as out:
+        while done < total:
+            chunk = src.read(min(1 << 20, total - done))
+            if not chunk:
+                raise Stop("the original card ended before the backup was complete")
+            raw.update(chunk)
+            out.write(comp.compress(chunk))
+            done += len(chunk)
+            say("Backing up the original card...", done / total / 2)
+        out.write(comp.flush())
+        out.flush()
+        os.fsync(out.fileno())
+    digest = raw.hexdigest()
+    check, seen = hashlib.sha256(), 0
+    with gzip.open(part, "rb") as f:
+        for chunk in iter(lambda: f.read(1 << 20), b""):
+            check.update(chunk)
+            seen += len(chunk)
+            say("Checking the backup...", 0.5 + seen / total / 2)
+    if check.hexdigest() != digest or seen != total:
+        part.unlink(missing_ok=True)
+        raise Stop("the backup did not read back the same: it was removed")
+    final = dest / name
+    os.replace(part, final)
+    (dest / (name + ".sha256")).write_text(f"{digest}  {name[:-3]}\n")
+    os.sync()
+    return name, f"{total // 1048576} MB of the original, kept as {name}"
+
+
+# ---- the whole setup --------------------------------------------------------------------------------------------------------------
+STEPS = ["Check the original card", "Check this card", "Back up the original (only if asked)", "Write the boot files",
+         "Install the drivers", "Make the games area", "Finish"]
+
+
+def version():
+    for line in (read_text(ROOT / "etc/r3i6nos-release") or "").splitlines():
+        if line.startswith("VERSION="):
+            return line.split("=", 1)[1]
+    return "?"
+
+
+def setup(info, screen, report):
+    src, root, head, parts = info["source"], info["root"], info["head"], info["parts"]
+    mounts = Mounts()
+    sig = f"{int.from_bytes(head[440:444], 'little'):08x}"
+    report.add("INFO", "original card", f"{src}, disk id {sig}, {len(parts)} partitions")
+    report.add("INFO", "this card", f"{root}")
+    note = battery_note()
+    if note:
+        report.add("FAIL" if note.startswith("LOW") else "INFO", "battery", note)
+    say = screen.say
+    try:
+        # 1. the original
+        screen.mark(0, "now")
+        say("Reading the original card (it is only read, never changed)...", 0.1)
+        base = RUN / "setup"
+        src_boot = mounts.ro(part_dev(src, 1), base / "boot-src", fstype(part_dev(src, 1)) or "vfat")
+        say("Checking it is a genuine R36S...", 0.3)
+        bad = check_genuine(head, src_boot)
+        if bad:
+            report.add("FAIL", "genuine R36S", "; ".join(bad))
+            raise Stop("This is not a genuine R36S card, so nothing was written: " + bad[0] + ".")
+        report.add("PASS", "genuine R36S", "an RK3326 board file, a kernel and no clone signs")
+        loader = loader_of(head, parts)
+        report.add("PASS", "bootloader", f"{len(loader)} bytes from sector {LOADER_SECTOR}, sha256 {hashlib.sha256(loader).hexdigest()[:16]}")
+        say("Finding its system files...", 0.5)
+        src_root = None
+        for p in sorted(parts, key=lambda p: p["number"]):
+            fs = fstype(part_dev(src, p["number"]))
+            if p["number"] > 1 and fs and fs.startswith("ext"):
+                cand = mounts.ro(part_dev(src, p["number"]), base / f"root-src{p['number']}", fs)
+                if resolve_in(cand, "/etc/os-release"):
+                    src_root = cand
+                    break
+        if src_root is None:
+            raise Stop("the original card has no Linux root partition (ext4)")
+        say("Looking for the kernel modules and the graphics driver...", 0.8)
+        plan = vendor_plan(src_root)
+        gpu = plan["gpu"]
+        report.add("PASS", "graphics driver", f"{len(gpu['files'])} files and {len(gpu['links'])} links from {gpu['dir']}")
+        report.add("PASS", "kernel modules", f"{tree_size(plan['trees'][0][1]) // 1048576} MB from the original")
+        screen.mark(0, "done")
+
+        # 2. this card
+        screen.mark(1, "now")
+        say("Checking this card is an r3i6nos card...", 0.2)
+        mbr = read_at(DEV / root, 0, SECTOR)
+        if int.from_bytes(mbr[440:444], "little") != DISK_SIGNATURE:
+            raise Stop("This card is not an r3i6nos card (its disk signature differs), so nothing was written.")
+        say("Checking there is room for the drivers...", 0.5)
+        need = sum(tree_size(s) for _, s, _ in plan["trees"]) + sum(p.stat().st_size for p in gpu["files"])
+        free = shutil.disk_usage(ROOT).free
+        report.add("INFO", "room on this card", f"{free // 1048576} MB free, {need // 1048576} MB needed")
+        if free < need + (64 << 20):
+            raise Stop(f"This card's system area has {free // 1048576} MB free but the drivers need {need // 1048576} MB, so nothing was written.")
+        say("Opening this card's boot partition...", 0.8)
+        ensure_boot_mounted(root, src)
+        report.add("PASS", "this card", "an r3i6nos card with room for the drivers")
+        screen.mark(1, "done")
+
+        # 3. the backup: offered only when this card has room for it, and only done if asked
+        screen.mark(2, "now")
+        say("Checking whether this card has room for a backup...", 0.1)
+        room, avail, why = backup_room(root, parts, mounts)
+        backup_name, games_kind = "none", None
+        if not room:
+            report.add("SKIP", "backup", f"not offered: {why}")
+            say(f"No backup offered: {why}.", 1.0)
+            time.sleep(float(ENV("R3I6NOS_SETUP_NOTE", "3")))
+            screen.mark(2, "skip")
+        else:
+            if BACKUP_ENV in ("1", "0"):
+                want = BACKUP_ENV == "1"
+            else:
+                def countdown(frac):
+                    left = max(0, int(round(WAIT * (1 - frac))))
+                    say(f"Also back up the original card?\n{why}.\nPress any button within {left} s, or it is skipped.", frac)
+                countdown(0.0)
+                want = button_pressed(WAIT, countdown)
+            if want:
+                screen.weight(2, BACKUP_WEIGHT)
+                screen.mark(2, "now")
+                # the backup goes on this card's games partition: make it first, then back up into it
+                games_kind, why2 = make_games(root, say)
+                report.add("PASS" if games_kind == "created" else "INFO" if games_kind == "exists" else "SKIP", "games partition", f"{games_kind}: {why2}")
+                if games_kind in ("created", "exists"):
+                    mnt = RUN / "setup" / "games"
+                    mnt.mkdir(parents=True, exist_ok=True)
+                    r = run(["mount", "-t", "exfat", "-o", "rw,noatime", str(part_dev(root, 3)), str(mnt)], 60)
+                    if r.returncode == 0:
+                        try:
+                            name, why3 = do_backup(src, parts, sig, mnt / "Backup", say)
+                        finally:
+                            run(["umount", str(mnt)], 60)
+                        report.add("PASS" if name else "SKIP", "backup", why3)
+                        backup_name = name or "none"
+                    else:
+                        report.add("SKIP", "backup", "the games partition could not be opened: " + r.stderr.strip())
+                else:
+                    report.add("SKIP", "backup", "there is no games partition to keep it on")
+                screen.mark(2, "done")
+            else:
+                report.add("SKIP", "backup", f"offered ({why}) and not asked for")
+                screen.mark(2, "skip")
+
+        # 4. the boot area
+        screen.mark(3, "now")
+        say("Writing the bootloader to this card...", 0.05)
+        write_loader(root, loader)
+        n_files, n_roots = copy_boot(src_boot, lambda m, b=None: say(m, 0.1 + 0.9 * (b or 0)))
+        report.add("PASS", "bootloader written", f"{len(loader)} bytes at sector {LOADER_SECTOR}, read back")
+        report.add("PASS", "boot files", f"{n_files} files copied and read back; root= set to this card in {n_roots} places")
+        screen.mark(3, "done")
+
+        # 5. the drivers
+        screen.mark(4, "now")
+        notes = install_vendor(plan, say)
+        say("Checking the graphics driver's libraries...", 1.0)
+        for name, count in notes:
+            report.add("PASS", f"installed {name}", f"{count} entries, compared with the original")
+        info_needs, missing = needed_problems()
+        for blob, need_libs in info_needs:
+            report.add("INFO", f"{blob} needs", " ".join(need_libs) or "(nothing)")
+        for m in missing:
+            report.add("FAIL", "graphics driver link", m)
+        screen.mark(4, "done")
+
+        # 6. the games area
+        screen.mark(5, "now")
+        if games_kind is None:
+            say("Making the games area on this card...", 0.05)
+            games_kind, why4 = make_games(root, say)
+            report.add("PASS" if games_kind == "created" else "INFO" if games_kind == "exists" else "SKIP", "games partition", f"{games_kind}: {why4}")
+        screen.mark(5, "skip" if games_kind == "skipped" else "done")
+
+        # 7. finish
+        screen.mark(6, "now")
+        say("Writing the report and saving everything to the card...", 0.5)
+        os.sync()
+        return {"sig": sig, "backup": backup_name, "missing_libs": len(missing)}
+    finally:
+        mounts.close()
+
+
+def finish(ok, report, screen, extra):
+    path = report.write(version())
+    try:
+        VAR.mkdir(parents=True, exist_ok=True)
+        if ok:
+            (VAR / "setup-done").write_text(f"DATE={time.strftime('%Y-%m-%dT%H:%M:%S')}\nVERSION={version()}\nSOURCE_ID={extra.get('sig', '?')}\nBACKUP={extra.get('backup', 'none')}\n")
+    except OSError:
+        pass
+    return path
+
+
+def main(argv):
+    if len(argv) == 2 and argv[1] == "detect":
+        mode, info = detect()
+        print(f"mode=setup source={info['source']} root={info['root']}" if mode == "setup" else f"mode=normal why={info['why']}")
+        return 0
+    if len(argv) != 1:
+        print("usage: r3i6nos-setup | r3i6nos-setup detect", file=sys.stderr)
+        return 2
+    RUN.mkdir(parents=True, exist_ok=True)
+    try:
+        mode, info = detect()
+    except Exception as e:           # never fail an ordinary boot
+        log(f"could not decide whether this is a setup boot: {e}")
+        return 0
+    if mode != "setup":
+        (RUN / "setup-state").write_text(f"mode=normal\nwhy={info['why']}\n")
+        log(info["why"])
+        return 0
+    # The original must never be mounted as a data card while this runs, or after a failure (r3i6nos-cards reads this file).
+    (RUN / "setup-source").write_text(info["source"] + "\n")
+    (RUN / "setup-state").write_text(f"mode=setup\nsource={info['source']}\n")
+    screen, report = Screen(STEPS, STEP_WEIGHTS), Report()
+    ok, message, extra = False, "", {}
+    try:
+        extra = setup(info, screen, report)
+        ok = True
+        report.add("PASS" if not extra["missing_libs"] else "FAIL", "setup", "finished" if ok else "")
+        screen.say("Finished. Everything is saved.", 1.0)
+        screen.mark(6, "done")
+    except Stop as e:
+        message = str(e)
+        report.add("FAIL", "setup", message)
+    except Exception as e:
+        message = f"Unexpected problem: {e}"
+        report.add("FAIL", "setup", message)
+    path = finish(ok, report, screen, extra)
+    if ok:
+        screen.final(["Done. Switch-off follows.", "", "1. Take the ORIGINAL card out and keep it somewhere safe.",
+                      "2. Put the NEW card in the LEFT slot (TF1).", "3. Switch on: the r3i6nos menu appears.", "",
+                      f"A report is on the card's BOOT drive: {Path(path).name}" if path else "",
+                      "Graphics driver check: see the report." if extra.get("missing_libs") else ""])
+        time.sleep(float(ENV("R3I6NOS_SETUP_PAUSE", "8")))
+        os.sync()
+        for cmd in (["systemctl", "--no-block", "poweroff"], ["poweroff"]):   # --no-block: this unit is still running, as r3i6nos-poweroff does
+            try:
+                if run(cmd, 60).returncode == 0:
+                    break
+            except (OSError, subprocess.SubprocessError):
+                continue
+        return 0
+    screen.final(["Setup stopped. Nothing was changed on the original card.", "", message, "",
+                  "Switch the console off (hold the power button), and ask on Discord:", "https://discord.gg/6q8mrKRKqh",
+                  f"The report is on the card's BOOT drive: {Path(path).name}" if path else ""])
+    log(message)
+    # Stay here: finishing would let the menu start over this screen. A button press switches off.
+    if ENV("R3I6NOS_SETUP_PAUSE") is None:
+        button_pressed(10 ** 6)
+        run(["poweroff"], 60)
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

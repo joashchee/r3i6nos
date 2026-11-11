@@ -90,6 +90,25 @@ class Fake(unittest.TestCase):
 
 
 class SystemReport(Fake):
+    def test_setup_section_says_how_the_card_was_made(self):
+        t = self.t
+        for d in ("var", "boot"):
+            (t / d).mkdir(exist_ok=True)
+        env = {"R3I6NOS_SETUP_VAR": str(t / "var"), "R3I6NOS_SETUP_RUN": str(t / "run"), "R3I6NOS_SETUP_BOOT": str(t / "boot")}
+        self.report(**env)
+        text = self.text(self.t / "sys2/r3i6nos")
+        self.assertIn("== setup ==", text)
+        self.assertIn("SKIP made by r3i6nos-setup: no record", text)
+        (t / "var/setup-done").write_text("DATE=2026-11-12T09:00:00\nVERSION=0.1.0\nSOURCE_ID=12345678\nBACKUP=none\n")
+        (t / "run/setup-state").write_text("mode=normal\nwhy=mmcblk0 has its own bootloader\n")
+        (t / "boot/r3i6nos-setup-report.txt").write_text("PASS 12  FAIL 0  INFO 4  SKIP 1\nend\n")
+        self.report(**env)
+        text = self.text(self.t / "sys2/r3i6nos")
+        self.assertIn("INFO made by r3i6nos-setup: 2026-11-12T09:00:00, build 0.1.0, original card id 12345678", text)
+        self.assertIn("INFO backup of the original: none", text)
+        self.assertIn("INFO this boot: normal, mmcblk0 has its own bootloader", text)
+        self.assertIn("PASS setup report on BOOT: 12 PASS, 0 FAIL", text)
+
     def test_written_on_the_data_card_with_every_section(self):
         self.report()
         text = self.text(self.t / "sys2/r3i6nos")

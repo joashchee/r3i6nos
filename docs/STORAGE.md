@@ -84,3 +84,7 @@ by hand: with the unit on, insert a card in TF2, then run `ls /sys/block` over S
 - **Untested:** the data card. No card was in TF2 for that report. To find out: put a card in TF2, boot, run the report (what it shows up as,
   whether it is ready when the service runs, its speed); then take it out, boot, put it back with the unit on, and run the report again
   (it lists the disks the kernel sees, so it shows whether the slot reports a card put in while on: step 5).
+
+## A setup boot (docs/TWO-SLOT-SETUP.md)
+
+When the original card is in TF1 and the new card in TF2, the new card is the root disk and the original is the *other* card. `r3i6nos-setup` runs first, names the original in `/run/r3i6nos/setup-source`, and `r3i6nos-cards` then never mounts it as a data card (it is only ever read, rule 7). After the swap the new card boots from TF1 on its own and this section does not apply.
