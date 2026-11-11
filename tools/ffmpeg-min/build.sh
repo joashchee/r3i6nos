@@ -44,9 +44,9 @@ mkdir "$W/zs"; ln -s "$(dpkg -L zlib1g-dev | grep 'libz\.a$' | head -n 1)" "$W/z
 export PKG_CONFIG_PATH="$W/x264/lib/pkgconfig"
 cd "ffmpeg-$VER"
 
-DEMUXERS=mov,matroska,avi,asf,flv,mpegps,mpegts,mpegvideo,wav,mp3,ogg,flac,aiff,aac,wv,ac3,eac3,dts,rawvideo,image2,image2pipe,image_jpeg_pipe,image_webp_pipe,image_tiff_pipe,image_psd_pipe   # mpegvideo: a program stream identifies its video by probing it
-PARSERS=webp,h264,hevc,aac,ac3,dca,mpegaudio,mpeg4video,mpegvideo,h263,mjpeg,vc1,vorbis,flac,opus,vp8,vp9
-VIDEO=webp,tiff,psd,rawvideo,h264,hevc,mpeg4,mpeg2video,mpeg1video,vp8,vp9,wmv1,wmv2,wmv3,vc1,mjpeg,msmpeg4v1,msmpeg4v2,msmpeg4v3,h263,h263p,flv,vp6,vp6f,vp6a,cinepak,msvideo1,qtrle,svq1,svq3,prores
+DEMUXERS=mov,matroska,avi,asf,flv,mpegps,mpegts,mpegvideo,wav,mp3,ogg,flac,aiff,aac,wv,ac3,eac3,dts,rawvideo,image2,image2pipe,image_jpeg_pipe,image_webp_pipe,image_tiff_pipe,image_psd_pipe,image_png_pipe   # mpegvideo: a program stream identifies its video by probing it
+PARSERS=png,webp,h264,hevc,aac,ac3,dca,mpegaudio,mpeg4video,mpegvideo,h263,mjpeg,vc1,vorbis,flac,opus,vp8,vp9
+VIDEO=png,webp,tiff,psd,rawvideo,h264,hevc,mpeg4,mpeg2video,mpeg1video,vp8,vp9,wmv1,wmv2,wmv3,vc1,mjpeg,msmpeg4v1,msmpeg4v2,msmpeg4v3,h263,h263p,flv,vp6,vp6f,vp6a,cinepak,msvideo1,qtrle,svq1,svq3,prores
 AUDIO=aac,aac_latm,mp1,mp1float,mp2,mp2float,mp3,mp3float,ac3,eac3,dca,flac,vorbis,opus,wavpack,alac,wmav1,wmav2,wmapro,pcm_s16le,pcm_s16be,pcm_u8,pcm_s24le,pcm_s32le,pcm_f32le,adpcm_ms,adpcm_ima_wav
 ./configure --prefix=/opt/min --disable-everything --disable-autodetect --disable-doc --disable-network --disable-debug --enable-small \
     --disable-ffplay --disable-ffprobe --enable-ffmpeg \
@@ -70,7 +70,7 @@ fail=0
 for d in $(echo "$VIDEO,$AUDIO" | tr ',' ' ' | sed 's/msmpeg4v3/msmpeg4/'); do "$MIN" -hide_banner -decoders 2>/dev/null | awk '{print $2}' | grep -qx "$d" || { echo "    MISSING decoder: $d"; fail=1; }; done
 
 # the same for demuxers, muxers and encoders (their names in `-demuxers` are not always the configure names: image_psd_pipe is psd_pipe)
-for d in mov matroska avi asf flv mpeg mpegts mpegvideo wav mp3 ogg flac aiff aac wv ac3 eac3 dts rawvideo image2 image2pipe jpeg_pipe webp_pipe tiff_pipe psd_pipe; do
+for d in mov matroska avi asf flv mpeg mpegts mpegvideo wav mp3 ogg flac aiff aac wv ac3 eac3 dts rawvideo image2 image2pipe jpeg_pipe webp_pipe tiff_pipe psd_pipe png_pipe; do
     "$MIN" -hide_banner -demuxers 2>/dev/null | awk '{print $2}' | tr ',' '\n' | grep -qx "$d" || { echo "    MISSING demuxer: $d"; fail=1; }
 done
 for m in mp4 rawvideo s16le; do "$MIN" -hide_banner -muxers 2>/dev/null | awk '{print $2}' | grep -qx "$m" || { echo "    MISSING muxer: $m"; fail=1; }; done
@@ -152,6 +152,10 @@ ffmpeg -v error -i "$T/s.png" -c:v tiff -compression_algo raw -y "$T/raw.tiff"; 
 ffmpeg -v error -i "$T/s.png" -c:v tiff -compression_algo lzw -y "$T/lzw.tiff"; scase "tiff lzw" "$T/lzw.tiff"
 ffmpeg -v error -i "$T/s.png" -c:v tiff -compression_algo deflate -y "$T/deflate.tiff"; scase "tiff deflate" "$T/deflate.tiff"
 ffmpeg -v error -i "$T/s.png" -c:v tiff -compression_algo packbits -y "$T/pack.tiff"; scase "tiff packbits" "$T/pack.tiff"
+# PNG (Commander and the demo tools hand it PNGs; zlib is already linked in for TIFF), by extension and by content alone
+scase "png" "$T/s.png"
+cp "$T/s.png" "$T/png-no-extension"; scase "png, found by its content (no extension)" "$T/png-no-extension"
+ffmpeg -v error -f lavfi -i "color=c=red@0.5:s=320x240,format=rgba" -frames:v 1 -y "$T/alpha.png"; scase "png with alpha" "$T/alpha.png"
 # JPEG, baseline and progressive (Commander draws a progressive one through ffmpeg: images.h does not), by extension and by content alone
 ffmpeg -v error -f lavfi -i gradients=s=320x240:n=4:seed=7 -frames:v 1 -y "$T/g.ppm"
 cjpeg -quality 90 "$T/g.ppm" > "$T/base.jpg"; scase "jpeg baseline" "$T/base.jpg"
