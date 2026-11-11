@@ -110,16 +110,18 @@ find_ports() {
         fi
     done
 }
-# The test corpus (corpus/README.md): all of it in "Test files/", and the files of the apps that browse only their own folder in that
+# The test corpus (corpus/README.md): all of it in "Test files/" with its sub-folders, and the files of the apps that browse only their own folder in that
 # folder too (Neumetik's music, KlamANSI's drawings). Comes from this repo, so it is always there.
 find_corpus() {
     local dir f
     dir="$(cd "$(dirname "$0")/.." && pwd)/corpus/files"
     [ -d "$dir" ] || return 0
-    for f in "$dir"/*; do [ -f "$f" ] && CORPUS_COPY+=("$f	Test files/$(basename "$f")"); done
-    while read -r f; do [ -n "$f" ] && CORPUS_COPY+=("$dir/$f	Neumetik/music/Test files/$f"); done \
+    # the sub-folders (music, images, video, archives, ...) are kept under "Test files/"; the two apps that browse only their own folder get
+    # their files flat, by name
+    while read -r f; do [ -n "$f" ] && CORPUS_COPY+=("$f	Test files/${f#"$dir"/}"); done < <(find "$dir" -type f ! -name '.DS_Store' | sort)
+    while read -r f; do [ -n "$f" ] && CORPUS_COPY+=("$dir/$f	Neumetik/music/Test files/$(basename "$f")"); done \
         < <(python3 -I "$(dirname "$0")/corpus_extra.py" list neumetik)
-    while read -r f; do [ -n "$f" ] && CORPUS_COPY+=("$dir/$f	KlamANSI/drawings/test-files/$f"); done \
+    while read -r f; do [ -n "$f" ] && CORPUS_COPY+=("$dir/$f	KlamANSI/drawings/test-files/$(basename "$f")"); done \
         < <(python3 -I "$(dirname "$0")/corpus_extra.py" list klamansi)
     return 0
 }

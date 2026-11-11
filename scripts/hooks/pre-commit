@@ -1,7 +1,8 @@
 #!/bin/bash
 # Refuses a commit that stages the vendor's captured files or anything huge.
 # Install once per clone:  git config core.hooksPath scripts/hooks
-bad="$(git diff --cached --name-only --diff-filter=ACM | grep -E '^local_hardware_assets|\.(img|zip)(\.gz)?$' || true)"
+# (the test corpus's own tiny .img and .zip files in corpus/files are test data, not card images)
+bad="$(git diff --cached --name-only --diff-filter=ACM | grep -E '^local_hardware_assets|\.(img|zip)(\.gz)?$' | grep -v '^corpus/files/' || true)"
 if [ -n "$bad" ]; then
     echo "pre-commit: refusing to commit files that must stay out of the repo:" >&2
     echo "$bad" >&2

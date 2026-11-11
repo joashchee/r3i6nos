@@ -2978,6 +2978,13 @@ static void test_play(const char *root) {
     CHECK(start_viewer(&a, psd, 0, 0) == 0 && viewer_tab(&a.view)->kind == TAB_PICTURE, "with ffmpeg a Photoshop file opens on Picture");
     CHECK(a.view.pic_w == 4 && a.view.pic_h == 2 && a.view.pic.px && a.view.pic.px[0] == 0xFFFFFFFFu, "drawn from ffmpeg's pixels (%dx%d %08x)", a.view.pic_w, a.view.pic_h, a.view.pic.px ? a.view.pic.px[0] : 0);
     app_action(&a, R3_BACK);
+    /* UTF-16 text with a byte-order mark (FF FE) is text, not an MPEG audio frame (found by the test corpus) */
+    {
+        char u16[PATH_MAX];
+        path_join(u16, sizeof u16, root, "utf16.txt");
+        write_file(u16, "\xff\xfeU\0T\0F\0-\0" "1\0" "6\0 \0t\0e\0x\0t\0\n\0", 24);
+        CHECK(fx_type_of(u16).kind == K_TEXT, "a UTF-16 text file with a BOM is text, not MPEG audio (%s)", fx_type_of(u16).label);
+    }
     unsetenv("R3I6NOS_FFMPEG");
     unsetenv("R3I6NOS_FM_NOAUDIO");
     app_free(&a);

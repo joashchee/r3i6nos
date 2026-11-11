@@ -1,0 +1,11 @@
+{
+  "corpus": "r3i6nos",
+  "items": [
+    1,
+    2,
+    3
+  ],
+  "nested": {
+    "ok": true
+  }
+}

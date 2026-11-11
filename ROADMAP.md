@@ -247,7 +247,7 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
 
 ## 14. The test corpus: one file of each format the apps read (`corpus/README.md`)
 
-- [x] **The corpus, always on the boot disk** (2026-11-09, maintainer's request): 47 files (424 KB), every one made in code by the
+- [x] **The corpus, always on the boot disk** (2026-11-09, maintainer's request; 47 files then, 252 now, see below): 47 files (424 KB), every one made in code by the
   apps' own generators and writers or written by hand, none of it anyone else's. Neumetik: MIDI, RIFF RMID, 13 tracker files in 11
   formats, 22 music-as-text files (MusicXML and `.mxl`, ABC, kern, ChordPro, Alda, mini-notation, RTTTL, TMF, FlMML, SiON, MML in
   11 dialects); Composer `.cmp` and a cue sheet; Painter PNG and ANSI; an Animator clip; a KlamANSI `.kan`; a `.love` and a tool `.deb`;
@@ -255,6 +255,8 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
   and Neumetik's and KlamANSI's own folders). `scripts/build_corpus.sh` remakes it from the apps' repos and opens each file with the app
   that reads it (Neumetik's `corpus` example, the Node CLIs, KlamANSI's `load`); a rebuild is identical. Tests: `tests/test_corpus.py`,
   `tests/test_configure_rootfs.sh`, `tests/test_flash_macos.sh`.
+  - [x] **Every format Commander reads, sorted into sub-folders** (2026-11-11, maintainer's request): the corpus is now **252 files in 14 sub-folders** (music, audio, images, art, video, documents, text, data, archives, disks, programs, fonts, models, apps; 1.4 MB). `scripts/corpus_formats.py` makes 207 new files, one for each of Commander's ~130 kinds and for every extension and signature it tells apart, in a Debian 12 arm64 container (`scripts/corpus_formats_in_docker.sh`, run by `build_corpus.sh`), which builds Commander and **fails unless `commander --info` gives each file the `Type` line the manifest says** (207 of 207); two rebuilds are byte for byte identical. `MANIFEST.tsv` gained a column for that Type line, and `tests/test_corpus.py` checks it (building Commander with cc), the sub-folders and the signatures of each family. `flash-macos.sh` and the image keep the sub-folders. **Found by it and fixed:** a UTF-16 text file with a byte-order mark (FF FE) was named "MPEG audio" (bare MPEG audio now needs a Layer II or III header). **Header-only files, said so in the manifest:** HEIC and AVIF, the old DOS and Amiga archives, most of the extra tracker formats, the registry hive, the shortcut and the Parquet file. **Not run on the unit.**
+  - [ ] **More could be added:** a real SoundFont, a TinyNTT song (`tinyntt --make-demo`), real files for the header-only formats, a few big photos and PDFs for speed tests, and the Neumetik trackers nothing writes yet.
   - [x] **Its licence** (`NOTICE`): MIT, as the repository (maintainer, 2026-11-09). The files only: Neumetik, Composer, Painter and
     Animator, which made some of them, stay proprietary.
   - [ ] **On the unit:** play every file in Neumetik's `Test files`, open the drawing in KlamANSI, view every file in Commander's

@@ -29,6 +29,8 @@ __pycache__/
 .claude/settings.local.json
 .claude/.cc-writes/
 CLAUDE.local.md
-# ... except the test corpus's own .love and .deb, which are committed (corpus/README.md; tests/test_corpus.py checks every file is tracked)
-!corpus/files/*.love
-!corpus/files/*.deb
+# ... except the test corpus's own .love, .deb, .img and .zip, which are committed (corpus/README.md; tests/test_corpus.py checks every file is tracked)
+!corpus/files/**/*.love
+!corpus/files/**/*.deb
+!corpus/files/**/*.img
+!corpus/files/**/*.zip

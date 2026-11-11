@@ -47,7 +47,8 @@ if [ -f /usr/share/common-licenses/GPL-2 ]; then [ -s "$R/usr/share/ffmpeg-min/G
 [ -f "$R/opt/loveos/theme/font/LICENSE.TXT" ]    || fail "the font's licence must ship with the theme"
 [ -f "$R/opt/loveos/test-files/MANIFEST.tsv" ] || fail "the test corpus is not on the boot disk"
 [ -f "$R/opt/loveos/test-files/README.md" ]    || fail "the test corpus's README is not on the boot disk"
-for f in corpus/files/*; do cmp -s "$f" "$R/opt/loveos/test-files/$(basename "$f")" || fail "test corpus file not installed: $(basename "$f")"; done
+for f in $(cd corpus/files && find . -type f | sed 's|^\./||'); do cmp -s "corpus/files/$f" "$R/opt/loveos/test-files/$f" || fail "test corpus file not installed: $f"; done
+[ -f "$R/opt/loveos/test-files/music/midi/midi.mid" ] && [ -f "$R/opt/loveos/test-files/video/clip.mp4" ] || fail "the corpus's sub-folders are not on the boot disk"
 [ "$(cat "$R/etc/hostname")" = r3i6nos ]        || fail "hostname"
 # the games cards are mounted by role, not by label (docs/STORAGE.md): no fstab line, the service enabled, the session waits for it
 ! grep -q 'EASYROMS' "$R/etc/fstab"             || fail "fstab still mounts a card by the EASYROMS label (two cards race for /roms)"

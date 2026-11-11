@@ -19,7 +19,7 @@ is blocked and on what.
 - `theme/`: the r3i6nos-ansiapps text-mode theme for LÖVE (`.lua`) and C/SDL2 (`.h`): font, screen, list dialogs; installed at `/opt/loveos/theme`. See `docs/R3I6NOS-ANSIAPPS-THEME.md`.
 - `tools/ffmpeg-min/`: the minimal GPL ffmpeg (one 5.3 MiB binary: the decoders Commander's Play tab and Diskette's audio and video lists need, WebP/TIFF/PSD stills, and Rec demo's H.264 + AAC encode; `scripts/build-ffmpeg-min.sh` builds and checks it; `configure_rootfs.sh` installs it at `/usr/bin/ffmpeg` with its GPL terms; ROADMAP section 20).
 - `tools/qjs-node/`: the shims and builder that turn a Node-style CLI into one QuickJS executable (`docs/QJS-CLI-PORTS.md`); an app's folder is only ever read, never copied in.
-- `corpus/`: the test corpus, one file of each format the apps read (`corpus/README.md`), installed at `/opt/loveos/test-files` and copied to EASYROMS by `flash-macos.sh`; `scripts/build_corpus.sh` remakes it.
+- `corpus/`: the test corpus, one file of each format the apps read (Commander's ~130 and the other apps'), sorted into sub-folders (music, audio, images, art, video, documents, text, data, archives, disks, programs, fonts, models, apps; `corpus/README.md`), installed at `/opt/loveos/test-files` and copied to EASYROMS by `flash-macos.sh`; `scripts/build_corpus.sh` remakes it.
 - `scripts/`: host-side tools. `check.sh` runs everything CI runs.
 - `tests/`: Python (`unittest`) and Lua tests; no hardware needed.
 - `vendor/`, `build/`, `local_hardware_assets/`: fetched, built or captured, gitignored.

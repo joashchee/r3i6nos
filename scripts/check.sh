@@ -8,7 +8,8 @@ step() { echo "== $1"; }
 
 step "no vendor or huge files tracked"
 if git rev-parse --git-dir >/dev/null 2>&1; then
-    bad="$(git ls-files | grep -E '^local_hardware_assets|\.(img|zip)(\.gz)?$' || true)"
+    # the test corpus's own tiny .img and .zip files (corpus/files, 64 KiB at most) are the one exception: they are test data, not a card image
+    bad="$(git ls-files | grep -E '^local_hardware_assets|\.(img|zip)(\.gz)?$' | grep -v '^corpus/files/' || true)"
     big="$(git ls-files -z | xargs -0 find -maxdepth 0 -size +20M 2>/dev/null || true)"
     if [ -n "$bad$big" ]; then
         echo "FAIL: tracked files that must not be in the repo:" >&2

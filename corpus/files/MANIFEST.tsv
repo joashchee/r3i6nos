@@ -1,48 +1,253 @@
-file	bytes	format	read by	made by
-midi.mid	2595	Standard MIDI File (General MIDI, 7 parts)	Neumetik, Composer (lint, notate)	Neumetik's generator (r36s/lib gen::midi_song)
-midi-riff.rmi	2616	RIFF RMID (MIDI in a RIFF chunk)	Neumetik	Neumetik's corpus example
-protracker.mod	9236	ProTracker MOD (M.K., 4 channels)	Neumetik	Neumetik's generator (gen::module)
-fasttracker-8chn.mod	13332	FastTracker 8CHN MOD (8 channels)	Neumetik	Neumetik's generator (gen::module)
-screamtracker.s3m	7488	Scream Tracker 3 S3M	Neumetik	Neumetik's tracker export
-adlib.s3m	261	Scream Tracker 3 S3M with AdLib (OPL2) instruments	Neumetik	Neumetik's tracker tests (s3m.rs)
-fasttracker2.xm	14795	FastTracker 2 XM	Neumetik	Neumetik's tracker export
-impulsetracker.it	7818	Impulse Tracker IT	Neumetik	Neumetik's tracker export
-neumetik.ntt	4746	Neumetik tracker file (UMF .ntt)	Neumetik, Composer (writes it)	Neumetik's UMF writer
-tiny.ahx	82	AHX (Abyss' Highest eXperience)	Neumetik	Neumetik's tracker tests (synth.rs)
-tiny.st	75	Sawteeth	Neumetik	Neumetik's tracker tests (synth.rs)
-tiny.kt	110	Klystrack	Neumetik	Neumetik's tracker tests (synth.rs)
-tiny.v2m	251	V2 (farbrausch) V2M	Neumetik	Neumetik's tracker tests (synth.rs)
-tiny.ml	516	Musicline Editor	Neumetik	Neumetik's tracker tests (musicline.rs)
-tiny.ptk	123768	ProTrekkr / NoiseTrekker	Neumetik	Neumetik's tracker tests (ptk.rs)
-notation.musicxml	72458	MusicXML	Neumetik	Neumetik's text writer
-notation.mxl	2779	MusicXML, compressed (.mxl)	Neumetik	this script, from notation.musicxml
-notation.abc	2055	ABC notation	Neumetik	Neumetik's text writer
-notation.krn	3643	Humdrum **kern	Neumetik	Neumetik's text writer
-notation.cho	119	ChordPro	Neumetik	Neumetik's text writer
-notation.alda	2065	Alda	Neumetik	Neumetik's text writer
-notation.mini	969	Strudel / Tidal mini-notation	Neumetik	Neumetik's text writer
-notation.rtttl	82	RTTTL (ringtone)	Neumetik	Neumetik's text writer
-notation.tmf	437	TMF (text MIDI)	Neumetik	Neumetik's text writer
-notation.flmml	94	FlMML	Neumetik	hand-written in Neumetik's corpus example
-notation.sion	127	SiON MML	Neumetik	hand-written in Neumetik's corpus example
-mml-generic.mml	950	MML, plain (Mabinogi syntax)	Neumetik	Neumetik's MML writer
-mml-mabinogi.mml	115	MML, Mabinogi	Neumetik	Neumetik's MML writer
-mml-archeage.mml	115	MML, ArcheAge	Neumetik	Neumetik's MML writer
-mml-maplestory2.ms2mml	1210	MML, MapleStory 2 (.ms2mml)	Neumetik	Neumetik's MML writer
-mml-gwbasic.bas	48	MML, GW-BASIC PLAY	Neumetik	Neumetik's MML writer
-mml-msx.mml	160	MML, MSX BASIC	Neumetik	Neumetik's MML writer
-mml-msx-music.mml	152	MML, MSX-MUSIC (FM)	Neumetik	Neumetik's MML writer
-mml-n88.mml	152	MML, N88-BASIC	Neumetik	Neumetik's MML writer
-mml-c128.mml	152	MML, Commodore 128	Neumetik	Neumetik's MML writer
-mml-zx128.mml	152	MML, ZX Spectrum 128	Neumetik	Neumetik's MML writer
-mml-sakura.mml	1143	MML, Sakura (TextSakura)	Neumetik	Neumetik's MML writer
-notation.cmp	321	Composer notation (.cmp)	Composer	Composer (compose notate)
-cue-sheet.json	346	Composer cue sheet (JSON)	Composer (compose cues)	hand-written (corpus/src)
-painter.png	320	PNG image (RGBA)	Painter (lint, convert, study)	Painter (sprites draw item)
-painter.ans	620	ANSI art (CP437, SAUCE)	Painter (lint)	Painter (sprites draw item --style ansi)
-animator-clip.json	1404	Animator clip (animator-clip JSON)	Animator (lint)	Animator (animate make walk)
-test-corpus.kan	452	KlamANSI drawing (.kan, klam 1)	KlamANSI	hand-written (corpus/src)
-hello.love	716	LÖVE app (.love)	the menu, LÖVE 11.5 and 12.0	this script, from corpus/src/hello-love
-r3i6nos-test-tool.deb	838	Debian package, a command-line tool (.deb)	the menu (deb_watcher, from native_deb/)	this script, from corpus/src/tool
-text-utf8.txt	724	UTF-8 text	Commander	this script
-binary.bin	512	binary (every byte value)	Commander	this script
+file	bytes	format	read by	made by	commander type
+apps/hello.love	716	LÖVE app (.love)	the menu, LÖVE 11.5 and 12.0	this script, from corpus/src/hello-love	
+apps/r3i6nos-test-tool.deb	838	Debian package, a command-line tool (.deb)	the menu (deb_watcher, from native_deb/)	this script, from corpus/src/tool	
+archives/amiga.dms	64	Amiga DiskMasher disk image (signature only)	Commander	scripts/corpus_formats.py	Amiga DiskMasher disk image
+archives/app.msix	388	Windows app package (msix)	Commander	scripts/corpus_formats.py	Windows app package (msix)
+archives/bundle.zip	660	ZIP archive (a folder, a tar and text)	Commander	scripts/corpus_formats.py	ZIP archive
+archives/corpus.rpm	397	RPM package (noarch, one file)	Commander	scripts/corpus_formats.py	RPM package
+archives/crc.cpio	252	cpio archive (newc, CRC)	Commander	scripts/corpus_formats.py	cpio archive (newc, CRC)
+archives/game.7z	287	7-Zip archive (LZMA2 (named only: not listed or unpacked yet))	Commander	scripts/corpus_formats.py	7-Zip archive
+archives/game.tar	10240	TAR archive (ustar)	Commander	scripts/corpus_formats.py	TAR archive
+archives/game.tar.bz2	256	Bzip2 compressed (a tar inside (listed only with the archive options in ROADMAP section 21))	Commander	scripts/corpus_formats.py	Bzip2 compressed
+archives/game.tar.gz	224	TAR archive, gzip compressed (a tar inside)	Commander	scripts/corpus_formats.py	TAR archive, gzip compressed
+archives/game.tar.lz	255	Lzip compressed (a tar inside)	Commander	scripts/corpus_formats.py	Lzip compressed
+archives/game.tar.xz	284	XZ compressed (a tar inside)	Commander	scripts/corpus_formats.py	XZ compressed
+archives/game.tar.zst	200	Zstandard compressed (a tar inside)	Commander	scripts/corpus_formats.py	Zstandard compressed
+archives/hello-xz.deb	716	Debian package (.deb) (xz members)	Commander	scripts/corpus_formats.py	Debian package (.deb)
+archives/hello-zst.deb	540	Debian package (.deb) (zstd members)	Commander	scripts/corpus_formats.py	Debian package (.deb)
+archives/initrd.cpio	540	cpio archive (newc)	Commander	scripts/corpus_formats.py	cpio archive (newc)
+archives/notes.txt.bz2	65	Bzip2 compressed	Commander	scripts/corpus_formats.py	Bzip2 compressed
+archives/notes.txt.gz	41	Gzip compressed	Commander	scripts/corpus_formats.py	Gzip compressed
+archives/notes.txt.lz	57	Lzip compressed	Commander	scripts/corpus_formats.py	Lzip compressed
+archives/notes.txt.xz	92	XZ compressed	Commander	scripts/corpus_formats.py	XZ compressed
+archives/notes.txt.zst	38	Zstandard compressed	Commander	scripts/corpus_formats.py	Zstandard compressed
+archives/old.Z	23	Unix compress (.Z) (signature only)	Commander	scripts/corpus_formats.py	Unix compress (.Z)
+archives/old.ace	34	ACE archive (signature only)	Commander	scripts/corpus_formats.py	ACE archive
+archives/old.arc	45	ARC archive (SEA ARC, 1985) (signature and one stored entry)	Commander	scripts/corpus_formats.py	ARC archive (SEA ARC, 1985)
+archives/old.arj	34	ARJ archive (signature only)	Commander	scripts/corpus_formats.py	ARJ archive
+archives/old.cpio	184	cpio archive (portable)	Commander	scripts/corpus_formats.py	cpio archive (portable)
+archives/old.lzh	110	LZH/LHA archive (-lh0- (stored))	Commander	scripts/corpus_formats.py	LZH/LHA archive
+archives/old.zoo	58	ZOO archive (signature only)	Commander	scripts/corpus_formats.py	ZOO archive
+archives/pkg.a	170	Unix ar archive	Commander	scripts/corpus_formats.py	Unix ar archive
+archives/stored.rar	173	RAR archive (RAR 4, one file stored)	Commander	scripts/corpus_formats.py	RAR archive
+archives/stored5.rar	157	RAR 5 archive (RAR 5, one file stored)	Commander	scripts/corpus_formats.py	RAR 5 archive
+archives/tool.jar	328	Java archive (jar)	Commander	scripts/corpus_formats.py	Java archive (jar)
+archives/two.cab	186	Microsoft Cabinet archive (two files, stored)	Commander	scripts/corpus_formats.py	Microsoft Cabinet archive
+art/artworx.adf	4929	ArtWorx art (ADF) (palette, font, 80 x 4)	Commander	scripts/corpus_formats.py	ArtWorx art (ADF)
+art/colours.ice	202	ANSI art (iCE colours) (SAUCE flag: iCE colours)	Commander	scripts/corpus_formats.py	ANSI art (iCE colours)
+art/file_id.diz	79	FILE_ID.DIZ description (text)	Commander	scripts/corpus_formats.py	FILE_ID.DIZ description
+art/icedraw.idf	4396	iCE Draw art (IDF) (40 x 3, font, palette)	Commander	scripts/corpus_formats.py	iCE Draw art (IDF)
+art/logo.ans	225	ANSI art (SAUCE, 80 columns)	Commander	scripts/corpus_formats.py	ANSI art
+art/painter.ans	620	ANSI art (CP437, SAUCE)	Painter (lint)	Painter (sprites draw item --style ansi)	
+art/palette-font.xb	4187	XBin art (own palette, own font, iCE colours)	Commander	scripts/corpus_formats.py	XBin art
+art/plain.xb	59	XBin art (default palette and font)	Commander	scripts/corpus_formats.py	XBin art
+art/readme.asc	59	ASCII text or art (text)	Commander	scripts/corpus_formats.py	ASCII text or art
+art/release.nfo	71	NFO (release info, often ANSI art) (code page 437 blocks)	Commander	scripts/corpus_formats.py	NFO (release info, often ANSI art)
+art/screen.bin	640	Binary text art (BIN) (80 columns by 4 rows)	Commander	scripts/corpus_formats.py	Binary text art (BIN)
+art/test-corpus.kan	452	KlamANSI drawing (.kan, klam 1)	KlamANSI	hand-written (corpus/src)	
+art/tundra.tnd	29	TundraDraw art (header and a few commands)	Commander	scripts/corpus_formats.py	TundraDraw art
+audio/opus.opus	9582	Opus audio	Commander	scripts/corpus_formats.py	Opus audio
+audio/tone.aiff	88254	AIFF audio (PCM 16-bit)	Commander	scripts/corpus_formats.py	AIFF audio
+audio/tone.flac	38864	FLAC audio	Commander	scripts/corpus_formats.py	FLAC audio
+audio/tone.m4a	9375	MPEG-4 audio (M4A) (AAC)	Commander	scripts/corpus_formats.py	MPEG-4 audio (M4A)
+audio/tone.mp3	8819	MP3 audio (64 kbit/s)	Commander	scripts/corpus_formats.py	MP3 audio
+audio/tone.wav	88244	WAV audio (PCM 16-bit stereo, 22.05 kHz)	Commander	scripts/corpus_formats.py	WAV audio
+audio/tone.wma	10044	Windows Media (ASF) (WMA v2)	Commander	scripts/corpus_formats.py	Windows Media (ASF)
+audio/tone.wv	56564	WavPack audio	Commander	scripts/corpus_formats.py	WavPack audio
+audio/vorbis.ogg	5786	Ogg Vorbis audio	Commander	scripts/corpus_formats.py	Ogg Vorbis audio
+data/animator-clip.json	1404	Animator clip (animator-clip JSON)	Animator (lint)	Animator (animate make walk)	
+data/corpus.torrent	197	BitTorrent file (one file of 512 bytes)	Commander	scripts/corpus_formats.py	BitTorrent file
+data/empty.parquet	31	Parquet data file (magic and a footer only)	Commander	scripts/corpus_formats.py	Parquet data file
+data/music.db	2048	SQLite database (two tables, an index)	Commander	scripts/corpus_formats.py	SQLite database
+data/shortcut.lnk	76	Windows shortcut (.lnk) (header only)	Commander	scripts/corpus_formats.py	Windows shortcut (.lnk)
+data/songs.dbf	161	dBase table (3 fields, 1 record)	Commander	scripts/corpus_formats.py	dBase table
+data/system.regf	4100	Windows Registry hive (header block)	Commander	scripts/corpus_formats.py	Windows Registry hive
+disks/corpus.iso	47104	ISO 9660 disk image (two files)	Commander	scripts/corpus_formats.py	ISO 9660 disk image
+disks/fixed.vhd	66048	Virtual hard disk (VHD) (fixed, 64 KiB)	Commander	scripts/corpus_formats.py	Virtual hard disk (VHD)
+disks/floppy.img	65536	Disk image (a FAT12 volume labelled CORPUS FAT, no partition table)	Commander	scripts/corpus_formats.py	Disk image
+disks/gpt.img	32768	Disk image (partitioned) (GPT with one partition)	Commander	scripts/corpus_formats.py	Disk image (partitioned)
+disks/image.dmg	66048	Apple disk image (DMG) (the koly trailer only)	Commander	scripts/corpus_formats.py	Apple disk image (DMG)
+disks/mbr.img	2048	Disk image (partitioned) (MBR with one FAT32 partition labelled R36S CARD)	Commander	scripts/corpus_formats.py	Disk image (partitioned)
+documents/book.epub	876	EPUB e-book	Commander	scripts/corpus_formats.py	EPUB e-book
+documents/doc.pdf	570	PDF document (two pages)	Commander	scripts/corpus_formats.py	PDF document
+documents/doc.rtf	95	Rich Text Format document	Commander	scripts/corpus_formats.py	Rich Text Format document
+documents/inbox.mbox	188	Mbox mail archive (two messages)	Commander	scripts/corpus_formats.py	Mbox mail archive
+documents/installer.msi	9728	Legacy MS Office document (or MSI) (an installer's compound file)	Commander	scripts/corpus_formats.py	Legacy MS Office document (or MSI)
+documents/legacy.doc	9728	Legacy MS Office document (or MSI) (holds a Word stream)	Commander	scripts/corpus_formats.py	Legacy MS Office document (or MSI)
+documents/legacy.ppt	5632	Legacy MS Office document (or MSI) (holds a PowerPoint stream)	Commander	scripts/corpus_formats.py	Legacy MS Office document (or MSI)
+documents/legacy.xls	5632	Legacy MS Office document (or MSI) (holds a Workbook stream)	Commander	scripts/corpus_formats.py	Legacy MS Office document (or MSI)
+documents/letter.docx	586	Word document (docx)	Commander	scripts/corpus_formats.py	Word document (docx)
+documents/letter.odt	628	OpenDocument text (odt)	Commander	scripts/corpus_formats.py	OpenDocument text (odt)
+documents/mail.eml	209	Email message	Commander	scripts/corpus_formats.py	Email message
+documents/notes.md	74	Markdown document	Commander	scripts/corpus_formats.py	Markdown document
+documents/page.html	155	HTML document	Commander	scripts/corpus_formats.py	HTML document
+documents/page.xhtml	135	XHTML document	Commander	scripts/corpus_formats.py	XHTML document
+documents/sheet.ods	640	OpenDocument spreadsheet (ods)	Commander	scripts/corpus_formats.py	OpenDocument spreadsheet (ods)
+documents/sheet.xlsx	643	Excel spreadsheet (xlsx)	Commander	scripts/corpus_formats.py	Excel spreadsheet (xlsx)
+documents/slides.odp	637	OpenDocument presentation (odp)	Commander	scripts/corpus_formats.py	OpenDocument presentation (odp)
+documents/slides.pptx	677	PowerPoint presentation (pptx)	Commander	scripts/corpus_formats.py	PowerPoint presentation (pptx)
+fonts/console.psf	4128	PC Screen Font (PSF 2) (256 glyphs, 8 x 16)	Commander	scripts/corpus_formats.py	PC Screen Font (PSF 2)
+fonts/console1.psf	4100	PC Screen Font (PSF 1) (256 glyphs, 8 x 16)	Commander	scripts/corpus_formats.py	PC Screen Font (PSF 1)
+fonts/corpus.ttc	1260	TrueType collection (two fonts)	Commander	scripts/corpus_formats.py	TrueType collection
+fonts/corpus.ttf	636	TrueType font (three square glyphs, family Corpus Test)	Commander	scripts/corpus_formats.py	TrueType font
+fonts/corpus.woff	552	WOFF font	Commander	scripts/corpus_formats.py	WOFF font
+fonts/corpus.woff2	280	WOFF2 font (brotli, null-transformed tables)	Commander	scripts/corpus_formats.py	WOFF2 font
+images/animation.gif	1384	GIF image (32 colours, interlaced)	Commander	scripts/corpus_formats.py	GIF image
+images/ascii.pnm	108	Portable anymap (P3, text)	Commander	scripts/corpus_formats.py	Portable anymap
+images/bilevel.pbm	201	Portable bitmap (P4)	Commander	scripts/corpus_formats.py	Portable bitmap
+images/grey.jpg	729	JPEG image (greyscale)	Commander	scripts/corpus_formats.py	JPEG image
+images/grey.pgm	1549	Portable greymap (P5)	Commander	scripts/corpus_formats.py	Portable greymap
+images/icon.ico	414	ICO icon (two sizes)	Commander	scripts/corpus_formats.py	ICO icon
+images/interlaced-palette.png	134	PNG image (2-bit palette, Adam7)	Commander	scripts/corpus_formats.py	PNG image
+images/layers.psd	2344	Photoshop document (raw RGB (drawn through ffmpeg))	Commander	scripts/corpus_formats.py	Photoshop document
+images/lossy.webp	342	WebP image (lossy (drawn through ffmpeg))	Commander	scripts/corpus_formats.py	WebP image
+images/painter.png	320	PNG image (RGBA)	Painter (lint, convert, study)	Painter (sprites draw item)	
+images/palette.bmp	2614	BMP image (4-bit palette)	Commander	scripts/corpus_formats.py	BMP image
+images/photo.jpg	1232	JPEG image (baseline, 4:2:0)	Commander	scripts/corpus_formats.py	JPEG image
+images/photo.pcx	2880	PCX image (24-bit)	Commander	scripts/corpus_formats.py	PCX image
+images/photo.png	192	PNG image (RGBA, 48 x 32)	Commander	scripts/corpus_formats.py	PNG image
+images/photo.ppm	4621	Portable pixmap (P6)	Commander	scripts/corpus_formats.py	Portable pixmap
+images/photo.tiff	4406	TIFF image (LZW (drawn through ffmpeg))	Commander	scripts/corpus_formats.py	TIFF image
+images/photo.webp	164	WebP image (lossless (drawn through ffmpeg))	Commander	scripts/corpus_formats.py	WebP image
+images/pic.qoi	42	QOI image (2 x 2 RGBA)	Commander	scripts/corpus_formats.py	QOI image
+images/progressive.jpg	819	JPEG image (progressive (drawn through ffmpeg))	Commander	scripts/corpus_formats.py	JPEG image
+images/rle.tga	6220	Targa image (32-bit RLE)	Commander	scripts/corpus_formats.py	Targa image
+images/stub.avif	24	AVIF image (the ftyp box only: not a picture)	Commander	scripts/corpus_formats.py	AVIF image
+images/stub.heic	24	HEIC/HEIF image (the ftyp box only: not a picture)	Commander	scripts/corpus_formats.py	HEIC/HEIF image
+images/truecolour.bmp	4662	BMP image (24-bit)	Commander	scripts/corpus_formats.py	BMP image
+images/vector.svg	209	SVG image (64 x 48)	Commander	scripts/corpus_formats.py	SVG image
+models/cube.obj	152	Wavefront OBJ 3D model (8 vertices, 6 faces)	Commander	scripts/corpus_formats.py	Wavefront OBJ 3D model
+models/triangle-binary.stl	134	STL 3D model (binary) (binary)	Commander	scripts/corpus_formats.py	STL 3D model (binary)
+models/triangle.glb	416	glTF binary (GLB) 3D model (one triangle)	Commander	scripts/corpus_formats.py	glTF binary (GLB) 3D model
+models/triangle.gltf	674	glTF JSON 3D model (one triangle, embedded buffer)	Commander	scripts/corpus_formats.py	glTF JSON 3D model
+models/triangle.stl	130	STL 3D model (text) (ASCII)	Commander	scripts/corpus_formats.py	STL 3D model (text)
+music/midi/midi-riff.rmi	2616	RIFF RMID (MIDI in a RIFF chunk)	Neumetik	Neumetik's corpus example	
+music/midi/midi.mid	2595	Standard MIDI File (General MIDI, 7 parts)	Neumetik, Composer (lint, notate)	Neumetik's generator (r36s/lib gen::midi_song)	
+music/mml/mml-archeage.mml	115	MML, ArcheAge	Neumetik	Neumetik's MML writer	
+music/mml/mml-c128.mml	152	MML, Commodore 128	Neumetik	Neumetik's MML writer	
+music/mml/mml-generic.mml	950	MML, plain (Mabinogi syntax)	Neumetik	Neumetik's MML writer	
+music/mml/mml-gwbasic.bas	48	MML, GW-BASIC PLAY	Neumetik	Neumetik's MML writer	
+music/mml/mml-mabinogi.mml	115	MML, Mabinogi	Neumetik	Neumetik's MML writer	
+music/mml/mml-maplestory2.ms2mml	1210	MML, MapleStory 2 (.ms2mml)	Neumetik	Neumetik's MML writer	
+music/mml/mml-msx-music.mml	152	MML, MSX-MUSIC (FM)	Neumetik	Neumetik's MML writer	
+music/mml/mml-msx.mml	160	MML, MSX BASIC	Neumetik	Neumetik's MML writer	
+music/mml/mml-n88.mml	152	MML, N88-BASIC	Neumetik	Neumetik's MML writer	
+music/mml/mml-sakura.mml	1143	MML, Sakura (TextSakura)	Neumetik	Neumetik's MML writer	
+music/mml/mml-zx128.mml	152	MML, ZX Spectrum 128	Neumetik	Neumetik's MML writer	
+music/notation/cue-sheet.json	346	Composer cue sheet (JSON)	Composer (compose cues)	hand-written (corpus/src)	
+music/notation/notation.abc	2055	ABC notation	Neumetik	Neumetik's text writer	
+music/notation/notation.alda	2065	Alda	Neumetik	Neumetik's text writer	
+music/notation/notation.cho	119	ChordPro	Neumetik	Neumetik's text writer	
+music/notation/notation.cmp	321	Composer notation (.cmp)	Composer	Composer (compose notate)	
+music/notation/notation.flmml	94	FlMML	Neumetik	hand-written in Neumetik's corpus example	
+music/notation/notation.krn	3643	Humdrum **kern	Neumetik	Neumetik's text writer	
+music/notation/notation.mini	969	Strudel / Tidal mini-notation	Neumetik	Neumetik's text writer	
+music/notation/notation.musicxml	72458	MusicXML	Neumetik	Neumetik's text writer	
+music/notation/notation.mxl	2779	MusicXML, compressed (.mxl)	Neumetik	this script, from notation.musicxml	
+music/notation/notation.rtttl	82	RTTTL (ringtone)	Neumetik	Neumetik's text writer	
+music/notation/notation.sion	127	SiON MML	Neumetik	hand-written in Neumetik's corpus example	
+music/notation/notation.tmf	437	TMF (text MIDI)	Neumetik	Neumetik's text writer	
+music/trackers/adlib.s3m	261	Scream Tracker 3 S3M with AdLib (OPL2) instruments	Neumetik	Neumetik's tracker tests (s3m.rs)	
+music/trackers/c64.sid	128	C64 SID tune (PSID v2 header)	Commander	scripts/corpus_formats.py	C64 SID tune
+music/trackers/composer.669	497	Composer 669 module (header only)	Commander	scripts/corpus_formats.py	Composer 669 module
+music/trackers/digibooster.dbm	64	DigiBooster Pro module (header only)	Commander	scripts/corpus_formats.py	DigiBooster Pro module
+music/trackers/dsmi.amf	76	DSMI module (AMF) (header only)	Commander	scripts/corpus_formats.py	DSMI module (AMF)
+music/trackers/farandole.far	84	Farandole module (header only)	Commander	scripts/corpus_formats.py	Farandole module
+music/trackers/fasttracker-8chn.mod	13332	FastTracker 8CHN MOD (8 channels)	Neumetik	Neumetik's generator (gen::module)	
+music/trackers/fasttracker2.xm	14795	FastTracker 2 XM	Neumetik	Neumetik's tracker export	
+music/trackers/hively.hvl	64	HivelyTracker module (header only)	Commander	scripts/corpus_formats.py	HivelyTracker module
+music/trackers/impulsetracker.it	7818	Impulse Tracker IT	Neumetik	Neumetik's tracker export	
+music/trackers/multitracker.mtm	231	MultiTracker module (MTM) (header and one sample name)	Commander	scripts/corpus_formats.py	MultiTracker module (MTM)
+music/trackers/nes.nsf	130	NES sound file (header only)	Commander	scripts/corpus_formats.py	NES sound file
+music/trackers/neumetik.ntt	4746	Neumetik tracker file (UMF .ntt)	Neumetik, Composer (writes it)	Neumetik's UMF writer	
+music/trackers/octamed.med	56	OctaMED module (MMD0) (header only)	Commander	scripts/corpus_formats.py	OctaMED module (MMD0)
+music/trackers/oktalyzer.okt	32	Oktalyzer module (header and two chunks)	Commander	scripts/corpus_formats.py	Oktalyzer module
+music/trackers/polytracker.ptm	108	PolyTracker module (PTM) (header only)	Commander	scripts/corpus_formats.py	PolyTracker module (PTM)
+music/trackers/protracker.mod	9236	ProTracker MOD (M.K., 4 channels)	Neumetik	Neumetik's generator (gen::module)	
+music/trackers/screamtracker.s3m	7488	Scream Tracker 3 S3M	Neumetik	Neumetik's tracker export	
+music/trackers/screamtracker2.stm	1040	Scream Tracker 2 module (STM) (header and 31 sample slots)	Commander	scripts/corpus_formats.py	Scream Tracker 2 module (STM)
+music/trackers/tiny.ahx	82	AHX (Abyss' Highest eXperience)	Neumetik	Neumetik's tracker tests (synth.rs)	
+music/trackers/tiny.kt	110	Klystrack	Neumetik	Neumetik's tracker tests (synth.rs)	
+music/trackers/tiny.ml	516	Musicline Editor	Neumetik	Neumetik's tracker tests (musicline.rs)	
+music/trackers/tiny.ptk	123768	ProTrekkr / NoiseTrekker	Neumetik	Neumetik's tracker tests (ptk.rs)	
+music/trackers/tiny.st	75	Sawteeth	Neumetik	Neumetik's tracker tests (synth.rs)	
+music/trackers/tiny.v2m	251	V2 (farbrausch) V2M	Neumetik	Neumetik's tracker tests (synth.rs)	
+music/trackers/ultratracker.ult	87	UltraTracker module (header only)	Commander	scripts/corpus_formats.py	UltraTracker module
+programs/Hello.class	55	Java class (Java 8, no methods)	Commander	scripts/corpus_formats.py	Java class
+programs/chunk.ljbc	87	LuaJIT bytecode (LuaJIT)	Commander	scripts/corpus_formats.py	LuaJIT bytecode
+programs/chunk.luac	138	Lua bytecode (Lua 5.4)	Commander	scripts/corpus_formats.py	Lua bytecode
+programs/corpus.AppImage	124	AppImage (type 2) (an ELF with the AppImage marker)	Commander	scripts/corpus_formats.py	AppImage (type 2)
+programs/hello	67520	ELF program or library (a dynamic program made by gcc for this machine (links libc))	Commander	scripts/corpus_formats.py	ELF program or library
+programs/thin-arm64	32	Mach-O program (64-bit) (hand-made header)	Commander	scripts/corpus_formats.py	Mach-O program (64-bit)
+programs/tiny-aarch64	124	ELF program or library (hand-made, ARM64, no libraries)	Commander	scripts/corpus_formats.py	ELF program or library
+programs/tiny-x86_64	121	ELF program or library (hand-made, x86-64)	Commander	scripts/corpus_formats.py	ELF program or library
+programs/tiny.exe	528	Windows program (PE) (hand-made 32-bit PE)	Commander	scripts/corpus_formats.py	Windows program (PE)
+programs/tiny.wasm	31	WebAssembly module (one exported function)	Commander	scripts/corpus_formats.py	WebAssembly module
+programs/universal	8224	Mach-O universal program (arm64 and x86-64)	Commander	scripts/corpus_formats.py	Mach-O universal program
+text/Hello.cs	74	C# source	Commander	scripts/corpus_formats.py	C# source
+text/Hello.java	92	Java source	Commander	scripts/corpus_formats.py	Java source
+text/app.cfg	12	Settings file	Commander	scripts/corpus_formats.py	Settings file
+text/app.conf	10	Settings file	Commander	scripts/corpus_formats.py	Settings file
+text/app.desktop	57	Desktop entry	Commander	scripts/corpus_formats.py	Desktop entry
+text/binary.bin	512	Unknown (binary data) (every byte value twice (hex view))	Commander	scripts/corpus_formats.py	Unknown (binary data)
+text/boot.log	55	Log file	Commander	scripts/corpus_formats.py	Log file
+text/change.diff	46	Patch	Commander	scripts/corpus_formats.py	Patch
+text/change.patch	46	Patch	Commander	scripts/corpus_formats.py	Patch
+text/config.toml	41	TOML data	Commander	scripts/corpus_formats.py	TOML data
+text/config.yaml	39	YAML data	Commander	scripts/corpus_formats.py	YAML data
+text/config.yml	11	YAML data	Commander	scripts/corpus_formats.py	YAML data
+text/contact.vcf	76	vCard contacts	Commander	scripts/corpus_formats.py	vCard contacts
+text/data.json	98	JSON data	Commander	scripts/corpus_formats.py	JSON data
+text/data.xml	85	XML data	Commander	scripts/corpus_formats.py	XML data
+text/disc.cue	84	CD cue sheet	Commander	scripts/corpus_formats.py	CD cue sheet
+text/dos437.txt	37	Plain text (code page 437 bytes)	Commander	scripts/corpus_formats.py	Plain text
+text/empty.txt	0	Empty file (zero bytes)	Commander	scripts/corpus_formats.py	Empty file
+text/event.ics	111	iCalendar	Commander	scripts/corpus_formats.py	iCalendar
+text/font.bdf	129	BDF bitmap font	Commander	scripts/corpus_formats.py	BDF bitmap font
+text/game.lua	47	Lua source	Commander	scripts/corpus_formats.py	Lua source
+text/hello.c	70	C source	Commander	scripts/corpus_formats.py	C source
+text/hello.cpp	66	C++ source	Commander	scripts/corpus_formats.py	C++ source
+text/hello.h	56	C header	Commander	scripts/corpus_formats.py	C header
+text/hello.hpp	26	C++ header	Commander	scripts/corpus_formats.py	C++ header
+text/hello.php	27	PHP source	Commander	scripts/corpus_formats.py	PHP source
+text/hello.rb	20	Ruby source	Commander	scripts/corpus_formats.py	Ruby source
+text/key.pem	97	PEM key or certificate	Commander	scripts/corpus_formats.py	PEM key or certificate
+text/list.m3u	48	M3U playlist	Commander	scripts/corpus_formats.py	M3U playlist
+text/list.m3u8	48	M3U playlist	Commander	scripts/corpus_formats.py	M3U playlist
+text/list.pls	82	PLS playlist	Commander	scripts/corpus_formats.py	PLS playlist
+text/main.go	72	Go source	Commander	scripts/corpus_formats.py	Go source
+text/main.rs	44	Rust source	Commander	scripts/corpus_formats.py	Rust source
+text/module.mjs	26	JavaScript module	Commander	scripts/corpus_formats.py	JavaScript module
+text/nul-terminated.dat	300	Unknown (binary data) (NUL bytes: not text)	Commander	scripts/corpus_formats.py	Unknown (binary data)
+text/paper.tex	70	TeX document	Commander	scripts/corpus_formats.py	TeX document
+text/query.sql	65	SQL script	Commander	scripts/corpus_formats.py	SQL script
+text/refs.bib	61	BibTeX references	Commander	scripts/corpus_formats.py	BibTeX references
+text/run.bash	30	Shell script	Commander	scripts/corpus_formats.py	Shell script
+text/run.bat	30	DOS batch file	Commander	scripts/corpus_formats.py	DOS batch file
+text/run.ps1	26	PowerShell script	Commander	scripts/corpus_formats.py	PowerShell script
+text/run.sh	28	Shell script	Commander	scripts/corpus_formats.py	Shell script
+text/script.js	79	JavaScript source	Commander	scripts/corpus_formats.py	JavaScript source
+text/script.py	68	Python source	Commander	scripts/corpus_formats.py	Python source
+text/settings.ini	26	INI settings	Commander	scripts/corpus_formats.py	INI settings
+text/style.css	36	CSS stylesheet	Commander	scripts/corpus_formats.py	CSS stylesheet
+text/subtitles.srt	90	SubRip subtitles	Commander	scripts/corpus_formats.py	SubRip subtitles
+text/subtitles.vtt	45	WebVTT subtitles	Commander	scripts/corpus_formats.py	WebVTT subtitles
+text/table.csv	56	CSV table	Commander	scripts/corpus_formats.py	CSV table
+text/table.tsv	27	TSV table	Commander	scripts/corpus_formats.py	TSV table
+text/types.ts	55	TypeScript source	Commander	scripts/corpus_formats.py	TypeScript source
+text/unit.service	56	systemd unit	Commander	scripts/corpus_formats.py	systemd unit
+text/utf16.txt	72	Plain text (UTF-16 with a BOM)	Commander	scripts/corpus_formats.py	Plain text
+text/utf8.txt	724	Plain text	Commander	scripts/corpus_formats.py	Plain text
+video/clip.3gp	27427	3GPP video (H.263 + AAC)	Commander	scripts/corpus_formats.py	3GPP video
+video/clip.avi	29532	AVI video (MPEG-4 + MP3)	Commander	scripts/corpus_formats.py	AVI video
+video/clip.flv	19498	Flash video (FLV1 + MP3)	Commander	scripts/corpus_formats.py	Flash video
+video/clip.mkv	15764	Matroska/WebM video (H.264 + AAC in Matroska)	Commander	scripts/corpus_formats.py	Matroska/WebM video
+video/clip.mov	16894	QuickTime video (H.264 + AAC in a QuickTime file)	Commander	scripts/corpus_formats.py	QuickTime video
+video/clip.mp4	16839	MPEG-4 video (H.264 + AAC, 64 x 48, 2 s)	Commander	scripts/corpus_formats.py	MPEG-4 video
+video/clip.mpg	28672	MPEG program stream (MPEG-1 + MP2)	Commander	scripts/corpus_formats.py	MPEG program stream
+video/clip.ogv	12332	Ogg Theora video (Theora + Vorbis)	Commander	scripts/corpus_formats.py	Ogg Theora video
+video/clip.ts	32336	MPEG transport stream (MPEG-2 + MP2)	Commander	scripts/corpus_formats.py	MPEG transport stream
+video/clip.webm	11801	Matroska/WebM video (VP8 + Vorbis in WebM)	Commander	scripts/corpus_formats.py	Matroska/WebM video
+video/clip.wmv	20007	Windows Media (ASF) (WMV2 + WMA2)	Commander	scripts/corpus_formats.py	Windows Media (ASF)
+video/demo-20261109-000000-frames.r3f	13836	Rec demo frames (r3i6nos) (3 screens, 3 s: plays in Commander without ffmpeg)	Commander	scripts/corpus_formats.py	Rec demo frames (r3i6nos)
+video/demo-20261109-000000.wav	66194	WAV audio (the sound beside the frames)	Commander	scripts/corpus_formats.py	WAV audio

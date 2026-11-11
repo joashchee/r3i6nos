@@ -4,14 +4,15 @@
     corpus_extra.py mxl <notation.musicxml> <out.mxl>    MusicXML, zipped as .mxl (with META-INF/container.xml)
     corpus_extra.py love <folder> <out.love>             a LÖVE app: the folder's files zipped
     corpus_extra.py deb <command> <out.deb>              a command-line tool package (deb_watcher's tool marker), architecture all
-    corpus_extra.py text <out.txt>                       UTF-8 text with box drawing, accents and shades (Commander's text view)
-    corpus_extra.py binary <out.bin>                     every byte value twice (Commander's hex view)
-    corpus_extra.py manifest <files folder>              write MANIFEST.tsv; fails on a file not in FORMATS, or one in FORMATS missing
+    corpus_extra.py organise <files folder>              move the flat files the apps' generators write into their sub-folders (WHERE)
+    corpus_extra.py manifest <files folder> [registry]   write MANIFEST.tsv; `registry` is corpus_formats.py's _registry.json (Commander's formats);
+                                                         fails on a file in neither FORMATS nor the registry, or one listed but missing
 
 Every file is the same byte for byte each time it is made (fixed times in the zips and tars). Standard library only.
 """
 import gzip
 import io
+import json
 import sys
 import tarfile
 import zipfile
@@ -69,13 +70,23 @@ FORMATS = {
     "test-corpus.kan": ("KlamANSI drawing (.kan, klam 1)", KLA, "hand-written (corpus/src)"),
     "hello.love": ("LÖVE app (.love)", f"{MENU}, LÖVE 11.5 and 12.0", "this script, from corpus/src/hello-love"),
     "r3i6nos-test-tool.deb": ("Debian package, a command-line tool (.deb)", f"{MENU} (deb_watcher, from native_deb/)", "this script, from corpus/src/tool"),
-    "text-utf8.txt": ("UTF-8 text", CMD, "this script"),
-    "binary.bin": ("binary (every byte value)", CMD, "this script"),
 }
 
+# Where each of those files sits in corpus/files: music/ (midi, trackers, notation, mml), images/, art/, apps/, data/. The other folders
+# (audio video documents text data archives disks programs fonts models) are made by scripts/corpus_formats.py and listed in its registry.
+WHERE = {n: "music/trackers" for n in ("protracker.mod", "fasttracker-8chn.mod", "screamtracker.s3m", "adlib.s3m", "fasttracker2.xm", "impulsetracker.it", "neumetik.ntt",
+                                       "tiny.ahx", "tiny.st", "tiny.kt", "tiny.v2m", "tiny.ml", "tiny.ptk")}
+WHERE.update({n: "music/midi" for n in ("midi.mid", "midi-riff.rmi")})
+WHERE.update({n: "music/notation" for n in ("notation.musicxml", "notation.mxl", "notation.abc", "notation.krn", "notation.cho", "notation.alda", "notation.mini", "notation.rtttl",
+                                            "notation.tmf", "notation.flmml", "notation.sion", "notation.cmp", "cue-sheet.json")})
+WHERE.update({n: "music/mml" for n in FORMATS if n.startswith("mml-")})
+WHERE.update({"painter.png": "images", "painter.ans": "art", "test-corpus.kan": "art", "animator-clip.json": "data", "hello.love": "apps", "r3i6nos-test-tool.deb": "apps"})
+assert set(WHERE) == set(FORMATS), sorted(set(FORMATS) ^ set(WHERE))
+
+
 # Which files each app's own folder on EASYROMS gets (flash-macos.sh): the apps that only browse their own folder.
-FOR_NEUMETIK = sorted(f for f, (_, by, _) in FORMATS.items() if by.startswith(NEU))
-FOR_KLAMANSI = ["test-corpus.kan"]
+FOR_NEUMETIK = sorted(f"{WHERE[f]}/{f}" for f, (_, by, _) in FORMATS.items() if by.startswith(NEU))
+FOR_KLAMANSI = ["art/test-corpus.kan"]
 
 
 def zip_files(out, members):
@@ -142,47 +153,42 @@ def deb(command, out):
                               ("data.tar.gz", data)]))
 
 
-def text(out):
-    lines = [
-        "r3i6nos test corpus: UTF-8 text for Commander's viewer.",
-        "",
-        "Box drawing:  ┌──┬──┐  ╔══╦══╗",
-        "              │  │  │  ║  ║  ║",
-        "              └──┴──┘  ╚══╩══╝",
-        "Shades:       ░░▒▒▓▓██",
-        "Accents:      café naïve Ångström Øre façade",
-        "Symbols:      ♪ ♫ ☺ ☻ ♥ ♦ ♣ ♠ • ° ± ÷ ½ ¼",
-        "Not in CP437: 中文 ✓ (shown as a stand-in)",
-        "A long line: " + " ".join(f"word{i}" for i in range(40)),
-        "\tA tab at the start.",
-    ]
-    Path(out).write_text("\n".join(lines) + "\n", encoding="utf-8")
-
-
-def binary(out):
-    Path(out).write_bytes(bytes(range(256)) * 2)
-
-
-def manifest(folder):
+def organise(folder):
     folder = Path(folder)
-    have = {p.name for p in folder.iterdir() if p.is_file() and p.name != "MANIFEST.tsv"}
-    extra, missing = sorted(have - set(FORMATS)), sorted(set(FORMATS) - have)
+    for name, where in WHERE.items():
+        src = folder / name
+        if src.is_file():
+            (folder / where).mkdir(parents=True, exist_ok=True)
+            src.rename(folder / where / name)
+
+
+def manifest(folder, registry=None):
+    folder = Path(folder)
+    reg = json.loads(Path(registry).read_text()) if registry else {}
+    listed = {f"{WHERE[n]}/{n}": v for n, v in FORMATS.items()}
+    have = {p.relative_to(folder).as_posix() for p in folder.rglob("*") if p.is_file() and p.name not in ("MANIFEST.tsv", ".DS_Store")}
+    extra, missing = sorted(have - set(listed) - set(reg)), sorted((set(listed) | set(reg)) - have)
     if extra or missing:
-        sys.exit(f"corpus_extra: not in FORMATS: {extra}; missing from the folder: {missing}")
-    rows = ["file\tbytes\tformat\tread by\tmade by"]
-    for name, (fmt, by, made) in FORMATS.items():
-        rows.append(f"{name}\t{(folder / name).stat().st_size}\t{fmt}\t{by}\t{made}")
+        sys.exit(f"corpus_extra: in the folder but in neither FORMATS nor the registry: {extra}; listed but missing from the folder: {missing}")
+    rows = ["file\tbytes\tformat\tread by\tmade by\tcommander type"]
+    for path in sorted(have):
+        if path in reg:
+            label, what = reg[path]
+            rows.append(f"{path}\t{(folder / path).stat().st_size}\t{label}{' (' + what + ')' if what else ''}\t{CMD}\tscripts/corpus_formats.py\t{label}")
+        else:
+            fmt, by, made = listed[path]
+            rows.append(f"{path}\t{(folder / path).stat().st_size}\t{fmt}\t{by}\t{made}\t")
     (folder / "MANIFEST.tsv").write_text("\n".join(rows) + "\n", encoding="utf-8")
-    print(f"MANIFEST.tsv: {len(FORMATS)} files")
+    print(f"MANIFEST.tsv: {len(have)} files ({len(reg)} for Commander, from the registry)")
 
 
 def main(argv):
     cmd, args = (argv[1], argv[2:]) if len(argv) > 1 else ("", [])
-    table = {"mxl": (mxl, 2), "love": (love, 2), "deb": (deb, 2), "text": (text, 1), "binary": (binary, 1), "manifest": (manifest, 1)}
+    table = {"mxl": (mxl, 2), "love": (love, 2), "deb": (deb, 2), "organise": (organise, 1), "manifest": (manifest, (1, 2))}
     if cmd == "list":   # for flash-macos.sh: which files go into an app's own folder
         print("\n".join({"neumetik": FOR_NEUMETIK, "klamansi": FOR_KLAMANSI}[args[0]]))
         return 0
-    if cmd not in table or len(args) != table[cmd][1]:
+    if cmd not in table or len(args) not in (table[cmd][1] if isinstance(table[cmd][1], tuple) else (table[cmd][1],)):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     table[cmd][0](*args)

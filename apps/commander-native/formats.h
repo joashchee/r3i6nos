@@ -500,7 +500,8 @@ static FType ff_identify(const FFile *f) {
         }
     }
     if (f->hn >= 189 && h[0] == 0x47 && h[188] == 0x47) return ff_type(K_MPEGTS, "Video", "MPEG transport stream");
-    if (f->hn >= 4 && h[0] == 0xFF && (h[1] & 0xE0) == 0xE0 && ((h[1] >> 1) & 3) != 0 && (h[2] >> 4) != 15 && ((h[2] >> 2) & 3) != 3)
+    /* bare MPEG audio frames: Layer II or III only (Layer I is long gone, and FF FE is the start of a UTF-16 text file's byte-order mark) */
+    if (f->hn >= 4 && h[0] == 0xFF && (h[1] & 0xE0) == 0xE0 && (((h[1] >> 1) & 3) == 1 || ((h[1] >> 1) & 3) == 2) && (h[2] >> 4) != 15 && ((h[2] >> 2) & 3) != 3)
         return ff_type(K_MP3, "Audio", ((h[1] >> 1) & 3) == 1 ? "MP3 audio" : "MPEG audio");
     if (FF_AT(f, 0, "ID3")) return ff_type(K_MP3, "Audio", "MP3 audio");
     /* deep and footer signatures, only when the name hints */
