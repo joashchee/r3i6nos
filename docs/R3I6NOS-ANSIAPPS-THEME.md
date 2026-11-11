@@ -89,6 +89,12 @@ The font data it builds on: `theme/r3i6nos_vga8x16.h` has the 256 glyphs (`r3i6n
 (`r3i6nos_cp437[i]`). Use the same 64x24 grid of 10x20 cells, the same row roles, colours and mapping from 8x16 to 10x20 as above.
 (The C header includes it; the app's `.deb` carries `NOTICE` and the font licence in its doc folder.)
 
+## The splash (rule 12)
+
+`r3_splash(screen, app, version, build, tagline, what, percent)` in `r3i6nos_ansiapps.h` draws the start-up screen every R36S port has: the top bar, a
+framed box with the app's name, a tagline, what is loading and a bar, and the line `v<version> <commit> <date>`. Draw it at once at start, with each
+loading step, and put any load error in `what`. There is no Lua version yet.
+
 ## What the theme does not cover
 
 - The IO Checker (`docs/IO-CHECKER.md`) is on the theme but for its video test patterns, which are pixels by necessity and say so.

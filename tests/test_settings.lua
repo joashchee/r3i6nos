@@ -41,7 +41,7 @@ end
 local s = new()
 eq(title(s), "Settings"); eq(settings.node(s).items[1].label, "Network"); eq(settings.node(s).items[2].label, "SSH")
 eq(settings.node(s).items[3].label, "Battery"); eq(settings.node(s).items[4].label, "Sound mixer"); eq(settings.node(s).items[5].label, "Date and time")
-eq(settings.node(s).items[6].label, "Device reports"); eq(settings.node(s).items[7].label, "About"); eq(settings.node(s).items[8].label, "Shutdown")
+eq(settings.node(s).items[6].label, "Device reports"); eq(settings.node(s).items[7].label, "Rec demos"); eq(settings.node(s).items[8].label, "About"); eq(settings.node(s).items[9].label, "Shutdown")
 choose(s, "Shutdown")
 eq(kind(s), "confirm"); eq(settings.node(s).sel, 2, "the confirmation starts on No")
 assert(settings.press(s, "accept") == nil and kind(s) == "menu", "accepting the default (No) must not power off")
@@ -302,3 +302,32 @@ do
   settings.press(a, "back"); choose(a, "Back"); eq(title(a), "Settings")
 end
 print("settings about: ok")
+
+-- ---- Rec demos: a tool's demo started from the list, how far a recording has got (menu/demos.lua has its own test)
+do
+  local started, state = {}, { running = false }
+  local fakedm = {
+    found = { { cmd = "compose-demo", tool = "compose", app = "Composer" } },
+    ABOUT = { "about" }, NONE = { "none" },
+  }
+  function fakedm.list() return fakedm.found end
+  function fakedm.poll() return state end
+  function fakedm.start(r) if fakedm.ok == false then return false, "busy" end started[#started + 1] = r.cmd; return true end
+  function fakedm.statusLines(p) return { p.running and "recording" or "idle" } end
+  local d = settings.new(fake(), nil, nil, nil, nil, nil, fakedm); settings.open(d)
+  choose(d, "Rec demos")
+  eq(title(d), "Rec demos"); eq(settings.node(d).items[1].label, "Composer")
+  choose(d, "Composer")
+  eq(started[1], "compose-demo", "A starts the demo"); eq(kind(d), "pages")
+  settings.press(d, "back"); settings.press(d, "back"); fakedm.ok = false; choose(d, "Rec demos"); choose(d, "Composer")
+  assert(settings.node(d).bad, "a demo that cannot start says so")
+  settings.press(d, "back"); settings.press(d, "back")
+  state = { running = true, app = "TinyNTT", percent = 40 }
+  choose(d, "Rec demos")
+  eq(settings.node(d).items[1].label, "Recording now"); eq(settings.node(d).items[1].value, "40 %")
+  choose(d, "Recording now"); eq(settings.node(d).pages[1][1], "recording")
+  settings.press(d, "back"); settings.press(d, "back"); state = { running = false }; fakedm.found = {}
+  choose(d, "Rec demos"); eq(settings.node(d).items[1].label, "None installed")
+  choose(d, "None installed"); eq(settings.node(d).pages[1][1], "none")
+  print("settings rec demos: ok")
+end

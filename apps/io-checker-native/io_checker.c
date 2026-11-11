@@ -27,6 +27,7 @@
 
 #include "r3i6nos_ansiapps.h"
 #include "r3i6nos_report.h"
+#include "r3i6nos_toast.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -146,6 +147,7 @@ typedef struct {
     int nsys;
     char report_file[96];
     int report_written;
+    R3Toast toast;                  /* the hot-plug toast over the top bar (docs/HOTPLUG.md) */
 } App;
 
 static const char *env_or(const char *name, const char *dflt) {
@@ -1189,6 +1191,7 @@ static void handle(App *a, const SDL_Event *e, Uint32 now) {
     case SDL_JOYBUTTONDOWN:
     case SDL_JOYBUTTONUP: {
         int isdown = e->type == SDL_JOYBUTTONDOWN, b = e->jbutton.button + 1;
+        if (isdown && r3_toast_key(&a->toast)) break; /* the key that clears a failure toast is used up (not counted as a press) */
         if (b < MAX_B) a->down[b] = (Uint8)isdown;
         if (isdown) rec_press(a, b, now);
         else rec_release(a, b, now);
@@ -1228,6 +1231,7 @@ static void handle(App *a, const SDL_Event *e, Uint32 now) {
     case SDL_KEYUP: {
         if (e->key.repeat) break;
         int isdown = e->type == SDL_KEYDOWN;
+        if (isdown && r3_toast_key(&a->toast)) break;
         SDL_Keycode k = e->key.keysym.sym;
         char name[24];
         snprintf(name, sizeof name, "%s", SDL_GetKeyName(k));
@@ -1530,6 +1534,7 @@ int main(int argc, char **argv) {
     App *a = calloc(1, sizeof(App));
     if (!a) return 1;
     app_init(a);
+    r3_toast_init(&a->toast);
     a->idle_since = SDL_GetTicks();
     if (SDL_NumJoysticks() > 0) open_pad(a, 0);
     video_info(a, win, r);
@@ -1551,6 +1556,7 @@ int main(int argc, char **argv) {
         SDL_Event e;
         while (SDL_PollEvent(&e)) handle(a, &e, now);
         tick(a, now);
+        r3_toast_poll(&a->toast, now);
         if (a->page == P_PATTERN) {
             draw_pattern(a, r); /* vsync paces this loop */
             Uint64 t = SDL_GetPerformanceCounter();
@@ -1559,6 +1565,7 @@ int main(int argc, char **argv) {
             continue;
         }
         compose(a, &screen, now);
+        r3_toast_draw(&a->toast, &screen);
         r3_video_draw(&video, r, &screen, a->force);
         a->force = 0;
         if (a->pending && video.settle == 0) { /* after "Testing..." has been presented in full: the job blocks for seconds */

@@ -7,6 +7,7 @@ local osk = require("osk")
 local pages = require("netpages")
 local battery = require("battery")
 local reports = require("reports")
+local demos = require("demos")
 local about = require("about")
 local clock = require("clock")
 local mixer = require("mixer")
@@ -18,9 +19,9 @@ settings.TIMEOUT = { default = 30, scan = 45, wifi = 75, wired = 60, test = 60, 
 
 --- A closed dialog. io is the helper's client (menu/netclient.lua); bat the battery module (menu/battery.lua); rep the device reports
 --- (menu/reports.lua); ab Settings > About (menu/about.lua); clk the Date and time dialog (menu/clock.lua); mx the Sound mixer
---- (menu/mixer.lua). Tests pass fakes.
-function settings.new(io, bat, rep, ab, clk, mx)
-  return { stack = {}, io = io, bat = bat or battery, rep = rep or reports, ab = ab or about, clk = clk or clock, mx = mx or mixer }
+--- (menu/mixer.lua); dm Settings > Rec demos (menu/demos.lua). Tests pass fakes.
+function settings.new(io, bat, rep, ab, clk, mx, dm)
+  return { stack = {}, io = io, bat = bat or battery, rep = rep or reports, ab = ab or about, clk = clk or clock, mx = mx or mixer, dm = dm or demos }
 end
 
 local function top(s) return s.stack[#s.stack] end
@@ -216,6 +217,31 @@ local function reportsMenu(s)
   push(s, menu("Device reports", items, 48))
 end
 
+-- Rec demos (docs/DEMO-RECORDINGS.md): the tools' <command>-demo, and how far any recording has got.
+local function demosMenu(s)
+  local dm = s.dm
+  local found = dm.list()
+  local now = dm.poll()
+  local items = {}
+  if now.running or now.done then
+    items[#items + 1] = { label = now.running and "Recording now" or "Last recording", value = now.running and (now.percent and (now.percent .. " %") or "") or "",
+      hint = "How far it has got", run = function(sx) show(sx, "Rec demo", dm.statusLines(dm.poll()), true) end }
+  end
+  for _, r in ipairs(found) do
+    items[#items + 1] = { label = r.app, value = r.cmd, hint = "Record " .. r.app .. ": screenshots and a video, for its store page", run = function(sx)
+      local ok, err = dm.start(r)
+      if ok then show(sx, r.app .. " Rec demo", { "Recording has started.", "", "The unit is locked until it ends.", "Choose Recording now to see how far it has got." }, true)
+      else show(sx, r.app .. " Rec demo", { "Could not start it:", tostring(err) }, false) end
+    end }
+  end
+  if #found == 0 then
+    items[#items + 1] = { label = "None installed", hint = "No command-line tool with a Rec demo", run = function(sx) show(sx, "Rec demos", dm.NONE) end }
+  end
+  items[#items + 1] = { label = "What these are", hint = "Screenshots and a video of an app", run = function(sx) show(sx, "Rec demos", dm.ABOUT) end }
+  items[#items + 1] = { label = "Back", hint = "Return to Settings", run = function(sx) pop(sx) end }
+  push(s, menu("Rec demos", items, 48))
+end
+
 -- About: this build and unit, the update check (the only network use here, and only when chosen), the licences.
 local function aboutMenu(s)
   local ab = s.ab
@@ -268,6 +294,7 @@ local function root(s)
       end },
     { label = "Date and time", hint = "Set the clock and time zone (kept across restarts)", run = function(sx) clockNode(sx, false) end },
     { label = "Device reports", hint = "Check this unit for an app's maker (a file for Claude)", run = reportsMenu },
+    { label = "Rec demos", hint = "Screenshots and a video of an app, for its store page", run = demosMenu },
     { label = "About", hint = "Version, updates, this unit and licences", run = aboutMenu },
     { label = "Shutdown", hint = "Power the device off", run = function(sx)
         confirm(sx, "Shut down the device?", "Yes, shut down", "Powers the device off", function() return "poweroff" end)

@@ -1,0 +1,16 @@
+[Unit]
+Description=Hot-plug events: the headphone jack, USB devices and the DC power port, for the toast at the top of the display (docs/HOTPLUG.md)
+Documentation=file:/usr/local/bin/r3i6nos-hotplug
+After=sound.target r3i6nos-sound.service
+Before=loveos.service
+
+[Service]
+Type=simple
+RuntimeDirectory=r3i6nos-hotplug
+RuntimeDirectoryMode=0755
+ExecStart=/usr/local/bin/r3i6nos-hotplug start
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

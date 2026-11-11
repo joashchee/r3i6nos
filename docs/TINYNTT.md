@@ -157,3 +157,7 @@ songs (goals 2x real time and 99% of buffers in half their time) and the WAV exp
 3. **The open decisions** (section 0): the release terms, Select and Start, a workflow.
 4. **Later:** velocity per note and swing; copy, paste and transpose of bars; more styles; Ogg or FLAC export; opening its
    songs from Neumetik's player on the unit; other platforms (the brief: R36S first).
+
+## Rec demo
+
+TinyNTT is the first port with a **Rec demo** (CLAUDE.md rule 11, `docs/DEMO-RECORDINGS.md`): Files > Rec demo after Device report, and `tinyntt --rec-demo`, save screenshots and a video with sound to `/roms/TinyNTT/Demo/`. The hero features, the demo song ("Dungeon Crawl") and the tour are in the TinyNTT repo's `r36s/README.md` and `r36s/host/demo.h`. Not run on the unit.

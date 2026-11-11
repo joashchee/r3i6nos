@@ -1,0 +1,427 @@
+#!/usr/bin/env python3
+"""r3i6nos-hotplug - tells apps what was plugged in or out: the headphone jack, USB devices (the OTG port), the DC power port (docs/HOTPLUG.md).
+
+    r3i6nos-hotplug start      watch until stopped, one event line for each change
+    r3i6nos-hotplug status     what is plugged in now, one "key: value" a line (the device report reads it)
+
+Every change is one line in /run/r3i6nos-hotplug/events: "<nanoseconds>\\t<info|error>\\t<text>". Apps and the menu read the file and flash the text
+at the top of the display for 3 seconds (theme/r3i6nos_toast.h and .lua); an "error" stays until a key is pressed. The file keeps the last 40 lines
+and this program is the only writer. What is already plugged in at start is not announced.
+
+What is watched, and how it is told apart (untested on the unit: the R36S's sysfs names have never been read there):
+  headphones  the codec's headphone switch (an input device with SW_HEADPHONE_INSERT, the same one r3i6nos-sound reads)
+  USB         /sys/bus/usb/devices: each device (not its interfaces, not the root hubs), named by its product string, kinded by its interface
+              classes: audio, a pad or keyboard (HID), storage, Bluetooth or Wi-Fi (wireless), hub, other
+  power       /sys/class/power_supply/*: every supply that is not the battery and has "online": type Mains is the DC port, USB* the USB port
+  Wi-Fi       /sys/class/net/<wireless interface>/operstate: "up" is joined to a network (the SSID is asked of `iw dev <if> link` once, when it comes up):
+              "Wi-Fi connected: <ssid>" and "Wi-Fi disconnected: <ssid>" (a dropped link or Settings > Network > Disconnect alike)
+  pads        a USB device with a joystick input (a "js" handler) is a gamepad; other HID is a keyboard or mouse
+  battery     /sys/class/power_supply/*/capacity and status: "Battery low: N%" at 15% or less (re-armed above 20%), "Battery full" when charging ends;
+              "Battery critically low" at 5% or less is a failure (re-armed above 8%)
+  TF cards    /sys/block/mmcblk* (not boot or rpmb areas): TF1 is the disk the root filesystem is on (r3i6nos-cards), TF2 the other. In: "TF2 card in:
+              it is read at boot". Out: "TF2 card removed", or, if it was mounted (no Eject first), a failure: its last changes may be lost
+  failures    /dev/kmsg: a USB device that would not enumerate (descriptor errors, "unable to enumerate", a bad cable, over-current) and a USB
+              sound card that is plugged in but opened no playback device after 5 seconds: an "error" event, which stays on screen until a key.
+A change must show in two looks in a row (0.5 s apart) before it is announced, so a bouncing jack contact is one event.
+
+Runs as root from r3i6nos-hotplug.service. Standard library only. Overrides, for tests: R3I6NOS_SYS, R3I6NOS_IW (iw), R3I6NOS_PROC, R3I6NOS_CARDS_STATE, R3I6NOS_HOTPLUG_DIR
+(/run/r3i6nos-hotplug), R3I6NOS_HOTPLUG_POLL, R3I6NOS_KMSG (/dev/kmsg), R3I6NOS_SOUND (the r3i6nos-sound program to borrow the jack reading from).
+"""
+import importlib.machinery
+import importlib.util
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ENV = os.environ.get
+SYS = Path(ENV("R3I6NOS_SYS", "/sys"))
+PROC = Path(ENV("R3I6NOS_PROC", "/proc"))
+IW = ENV("R3I6NOS_IW", "iw")
+CARDS_STATE = Path(ENV("R3I6NOS_CARDS_STATE", "/run/r3i6nos/cards"))   # r3i6nos-cards writes BOOT_DISK= here
+RUN = Path(ENV("R3I6NOS_HOTPLUG_DIR", "/run/r3i6nos-hotplug"))   # root writes, everyone reads (loveos.service owns /run/loveos)
+KMSG = ENV("R3I6NOS_KMSG", "/dev/kmsg")
+SOUND = ENV("R3I6NOS_SOUND", "/usr/local/bin/r3i6nos-sound")
+POLL = float(ENV("R3I6NOS_HOTPLUG_POLL", "0.5"))
+KEEP = 40
+AUDIO_WAIT = 5.0      # seconds a USB sound card may take to open a playback device before that is a failure
+ERROR_GAP = 4.0       # kernel messages repeat for each retry: one error event in this many seconds
+
+USB_ERRORS = (
+    "unable to enumerate USB device", "device descriptor read", "device not accepting address", "Cannot enable. Maybe the USB cable is bad",
+    "over-current condition", "can't set config", "device descriptor read/all, error", "Unable to enumerate",
+)
+
+
+def log(msg):
+    print("r3i6nos-hotplug: " + msg, file=sys.stderr, flush=True)
+
+
+def read(path, default=""):
+    try:
+        return Path(path).read_text(errors="replace").strip()
+    except OSError:
+        return default
+
+
+def load_sound():
+    """r3i6nos-sound as a module, for its jack reading (None when it cannot be loaded)."""
+    try:
+        loader = importlib.machinery.SourceFileLoader("r3i6nos_sound", SOUND)
+        spec = importlib.util.spec_from_loader(loader.name, loader)
+        mod = importlib.util.module_from_spec(spec)
+        sys.dont_write_bytecode = True
+        loader.exec_module(mod)
+        return mod
+    except Exception as e:
+        log(f"cannot read the jack through {SOUND}: {e}")
+        return None
+
+
+# ---- what is plugged in now ------------------------------------------------------------------------------------------------------
+
+def usb_kind(dev):
+    """audio, input, storage, wireless, hub or other, from the interface classes under a USB device's directory."""
+    classes = {read(p).lower() for p in dev.glob("*:*/bInterfaceClass")}
+    if not classes:
+        classes = {read(dev / "bDeviceClass").lower()}
+    for cls, kind in (("01", "audio"), ("03", "input"), ("08", "storage"), ("e0", "wireless"), ("09", "hub")):
+        if cls in classes:
+            if kind == "input" and any(dev.glob("*:*/input/input*/js*")):
+                return "pad"      # the kernel's joystick handler made a jsN for it
+            return kind
+    return "other"
+
+
+def usb_devices():
+    """{sysfs name: (product, kind)} of the real USB devices: not interfaces ("1-1:1.0"), not the root hubs ("usb1")."""
+    out = {}
+    base = SYS / "bus/usb/devices"
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return out
+    for name in names:
+        if ":" in name or name.startswith("usb"):
+            continue
+        dev = base / name
+        product = " ".join(read(dev / "product").split()) or f"{read(dev / 'idVendor') or '????'}:{read(dev / 'idProduct') or '????'}"
+        out[name] = (product[:40], usb_kind(dev))
+    return out
+
+
+def power_supplies():
+    """{name: label} of the supplies that are plugged in: DC port (Mains) and USB power, never the battery."""
+    out = {}
+    base = SYS / "class/power_supply"
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return out
+    for name in names:
+        kind = read(base / name / "type")
+        if kind == "Battery" or read(base / name / "online") != "1":
+            continue
+        out[name] = "DC power" if kind == "Mains" else "USB power"
+    return out
+
+
+KIND_WORDS = {"audio": "USB audio", "pad": "USB gamepad", "input": "USB keyboard or mouse", "storage": "USB storage", "wireless": "USB wireless", "hub": "USB hub", "other": "USB device"}
+
+
+def boot_disk():
+    """The disk the root filesystem is on, from r3i6nos-cards' state file (mmcblk0 when it is not there yet)."""
+    for ln in read(CARDS_STATE).splitlines():
+        if ln.startswith("BOOT_DISK="):
+            return ln.split("=", 1)[1].strip().replace("/dev/", "") or "mmcblk0"
+    return "mmcblk0"
+
+
+def cards():
+    """{disk: (slot, mounted)} of the microSD cards in: slot TF1 (the system card, the boot disk) or TF2 (the data card); mounted from /proc/mounts."""
+    out = {}
+    try:
+        names = sorted(os.listdir(SYS / "block"))
+    except OSError:
+        return out
+    mounts = read(PROC / "mounts")
+    boot = boot_disk()
+    for name in names:
+        if not name.startswith("mmcblk") or "boot" in name or "rpmb" in name:
+            continue
+        if read(SYS / "block" / name / "size") in ("", "0"):
+            continue
+        mounted = any(ln.split()[0].startswith("/dev/" + name) for ln in mounts.splitlines() if ln.split())
+        out[name] = ("TF1" if name == boot else "TF2", mounted)
+    return out
+
+
+def battery():
+    """(capacity percent, status) of the first battery, or None."""
+    base = SYS / "class/power_supply"
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return None
+    for name in names:
+        if read(base / name / "type") == "Battery":
+            cap = read(base / name / "capacity")
+            if cap.isdigit():
+                return int(cap), read(base / name / "status")
+    return None
+
+
+WIFI_SSID = {}     # interface -> the network it joined (asked once, when it came up; kept to name it when it goes)
+
+
+def wifi_ssid(name):
+    """The SSID the interface is joined to (iw dev <name> link), or "" when iw cannot say."""
+    try:
+        out = subprocess.run([IW, "dev", name, "link"], capture_output=True, text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    m = re.search(r"SSID: (.*)", out)
+    return m.group(1).strip()[:32] if m else ""
+
+
+def wifi_up():
+    """{interface: joined} for each Wi-Fi adapter: its operstate is up. The SSID of a new link is looked up once and remembered."""
+    out = {}
+    base = SYS / "class/net"
+    try:
+        names = sorted(os.listdir(base))
+    except OSError:
+        return out
+    for name in names:
+        if not ((base / name / "wireless").exists() or (base / name / "phy80211").exists()):
+            continue
+        up = read(base / name / "operstate") == "up"
+        out[name] = up
+        if up and not WIFI_SSID.get(name):
+            WIFI_SSID[name] = wifi_ssid(name)
+    return out
+
+
+def snapshot(sound, devices):
+    return {
+        "jack": bool(sound.headphones_in(devices)) if sound else False,
+        "usb": usb_devices(),
+        "power": power_supplies(),
+        "cards": cards(),
+        "wifi": wifi_up(),
+    }
+
+
+class BatteryWatch:
+    """Low (15%), critical (5%, a failure) and full: each announced once, and armed again when the charge has climbed back."""
+
+    def __init__(self, first):
+        self.low_armed = first is None or first[0] > 20
+        self.crit_armed = first is None or first[0] > 8
+        self.status = first[1] if first else ""
+
+    def look(self, now):
+        ev = []
+        if now is None:
+            return ev
+        cap, status = now
+        if cap > 20:
+            self.low_armed = True
+        if cap > 8:
+            self.crit_armed = True
+        if cap <= 5 and self.crit_armed and status != "Charging":
+            self.crit_armed = self.low_armed = False
+            ev.append(("error", f"Battery critically low: {cap}%. Plug in power or save now"))
+        elif cap <= 15 and self.low_armed and status != "Charging":
+            self.low_armed = False
+            ev.append(("info", f"Battery low: {cap}%"))
+        if status == "Full" and self.status not in ("Full", ""):
+            ev.append(("info", "Battery full"))
+        self.status = status
+        return ev
+
+
+def changes(old, new):
+    """The events from one snapshot to the next: [(level, text)]."""
+    ev = []
+    if old["jack"] != new["jack"]:
+        ev.append(("info", "Headphones connected" if new["jack"] else "Headphones removed"))
+    for name, (product, kind) in new["usb"].items():
+        if name not in old["usb"]:
+            tail = ": sound plays there now" if kind == "audio" else ""
+            ev.append(("info", f"{KIND_WORDS[kind]} connected: {product}{tail}"))
+    for name, (product, kind) in old["usb"].items():
+        if name not in new["usb"]:
+            tail = ": sound is back on the speaker" if kind == "audio" else ""
+            ev.append(("info", f"{KIND_WORDS[kind]} removed: {product}{tail}"))
+    for name, up in new["wifi"].items():
+        was = old["wifi"].get(name, False)
+        if up and not was:
+            ssid = WIFI_SSID.get(name) or ""
+            ev.append(("info", "Wi-Fi connected" + (f": {ssid}" if ssid else "")))
+        elif was and not up:
+            ssid = WIFI_SSID.pop(name, "")
+            ev.append(("info", "Wi-Fi disconnected" + (f": {ssid}" if ssid else "")))
+    for name, (slot, mounted) in new["cards"].items():
+        if name not in old["cards"]:
+            ev.append(("info", f"{slot} card in: it is read at boot, so restart to use it"))
+    for name, (slot, mounted) in old["cards"].items():
+        if name not in new["cards"]:
+            if mounted:
+                ev.append(("error", f"{slot} card removed while in use: its last changes may be lost"))
+            else:
+                ev.append(("info", f"{slot} card removed"))
+    for name, label in new["power"].items():
+        if name not in old["power"]:
+            ev.append(("info", f"{label} connected"))
+    for name, label in old["power"].items():
+        if name not in new["power"]:
+            ev.append(("info", f"{label} disconnected"))
+    return ev
+
+
+# ---- the event file --------------------------------------------------------------------------------------------------------------
+
+class Events:
+    def __init__(self, path):
+        self.path = path
+        self.lines = []
+        self.last = 0
+
+    def add(self, level, text):
+        text = " ".join(text.replace("\t", " ").split())[:90]
+        ns = max(time.time_ns(), self.last + 1)   # strictly increasing: a reader keeps the last it has seen
+        self.last = ns
+        self.lines = (self.lines + [f"{ns}\t{level}\t{text}"])[-KEEP:]
+        try:
+            self.path.parent.mkdir(parents=True, exist_ok=True)
+            tmp = self.path.with_suffix(".tmp")
+            tmp.write_text("\n".join(self.lines) + "\n")
+            os.replace(tmp, self.path)   # whole or not at all: a reader never sees half a line
+        except OSError as e:
+            log(f"cannot write {self.path}: {e}")
+        log(f"{level}: {text}")
+
+
+# ---- failures --------------------------------------------------------------------------------------------------------------------
+
+class Kmsg:
+    """Reads new kernel messages (non-blocking) and says whether one is a USB failure. Starts at the end: old messages are not news."""
+
+    def __init__(self, path):
+        self.fd = None
+        try:
+            self.fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+            if Path(path).is_char_device():
+                os.lseek(self.fd, 0, os.SEEK_END)
+            else:
+                os.lseek(self.fd, 0, os.SEEK_END)   # a test's plain file
+        except OSError as e:
+            log(f"cannot read the kernel log {path}: {e}")
+
+    def failure(self):
+        """The first USB failure line since the last call, or None."""
+        if self.fd is None:
+            return None
+        found = None
+        while True:
+            try:
+                data = os.read(self.fd, 8192)
+            except (BlockingIOError, InterruptedError):
+                break
+            except OSError:
+                break   # /dev/kmsg says EPIPE if it was overtaken: next time
+            if not data:
+                break
+            for line in data.decode(errors="replace").splitlines():
+                msg = line.split(";", 1)[-1] if ";" in line else line
+                if re.search(r"\busb\b", msg) and any(p in msg for p in USB_ERRORS):
+                    found = found or msg.strip()
+        return found
+
+
+def watch(rounds=None, sound=None, devices=None, events=None, kmsg=None):
+    sound = sound if sound is not None else load_sound()
+    devices = devices if devices is not None else (sound.jack_devices() if sound else [])
+    events = events or Events(RUN / "events")
+    kmsg = kmsg or Kmsg(KMSG)
+    shown = snapshot(sound, devices)     # what is plugged in at start is not announced
+    batt = BatteryWatch(battery())
+    candidate, last_error, audio_since = None, None, {}
+    log("watching: " + ", ".join(k for k, v in (("jack", bool(devices)), ("USB", True), ("power", True), ("kernel log", kmsg.fd is not None)) if v))
+    while rounds is None or rounds > 0:
+        if rounds is not None:
+            rounds -= 1
+        now = snapshot(sound, devices)
+        if now != shown:
+            if candidate == now:        # the same change twice in a row: it is real
+                for level, text in changes(shown, now):
+                    events.add(level, text)
+                shown, candidate = now, None
+            else:
+                candidate = now
+        else:
+            candidate = None
+        # a USB sound card that opened nothing to play on
+        t = time.monotonic()
+        for name, (product, kind) in shown["usb"].items():
+            if kind != "audio":
+                continue
+            audio_since.setdefault(name, t)
+            if audio_since[name] is not None and sound and t - audio_since[name] >= AUDIO_WAIT:
+                if sound.usb_card() is None:
+                    events.add("error", f"USB audio {product} gives no sound output")
+                audio_since[name] = None
+        for name in list(audio_since):
+            if name not in shown["usb"]:
+                del audio_since[name]
+        for level, text in batt.look(battery()):
+            events.add(level, text)
+        msg = kmsg.failure()
+        if msg and (last_error is None or t - last_error >= ERROR_GAP):
+            last_error = t
+            events.add("error", "A USB device did not start: its cable or the device may be bad")
+        time.sleep(POLL)
+    return 0
+
+
+def status():
+    sound = load_sound()
+    devices = sound.jack_devices() if sound else []
+    s = snapshot(sound, devices)
+    print(f"headphones: {'in' if s['jack'] else 'out'}" + ("" if devices else " (no jack switch found)"))
+    for name, (product, kind) in s["usb"].items():
+        print(f"usb {name}: {kind}, {product}")
+    if not s["usb"]:
+        print("usb: nothing plugged in")
+    for name, (slot, mounted) in s["cards"].items():
+        print(f"card {name}: {slot}, {'mounted' if mounted else 'not mounted'}")
+    if not s["cards"]:
+        print("card: none seen")
+    b = battery()
+    print("battery: " + (f"{b[0]}%, {b[1] or 'status unknown'}" if b else "none reported"))
+    for name, up in s["wifi"].items():
+        print(f"wifi {name}: " + (f"joined {WIFI_SSID.get(name) or '(network name unknown)'}" if up else "not joined"))
+    if not s["wifi"]:
+        print("wifi: no adapter")
+    for name, label in s["power"].items():
+        print(f"power {name}: {label} connected")
+    if not s["power"]:
+        print("power: no outside power")
+    return 0
+
+
+def main(argv):
+    cmd = argv[1] if len(argv) > 1 else "start"
+    if cmd == "status":
+        return status()
+    if cmd == "start":
+        return watch()
+    print("\n".join(__doc__.strip().splitlines()[2:4]), file=sys.stderr)
+    return 2
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

@@ -13,7 +13,7 @@ r3i6nos-cards mounted, the kernel's filesystems, loop devices, and on each mount
 
 Standard library only. Overrides, for tests: R3I6NOS_ETC (/etc), R3I6NOS_PROC (/proc), R3I6NOS_SYS (/sys), R3I6NOS_DEV (/dev),
 R3I6NOS_CARDS_STATE (/run/r3i6nos/cards), R3I6NOS_REPORT_DIR (the folder to write in), R3I6NOS_REPORT_MB (16: the speed test's size),
-R3I6NOS_SOUND (r3i6nos-sound),
+R3I6NOS_SOUND (r3i6nos-sound), R3I6NOS_HOTPLUG (r3i6nos-hotplug),
 R3I6NOS_CLOCK (r3i6nos-clock).
 """
 import os
@@ -34,6 +34,7 @@ STATE = Path(ENV("R3I6NOS_CARDS_STATE", "/run/r3i6nos/cards"))
 MB = int(ENV("R3I6NOS_REPORT_MB", "16"))
 REPORT_DIR = ENV("R3I6NOS_REPORT_DIR")
 SOUND = ENV("R3I6NOS_SOUND", "/usr/local/bin/r3i6nos-sound")
+HOTPLUG = ENV("R3I6NOS_HOTPLUG", "/usr/local/bin/r3i6nos-hotplug")
 CLOCK = ENV("R3I6NOS_CLOCK", "/usr/local/bin/r3i6nos-clock")
 BOOTSTATE = Path(ENV("R3I6NOS_BOOTSTATE", "/run/r3i6nos/boot-state"))   # r3i6nos-bootstate (root) writes it: systemctl answers only root
 PROGRESS = ENV("R3I6NOS_REPORT_PROGRESS")   # set by the menu (menu/reports.lua): where to say how far it has got
@@ -235,6 +236,16 @@ def sound(r):
     state = (run(["systemctl", "is-active", "r3i6nos-sound.service"]) or "").strip() or boot_state().get("unit r3i6nos-sound.service", "")
     r.line("INFO", "jack follower", state or "unknown")
     r.line("INFO", "heard", "not measured: listen for the menu's sounds (speaker), then with headphones in")
+    # what is plugged in, and whether the toast's watcher runs (docs/HOTPLUG.md); the sysfs names it reads have never been read on the unit
+    plugged = run([HOTPLUG, "status"])
+    if plugged is None:
+        r.line("SKIP", "hotplug", "r3i6nos-hotplug did not answer")
+    else:
+        for ln in plugged.splitlines():
+            key, _, val = ln.partition(": ")
+            r.line("INFO", "plugged " + key, val)
+        hstate = (run(["systemctl", "is-active", "r3i6nos-hotplug.service"]) or "").strip() or boot_state().get("unit r3i6nos-hotplug.service", "")
+        r.line("PASS" if hstate == "active" else "INFO", "hotplug watcher", hstate or "unknown")
 
 
 def clock(r):
@@ -408,8 +419,23 @@ def where(cards):
     return os.path.join(root, "r3i6nos"), card
 
 
+def demo_recording():
+    """True while a Rec demo holds /run/loveos/demo/lock with a live pid (docs/DEMO-RECORDINGS.md: the unit's whole power is its)."""
+    try:
+        pid = int(Path(os.environ.get("R3I6NOS_RUN", "/run/loveos") + "/demo/lock").read_text().split()[0])
+        os.kill(pid, 0)
+    except PermissionError:
+        return True
+    except (OSError, ValueError, IndexError):
+        return False
+    return True
+
+
 def main(argv):
     quiet = "--quiet" in argv
+    if demo_recording():
+        print("r3i6nos-report: a Rec demo is recording; the unit's whole power is its until it ends", file=sys.stderr)
+        return 75
     how = "Settings > Device reports" if "--from-settings" in argv else "r3i6nos-report"
     rel = keyvals(ETC / "r3i6nos-release")
     cards = keyvals(STATE)

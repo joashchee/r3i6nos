@@ -496,4 +496,23 @@ static inline void r3_video_free(R3Video *v) {
     memset(v, 0, sizeof *v);
 }
 
+/* ---- the splash screen every R36S port has (CLAUDE.md rule 12) ------------------------------------------------------------------ */
+
+/* The app's start-up screen: the top bar (name, version), a framed box in the middle with the name, a tagline, what is loading and a bar of
+ * `percent`, and the build line "v<version> <commit> <date>" (NULL: none). Draw it at once at start, before anything heavy, with the load's
+ * steps and any error in `what`; Rec demo's video starts on it. KlamANSI's is the example of the look. */
+static inline void r3_splash(R3Screen *s, const char *app, const char *version, const char *build, const char *tagline, const char *what, int percent) {
+    char line[96];
+    r3_clear(s);
+    r3_top_bar(s, app, version);
+    r3_box(s, 12, 8, 40, 7, &(R3Box){1, app, NULL, NULL, 0});
+    if (tagline) r3_text_fit(s, 15, 10, tagline, 34, R3_ST(R3_ST_STRONG));
+    if (what) r3_text_fit(s, 15, 11, what, 34, R3_ST(R3_ST_BODY));
+    r3_progress(s, 15, 12, 34, percent);
+    if (build) {
+        snprintf(line, sizeof line, "v%s %s", version ? version : "?", build);
+        r3_text_fit(s, 15, 13, line, 34, R3_ST(R3_ST_HINT));
+    }
+}
+
 #endif /* R3I6NOS_ANSIAPPS_H */

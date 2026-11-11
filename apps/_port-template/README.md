@@ -8,5 +8,9 @@ Not an app: this folder has no `app.conf`, so no script or workflow picks it up.
 4. Record the source, licence and what game data it needs (`docs/` or the port's README). Never commit the source, ROMs, BIOS or proprietary data.
 5. Give it a **device report** (CLAUDE.md rule 9, `docs/DEVICE-REPORTS.md`): a Device report item in its menu and a `--report` flag that write
    `/roms/<App>/r36s-report.txt` for Claude, with `theme/r3i6nos_report.h`; a self-test that checks the file. The port is not done without it.
+6. Give it a **Rec demo** (CLAUDE.md rule 11, `docs/DEMO-RECORDINGS.md`): a hero list in the README, a generated demo file using every hero feature, a
+   tour script, a Rec demo menu item (and `--rec-demo`) with a feature checklist, a lock-out and a progress bar, that saves screenshots and `demo-<timestamp>.mp4` with audio (starting on the splash and a version line) to `/roms/<App>/Demo/`, and a self-test.
+8. Show the **hot-plug toast** (CLAUDE.md rule 13, `docs/HOTPLUG.md`): `theme/r3i6nos_toast.h` or `.lua`, polled each frame, `key` first on every input, drawn over the top bar.
+7. Give it a **splash screen** to the theme (rule 12; KlamANSI's is the example) showing the version, commit and date.
 
 A port is a user-installed `.deb` (card `native_deb/`), never part of the firmware image, and links only libraries the rootfs has.

@@ -552,11 +552,28 @@ VERBS = {
 }
 
 
+def demo_recording():
+    """True while a Rec demo holds /run/loveos/demo/lock with a live pid (docs/DEMO-RECORDINGS.md: the unit's whole power is its)."""
+    try:
+        pid = int(Path(os.environ.get("R3I6NOS_RUN", "/run/loveos") + "/demo/lock").read_text().split()[0])
+        os.kill(pid, 0)
+    except PermissionError:
+        return True
+    except (OSError, ValueError, IndexError):
+        return False
+    return True
+
+
+BUSY_VERBS = {"scan", "wired", "wifi", "test", "ssh-enable"}   # what starts a network or the SSH server: not while a Rec demo records
+
+
 def handle(req):
     verb = req.get("verb", "")
     fn = VERBS.get(verb)
     if fn is None:
         return Result(False, ["Unknown request."])
+    if verb in BUSY_VERBS and demo_recording():
+        return Result(False, ["A Rec demo is recording.", "The network waits until it ends."])
     try:
         return fn(req)
     except Refused as e:

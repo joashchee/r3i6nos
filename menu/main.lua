@@ -12,6 +12,8 @@ local settings = require("settings")
 local about = require("about")
 local mixer = require("mixer")
 local theme = require("r3i6nos_ansiapps")
+local toast = require("r3i6nos_toast")
+local hotplug = toast.new() -- the hot-plug toast over the top bar: headphones, USB, DC power (docs/HOTPLUG.md)
 local view = require("view")
 
 local ROMS = os.getenv("R3I6NOS_ROMS") or "/roms"
@@ -90,6 +92,7 @@ local function testSound()
 end
 
 function love.update(dt)
+  toast.poll(hotplug, love.timer.getTime())
   settings.tick(dialog, dt)
   testSound()
   powerAge = powerAge + dt
@@ -117,6 +120,7 @@ local function act(action)
 end
 
 function love.keypressed(key)
+  if toast.key(hotplug) then return end -- the key that clears a failure toast is used up
   if typing() then -- letters are text here, not commands
     if key == "backspace" then settings.backspace(dialog)
     elseif key == "return" or key == "kpenter" then act("more")
@@ -133,10 +137,12 @@ end
 
 -- Raw buttons only: this pad's SDL gamepad mapping does not match its real layout (docs/hardware-findings.md).
 function love.joystickpressed(_, button)
+  if toast.key(hotplug) then return end
   if theme.PAD[button] then act(theme.PAD[button]) end
 end
 
 function love.draw()
   view.render(screen, { entries = entries, selected = selected, dialog = dialog, battery = power })
+  toast.draw(hotplug, screen)
   theme.draw(screen)
 end

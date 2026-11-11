@@ -101,6 +101,7 @@ end
 function M.start(r, sys)
   sys = sys or M.sys
   if not (r and r.cmd and valid(r.cmd)) then return false, "not a report command" end
+  if package.loaded["demos"] and package.loaded["demos"].active(sys) then return false, "a Rec demo is recording: the unit is busy until it ends" end
   local busy = M.running(sys)
   if busy then return false, busy .. " is still running: wait for it to finish" end
   local run = quote(M.RUN)

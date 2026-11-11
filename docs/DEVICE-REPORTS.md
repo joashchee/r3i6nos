@@ -96,6 +96,8 @@ if the file is missing or has no `end`, that the report stopped and where its `.
 - **Command-line tools:** `tools/qjs-node/report.py` (Python 3 standard library), shipped by `package-tool.sh`.
 - **LÖVE:** no shared module yet (an app must work on an image whose `/opt/loveos/theme` predates one); follow this file's grammar.
 
+Its sibling, **Rec demo** (`docs/DEMO-RECORDINGS.md`, CLAUDE.md rule 11), sits right after Device report in each port's menu and records screenshots and a video to `/roms/<App>/Demo/`.
+
 ## Which ports have one
 
 | Port | Where it lives | How it is started | File |

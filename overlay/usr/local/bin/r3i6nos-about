@@ -284,11 +284,26 @@ def write(out, ok, lines):
     os.replace(tmp, out)
 
 
+def demo_recording():
+    """True while a Rec demo holds /run/loveos/demo/lock with a live pid (docs/DEMO-RECORDINGS.md: the unit's whole power is its)."""
+    try:
+        pid = int(Path(os.environ.get("R3I6NOS_RUN", "/run/loveos") + "/demo/lock").read_text().split()[0])
+        os.kill(pid, 0)
+    except PermissionError:
+        return True
+    except (OSError, ValueError, IndexError):
+        return False
+    return True
+
+
 def main(argv):
     if len(argv) == 2 and argv[1] == "info":
         print("\n".join(info()))
         return 0
     if len(argv) == 3 and argv[1] == "check":
+        if demo_recording():
+            write(argv[2], False, ["A Rec demo is recording.", "The update check waits until it ends."])
+            return 0
         try:
             ok, lines = check()
         except Exception as e:  # never leave the menu waiting for nothing

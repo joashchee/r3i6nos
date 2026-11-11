@@ -40,6 +40,7 @@
 #include <unistd.h>
 
 #include "r3i6nos_ansiapps.h"
+#include "r3i6nos_toast.h"
 #include "formats.h"
 #include "ansiart.h"
 #include "selftest_data.h"
@@ -2773,6 +2774,8 @@ int main(int argc, char **argv) {
     if (!r) r = SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE); /* no GPU: the software path still draws */
     if (!r) { fprintf(stderr, "commander: renderer: %s\n", SDL_GetError()); SDL_Quit(); return 1; }
     R3Video video;
+    R3Toast toast;                  /* the hot-plug toast over the top bar (docs/HOTPLUG.md) */
+    r3_toast_init(&toast);
     if (!r3_video_init(&video, r)) { fprintf(stderr, "commander: texture: %s\n", SDL_GetError()); SDL_Quit(); return 1; }
 
     App app;
@@ -2800,7 +2803,7 @@ int main(int argc, char **argv) {
     while (!app.quit) {
         SDL_Event e;
         /* a job polls; so does a screen still being presented (app_video_draw owes presents after a change); else wait */
-        int have = (app.mode == M_JOB) ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, (force || video.settle > 0) ? 16 : 500);
+        int have = (app.mode == M_JOB) ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, (force || video.settle > 0 || r3_toast_active(&toast)) ? 16 : 250);
         while (have) {
             switch (e.type) {
             case SDL_QUIT: app.quit = 1; break;
@@ -2810,6 +2813,7 @@ int main(int argc, char **argv) {
                 if (r3_pad_action(e.jbutton.button) == R3_SELECT) app.select_held = 0;
                 break;
             case SDL_JOYBUTTONDOWN: {
+                if (r3_toast_key(&toast)) break; /* the key that clears a failure toast is used up */
                 int act = r3_pad_action(e.jbutton.button);
                 if (act == R3_SELECT) { app.select_held = 1; break; }
                 if (act == R3_MORE && app.select_held) { app.quit = 1; break; } /* Select+Start leaves, as in the input checker */
@@ -2818,6 +2822,7 @@ int main(int argc, char **argv) {
             }
             case SDL_KEYDOWN: {
                 SDL_Keycode k = e.key.keysym.sym;
+                if (r3_toast_key(&toast)) break;
                 if (app_key(&app, k)) break;
                 int act = key_action(&app, k);
                 if (act != R3_NONE) app_action(&app, act);
@@ -2834,7 +2839,9 @@ int main(int argc, char **argv) {
             if (typing) SDL_StartTextInput();
             else SDL_StopTextInput();
         }
+        r3_toast_poll(&toast, SDL_GetTicks());
         app_compose(&app, &screen);
+        r3_toast_draw(&toast, &screen);
         app_video_draw(&video, r, &screen, &app, force);
         force = 0;
     }

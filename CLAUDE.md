@@ -23,6 +23,8 @@ is blocked and on what.
 - `tests/`: Python (`unittest`) and Lua tests; no hardware needed.
 - `vendor/`, `build/`, `local_hardware_assets/`: fetched, built or captured, gitignored.
 - `docs/DEVICE-REPORTS.md`: the device report every R36S port has (rule 9) and its file format.
+- `docs/HOTPLUG.md`: the toast over the top bar when headphones, a USB device or DC power is plugged in or out (rule 13); `r3i6nos-hotplug` writes the events, `theme/r3i6nos_toast.{h,lua}` show them.
+- `docs/DEMO-RECORDINGS.md`: Rec demo, the screenshots and video every R36S port records to a `Demo` folder (rule 11).
 - `docs/STORAGE.md`: the two card slots: the system card (TF1, `/roms`) and the data card (TF2, `/roms2`), mounted by role by `r3i6nos-cards`.
 - `docs/hardware-findings.md`: what the stock card showed (kernel 4.4.189, no panfrost, boot flow). Read it before touching boot or graphics.
 
@@ -64,6 +66,25 @@ is blocked and on what.
    `--clean-room` also installs it with `deb_watcher.py` in a clean Debian 12), a LÖVE port's `scripts/build.sh`. It fetches what it
    needs (a pinned tarball, checked by hash) or says where to put it, and leaves the file where `flash-macos.sh`'s `PORTS` list looks
    for it; that list names the script as the port's build command. A new port is not done until its script has been run.
+11. **Every R36S port has a Rec demo** (`docs/DEMO-RECORDINGS.md`) next to its Device report: an item **Rec demo** in its menu right after
+   **Device report** (and a `--rec-demo` flag; a command-line tool's `<command>-demo`, which Settings > Rec demos starts). It first opens a
+   **checklist of the hero features** (all ticked) so the person picks which ones the demo shows; then it runs the real app through a scripted
+   tour of the ticked ones on a **pre-generated demo file** (original, made by a script in the port, using every hero feature in the port's README
+   hero list) and saves, in **`/roms/<App>/Demo/`**: numbered PNG screenshots of the running app, **`demo-<timestamp>.mp4`**
+   (30-90 s, with the app's own audio; the timestamp is `YYYYMMDD-HHMMSS`), a copy of the demo file and `rec-demo.txt` (the log, in the report
+   grammar, `end` last). **The video always opens on the app's splash screen (rule 12) with a clear version line: the version, the git commit and the
+   date**, so a video says which build made it. **While it runs, everything else is locked out:** no input but a cancel, the menu's and other
+   processes' work paused or stopped, so the unit's full power goes to this one task, and a **progress bar** (step, bar, time) shows. The tour
+   drives the app's real input path on a stepped clock, so a recording is the same on any unit. A new port is not done until Rec demo
+   exists and a self-test checks the tour covers every hero feature; say untested what has not run on the unit.
+12. **Every R36S port has a splash screen** made to the r3i6nos-ansiapps theme (rule 8; KlamANSI's is the example): the app's name and art on the 64x24
+   screen, the version, commit and date, and the load's progress and any error, shown at once at start and before anything heavy runs. Rec demo's
+   video starts on it.
+
+13. **Every R36S port shows the hot-plug toast** (`docs/HOTPLUG.md`): when the 3.5 mm headphone jack, a USB device (OTG) or the DC power port is plugged in or
+   out, a **toast over the top bar flashes for 3 seconds** saying what changed (from `/run/r3i6nos-hotplug/events`, written by the root service `r3i6nos-hotplug`;
+   `theme/r3i6nos_toast.h` for native ports, `theme/r3i6nos_toast.lua` for LÖVE). **A failure stays until a key is pressed**, and that key is used up (it clears the
+   toast and does nothing else). A new port wires it in (poll each frame, `key` first on every input, draw after composing) and says untested what has not run on the unit. It also announces a pad, the battery (low, critical, full) and the TF cards in and out. **A Rec demo shows no toast; a failure stops and closes it, then the failure(s) show** (rule 11).
 
 ## Check before committing
 

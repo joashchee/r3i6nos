@@ -32,6 +32,8 @@ if command -v luajit >/dev/null; then
     luajit tests/test_clock.lua || fail=1
     luajit tests/test_mixer.lua || fail=1
     luajit tests/test_reports.lua || fail=1
+    luajit tests/test_demos.lua || fail=1
+    luajit tests/test_toast.lua || fail=1
     luajit tests/test_about.lua || fail=1
     luajit tests/test_net_menu.lua || fail=1
     luajit tests/test_theme.lua || fail=1
@@ -43,6 +45,8 @@ elif command -v lua >/dev/null; then
     lua tests/test_settings.lua || fail=1
     lua tests/test_clock.lua || fail=1
     lua tests/test_reports.lua || fail=1
+    lua tests/test_demos.lua || fail=1
+    lua tests/test_toast.lua || fail=1
     lua tests/test_net_menu.lua || fail=1
     lua tests/test_theme.lua || fail=1
     lua tests/test_menu_view.lua || fail=1
@@ -107,6 +111,26 @@ if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
         SDL_AUDIODRIVER=dummy "$report_bin" || fail=1
     else echo "FAIL: tests/test_report.c does not compile"; fail=1; fi
     rm -f "$report_bin"
+else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
+
+step "Hot-plug toast (theme/r3i6nos_toast.h)"
+if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
+    toast_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-toast.XXXXXX")"
+    # shellcheck disable=SC2046,SC2086  # sdl2-config prints separate flags; $werror is empty or one flag
+    if cc -std=c11 -Wall -Wextra $werror -O2 -I theme $(sdl2-config --cflags) -o "$toast_bin" tests/test_toast.c $(sdl2-config --libs) -lm; then
+        "$toast_bin" || fail=1
+    else echo "FAIL: tests/test_toast.c does not compile"; fail=1; fi
+    rm -f "$toast_bin"
+else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
+
+step "Rec demo recorder (theme/r3i6nos_demo.h)"
+if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
+    demo_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-demo.XXXXXX")"
+    # shellcheck disable=SC2046,SC2086  # sdl2-config prints separate flags; $werror is empty or one flag
+    if cc -std=c11 -Wall -Wextra $werror -O2 -I theme $(sdl2-config --cflags) -o "$demo_bin" tests/test_demo.c $(sdl2-config --libs) -lm; then
+        SDL_AUDIODRIVER=dummy "$demo_bin" || fail=1
+    else echo "FAIL: tests/test_demo.c does not compile"; fail=1; fi
+    rm -f "$demo_bin"
 else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
 
 step "LÖVE apps (check, test, pack)"

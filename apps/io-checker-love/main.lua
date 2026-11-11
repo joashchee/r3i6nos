@@ -8,6 +8,8 @@
 package.path = (os.getenv("R3I6NOS_THEME") or "/opt/loveos/theme") .. "/?.lua;" .. package.path
 
 local theme = require("r3i6nos_ansiapps")
+local toast = require("r3i6nos_toast")
+local hotplug = toast.new() -- the hot-plug toast over the top bar (docs/HOTPLUG.md)
 local model = require("model")
 local probe = require("probe")
 local view = require("view")
@@ -291,6 +293,7 @@ function love.joystickremoved(j)
 end
 
 function love.joystickpressed(j, b)
+  if toast.key(hotplug) then return end -- the key that clears a failure toast is used up
   s.idle:touch()
   s.input:press(b, now())
   s.input:event(("btn %d DOWN"):format(b), j:isDown(b))
@@ -322,6 +325,7 @@ end
 
 -- On a keyboard: the theme's keys, H heard and N not heard on Sound. Every key is recorded (power and volume arrive as keys).
 function love.keypressed(k)
+  if toast.key(hotplug) then return end
   s.keysDown[k] = true
   s.input:key(k)
   s.input:event("key " .. k .. " DOWN")
@@ -340,6 +344,7 @@ function love.keyreleased(k)
 end
 
 function love.update(dt)
+  toast.poll(hotplug, love.timer.getTime())
   if joy and not joy:isConnected() then pick() end
   if joy then s.pad.hat = s.pad.hats > 0 and joy:getHat(1) or "c" end
   if pending and pendingShown then
@@ -421,6 +426,7 @@ function love.draw()
     return
   end
   view.render(screen, s)
+  toast.draw(hotplug, screen)
   theme.draw(screen)
   if pending then pendingShown = true end
 end
