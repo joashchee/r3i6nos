@@ -68,7 +68,7 @@ class Sound(unittest.TestCase):
         (t / "amixer").chmod(0o755)
         (t / "state").write_text("0")
         self.env = {"R3I6NOS_PROC": str(t / "proc"), "R3I6NOS_SYS": str(t / "sys"), "R3I6NOS_DEV": str(t / "dev"),
-                    "R3I6NOS_AMIXER": str(t / "amixer"), "R3I6NOS_SOUND_WAIT": "0",
+                    "R3I6NOS_AMIXER": str(t / "amixer"), "R3I6NOS_SOUND_WAIT": "0", "R3I6NOS_VOLUME_FILE": str(t / "volume"),
                     "R3I6NOS_ASOUND_OUT": str(t / "run/asound-out.conf")}
         os.environ["FAKE_STATE"] = str(t / "state")
         os.environ["FAKE_LOG"] = str(t / "log")
@@ -357,6 +357,14 @@ class Sound(unittest.TestCase):
             self.m.handle(event(0x01, 114, 0))                     # released: nothing
         steps = [ln for ln in self.log().splitlines() if "sset Volume" in ln]
         self.assertEqual(steps, ["-c 0 -q sset Volume 1+", "-c 0 -q sset Volume 1-"])
+
+    def test_volume_keys_tell_the_toast_the_level(self):
+        (self.t / "mixer").write_text(self.MIXER)
+        with redirect_stderr(io.StringIO()):
+            self.m.handle(event(0x01, 115, 1))
+            self.m.handle(event(0x01, 115, 2))
+        self.assertEqual(len((self.t / "volume").read_text().split()), 2)
+        self.assertEqual((self.t / "volume").read_text().split()[0], "2")   # a count: a press at the end of the range still counts
 
     def test_start_follows_the_keys_without_a_jack(self):
         self.key_dev(0, "gpio-keys-vol", "c000000000000 0")

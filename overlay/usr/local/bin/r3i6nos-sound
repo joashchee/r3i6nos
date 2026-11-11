@@ -46,6 +46,7 @@ ALSACTL = ENV("R3I6NOS_ALSACTL", "alsactl")
 STATE = Path(ENV("R3I6NOS_ALSA_STATE", "/var/lib/alsa/asound.state"))
 WAIT = float(ENV("R3I6NOS_SOUND_WAIT", "10"))
 OUT_CONF = Path(ENV("R3I6NOS_ASOUND_OUT", "/run/r3i6nos/asound-out.conf"))   # /etc/asound.conf loads it (errors ignored if missing)
+VOLUME_FILE = Path(ENV("R3I6NOS_VOLUME_FILE", "/run/r3i6nos/volume"))   # "<count> <percent>" after each volume key: r3i6nos-hotplug toasts it
 POLL = 2.0   # seconds between looks for a USB card plugged in or out
 CONTROL = "Playback Path"
 VOLUME, BOOST = "Volume", "Boost"         # the software volumes /etc/asound.conf makes on card 0
@@ -299,6 +300,27 @@ def step_volume(up):
     rc, out = amixer("-c", "0", "-q", "sset", VOLUME, "1+" if up else "1-")
     if rc != 0:
         log("volume key: " + out.strip()[:200])
+        return
+    announce()
+
+
+_PRESSES = 0
+
+
+def announce():
+    """Tell r3i6nos-hotplug the level after a key press (even at the end of the range, where nothing changed), for its toast."""
+    global _PRESSES
+    vol = next((c for c in mixer_controls() if c["name"] == VOLUME), None)
+    if vol is None or not vol.get("percent"):
+        return
+    _PRESSES += 1
+    try:
+        VOLUME_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = VOLUME_FILE.with_suffix(".tmp")
+        tmp.write_text(f"{_PRESSES} {vol['percent']}\n")
+        os.replace(tmp, VOLUME_FILE)
+    except OSError as e:
+        log(f"cannot write {VOLUME_FILE}: {e}")
 
 
 def save():

@@ -20,6 +20,7 @@ change once it shows in **two looks in a row** (a bouncing jack contact is one e
 | USB gamepad | a USB HID device with a `jsN` under its input device (the kernel's joystick handler): a gamepad; other HID is a keyboard or mouse | `USB gamepad connected: <name>` / `removed`, `USB keyboard or mouse ...` |
 | Battery | `/sys/class/power_supply/*` of type Battery: `capacity`, `status` | `Battery low: 15%` (at 15% or less, not charging; armed again above 20%), `Battery full` (status turns Full). Not announced if it starts low |
 | TF cards (microSD) | `/sys/block/mmcblk*` (not boot or rpmb areas); TF1 is the boot disk (`BOOT_DISK=` in `/run/r3i6nos/cards`), TF2 the other; mounted from `/proc/mounts` | `TF2 card in: it is read at boot, so restart to use it` (`docs/STORAGE.md`: cards are mounted at boot only), `TF2 card removed` |
+| Volume keys | `r3i6nos-sound` writes `<count> <percent>` to `/run/r3i6nos/volume` after each press; the daemon waits until the file has rested 0.6 s, so a held key is one toast | `Volume 72%` (also at the end of the range) |
 | DC power port | `/sys/class/power_supply/*` that is not the battery and has `online`: type `Mains` is the DC port, `USB*` the USB port | `DC power connected` / `DC power disconnected`, `USB power connected` / `USB power disconnected` |
 
 **Failures** (an `error` event; the toast is white on red, says `Press a key`, and stays):

@@ -45,7 +45,7 @@ class Hotplug(unittest.TestCase):
         (self.sys / "class/power_supply").mkdir(parents=True)
         self.kmsg = t / "kmsg"
         self.kmsg.write_text("")
-        self.env = {"R3I6NOS_SYS": str(self.sys), "R3I6NOS_HOTPLUG_DIR": str(t / "run"), "R3I6NOS_KMSG": str(self.kmsg), "R3I6NOS_HOTPLUG_POLL": "0", "R3I6NOS_PROC": str(t / "proc"), "R3I6NOS_CARDS_STATE": str(t / "cards-state")}
+        self.env = {"R3I6NOS_SYS": str(self.sys), "R3I6NOS_HOTPLUG_DIR": str(t / "run"), "R3I6NOS_KMSG": str(self.kmsg), "R3I6NOS_HOTPLUG_POLL": "0", "R3I6NOS_PROC": str(t / "proc"), "R3I6NOS_CARDS_STATE": str(t / "cards-state"), "R3I6NOS_VOLUME_FILE": str(t / "volume")}
         (t / "cards-state").write_text("BOOT_DISK=mmcblk0\n")
         self.mod = load(self.env)
         self.sound = FakeSound()
@@ -144,6 +144,26 @@ class Hotplug(unittest.TestCase):
         ])
         ns = [int(ln[0]) for ln in lines]
         self.assertEqual(ns, sorted(set(ns)), "strictly increasing, so a reader can keep the last it has seen")
+
+    def test_volume_keys_toast_once_per_burst(self):
+        vol = self.mod.VolumeWatch()
+        self.assertEqual(vol.look(0.0), [])
+        (Path(self.tmp.name) / "volume").write_text("1 70\n")
+        self.assertEqual(vol.look(1.0), [])           # still pressing
+        (Path(self.tmp.name) / "volume").write_text("2 72\n")
+        self.assertEqual(vol.look(1.4), [])
+        self.assertEqual(vol.look(1.9), [])           # 0.5 s after the last press
+        self.assertEqual(vol.look(2.1), [("info", "Volume 72%")])
+        self.assertEqual(vol.look(5.0), [])           # said once
+        (Path(self.tmp.name) / "volume").write_text("3 72\n")   # a press at the end of the range: same level, still a toast
+        vol.look(6.0)
+        self.assertEqual(vol.look(6.7), [("info", "Volume 72%")])
+
+    def test_volume_before_start_is_not_announced(self):
+        (Path(self.tmp.name) / "volume").write_text("9 50\n")
+        vol = self.mod.VolumeWatch()
+        self.assertEqual(vol.look(0.0), [])
+        self.assertEqual(vol.look(9.0), [])
 
     def test_a_keyboard_is_not_a_gamepad(self):
         self.usb("1-3", "Tiny Keyboard", "03")

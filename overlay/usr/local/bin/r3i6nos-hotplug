@@ -45,6 +45,8 @@ RUN = Path(ENV("R3I6NOS_HOTPLUG_DIR", "/run/r3i6nos-hotplug"))   # root writes, 
 KMSG = ENV("R3I6NOS_KMSG", "/dev/kmsg")
 SOUND = ENV("R3I6NOS_SOUND", "/usr/local/bin/r3i6nos-sound")
 POLL = float(ENV("R3I6NOS_HOTPLUG_POLL", "0.5"))
+VOLUME_FILE = Path(ENV("R3I6NOS_VOLUME_FILE", "/run/r3i6nos/volume"))   # r3i6nos-sound writes "<count> <percent>" after each volume key
+VOLUME_SETTLE = 0.6   # seconds the keys must rest before the toast: a held key is one toast with the last level, not a queue of them
 KEEP = 40
 AUDIO_WAIT = 5.0      # seconds a USB sound card may take to open a playback device before that is a failure
 ERROR_GAP = 4.0       # kernel messages repeat for each retry: one error event in this many seconds
@@ -284,6 +286,28 @@ def changes(old, new):
 
 # ---- the event file --------------------------------------------------------------------------------------------------------------
 
+class VolumeWatch:
+    """Turns the volume keys into one `Volume NN%` event per burst of presses. Presses before the daemon started are not news."""
+    def __init__(self):
+        self.seen = self.read()
+        self.pending, self.since = None, 0.0
+
+    @staticmethod
+    def read():
+        parts = read(VOLUME_FILE).split()
+        return (parts[0], parts[1]) if len(parts) == 2 and parts[1].isdigit() else None
+
+    def look(self, now):
+        cur = self.read()
+        if cur is not None and cur != self.seen:
+            self.seen, self.pending, self.since = cur, cur, now
+        if self.pending and now - self.since >= VOLUME_SETTLE:
+            pct = self.pending[1]
+            self.pending = None
+            return [("info", f"Volume {pct}%")]
+        return []
+
+
 class Events:
     def __init__(self, path):
         self.path = path
@@ -349,6 +373,7 @@ def watch(rounds=None, sound=None, devices=None, events=None, kmsg=None):
     kmsg = kmsg or Kmsg(KMSG)
     shown = snapshot(sound, devices)     # what is plugged in at start is not announced
     batt = BatteryWatch(battery())
+    vol = VolumeWatch()
     candidate, last_error, audio_since = None, None, {}
     log("watching: " + ", ".join(k for k, v in (("jack", bool(devices)), ("USB", True), ("power", True), ("kernel log", kmsg.fd is not None)) if v))
     while rounds is None or rounds > 0:
@@ -377,6 +402,8 @@ def watch(rounds=None, sound=None, devices=None, events=None, kmsg=None):
         for name in list(audio_since):
             if name not in shown["usb"]:
                 del audio_since[name]
+        for level, text in vol.look(t):
+            events.add(level, text)
         for level, text in batt.look(battery()):
             events.add(level, text)
         msg = kmsg.failure()
