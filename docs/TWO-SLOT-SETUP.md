@@ -248,7 +248,7 @@ What each trial must leave behind: the exact command or the screen it used, the 
 every image by `configure_rootfs.sh`; ordered before `r3i6nos-cards.service` and `loveos.service`), a change to `r3i6nos-cards` (it never mounts the disk
 named in `/run/r3i6nos/setup-source`), a `setup` section in `r3i6nos-report`, and checks in `check_image.sh`, `tests/test_configure_rootfs.sh` and CI
 (`build.yml`: `r3i6nos-setup` joins the stdlib-import check; `partx`, `mount`, `umount`, `blkid` and `mkfs.exfat` must be in the rootfs).
-Tests: `tests/test_r3i6nos_setup.py` (45), plus new cases in `test_r3i6nos_cards.py` and `test_r3i6nos_report.py`. They run on a Mac and in Debian 12 under Docker.
+Tests: `tests/test_r3i6nos_setup.py` (48), plus new cases in `test_r3i6nos_cards.py` and `test_r3i6nos_report.py`. They run on a Mac and in Debian 12 under Docker.
 
 How it follows section 5, and where it differs:
 
@@ -282,6 +282,12 @@ How it follows section 5, and where it differs:
   powers off (`systemctl --no-block poweroff`, as `r3i6nos-poweroff` does); **on a failure it stays on the screen** (the unit never finishes, so the menu cannot start over it)
   until a button is pressed, then powers off.
 - **The report** is `r3i6nos-setup-report.txt` on BOOT, in the report grammar, `end` last; `r3i6nos-report`'s `setup` section reads the record, this boot's state and that file.
+
+- **The bootloader is the last write** (changed 2026-11-11 after this was thought through for T1): a card with a bootloader at sector 64 is a finished card to the next boot, so if the loader
+  were written first, a power cut afterwards would leave a card that looks done and has no drivers. Now the boot files, the drivers and the games partition come first and the loader goes in
+  last (the step *Make the card bootable*); a failure or power cut at any earlier point leaves a setup card and the setup is simply run again (two tests prove it).
+- **The report records what a trial needs to read** with no keyboard or screen capture: the kernel, the kernel command line, seconds since power on, memory available at the start and after the
+  drivers, what was mounted at `/boot` before the setup (the label-clash question), the battery, and how long each step took.
 
 **Untested on a unit, so every one a trial must answer:** the battery's sysfs name (`class/power_supply/*/type` = Battery) and that the percent and status read there; that the stock U-Boot and kernel start r3i6nos from TF2 (T1); what is mounted at `/boot`; that `mount -o ro,noload`
 leaves the original byte-identical (T2, T3); the real copy time and memory of about 520 MB of modules and firmware; `partx -a` and `mkfs.exfat` on a card that is also the root disk;

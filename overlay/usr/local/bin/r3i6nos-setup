@@ -13,10 +13,12 @@ It then, in this order, and stops at the first thing it cannot do (the new card 
   1. checks the original is a genuine RK3326 R36S board (CLAUDE.md rule 3) and refuses a clone, saying why;
   2. checks the new card is an r3i6nos card (its disk signature) and has room;
   3. offers to back the original up, but only if this card has room for it (off unless a button is pressed within the first seconds);
-  4. writes the original's bootloader to sector 64 of the new card and its boot files, with root= pointed at this root, to BOOT;
+  4. writes the original's boot files, with root= pointed at this root, to this card's BOOT;
   5. installs the kernel modules, firmware and the Mali GPU driver from the original into this root (/usr/lib/modules, /usr/lib/firmware,
      /opt/libmali), checks them, and makes the games partition on the new card if it has none and the space after ROOTFS is empty;
-  6. writes r3i6nos-setup-report.txt on BOOT (readable on any computer), tells the reader to swap the cards, and powers off.
+  6. only then writes the original's bootloader to sector 64 of the new card (the last write: a card with a bootloader is a finished card to
+     the next boot, so an interrupted setup stays a setup and is simply run again), writes r3i6nos-setup-report.txt on BOOT (readable on
+     any computer), tells the reader to swap the cards, and powers off.
 
 The screen always shows two progress bars (this step, and overall) and a tip to keep the console charged or plugged in.
 The original card is mounted read-only (ext4 with noload, so the journal is not replayed onto it) and nothing is ever written to it
@@ -75,7 +77,7 @@ GAMES_FOLDERS = ("Love 11.5", "Love 12.0", "native_deb")
 KEY_IGNORED = {114, 115, 116}           # volume down, volume up, power
 BACKUP_DIV = 3                          # a backup is guessed at a third of the raw size (the card's free space compresses well)
 BACKUP_MARGIN = 256 << 20               # and must leave this much free
-STEP_WEIGHTS = [4, 2, 0, 6, 40, 6, 1]   # how much of the overall bar each step is worth; the backup's (index 2) is set when it is chosen
+STEP_WEIGHTS = [4, 2, 0, 6, 40, 6, 2]   # how much of the overall bar each step is worth; the backup's (index 2) is set when it is chosen
 BACKUP_WEIGHT = 60
 TIP = "Keep the console charged or plugged in until it switches off."
 
@@ -190,6 +192,13 @@ def battery_note():
     return f"Battery {cap}%{', ' + status.lower() if status else ''}" if cap is not None else ""
 
 
+def mem_available():
+    for line in (read_text(PROC / "meminfo") or "").splitlines():
+        if line.startswith("MemAvailable:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
 def detect():
     """(mode, info): mode is "setup" with info["source"] and info["head"], or "normal" with info["why"]."""
     root = root_disk()
@@ -277,6 +286,7 @@ class Screen:
         self.marks, self.msg, self.sub, self.current = {}, "", 0.0, None
         self.on = ENV("R3I6NOS_SETUP_COLS", "64") != "0"
         self._last = None
+        self.started, self.took = {}, {}       # seconds each step took, for the report (trial T6: how long does it all take?)
 
     def overall(self):
         total = sum(self.weights) or 1
@@ -288,8 +298,11 @@ class Screen:
         self.marks[i] = state
         if state == "now":
             self.current, self.sub = i, 0.0
+            self.started[i] = time.monotonic()
         elif state in ("done", "skip") and i == self.current:
             self.sub = 1.0
+        if state in ("done", "skip", "fail") and i in self.started and i not in self.took:
+            self.took[i] = time.monotonic() - self.started[i]
         self.draw(force=True)
 
     def weight(self, i, w):
@@ -735,7 +748,7 @@ def ensure_boot_mounted(root, src):
     /etc/fstab mounts LABEL=BOOT at /boot, and the original card's boot partition may carry the same label: in a setup boot the
     original could be what is mounted there, read-write. Writing the new card's boot files onto it would be the one way this
     program could damage the original, so what is mounted at BOOT is checked, and the original is unmounted if it is there."""
-    dev = mounted_at(BOOT)
+    dev = before = mounted_at(BOOT)
     if dev and Path(dev).name.startswith(src):
         r = run(["umount", str(BOOT)], 60)
         if r.returncode != 0:
@@ -744,11 +757,12 @@ def ensure_boot_mounted(root, src):
     elif dev and not Path(dev).name.startswith(root):
         raise Stop(f"{dev} is mounted at {BOOT}, which is neither card in this setup, so nothing was written")
     if dev:
-        return
+        return before
     BOOT.mkdir(parents=True, exist_ok=True)
     r = run(["mount", "-t", "vfat", "-o", "rw,noatime", str(part_dev(root, 1)), str(BOOT)], 60)
     if r.returncode != 0:
         raise Stop(f"cannot open this card's BOOT partition: {r.stderr.strip() or 'mount failed'}")
+    return before
 
 
 def copy_boot(src_boot, say=None):
@@ -962,7 +976,7 @@ def do_backup(src_disk, parts, sig, dest, say):
 
 # ---- the whole setup --------------------------------------------------------------------------------------------------------------
 STEPS = ["Check the original card", "Check this card", "Back up the original (only if asked)", "Write the boot files",
-         "Install the drivers", "Make the games area", "Finish"]
+         "Install the drivers", "Make the games area", "Make the card bootable"]
 
 
 def version():
@@ -981,6 +995,11 @@ def setup(info, screen, report):
     note = battery_note()
     if note:
         report.add("FAIL" if note.startswith("LOW") else "INFO", "battery", note)
+    for key, text in (("kernel", os.uname().release if hasattr(os, "uname") else None), ("kernel command line", read_text(PROC / "cmdline")),
+                      ("seconds since power on", (read_text(PROC / "uptime") or "").split(" ")[0] or None),
+                      ("memory available at start", mem_available())):
+        if text:
+            report.add("INFO", key, text)
     say = screen.say
     try:
         # 1. the original
@@ -1027,7 +1046,8 @@ def setup(info, screen, report):
         if free < need + (64 << 20):
             raise Stop(f"This card's system area has {free // 1048576} MB free but the drivers need {need // 1048576} MB, so nothing was written.")
         say("Opening this card's boot partition...", 0.8)
-        ensure_boot_mounted(root, src)
+        before = ensure_boot_mounted(root, src)
+        report.add("INFO", "boot partition mounted at /boot before setup", before or "nothing (fstab had not mounted it)")
         report.add("PASS", "this card", "an r3i6nos card with room for the drivers")
         screen.mark(1, "done")
 
@@ -1076,12 +1096,10 @@ def setup(info, screen, report):
                 report.add("SKIP", "backup", f"offered ({why}) and not asked for")
                 screen.mark(2, "skip")
 
-        # 4. the boot area
+        # 4. the boot files (the bootloader waits until the very end: see step 7)
         screen.mark(3, "now")
-        say("Writing the bootloader to this card...", 0.05)
-        write_loader(root, loader)
-        n_files, n_roots = copy_boot(src_boot, lambda m, b=None: say(m, 0.1 + 0.9 * (b or 0)))
-        report.add("PASS", "bootloader written", f"{len(loader)} bytes at sector {LOADER_SECTOR}, read back")
+        say("Writing the boot files to this card...", 0.05)
+        n_files, n_roots = copy_boot(src_boot, lambda m, b=None: say(m, 0.05 + 0.95 * (b or 0)))
         report.add("PASS", "boot files", f"{n_files} files copied and read back; root= set to this card in {n_roots} places")
         screen.mark(3, "done")
 
@@ -1091,6 +1109,7 @@ def setup(info, screen, report):
         say("Checking the graphics driver's libraries...", 1.0)
         for name, count in notes:
             report.add("PASS", f"installed {name}", f"{count} entries, compared with the original")
+        report.add("INFO", "memory available after the drivers", mem_available() or "unknown")
         info_needs, missing = needed_problems()
         for blob, need_libs in info_needs:
             report.add("INFO", f"{blob} needs", " ".join(need_libs) or "(nothing)")
@@ -1106,9 +1125,14 @@ def setup(info, screen, report):
             report.add("PASS" if games_kind == "created" else "INFO" if games_kind == "exists" else "SKIP", "games partition", f"{games_kind}: {why4}")
         screen.mark(5, "skip" if games_kind == "skipped" else "done")
 
-        # 7. finish
+        # 7. make the card bootable: the bootloader is written LAST. A card with a bootloader of its own is a normal card to the next boot
+        #    (detect), so everything before this must be complete; a power cut or a failure at any earlier point leaves a card that is
+        #    still a setup card, and running the setup again simply redoes it.
         screen.mark(6, "now")
-        say("Writing the report and saving everything to the card...", 0.5)
+        say("Making the card bootable (the bootloader goes in last)...", 0.2)
+        write_loader(root, loader)
+        report.add("PASS", "bootloader written", f"{len(loader)} bytes at sector {LOADER_SECTOR}, read back (the last write)")
+        say("Saving everything to the card...", 0.7)
         os.sync()
         return {"sig": sig, "backup": backup_name, "missing_libs": len(missing)}
     finally:
@@ -1116,6 +1140,9 @@ def setup(info, screen, report):
 
 
 def finish(ok, report, screen, extra):
+    for i, name in enumerate(screen.steps):
+        if i in screen.took:
+            report.add("INFO", f"time: {name}", f"{screen.took[i]:.1f} s")
     path = report.write(version())
     try:
         VAR.mkdir(parents=True, exist_ok=True)

@@ -373,6 +373,59 @@ class Setup(Fixture):
         self.assertEqual(code, 1)
         self.assertIn("neither card in this setup", self.report())
 
+    def test_the_report_carries_what_the_first_trial_needs_to_read(self):
+        """No keyboard, no screen capture: the report is how a trial sees what the boot did (docs/TRIAL-T1.md)."""
+        t = self.t
+        (t / "proc/cmdline").write_text(f"root=UUID={ROOT_UUID} rootwait rw panel=4\n")
+        (t / "proc/uptime").write_text("41.50 100.00\n")
+        (t / "proc/meminfo").write_text("MemTotal: 919232 kB\nMemAvailable: 848420 kB\n")
+        (t / "proc/mounts").write_text(f"{t / 'dev/mmcblk0p1'} {t / 'boot'} vfat rw 0 0\n")
+        code, m = self.run_setup()
+        self.assertEqual(code, 0, self.err)
+        rep = self.report()
+        for want in (f"INFO kernel command line: root=UUID={ROOT_UUID} rootwait rw panel=4", "INFO seconds since power on: 41.50",
+                     "INFO memory available at start: 848420 kB", "INFO memory available after the drivers: 848420 kB",
+                     f"INFO boot partition mounted at /boot before setup: {t / 'dev/mmcblk0p1'}",
+                     "INFO time Check the original card:", "INFO time Install the drivers:", "INFO time Make the card bootable:"):
+            self.assertIn(want, rep)
+
+    def test_the_bootloader_is_the_last_write_so_an_interrupted_setup_is_run_again(self):
+        """With a bootloader at sector 64 the next boot sees a finished card. So it goes in last: a failure before it leaves a setup card."""
+        t = self.t
+        (t / "bin/mkfs.exfat").write_text("#!/bin/sh\necho 'mkfs.exfat: failed' >&2\nexit 1\n")
+        code, m = self.run_setup()
+        self.assertEqual(code, 1)
+        self.assertIn("could not format the games partition", self.report())
+        head = (t / "dev/mmcblk1").read_bytes()[64 * 512:(64 + 300) * 512]
+        self.assertFalse(any(head), "no bootloader was written")
+        self.assertNotIn("bootloader written", self.report())
+        mode, info = load(self.env).detect()
+        self.assertEqual(mode, "setup", "the card is still a setup card")
+        # the cause is fixed (the games partition entry is already on the card, so it is found as existing): a re-run finishes the job
+        (t / "bin/mkfs.exfat").write_text(f"#!/bin/sh\necho \"mkfs.exfat $@\" >> {t}/calls\n")
+        code, m = self.run_setup()
+        self.assertEqual(code, 0, self.err)
+        self.assertEqual((t / "dev/mmcblk1").read_bytes()[64 * 512:64 * 512 + len(self.loader)], self.loader)
+        self.assertEqual(load(self.env).detect()[0], "normal", "now it is a finished card")
+        self.assertTrue(self.report().rstrip().endswith("end"))
+
+    def test_a_failure_while_installing_the_drivers_also_leaves_a_setup_card(self):
+        t = self.t
+        (t / "dev/mmcblk0p2/usr/lib/modules/4.4.189/kernel/a.ko").write_bytes(b"x")
+        real = shutil.copy2
+
+        def corrupt(src, dst, **kw):
+            real(src, dst, **kw)
+            if str(dst).endswith("a.ko"):
+                Path(dst).write_bytes(b"corrupted on the way")
+            return dst
+        with mock.patch("shutil.copy2", side_effect=corrupt):
+            code, m = self.run_setup()
+        self.assertEqual(code, 1)
+        self.assertIn("does not match the original", self.report())
+        self.assertFalse(any((t / "dev/mmcblk1").read_bytes()[64 * 512:(64 + 300) * 512]))
+        self.assertEqual(load(self.env).detect()[0], "setup")
+
     def test_a_setup_boot_changes_nothing_when_the_card_is_a_clone(self):
         for kw, why in ((dict(allwinner=True), "eGON.BT0"), (dict(evb=True), "rk3326-evb-lp3-v12"), (dict(rk_dtb=False), "no RK3326 board file")):
             with self.subTest(why=why):
