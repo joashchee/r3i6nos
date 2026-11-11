@@ -1,6 +1,6 @@
 # Neumetik on the R36S: the plan
 
-Status (2026-11-08): **phases 2-5 built in the Neumetik repo's `r36s/` and tested without the unit (its README has the detail); never run on a real R36S.** Neumetik is ansiapps' synthesizer (`~/Coding/neumetik`, `joashchee/neumetik`,
+Status (2026-11-08): **phases 2-5 built in the Neumetik repo's `r36s/` and tested without the unit (its README has the detail); run on a real R36S from 2026-11-09 (section 8: speed GO, 18 of 18; not yet heard or played by hand).** Neumetik is ansiapps' synthesizer (`~/Coding/neumetik`, `joashchee/neumetik`,
 proprietary but for its MIT `neumetik-midi`): General MIDI and GS without a SoundFont, layered background noise (BGN), tracker modules in 112 formats played by
 their own replayers, the chips they need (OPL, SID, Paula, the 2A03, the YM chips...), and music seen as animated ANSI art (Visual). Its desktop app is Tauri,
 React and TypeScript. This file is the plan and the decisions, as `docs/KLAMANSI-PORT.md` is for KlamANSI; the code will live in the Neumetik repo (an `r36s/`

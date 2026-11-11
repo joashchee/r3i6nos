@@ -1,7 +1,7 @@
 # Crunchy on the R36S: the plan
 
 Status (2026-11-10): **the first version is built in the Crunchy repo's `r36s/` and tested without the unit (its README has the
-detail); never run on a real R36S.** Crunchy is ansiapps' de-duplicator (`~/Coding/crunchy`, closed source and paid on the desktop):
+detail); run on a real R36S from 2026-11-10 (device report: 14 PASS, 0 FAIL; ROADMAP section 15).** Crunchy is ansiapps' de-duplicator (`~/Coding/crunchy`, closed source and paid on the desktop):
 it finds copies of the same file, proves they are identical by content (size, then BLAKE3 of the first and last bytes, then of every
 byte), and reclaims the space safely (Move to Trash, re-checked first, logged for Undo). Its desktop app is Tauri, React and Rust.
 This file is the plan and the decisions, as `docs/NEUMETIK-PORT.md` is for Neumetik; the code lives in the Crunchy repo (an `r36s/`

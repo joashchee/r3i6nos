@@ -1,7 +1,7 @@
 # Lean CLI ports of Composer, Painter and Animator (QuickJS)
 
 Status (2026-11-08): **the shared toolchain is built and tested; the three tools run, on this Mac and in Debian 12 arm64 under Docker, with the same output as Node; each app's repo
-has its `r36s/` folder (manifest, command list, licence note, check and package scripts, workflow); nothing has run on a real R36S; the three GitHub workflows passed in manual runs (2026-11-08: `compare`, then the arm64 `package` and smoke under qemu).** The apps: Composer (`~/Coding/composer`, seeded music: MIDI, WAV, NTT),
+has its `r36s/` folder (manifest, command list, licence note, check and package scripts, workflow); the three tools ran on a real R36S on 2026-11-09 and 11-11 (their device reports, ROADMAP section 10); the three GitHub workflows passed in manual runs (2026-11-08: `compare`, then the arm64 `package` and smoke under qemu).** The apps: Composer (`~/Coding/composer`, seeded music: MIDI, WAV, NTT),
 Painter (`~/Coding/painter`, sprites and ANSI art: PNG, ANS, TXT) and Animator (`~/Coding/animator`, motion clips: JSON). All three are dependency-free JavaScript libraries
 with a Node `cli.js` (`compose`, `sprites`, `animate`). The point of a port is that **other apps can use them**: NoCoGaMa's sprites, jingles and animations, KlamANSI's ANSI
 art, anything on the device, from a command line, with no Node on it.
@@ -47,7 +47,7 @@ commands to compare, and a workflow (`r36s/`, as KlamANSI has). Composer is prop
   yet (it would embed the atlas in the binary, with its credit). `node:` modules other than the six above stop the build.
 - **Numbers that are floats** (Composer's WAV preview) came out identical in QuickJS (libm) and V8 here. Composer's rule 4 says the preview is never byte-compared; a different libm on the device could differ
   in a last bit: **untested on the R36S**.
-- **Not tried on a real R36S**: any of it, including that a LÖVE app's `io.popen` and `os.execute` work there. They are LuaJIT's and LÖVE does not remove them, but nobody has run it.
+- **LÖVE's `io.popen` on the unit:** works (NoCoGaMa's report, 2026-11-11: the game list through `io.popen` + `ls`, PASS). **Not tried:** a LÖVE app calling one of these tools.
 
 ## Using a tool from a LÖVE app (NoCoGaMa)
 

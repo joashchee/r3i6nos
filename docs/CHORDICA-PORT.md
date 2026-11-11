@@ -1,7 +1,7 @@
 # Chordica on the R36S: the plan
 
 Status (2026-11-10): **the first version is built in the Chordica repo's `r36s/` and tested without the unit (its README has the
-detail); never run on a real R36S.** Chordica is Scoreless Music's and ansiapps' musical instrument (`~/Coding/chordica`, closed
+detail); run on a real R36S from 2026-11-10 (device report: 17 PASS, 2 FAIL on String Ensemble's speed; ROADMAP section 16).** Chordica is Scoreless Music's and ansiapps' musical instrument (`~/Coding/chordica`, closed
 source; on Apple's App Stores as `com.scorelessmusic.chordica` and on Google Play as `com.ansiapps.chordica`): played live from a
 keyboard the CHORDiCA way, composed in a shared score, played together across devices. Its desktop app is Tauri, React and Rust,
 and all its sound and timing are Rust crates with no Tauri in them. This file is the plan and the decisions, as

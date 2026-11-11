@@ -33,10 +33,10 @@ is blocked and on what.
 
 ## Rules
 
-1. **Say what was not run on a real R36S.** Nothing in this repo has booted
-   on hardware yet. A claim about behaviour on the device is "untested"
-   until ROADMAP section 2 says otherwise. The gamepad mapping in
-   `run_app.sh` is unverified.
+1. **Say what was not run on a real R36S.** The image and its apps have
+   run on a real unit since 2026-11-09 (device reports in each repo, the roadmap's sections 8-17), but a claim about behaviour on the
+   device is "untested" until a report or the maintainer says otherwise (ROADMAP section 2). The gamepad mapping is measured
+   (memory: R36S controller mapping), not assumed.
 2. **No copyrighted or proprietary content in the repo, in CI artifacts or in a release:** no ROMs, BIOS files,
    or proprietary emulator assets. **The Mali GPU blob (`libmali`), kernel modules,
    bootloader and boot files come from the user's own card at flash time

@@ -1,6 +1,6 @@
 # NoCoGaMa on r3i6nos: status and what r3i6nos gives it
 
-Status (2026-11-08): **the editor, play, files, export and the release workflow are written and tested without a display (13 commits); never drawn by LÖVE with a display, never run on an R36S.** NoCoGaMa is the ansiapps **No Code Game Maker**: draw a level, place actors, give them
+Status (2026-11-08): **the editor, play, files, export and the release workflow are written and tested without a display (13 commits); run on the R36S since 2026-11-09: the spike under LÖVE 11.5 and 12.0, and the app's own Device report on 2026-11-11 (17 PASS, 2 FAIL on music slices, since cut; 60 fps drawing, the card and export pass).** NoCoGaMa is the ansiapps **No Code Game Maker**: draw a level, place actors, give them
 behaviours, play it, all with the pad. The code, its plan and its tests live in the private repo `joashchee/nocogama` (`~/Coding/nocogama`); this repo never holds any of it (rule 2). Its plan is that repo's
 `docs/R3I6NOS-PORT-PLAN.md` (organised like `docs/KLAMANSI-PORT.md`); `ROADMAP.md` section 9 tracks it here, and the NoCoGaMa repo's `ROADMAP.md` is the order of work.
 

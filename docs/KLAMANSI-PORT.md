@@ -1,6 +1,6 @@
 # KlamANSI on the R36S: the plan
 
-Status (2026-11-08): **built and tested headless; never run on a real R36S.** The code lives in the private KlamANSI repo (`r36s/`, its README has the detail);
+Status (2026-11-08): **built and tested headless, then run on a real R36S from 2026-11-09 (section 7: two device reports, 20 of 20).** The code lives in the private KlamANSI repo (`r36s/`, its README has the detail);
 this file is the plan and the decisions. Phases 1-5 below are done there: the QuickJS spike, the host, the controls, Files on the card and the package
 (`KlamANSI.deb`, installed by `deb_watcher` in a clean Debian 12 under Docker). What nobody has seen: the pad, the panel, a card, speed and memory. KlamANSI
 is the ansiapps text-mode drawing REPL (`~/Coding/klamansi`, private, proprietary, a paid native app with a free shareware web version). `ROADMAP.md`

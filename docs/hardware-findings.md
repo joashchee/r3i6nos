@@ -222,7 +222,7 @@ ran; only its first screen was missing.
 - USB: `/etc/asound.conf` played only on card 0. The stock kernel has `snd-usb-audio` built in (`modules.builtin`); whether the port gives
   a USB card at all is not known (the report did not list the cards then; it does now). The output now moves to a USB card while one is
   plugged in. **Untested on the unit.**
-- The volume keys work in Neumetik (the maintainer); which input device sends them is still unread.
+- The volume keys work in Neumetik (the maintainer). **The input device that sends them is `odroidgo3-keys`** (NoCoGaMa's device report, 2026-11-11, from `r3i6nos-sound`'s status: `volume keys: odroidgo3-keys`); the same report shows the software mixer controls `Volume` (10 of 0-20) and `Boost` made at boot.
 
 ## No sound at all: alsa-lib refused the Boost softvol (2026-11-10)
 

@@ -17,7 +17,7 @@
  * Frames are kept as the 64 x 24 cells (a run of equal screens is one record), the audio as 16-bit WAV, both in Demo/ while the
  * tour runs; the encode renders each cell screen to 640 x 480 and pipes it to ffmpeg (libx264 and AAC) with the WAV. The recorder
  * needs ffmpeg only at the end: without it the log says FAIL, the two files stay, and `r3_demo_encode(dir)` (the port's
- * --encode-demo) makes the video later on a computer that has it. R3I6NOS_FFMPEG names another ffmpeg (tests, a port's own build).
+ * --encode-demo) makes the video later on a computer that has it. The image's ffmpeg-min (`/usr/bin/ffmpeg`) is used first when it is there; R3I6NOS_FFMPEG names another ffmpeg (tests, a port's own build).
  *
  * Include r3i6nos_ansiapps.h and r3i6nos_report.h first. Define the POSIX/GNU feature macros before any system header. */
 #ifndef R3I6NOS_DEMO_H
@@ -448,9 +448,10 @@ static inline void r3_demo_caption(R3Demo *d, const char *hero, const char *fmt,
 static inline int r3_demo_find_ffmpeg(char *out, size_t cap) {
     const char *e = getenv("R3I6NOS_FFMPEG");
     if (e && *e) { snprintf(out, cap, "%s", e); return access(e, X_OK) == 0; }
+    /* the image's ffmpeg-min (/usr/bin/ffmpeg, tools/ffmpeg-min: exactly this encode, 5 MiB) is tried first, so the unit always uses it; a computer falls back to PATH */
     const char *path = getenv("PATH");
     char list[4096];
-    snprintf(list, sizeof list, "%s:/opt/homebrew/bin:/usr/local/bin:/usr/bin", path ? path : "");
+    snprintf(list, sizeof list, "/usr/bin:%s:/opt/homebrew/bin:/usr/local/bin", path ? path : "");
     for (char *save = NULL, *dir = strtok_r(list, ":", &save); dir; dir = strtok_r(NULL, ":", &save)) {
         snprintf(out, cap, "%s/ffmpeg", dir);
         if (access(out, X_OK) == 0) return 1;

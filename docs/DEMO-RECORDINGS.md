@@ -5,7 +5,7 @@ its menu has **Rec demo**: one action that runs the real app on the unit through
 saves **screenshots and a short video with sound** to a `Demo` folder. They are for the store page, the README and the maintainer's eyes. CLAUDE.md
 rule 11 makes this a rule.
 
-Status: **specified 2026-11-11; TinyNTT is the first port to have it** (2026-11-11, `theme/r3i6nos_demo.h`; ROADMAP section 18). Nothing here has run on a real R36S.
+Status: **specified 2026-11-11; TinyNTT is the first port to have it** (2026-11-11, `theme/r3i6nos_demo.h`; ROADMAP section 18). TinyNTT's has run on the unit (2026-11-11); no other port's has.
 
 ## What it makes
 
@@ -106,9 +106,7 @@ Rec demo owns the unit until it ends: the **whole power of the unit goes to this
 ## Encoding the video
 
 The frames (PNG) and the audio (WAV) are written to a temporary folder first; the encode then makes `demo-<timestamp>.mp4`; they stay in `Demo/` (as `demo-<timestamp>-frames.r3f` and `.wav`, until the next run clears them), and only the ffmpeg log is deleted. The encoder is
-`ffmpeg` (libx264 and AAC). **Open:** the Debian 12 arm64 image gets `/usr/bin/ffmpeg` from `tools/ffmpeg-min/` (ROADMAP section 20: the 5.3 MiB GPL build with exactly this encode in it, checked on a laptop VM, **not timed on the unit**, no image built with it yet), and the RK3326 has four Cortex-A35
-cores and 1 GB: whether ffmpeg is a dependency of each port's `.deb`, one shared package, or a step on the Mac (`scripts/` host tool run on the
-card) is decided by timing it on the unit. The rule does not change with the answer: **`Demo/demo-<timestamp>.mp4` is there when Rec demo says done**, or the
+`ffmpeg` (libx264 and AAC). **Decided 2026-11-11: use the image's ffmpeg-min where there is one.** The recorder looks for `/usr/bin/ffmpeg` first (the 5.3 MiB GPL build from `tools/ffmpeg-min/` with exactly this encode in it; ROADMAP section 20), then `PATH` (a computer). It is not a package dependency of any port. **Timed on the unit** (TinyNTT's report, 2026-11-11 21:14): a 53.3 s video recorded and encoded in 64.7 s on the four Cortex-A35 cores. The rule holds either way: **`Demo/demo-<timestamp>.mp4` is there when Rec demo says done**, or the
 log says FAIL with why, and the frames (`demo-frames.r3f`) and the audio (`demo.wav`) are left in `Demo/` so nothing is lost, and `--encode-demo DIR` on a computer with ffmpeg makes the video from them.
 
 ## Shared code
@@ -156,5 +154,5 @@ Ports still to add it to, in order of the roadmap: Neumetik, KlamANSI, Crunchy, 
 the IO Checker (r3i6nos's menu, being the system, has a Device report but no tour).
 
 **TinyNTT's first recording on a Mac (2026-11-11):** 16 screenshots, a 51-second video (H.264 640x480 30 fps, AAC, mean -23 dB), the demo song and the log, in
-about 2 seconds; two recordings are byte-identical in frames, audio and every PNG. Not run on the unit; an image built before `/usr/bin/ffmpeg` was added has none, so there the
+about 2 seconds; two recordings are byte-identical in frames, audio and every PNG. **Run on the unit** (2026-11-11 21:14, a card whose image has ffmpeg-min: 24 PASS, video made in 64.7 s, maintainer: it shows the app well). An image built before `/usr/bin/ffmpeg` was added has none, so there the
 video step fails in the log and `--encode-demo` finishes it on a computer; the kept frames and sound play in Commander either way.

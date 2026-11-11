@@ -1,6 +1,6 @@
 # Device reports: what an R36S port brings back for Claude
 
-Nothing in this repo has run on a real R36S until someone tries it there (CLAUDE.md rule 1), and the person trying it is not the one who writes
+Nothing in this repo is known to work on a real R36S until someone tries it there (CLAUDE.md rule 1), and the person trying it is not the one who writes
 the code. So every R36S port (an app or tool built for r3i6nos, in this repo or in its own) has a **device report**: one action on the unit that
 checks what can only be checked there, measures what can only be measured there, and writes the answers to **one plain text file on the games
 card**. The maintainer copies the file to a computer and gives it to Claude, which reads it and updates the port and the roadmaps from it.
