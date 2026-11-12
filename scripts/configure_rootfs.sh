@@ -98,6 +98,40 @@ else
     echo "[!] No minimal ffmpeg in $FFMPEG_BUILD: run scripts/build-ffmpeg-min.sh (the image will have no ffmpeg: Commander shows only Info for video, WebP, TIFF and PSD, and Rec demo cannot make its .mp4)" >&2
 fi
 
+# nttplay (ROADMAP section 27, built by scripts/build-nttplay.sh from the Neumetik repository): Neumetik's players as a command-line tool, so Commander plays
+# MIDI, the Tracker's formats and music as text the way it plays video through ffmpeg: `nttplay probe FILE`, `nttplay decode FILE ...`. It is always part of
+# the image: /usr/bin/nttplay, under the same R36S grant as the other ansiapps command-line ports (Composer, Painter, Animator: free to use on the R36S and to
+# pass on complete and unmodified, source stays proprietary), with the third-party NOTICE (the ported code its replayers carry) in /usr/share/nttplay, because
+# the trim below deletes every other file in /usr/share/doc; only `copyright` stays there, pointing at it.
+NTTPLAY_BUILD="${R3I6NOS_NTTPLAY_BUILD:-$REPO/build/nttplay}"
+if [ -f "$NTTPLAY_BUILD/nttplay" ]; then
+    mkdir -p "$ROOTFS/usr/bin" "$ROOTFS/usr/share/nttplay" "$ROOTFS/usr/share/doc/nttplay"
+    cp "$NTTPLAY_BUILD/nttplay" "$ROOTFS/usr/bin/nttplay"
+    chmod 755 "$ROOTFS/usr/bin/nttplay"
+    if [ -s "$NTTPLAY_BUILD/NOTICE" ]; then
+        cp "$NTTPLAY_BUILD/NOTICE" "$ROOTFS/usr/share/nttplay/NOTICE"
+        chmod 644 "$ROOTFS/usr/share/nttplay/NOTICE"
+    else
+        echo "[!] No NOTICE in $NTTPLAY_BUILD: nttplay carries ported third-party code whose licences must travel with it; run scripts/build-nttplay.sh" >&2
+    fi
+    NTT_SRC="$(cat "$NTTPLAY_BUILD/SOURCE" 2>/dev/null || echo "neumetik (commit not recorded)")"
+    cat > "$ROOTFS/usr/share/doc/nttplay/copyright" <<EOF
+/usr/bin/nttplay is Neumetik's players as a command-line tool (r36s/lib/src/bin/nttplay.rs of the Neumetik repository), built by scripts/build-nttplay.sh of
+https://github.com/joashchee/r3i6nos from: $NTT_SRC
+Copyright 2026 ansiapps. All rights reserved.
+
+ansiapps gives everyone, free of charge, the right to use this program on the R36S handheld (with r3i6nos or any other system) and to pass it on,
+complete and unmodified, free of charge. This grant covers this R36S program only: the Neumetik source code stays proprietary to ansiapps, and no right
+to copy, change or sell it, or to use its code in another product, is given. Music, modules and other files you play with it stay yours and under their
+own terms.
+
+Third-party code ported into Neumetik, with its licences, is listed in /usr/share/nttplay/NOTICE.
+EOF
+    chmod 644 "$ROOTFS/usr/share/doc/nttplay/copyright"
+else
+    echo "[!] No nttplay in $NTTPLAY_BUILD: run scripts/build-nttplay.sh (the image will have no nttplay: Commander cannot play MIDI, tracker modules or music written as text)" >&2
+fi
+
 # Mount points and places the boot scripts write to.
 mkdir -p "$ROOTFS"/{roms,roms2,boot,opt/love,opt/native_apps,opt/launchers/native}
 

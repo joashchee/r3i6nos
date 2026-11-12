@@ -97,6 +97,41 @@ jobs:
           path: ffmpeg-min.tar
           retention-days: 7
 
+  nttplay:
+    # nttplay (ROADMAP section 27): Neumetik's players as a command-line tool, always in the image so Commander plays MIDI, tracker modules and music as text.
+    # The code is the Neumetik repository's (ansiapps' own, proprietary), checked out beside this one; scripts/build-nttplay.sh builds it in Debian 12 arm64
+    # and runs it once. If that repository is private, the secret NEUMETIK_TOKEN (read access to it) is needed; without access this job fails and the image
+    # has no nttplay (configure_rootfs.sh says so). NOT RUN YET: this job has never been through GitHub.
+    runs-on: ${{ vars.R3I6NOS_ARM_RUNNER || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/checkout@v7
+        with:
+          repository: joashchee/neumetik
+          path: neumetik
+          token: ${{ secrets.NEUMETIK_TOKEN || github.token }}
+
+      - name: Emulation, only if this is not an arm64 runner
+        if: ${{ runner.arch != 'ARM64' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support
+
+      - name: Build and check (arm64, Debian 12)
+        run: scripts/build-nttplay.sh "$PWD/neumetik"
+
+      # A tar: upload-artifact zips and drops the executable bit.
+      - name: Pack
+        run: tar -C build -cf nttplay.tar nttplay
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: nttplay-arm64
+          path: nttplay.tar
+          retention-days: 7
+
   loveapps:
     # The LÖVE default apps, each built (checked, tested, packed) by its own reusable workflow, the same one its
     # app-<name>.yml uses; the firmware only bundles the .love files.
@@ -109,7 +144,7 @@ jobs:
       app: ${{ matrix.app }}
 
   rootfs:
-    needs: [love, native, loveapps, ffmpeg]
+    needs: [love, native, loveapps, ffmpeg, nttplay]
     # Build the rootfs with whatever runtimes were built, so a failing 12.0 does
     # not hide the rest. The run is still red: the love job failed.
     if: ${{ !cancelled() }}
@@ -144,6 +179,16 @@ jobs:
       - name: Unpack ffmpeg
         run: |
           if [ -f ffmpeg-min.tar ]; then tar -C build -xf ffmpeg-min.tar; ls -l build/ffmpeg-min; else echo "::warning::no ffmpeg-min artifact: the image will have no ffmpeg"; fi
+
+      - uses: actions/download-artifact@v8
+        with:
+          name: nttplay-arm64
+          path: .
+        continue-on-error: true   # a failed nttplay job must not hide the rest: the image then has no nttplay and configure_rootfs.sh says so
+
+      - name: Unpack nttplay
+        run: |
+          if [ -f nttplay.tar ]; then tar -C build -xf nttplay.tar; ls -l build/nttplay; else echo "::warning::no nttplay artifact: the image will have no nttplay"; fi
 
       - name: Unpack LÖVE
         run: |
@@ -197,6 +242,15 @@ jobs:
           $F -demuxers | grep -q psd_pipe
           sudo test -s "$R/usr/share/ffmpeg-min/GPL-2"
           sudo test -s "$R/usr/share/ffmpeg-min/NOTICE"
+
+      - name: Smoke test nttplay under qemu
+        # The binary in the rootfs runs against the rootfs's own libc: not that it keeps up on the unit.
+        if: ${{ hashFiles('build/nttplay/nttplay') != '' }}
+        run: |
+          R=build/rootfs
+          sudo qemu-aarch64-static -L $R $R/usr/bin/nttplay --version | grep -q '^nttplay '
+          sudo test -s "$R/usr/share/doc/nttplay/copyright"
+          sudo test -s "$R/usr/share/nttplay/NOTICE"
 
       - name: Sanity check the tree
         run: |

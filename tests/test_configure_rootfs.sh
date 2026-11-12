@@ -24,8 +24,9 @@ ln -s /lib/systemd/system/wpa_supplicant.service "$R/etc/systemd/system/multi-us
 ln -s /lib/systemd/system/wpa_supplicant.service "$R/etc/systemd/system/dbus-fi.w1.wpa_supplicant1.service"
 touch "$R/etc/ssh/ssh_host_ed25519_key" "$R/etc/ssh/ssh_host_ed25519_key.pub" "$R/etc/ssh/ssh_host_rsa_key" "$R/etc/ssh/sshd_config"
 for v in 11.5 12.0; do mkdir -p "$T/loveapps/Love $v"; python3 -I scripts/pack_love.py apps/io-checker-love "$T/loveapps/Love $v/IO_Checker.love" >/dev/null; done
+mkdir -p "$T/nttplay"; printf '#!/bin/sh\necho fake nttplay\n' > "$T/nttplay/nttplay"; echo "neumetik abc1234 2026-11-12" > "$T/nttplay/SOURCE"; echo "third-party notice" > "$T/nttplay/NOTICE"
 mkdir -p "$T/ffmpeg"; printf '#!/bin/sh\necho fake ffmpeg\n' > "$T/ffmpeg/ffmpeg"
-R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/native" R3I6NOS_LOVE_APPS_BUILD="$T/loveapps" R3I6NOS_FFMPEG_BUILD="$T/ffmpeg" scripts/configure_rootfs.sh "$R" >/dev/null
+R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/native" R3I6NOS_LOVE_APPS_BUILD="$T/loveapps" R3I6NOS_FFMPEG_BUILD="$T/ffmpeg" R3I6NOS_NTTPLAY_BUILD="$T/nttplay" scripts/configure_rootfs.sh "$R" >/dev/null
 
 [ -x "$R/opt/love/11.5/bin/love" ]              || fail "LÖVE 11.5 not installed"
 [ -x "$R/usr/bin/ffmpeg" ]                      || fail "the minimal ffmpeg is not installed executable"
@@ -33,6 +34,12 @@ R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/native" R3I6NOS_LOVE_APPS_
 # it is GPL, so what the licence asks ships with it, and survives the trim of /usr/share/doc
 [ -f "$R/usr/share/doc/ffmpeg-min/copyright" ]  || fail "ffmpeg's copyright file was trimmed away or never written"
 grep -q 'General Public License' "$R/usr/share/doc/ffmpeg-min/copyright" || fail "ffmpeg's copyright file does not name its licence"
+[ -x "$R/usr/bin/nttplay" ]                      || fail "nttplay is not installed executable"
+[ "$("$R/usr/bin/nttplay")" = "fake nttplay" ]   || fail "the installed nttplay is not the one built"
+grep -q 'abc1234' "$R/usr/share/doc/nttplay/copyright" || fail "nttplay's copyright file (kept by the doc trim) does not name the Neumetik commit"
+grep -q 'free of charge, the right to use this program on the R36S' "$R/usr/share/doc/nttplay/copyright" || fail "nttplay's copyright file does not carry the ansiapps R36S grant"
+grep -q 'source code stays proprietary' "$R/usr/share/doc/nttplay/copyright" || fail "nttplay's copyright file does not keep the source proprietary"
+[ -s "$R/usr/share/nttplay/NOTICE" ] || fail "nttplay's third-party NOTICE is not in the image"
 for f in NOTICE build.sh README.md; do [ -s "$R/usr/share/ffmpeg-min/$f" ] || fail "ffmpeg's $f (the source offer) is not in the image"; done
 grep -q 'f4fa066278f7a47feab316fef905f4db0d5e9b589451949740f83972b30901bd' "$R/usr/share/ffmpeg-min/NOTICE" || fail "NOTICE does not give the ffmpeg source's hash"
 if [ -f /usr/share/common-licenses/GPL-2 ]; then [ -s "$R/usr/share/ffmpeg-min/GPL-2" ] || fail "the GPL text is not in the image"; fi
@@ -102,11 +109,15 @@ done
 [ -f "$R/opt/loveos/defaults/native_deb/IO_Checker_Native.deb" ] || fail "default native deb not installed"
 [ "$(find "$R/opt/loveos/defaults" -type f ! -perm -444 | wc -l | tr -d ' ')" = 0 ] || fail "defaults must be world-readable"
 R2="$T/rootfs-no-native"; mkdir -p "$R2"
-R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/nothing-here" R3I6NOS_LOVE_APPS_BUILD="$T/nothing-here" R3I6NOS_FFMPEG_BUILD="$T/nothing-here" scripts/configure_rootfs.sh "$R2" >/dev/null 2>"$T/warn.txt" \
+R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/nothing-here" R3I6NOS_LOVE_APPS_BUILD="$T/nothing-here" R3I6NOS_FFMPEG_BUILD="$T/nothing-here" R3I6NOS_NTTPLAY_BUILD="$T/nothing-here" scripts/configure_rootfs.sh "$R2" >/dev/null 2>"$T/warn.txt" \
     || fail "a missing native app must be a warning, not an error"
 grep -q 'No native default app' "$T/warn.txt" || fail "no warning when the native app is missing"
 grep -q 'No LÖVE default app' "$T/warn.txt" || fail "no warning when the LÖVE app is missing"
 grep -q 'No minimal ffmpeg' "$T/warn.txt"   || fail "no warning when ffmpeg is missing"
+grep -q 'No nttplay' "$T/warn.txt"          || fail "no warning when nttplay is missing"
+[ ! -e "$R2/usr/bin/nttplay" ] || fail "phantom nttplay without a binary"
+[ ! -e "$R2/usr/share/doc/nttplay" ] || fail "phantom nttplay copyright without a binary"
+[ ! -e "$R2/usr/share/nttplay" ] || fail "phantom nttplay NOTICE without a binary"
 [ ! -e "$R2/usr/bin/ffmpeg" ] || fail "phantom ffmpeg without a binary"
 [ ! -e "$R2/usr/share/ffmpeg-min" ] || fail "phantom ffmpeg licence files without a binary"
 [ ! -e "$R2/opt/loveos/defaults/native_deb/IO_Checker_Native.deb" ] || fail "phantom native deb"
