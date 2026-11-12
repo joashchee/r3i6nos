@@ -110,6 +110,8 @@ Its sibling, **Rec demo** (`docs/DEMO-RECORDINGS.md`, CLAUDE.md rule 11), sits r
 | Neumetik | Neumetik repo `r36s/` | Start > Device report, `neumetik --report` | `/roms/Neumetik/r36s-report.txt` |
 | TinyNTT | TinyNTT repo `r36s/` | Files > Device report, `tinyntt --report` | `/roms/TinyNTT/r36s-report.txt` |
 | KlamANSI | KlamANSI repo `r36s/` | Start > Device report, `klamansi --report` | `/roms/KlamANSI/r36s-report.txt` |
+| Crunchy | Crunchy repo `r36s/` | Start > Device report, `crunchy --report` | `/roms/Crunchy/r36s-report.txt` |
+| Chordica | Chordica repo `r36s/` | Start > Device report, `chordica --report [SECONDS]` | `/roms/Chordica/r36s-report.txt` |
 | NoCoGaMa (device spike) | NoCoGaMa repo `spike/device/` | its Report page | `/roms/NoCoGaMa/r36s-report-11.5.txt` and `-12.0.txt` (one a runtime) |
 | IO Checker (the hardware: input, video, sound, cards; the native build also has the power section: idle on its list, the Motion pattern working, and the **usb sections**: devices, video out, MIDI, storage, network, keyboard, mouse, pads: what the OTG port brings, `docs/IO-CHECKER.md`) | `apps/io-checker-love/`, `apps/io-checker-native/` | its Device report item, or `io-checker-native --report` (headless: no power windows) | `/roms/IO_Checker/r36s-report-11.5.txt`, `-12.0.txt`, `-native.txt` (one a build) |
 | Composer, Painter, Animator | their repos' `r36s/` (the package from `tools/qjs-node/`) | Settings > Device reports, or `compose-report`, `sprites-report`, `animate-report` | `/roms/Composer/`, `/roms/Painter/`, `/roms/Animator/r36s-report.txt` |

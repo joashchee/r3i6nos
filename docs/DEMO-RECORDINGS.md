@@ -149,9 +149,13 @@ log says FAIL with why, and the frames (`demo-frames.r3f`) and the audio (`demo.
 | Port | Where it lives | How it is started | Folder |
 |---|---|---|---|
 | TinyNTT | TinyNTT repo `r36s/host/demo.h` | Files > Rec demo (checklist first), `tinyntt --rec-demo [--features LIST]` (and `--make-demo`, `--encode-demo`) | `/roms/TinyNTT/Demo/` |
+| KlamANSI | KlamANSI repo `r36s/host/recdemo.h` (the tour is `r36s/demo/tour.txt`, run by `host/demo.js` in a second QuickJS runtime on a drawing made in code) | Start > Rec demo (a checklist of six hero features first), `klamansi --rec-demo [--features a,b]` | `/roms/KlamANSI/Demo/` |
+| NoCoGaMa (LÖVE) | NoCoGaMa repo `app/demo/` (`rec.lua`, `tour.lua`, `heroes.lua`): its own recorder, since r3i6nos has none for LÖVE | Start > Rec demo (a checklist of eight hero features first), `love app --rec-demo [--features a,b]`, `--encode-demo DIR` | `/roms/NoCoGaMa/Demo/` |
 
-Ports still to add it to, in order of the roadmap: Neumetik, KlamANSI, Crunchy, Chordica, Composer, Painter, Animator, NoCoGaMa, Commander and
-the IO Checker (r3i6nos's menu, being the system, has a Device report but no tour).
+Ports still to add it to (checked in the repos 2026-11-12): Neumetik, Crunchy, Chordica, Composer, Painter, Animator, Commander and the IO Checker
+(r3i6nos's menu, being the system, has a Device report but no tour). The KlamANSI and NoCoGaMa rows come from those repos' own code and roadmaps (KlamANSI's
+Phase 10, NoCoGaMa's rule 11; NoCoGaMa's first recording on the unit, 2026-11-11 22:27, ran the whole tour in 87.8 s); this repo has not checked
+either against every point of rule 11. Any recording that writes the lock and status files in `/run/loveos/demo/` (both ports do) is seen by the menu (Settings > Rec demos shows its progress) and by the helpers (the report, the update check and the network helper refuse to run while it holds the lock): `menu/demos.lua`, `r3i6nos-report`, `r3i6nos-about`, `r3i6nos-net`. NoCoGaMa's roadmap still says the menu and helpers do not read its lock; that is out of date.
 
 **TinyNTT's first recording on a Mac (2026-11-11):** 16 screenshots, a 51-second video (H.264 640x480 30 fps, AAC, mean -23 dB), the demo song and the log, in
 about 2 seconds; two recordings are byte-identical in frames, audio and every PNG. **Run on the unit** (2026-11-11 21:14, a card whose image has ffmpeg-min: 24 PASS, video made in 64.7 s, maintainer: it shows the app well). An image built before `/usr/bin/ffmpeg` was added has none, so there the
