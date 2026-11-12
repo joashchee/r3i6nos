@@ -8,6 +8,13 @@ system), or `r3i6nos-report`, now has a `== power ==` section.
 
 **Every port, not only this system (CLAUDE.md rule 14):** each R36S port's device report has a `== power ==` section built the same way (its own CPU, wake-ups and memory idle and working, the draw in mW on battery, goals, what to cut first); this file's grammar and goals are the reference, and `power_section` in `r3i6nos-report` the code. Shared code for native, tool and LÖVE ports: ROADMAP section 23.
 
+## In a tool's Rec demo (`tools/qjs-node/demo.py`, tested by `tests/test_tool_demo.py`; written 2026-11-12)
+
+Every tool's `<command>-demo` writes a `== power ==` section in `rec-demo.txt` with the same lines as the report's, for three phases of the recording: **the tool's commands**,
+**drawing the frames** (this Python process) and **the encode** (ffmpeg's rusage), each with CPU seconds, % of a core, wake-ups a second, peak memory and the draw in mW, then
+the busiest other processes, the energy over the idle baseline (taken first, 5 s, only on battery), the time left, a wake-up goal of at most 200 a second per phase of a second
+or more and a "cut first" line. **Untested on the unit** (laptop and Debian 12 arm64 only): there are no figures yet; the goals are guesses.
+
 ## In a command-line tool (`tools/qjs-node/report.py`, tested by `tests/test_tool_report.py`)
 
 Every tool's `<command>-report` (generated from `report.py` by `package-tool.sh`, so every tool gets it after a rebuild) writes a `== power ==` section after

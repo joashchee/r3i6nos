@@ -131,7 +131,44 @@ log says FAIL with why, and the frames (`demo-frames.r3f`) and the audio (`demo.
   feature from a known place (TinyNTT's `rc_panel`, `rc_track`, `rc_play`, `rc_stop`), so a feature records alone.
 - **Settings > Rec demos** (`menu/demos.lua`): the tools' `<command>-demo` programs (listed like the reports), a start, and a "Recording now" page with the
   progress of any recording, an app's own too.
-- **Command-line tools** (`tools/qjs-node/demo.py`, `<command>-demo` in `package-tool.sh`) and **LÖVE**: not written yet (ROADMAP section 18).
+- **Command-line tools** (`tools/qjs-node/demo.py`, baked into each tool's package as `<command>-demo` by `package-tool.sh`; tests `tests/test_tool_demo.py`, in
+  `scripts/check.sh`; written 2026-11-12): see "Command-line tools" below. **LÖVE:** each LÖVE port has its own recorder (NoCoGaMa's `app/demo/`); no shared one yet.
+
+## Command-line tools (`tools/qjs-node/demo.py`)
+
+A tool has no screen, so its `<command>-demo` **draws the commands and what they print on the theme's 64x24 screen** (the IBM VGA 8x16 font scaled to 10x20, the top
+bar, a framed display, the three-row command line with the caption and the step) and records that: it opens on the splash (rule 12: the app's name, tagline,
+a progress bar and `v<version> <commit> <date>`), then for each step types the command, shows its output (stdout, stderr in red, the exit status, the files it made
+with their sizes), and ends back on the splash. Pure Python 3 standard library: PNGs are made by hand (4-bit indexed, zlib), a screen's rows and glyph strips are cached
+so a unit can draw a minute of video in about a second.
+
+- **The tour is the tool's own `commands.txt`**, the list the device report times, with directives in comments (the report and `compare.py` ignore them):
+  `#@hero id: label` (the hero features, in the README's list), `#@feature id` (the commands that follow belong to it; `#@feature -` ends it), `#@say caption` (the next
+  command's caption, in the log and on the screen's reply row). `!SLOW` commands and commands outside a feature are not played. **A feature's commands must work alone**
+  (an unticked feature's commands do not run), so one that reads a file draws it first; the self-test runs every feature alone. `package-tool.sh` makes `<command>-demo`
+  only when the list has `#@hero` lines.
+- **Checklist:** the menu starts a tool's demo without a dialog (`menu/demos.lua`: `<command>-demo --from-settings --quiet`), so every feature is ticked; over SSH
+  `--features a,b` picks, and `--no-video` writes the frames and the sound only (tests, the packaging smoke test).
+- **Deterministic:** the tool's commands run once, off the frame clock, and the screens are drawn from what they printed and held a fixed number of frames, so two runs make
+  the same screenshots, frames and sound whatever the unit's speed (`tests/test_tool_demo.py` records twice and compares every byte). A tour over 90 s is re-planned with
+  shorter holds; if it still does not fit the log says `FAIL video length`.
+- **Sound:** a `.wav` a command writes (16-bit PCM, any rate, mono or stereo) is mixed into the video's track at the moment its step shows; a tool with none gets a silent
+  track and `SKIP audio`.
+- **Files:** `01-<name>.png` ... (the splash, one per step's output, the end), `demo-<timestamp>.mp4` (ffmpeg: `/usr/bin/ffmpeg`, then `PATH`; without it the log says FAIL and the
+  frames, `demo-<timestamp>-frames.pngs`, and the sound are kept for `ffmpeg` on a computer), `demo-files/` (copies of the files the tour made, up to 40 of at most 2 MB), `rec-demo.txt`.
+  An earlier run's files go, every earlier video stays.
+- **Locked out:** the lock, `running`, `progress` and `done` files in `/run/loveos/demo/` (a live holder: exit 75, a dead one's lock is taken over). Cancel: SIGTERM or SIGINT, a
+  hot-plug failure between steps (the log has `FAIL hotplug failure` for each, then `FAIL cancelled`, no video), or **Select+Start held for a second on the pad read from
+  `/dev/input/js0`, whose button numbers (12 and 13) are the IO Checker's less one and are untested on the unit**. No toast is drawn: there is no screen of the app's own.
+- **The log** (`rec-demo.txt`) has `build`, `runtime` (the tool, python, kernel, ffmpeg), `shows`, `tour`, `steps` (each command's exit, seconds, peak memory, lines and files),
+  `files` (the checks), `timing`, `video`, `chapters`, `unit` (memory, temperature, load and battery at the start and the end) and **`power`** (rule 14): the battery, the idle
+  draw taken first, then three phases measured the way the device report measures a command (CPU seconds, % of a core, wake-ups a second, peak memory, the draw in mW):
+  **the tool's commands, drawing the frames, and the encode** (ffmpeg's own rusage), the busiest other processes, the total energy over idle, the time left, a
+  wake-up goal of at most 200 a second per phase of a second or more, and a "cut first" line. It reads `report.py`'s readers from the `<command>-report` installed beside it.
+- **Credit:** the font is CC BY-SA 4.0, so the package's NOTICE carries its README and licence when the demo is built in.
+
+**Not done / untested:** nothing has run on a unit (a Mac and Debian 12 arm64 under Docker only; the packaging smoke test runs the whole tour with `--no-video`); the video with the
+real ffmpeg is tested on a Mac only. The `.r3f` frames Commander plays are not written by this recorder (it keeps the PNG stream instead).
 
 ## What a port must do (the checklist)
 
@@ -152,7 +189,9 @@ log says FAIL with why, and the frames (`demo-frames.r3f`) and the audio (`demo.
 | KlamANSI | KlamANSI repo `r36s/host/recdemo.h` (the tour is `r36s/demo/tour.txt`, run by `host/demo.js` in a second QuickJS runtime on a drawing made in code) | Start > Rec demo (a checklist of six hero features first), `klamansi --rec-demo [--features a,b]` | `/roms/KlamANSI/Demo/` |
 | NoCoGaMa (LÖVE) | NoCoGaMa repo `app/demo/` (`rec.lua`, `tour.lua`, `heroes.lua`): its own recorder, since r3i6nos has none for LÖVE | Start > Rec demo (a checklist of eight hero features first), `love app --rec-demo [--features a,b]`, `--encode-demo DIR` | `/roms/NoCoGaMa/Demo/` |
 
-Ports still to add it to (checked in the repos 2026-11-12): Neumetik, Crunchy, Chordica, Composer, Painter, Animator, Commander and the IO Checker
+| Composer, Painter (command-line tools) | r3i6nos `tools/qjs-node/demo.py`, tours in each repo's `r36s/commands.txt` (2026-11-12; Animator's list has none yet) | `compose-demo`, `sprites-demo` (`--features a,b`, `--no-video`), Settings > Rec demos | `/roms/Composer/Demo/`, `/roms/Painter/Demo/` |
+
+Ports still to add it to (checked in the repos 2026-11-12): Neumetik, Crunchy, Chordica, Animator, Commander and the IO Checker
 (r3i6nos's menu, being the system, has a Device report but no tour). The KlamANSI and NoCoGaMa rows come from those repos' own code and roadmaps (KlamANSI's
 Phase 10, NoCoGaMa's rule 11; NoCoGaMa's first recording on the unit, 2026-11-11 22:27, ran the whole tour in 87.8 s); this repo has not checked
 either against every point of rule 11. Any recording that writes the lock and status files in `/run/loveos/demo/` (both ports do) is seen by the menu (Settings > Rec demos shows its progress) and by the helpers (the report, the update check and the network helper refuse to run while it holds the lock): `menu/demos.lua`, `r3i6nos-report`, `r3i6nos-about`, `r3i6nos-net`. NoCoGaMa's roadmap still says the menu and helpers do not read its lock; that is out of date.

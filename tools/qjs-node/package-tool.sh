@@ -27,7 +27,7 @@ grep -q '^12' /etc/debian_version 2>/dev/null || die "needs Debian 12 (Bookworm)
 
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
-pkgs="ca-certificates build-essential nodejs dpkg-dev file xz-utils python3"
+pkgs="ca-certificates build-essential nodejs dpkg-dev file xz-utils python3 git"
 [ -n "$SMOKE" ] && [ "$(uname -m)" != aarch64 ] && pkgs="$pkgs qemu-user-static"
 # shellcheck disable=SC2086  # a list of package names
 apt-get install -y -qq --no-install-recommends $pkgs >/dev/null
@@ -55,7 +55,23 @@ sed -e "s|@TOOL@|$NAME|; s|@APP@|$APP_NAME|; s|@VERSION@|$VERSION|; s|@PACKAGE@|
 chmod 0755 "$OUT/bin/$NAME-report"
 share=""
 if [ -n "$COMMANDS" ] && [ -f "$APP/$COMMANDS" ]; then cp "$APP/$COMMANDS" "$OUT/commands.txt"; share="$OUT/commands.txt"; fi
-MAKE_DEB_SHARE="$share" "$HERE/make-deb.sh" "$OUT/$NAME.deb" "$PKG" "$VERSION" "$DESC" "$OUT/copyright" "$OUT/NOTICE" "$OUT/bin/$NAME" "$OUT/bin/$NAME-report"
+# The Rec demo (docs/DEMO-RECORDINGS.md): <command>-demo, with the app's values and the font baked in. Only when the command list has `#@hero` lines (the hero
+# features and the captions; see the header of demo.py). The splash's version line is the build: the commit and its date (TOOL_COMMIT / TOOL_DATE override).
+demo=""
+if [ -n "$share" ] && grep -q '^#@hero ' "$APP/$COMMANDS"; then
+    commit="${TOOL_COMMIT:-}"; cdate="${TOOL_DATE:-}"
+    if [ -z "$commit" ] && command -v git >/dev/null && git -c safe.directory='*' -C "$APP" rev-parse --git-dir >/dev/null 2>&1; then
+        commit="$(git -c safe.directory='*' -C "$APP" rev-parse --short HEAD)"
+        [ -z "$(git -c safe.directory='*' -C "$APP" status --porcelain 2>/dev/null)" ] || commit="$commit+dirty"
+        cdate="$(git -c safe.directory='*' -C "$APP" log -1 --format=%cs)"
+    fi
+    python3 "$HERE/demo.py" --bake "$OUT/bin/$NAME-demo" "$NAME" "$APP_NAME" "$VERSION" "$PKG" "${commit:-nogit}" "${cdate:-unknown}" "${DESC#*: }" "$R3/theme/r3i6nos_vga8x16.h"
+    demo="$OUT/bin/$NAME-demo"
+    # the font is CC BY-SA 4.0: its credit, changes and licence travel with the package (the demo draws with it)
+    { printf -- '\n---- IBM VGA 8x16 font (the Rec demo draws with it; CC BY-SA 4.0) ----\n\n'; cat "$R3/theme/font/README.txt"; printf '\n\n'; cat "$R3/theme/font/LICENSE.TXT"; } >> "$OUT/NOTICE"
+fi
+# shellcheck disable=SC2086  # $demo is empty or one path
+MAKE_DEB_SHARE="$share" "$HERE/make-deb.sh" "$OUT/$NAME.deb" "$PKG" "$VERSION" "$DESC" "$OUT/copyright" "$OUT/NOTICE" "$OUT/bin/$NAME" "$OUT/bin/$NAME-report" $demo
 
 if [ -n "$SMOKE" ]; then
     T="$(mktemp -d)"; trap 'rm -rf "$T"' EXIT
@@ -76,6 +92,14 @@ if [ -n "$SMOKE" ]; then
     rep="$T/roms/$APP_NAME/r36s-report.txt"
     [ "$(tail -1 "$rep" 2>/dev/null)" = end ] || die "$NAME-report wrote no whole report at $rep"
     echo "[*] $NAME-report: $(grep -A1 '^== summary ==' "$rep" | tail -1) ($(grep -c '^PASS \|^FAIL ' "$rep") checks)"
+    if [ -n "$demo" ]; then
+        [ -x "$T/bin/$NAME-demo" ] || die "deb_watcher did not install $NAME-demo"
+        R3I6NOS_ROMS="$T/roms" R3I6NOS_RUN="$T/run" R3I6NOS_REPORT_POWER_S=0 "$T/bin/$NAME-demo" --quiet --no-video || die "$NAME-demo failed"
+        drec="$T/roms/$APP_NAME/Demo/rec-demo.txt"
+        [ "$(tail -1 "$drec" 2>/dev/null)" = end ] || die "$NAME-demo wrote no whole log at $drec"
+        ls "$T/roms/$APP_NAME/Demo"/01-*.png >/dev/null 2>&1 || die "$NAME-demo made no screenshot"
+        echo "[*] $NAME-demo (no video): $(grep -A1 '^== summary ==' "$drec" | tail -1), $(find "$T/roms/$APP_NAME/Demo" -maxdepth 1 -name '*.png' | wc -l | tr -d ' ') screenshots"
+    fi
     echo "package-tool: smoke ok"
 fi
 echo "package-tool: $OUT/$NAME.deb"
