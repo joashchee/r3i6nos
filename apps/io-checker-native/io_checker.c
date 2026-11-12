@@ -1480,6 +1480,41 @@ static void report_usb(App *a, R3Report *r) {
     if (usb_has_billboard(a) && !external) r3_report_line(r, R3_INFO, "billboard", "%s; a USB 2.0 DisplayLink adapter is the kind that could work", BILLBOARD_WHY);
     if (a->displays >= 0) r3_report_line(r, R3_INFO, "SDL displays", "%d", a->displays);
 
+    /* DisplayLink (USB video): the four things it needs, asked in order (docs/DISPLAYLINK-ADAPTERS.md). A fact that is missing and that nothing can change
+     * without a rebuilt kernel is a FAIL once an adapter is plugged in (it cannot work) and INFO before (nothing plugged in is never a FAIL); one that
+     * depends on an adapter being plugged in is SKIP until it is. */
+    r3_report_section(r, "usb displaylink");
+    UioUdl ud;
+    uio_udl_probe(&ud, a->usb_dev, a->n_dev);
+    if (ud.adapter) r3_report_line(r, R3_INFO, "adapter", "%s %s (DisplayLink, vendor 17e9)", ud.adapter_name, ud.adapter_product);
+    else r3_report_line(r, R3_SKIP, "adapter", "no DisplayLink adapter plugged in (USB vendor 17e9): the checks below read the kernel only");
+    if (ud.loaded) r3_report_line(r, R3_PASS, "udl loaded", "%s", ud.loaded_how);
+    else if (ud.adapter) r3_report_line(r, R3_FAIL, "udl loaded", "an adapter is plugged in and the udl driver is not in the running kernel (kernel %s)", ud.release);
+    else r3_report_line(r, R3_SKIP, "udl loaded", "not loaded now: a module loads when an adapter is plugged in, so this says nothing until one is (kernel %s)", ud.release);
+    int builtin_cfg = !strcmp(ud.cfg_drm, "y");
+    const char *miss = ud.adapter ? R3_FAIL : R3_INFO;
+    if (ud.file) r3_report_line(r, R3_PASS, "udl module file", "%s", ud.file_how);
+    else if (builtin_cfg || (ud.loaded && !strcmp(ud.loaded_how, "built in"))) r3_report_line(r, R3_PASS, "udl module file", "none needed: udl is built into the kernel");
+    else r3_report_line(r, miss, "udl module file", "no udl.ko under /lib/modules/%s and the kernel does not list it as built in: the kernel cannot load it (build it out of tree against the vendor kernel)", ud.release);
+    if (!ud.cfg_read) r3_report_line(r, R3_SKIP, "kernel config DRM_UDL", "no kernel config could be read (/proc/config.gz, /boot/config-%s, the build tree's .config)", ud.release);
+    else if (!strcmp(ud.cfg_drm, "y") || !strcmp(ud.cfg_drm, "m"))
+        r3_report_line(r, R3_PASS, "kernel config DRM_UDL", "CONFIG_DRM_UDL=%s (%s)", ud.cfg_drm, ud.cfg_src);
+    else if (!ud.cfg_drm[0]) r3_report_line(r, miss, "kernel config DRM_UDL", "CONFIG_DRM_UDL is not in the config (%s): the kernel's DRM has no udl driver", ud.cfg_src);
+    else r3_report_line(r, miss, "kernel config DRM_UDL", "CONFIG_DRM_UDL is %s (%s): the kernel was built without the udl driver", ud.cfg_drm, ud.cfg_src);
+    if (ud.cfg_read) r3_report_line(r, R3_INFO, "kernel config FB_UDL", "%s (the older framebuffer driver for the same chips)", ud.cfg_fb[0] ? ud.cfg_fb : "not in the config");
+    if (ud.drm_udl) r3_report_line(r, R3_PASS, "drm device", "%s is behind USB and bound to udl: plugging the adapter in made a video card", ud.drm_name);
+    else if (ud.drm_usb) r3_report_line(r, R3_INFO, "drm device", "%s is behind USB but not bound to udl (another adapter's driver)", ud.drm_name);
+    else if (ud.adapter) r3_report_line(r, R3_FAIL, "drm device", "an adapter is plugged in and no DRM card appeared behind USB (/sys/class/drm): the driver did not bind to it");
+    else r3_report_line(r, R3_SKIP, "drm device", "no DRM card behind USB: plug a DisplayLink adapter in and run again");
+    {
+        const char *why = !ud.cfg_read ? "read the kernel config first" :
+                          (strcmp(ud.cfg_drm, "y") && strcmp(ud.cfg_drm, "m")) ? "the kernel has no udl: it needs a kernel built with CONFIG_DRM_UDL, or the module built out of tree" :
+                          !ud.file && strcmp(ud.cfg_drm, "y") ? "the config has udl as a module but no udl.ko is on this card" :
+                          !ud.adapter ? "everything the kernel needs is there: plug a DisplayLink adapter in and run again" :
+                          ud.drm_udl ? "working: a DisplayLink adapter made a video card" : "the adapter is plugged in and no card appeared: read the kernel log";
+        r3_report_line(r, R3_INFO, "udl verdict", "%s", why);
+    }
+
     r3_report_section(r, "usb midi");
     if (!a->n_midi) r3_report_line(r, R3_SKIP, "ports", "no MIDI port: nothing USB MIDI is plugged in, or the kernel has no USB MIDI driver");
     for (int i = 0; i < a->n_midi; i++) {
@@ -2074,6 +2109,12 @@ static void selftest_usb(void) {
     setenv("R3I6NOS_SYS", sysd, 1);
     setenv("R3I6NOS_PROC", procd, 1);
     setenv("R3I6NOS_DEV", devd, 1);
+    char modsd[PATH_MAX + 16], bootd[PATH_MAX + 16];
+    snprintf(modsd, sizeof modsd, "%s/lib/modules", root);
+    snprintf(bootd, sizeof bootd, "%s/boot", root);
+    setenv("R3I6NOS_MODULES", modsd, 1);
+    setenv("R3I6NOS_BOOT", bootd, 1);
+    setenv("R3I6NOS_KERNEL_RELEASE", "4.4.189", 1);
 
     /* USB devices: a keyboard, a MIDI keyboard (audio + MIDI), a hub, a device the kernel has no driver for, Ethernet, a pad, a stick */
     ut_dir(root, "sys/bus/usb/devices/usb1");
@@ -2084,6 +2125,8 @@ static void selftest_usb(void) {
     ut_usb_iface(root, "1-2", "1-2:1.1", "01", "03", "00", "snd-usb-audio");
     ut_usb_dev(root, "1-3", "05e3", "0610", "USB2.0 Hub", "480");
     ut_usb_iface(root, "1-3", "1-3:1.0", "09", "00", "01", "hub");
+    ut_usb_dev(root, "1-10", "17e9", "0141", "USB Graphics Adapter", "480");   /* a DisplayLink adapter: vendor 17e9, its interface bound to udl */
+    ut_usb_iface(root, "1-10", "1-10:1.0", "ff", "00", "00", "udl");
     ut_usb_dev(root, "1-4", "dead", "beef", "Mystery Gadget", "480");
     ut_usb_iface(root, "1-4", "1-4:1.0", "ff", "00", "00", NULL);
     ut_usb_dev(root, "1-5", "0b95", "1790", "USB Ethernet", "480");
@@ -2105,6 +2148,16 @@ static void selftest_usb(void) {
     ut_dir(root, "sys/devices/usb1/1-6/drm");
     ut_link(root, "sys/class/drm/card0/device", "sys/devices/platform/ff400000.gpu");
     ut_link(root, "sys/class/drm/card1/device", "sys/devices/usb1/1-6/drm");
+    ut_dir(root, "sys/bus/usb/drivers/udl");
+    ut_link(root, "sys/devices/usb1/1-6/drm/driver", "sys/bus/usb/drivers/udl");              /* the card behind USB is bound to udl */
+    ut_file(root, "proc/modules", "snd_usb_audio 90112 1 - Live 0x0\nudl 20480 0 - Live 0x0\n");
+    ut_file(root, "lib/modules/4.4.189/kernel/drivers/gpu/drm/udl/udl.ko", "ELF\n");
+    ut_file(root, "proc/config.txt", "CONFIG_DRM=y\nCONFIG_DRM_UDL=m\n# CONFIG_FB_UDL is not set\n");
+    {
+        char gz[PATH_MAX * 2 + 64];
+        snprintf(gz, sizeof gz, "gzip -c '%s/proc/config.txt' > '%s/proc/config.gz'", root, root);
+        CHECK(system(gz) == 0, "usb: a gzipped kernel config for the fixture");
+    }
     /* storage: a stick on USB (mounted, with a space in the path) and an SD card that is not USB */
     ut_file(root, "sys/devices/usb1/1-7/host6/target6:0:0/6:0:0:0/vendor", "SanDisk \n");
     ut_file(root, "sys/devices/usb1/1-7/host6/target6:0:0/6:0:0:0/model", "Ultra\n");
@@ -2150,7 +2203,7 @@ static void selftest_usb(void) {
     app_init(u);
     usb_scan(u, 0);
     /* every parser */
-    CHECK(u->n_dev == 8, "usb: eight devices (the root hub and the interfaces are not devices)");
+    CHECK(u->n_dev == 9, "usb: nine devices (the root hub and the interfaces are not devices)");
     const UioDev *d = ut_find(u, "1-1");
     CHECK(d && !strcmp(d->kinds, "keyboard") && !strcmp(d->drivers, "usbhid") && !strcmp(d->vidpid, "046d:c31c") && !strcmp(d->speed, "12") && !strcmp(d->product, "USB Keyboard"), "usb: the keyboard");
     d = ut_find(u, "1-2");
@@ -2202,10 +2255,10 @@ static void selftest_usb(void) {
     u->page = P_USB;
     R3Screen sc;
     compose(u, &sc, 0);
-    CHECK(screen_has(&sc, "USB and OTG") && screen_has(&sc, "Game controllers") && screen_has(&sc, "8 found") && screen_has(&sc, "1 connected"), "usb: the list shows what was found");
+    CHECK(screen_has(&sc, "USB and OTG") && screen_has(&sc, "Game controllers") && screen_has(&sc, "9 found") && screen_has(&sc, "1 connected"), "usb: the list shows what was found");
     u->page = P_USBSUB;
     u->usb_sub = U_DEVICES; compose(u, &sc, 0);
-    CHECK(u->n_rows == 8 && ut_rows_have(u, "NO DRIVER") && ut_rows_have(u, "Mystery Gadget") && screen_has(&sc, "USB Keyboard"), "usb: eight device rows, the one with no driver says so");
+    CHECK(u->n_rows == 9 && ut_rows_have(u, "NO DRIVER") && ut_rows_have(u, "Mystery Gadget") && screen_has(&sc, "USB Keyboard"), "usb: nine device rows, the one with no driver says so");
     u->usb_sub = U_VIDEO; compose(u, &sc, 0);
     CHECK(u->n_rows == 4 && ut_rows_have(u, "A dock asked for video") && ut_rows_have(u, "connected 1920x1080") && ut_rows_have(u, "(USB adapter)"), "usb: video rows");
     u->usb_sub = U_STORAGE; compose(u, &sc, 0);
@@ -2344,9 +2397,12 @@ static void selftest_usb(void) {
     text[got] = 0;
     if (rf) fclose(rf);
     const char *want[] = {
-        "== usb devices ==", "INFO devices: 8 on USB", "INFO device 1-1: USB Keyboard (046d:c31c), 12 Mb/s: keyboard; drivers: usbhid",
+        "== usb devices ==", "INFO devices: 9 on USB", "INFO device 1-1: USB Keyboard (046d:c31c), 12 Mb/s: keyboard; drivers: usbhid",
         "FAIL driver 1-4: 1 of 1 interface(s) of Mystery Gadget have no driver",
         "== usb video out ==", "INFO connector DSI-1: connected, 640x480 (this unit's screen)", "PASS external display: connected on DVI-I-1, first mode 1920x1080",
+        "== usb displaylink ==", "INFO adapter: 1-10 USB Graphics Adapter (DisplayLink, vendor 17e9)", "PASS udl loaded: module loaded",
+        "PASS udl module file: ", "PASS kernel config DRM_UDL: CONFIG_DRM_UDL=m", "INFO kernel config FB_UDL: not set", "PASS drm device: card1 is behind USB and bound to udl",
+        "INFO udl verdict: working: a DisplayLink adapter made a video card",
         "== usb midi ==", "PASS Launchkey opens: ", "PASS messages: 2 in, 1 out",
         "== usb storage ==", "INFO billboard 1-9: USB 2.0 BILLBOARD: a USB-C dock is asking for video", "SKIP sdb mounted: no media in it", "INFO disk sda: SanDisk Ultra, 8.0 GB", "PASS sda mounted: sda1 on /media/My Stick (vfat)",
         "== usb network ==", "PASS eth1: Ethernet (USB): link up, 1000 Mb/s", "INFO wlan0: Wi-Fi (USB), down",
@@ -2359,11 +2415,41 @@ static void selftest_usb(void) {
         snprintf(m, sizeof m, "usb report says: %s", want[i]);
         CHECK(strstr(text, want[i]) != NULL, m);
     }
+    /* DisplayLink probes against other kernels: built in (modules.builtin and a plain /boot config), udl off, and nothing readable at all */
+    {
+        char none[PATH_MAX + 16], mods2[PATH_MAX + 32], boot2[PATH_MAX + 16];
+        snprintf(none, sizeof none, "%s/none", root);
+        snprintf(mods2, sizeof mods2, "%s/mods2", root);
+        snprintf(boot2, sizeof boot2, "%s/boot2", root);
+        ut_file(root, "mods2/4.4.189/modules.builtin", "kernel/drivers/gpu/drm/drm.ko\nkernel/drivers/gpu/drm/udl/udl.ko\n");
+        ut_file(root, "boot2/config-4.4.189", "CONFIG_DRM_UDL=y\nCONFIG_FB_UDL=m\n");
+        setenv("R3I6NOS_PROC", none, 1); setenv("R3I6NOS_SYS", none, 1); setenv("R3I6NOS_MODULES", mods2, 1); setenv("R3I6NOS_BOOT", boot2, 1);
+        UioUdl bu;
+        uio_udl_probe(&bu, NULL, 0);
+        CHECK(!bu.loaded && bu.file && strstr(bu.file_how, "built in") && !strcmp(bu.cfg_drm, "y") && !strcmp(bu.cfg_fb, "m") && bu.cfg_read && strstr(bu.cfg_src, "boot2/config-4.4.189"),
+              "udl: built in (modules.builtin, CONFIG_DRM_UDL=y from /boot), not loaded here, the framebuffer driver a module");
+        ut_file(root, "boot2/config-4.4.189", "CONFIG_DRM=y\n# CONFIG_DRM_UDL is not set\n");
+        uio_udl_probe(&bu, NULL, 0);
+        CHECK(!strcmp(bu.cfg_drm, "not set") && !bu.cfg_fb[0] && bu.cfg_read, "udl: a config with udl switched off says so");
+        ut_file(root, "boot2/config-4.4.189", "CONFIG_DRM=y\n");
+        uio_udl_probe(&bu, NULL, 0);
+        CHECK(bu.cfg_read && !bu.cfg_drm[0], "udl: a config that never mentions udl reads as not there");
+        setenv("R3I6NOS_MODULES", none, 1); setenv("R3I6NOS_BOOT", none, 1);
+        uio_udl_probe(&bu, NULL, 0);
+        CHECK(!bu.loaded && !bu.file && !bu.cfg_read && !bu.adapter && bu.drm_usb == 0, "udl: nothing readable: not loaded, no file, no config, no adapter, no card");
+        UioDev dl;
+        memset(&dl, 0, sizeof dl);
+        snprintf(dl.name, sizeof dl.name, "1-2");
+        snprintf(dl.vidpid, sizeof dl.vidpid, "17e9:4301");
+        snprintf(dl.product, sizeof dl.product, "DL-165");
+        uio_udl_probe(&bu, &dl, 1);
+        CHECK(bu.adapter && !strcmp(bu.adapter_product, "DL-165") && !bu.drm_udl, "udl: an adapter plugged in and no card behind it is told apart");
+    }
     /* nothing plugged in: every section SKIPs, none FAILs */
     unsetenv("R3I6NOS_SYS"); unsetenv("R3I6NOS_PROC"); unsetenv("R3I6NOS_DEV");
     char empty[PATH_MAX + 16];
     snprintf(empty, sizeof empty, "%s/empty", root);
-    setenv("R3I6NOS_SYS", empty, 1); setenv("R3I6NOS_PROC", empty, 1); setenv("R3I6NOS_DEV", empty, 1);
+    setenv("R3I6NOS_SYS", empty, 1); setenv("R3I6NOS_PROC", empty, 1); setenv("R3I6NOS_DEV", empty, 1); setenv("R3I6NOS_MODULES", empty, 1); setenv("R3I6NOS_BOOT", empty, 1);
     App *z = calloc(1, sizeof(App));
     if (z) {
         app_init(z);

@@ -9,6 +9,8 @@
  *   uio_nets          network adapters: Ethernet and Wi-Fi, link state, speed, address, bytes
  *   uio_midi_ports    ALSA raw MIDI ports (/dev/snd/midiC*D*), with the card's name and whether it is on USB
  *   uio_inputs        keyboards, mice and pads the kernel has made input devices for (/proc/bus/input/devices), and whether they are USB
+ *   uio_udl_probe     whether DisplayLink adapters (USB video) can work: the kernel's udl driver loaded, its module file on disk, its option in the
+ *                     kernel's config, a DisplayLink adapter plugged in, and a DRM card behind USB (docs/DISPLAYLINK-ADAPTERS.md)
  * MIT, like the rest of this app's source.
  */
 #ifndef R3_USB_IO_H
@@ -160,6 +162,7 @@ static inline const char *uio_iface_kind(unsigned cls, unsigned sub, unsigned pr
     static const char *const net[] = {"asix", "ax88", "r8152", "r8153", "cdc_ether", "cdc_ncm", "smsc", "lan78", "pegasus", "rtl8150", "dm9601", "mcs7830", "usbnet", "qmi_wwan", "cdc_mbim", NULL};
     static const char *const ser[] = {"ftdi", "cp210", "ch341", "pl2303", "usbserial", "cdc_acm", "option", NULL};
     static const char *const wifi[] = {"rtl8", "mt76", "ath9k", "ath10k", "rt2800", "rt73", "8821", "8188", "rtw", "carl9170", "brcm", "iwlwifi", NULL};
+    if (strstr(driver, "udl")) return "video";     /* a DisplayLink adapter, bound to the kernel's udl driver */
     for (int i = 0; net[i]; i++) if (strstr(driver, net[i])) return "network";
     for (int i = 0; ser[i]; i++) if (strstr(driver, ser[i])) return "serial";
     for (int i = 0; wifi[i]; i++) if (strstr(driver, wifi[i])) return "wifi";
@@ -534,6 +537,160 @@ static inline int uio_inputs(UioInput *out, int cap) {
     }
     fclose(f);
     return n;
+}
+
+/* ---- DisplayLink: can USB video work here? (docs/DISPLAYLINK-ADAPTERS.md) ---------------------------------------------------------- */
+
+typedef struct {
+    int loaded;             /* the udl driver is in the running kernel */
+    char loaded_how[40];    /* "module loaded", "built in" or "USB driver registered" */
+    int file;               /* its module file is on disk, or the kernel lists it as built in */
+    char file_how[200];     /* the path, or "built in (modules.builtin)" */
+    char cfg_drm[12];       /* CONFIG_DRM_UDL: "y", "m", "not set" or "" (no config readable, or not mentioned) */
+    char cfg_fb[12];        /* CONFIG_FB_UDL, the older framebuffer driver */
+    int cfg_read;           /* a kernel config was read */
+    char cfg_src[160];      /* where it was read */
+    int adapter;            /* a DisplayLink adapter (USB vendor 17e9) is plugged in */
+    char adapter_name[24], adapter_product[48];
+    int drm_usb;            /* DRM cards behind a USB bus */
+    int drm_udl;            /* ...and one is bound to udl */
+    char drm_name[24];
+    char release[64];       /* the running kernel */
+} UioUdl;
+
+/* Whether `path` names a file or directory. */
+static inline int uio_exists(const char *path) {
+    struct stat st;
+    return stat(path, &st) == 0;
+}
+
+/* Does the file at `path` have a line that contains `needle`? */
+static inline int uio_file_has(const char *path, const char *needle) {
+    FILE *f = fopen(path, "r");
+    if (!f) return 0;
+    char line[512];
+    int found = 0;
+    while (!found && fgets(line, sizeof line, f)) found = strstr(line, needle) != NULL;
+    fclose(f);
+    return found;
+}
+
+/* A module file (udl.ko, or compressed) under dir, looked for to `depth` levels, stopping after `*budget` entries (a modules folder is a few thousand). */
+static inline int uio_find_ko(const char *dir, int depth, int *budget, char *out, size_t cap) {
+    DIR *d = opendir(dir);
+    if (!d) return 0;
+    struct dirent *e;
+    int found = 0;
+    while (!found && (e = readdir(d)) && *budget > 0) {
+        (*budget)--;
+        if (e->d_name[0] == '.') continue;
+        char p[PATH_MAX];
+        if (uio_cat(p, sizeof p, dir, e->d_name) != 0) continue;
+        if (!strncmp(e->d_name, "udl.ko", 6) && (e->d_name[6] == 0 || e->d_name[6] == '.')) { uio_copy(out, cap, p); found = 1; break; }
+        struct stat st;
+        if (depth > 0 && lstat(p, &st) == 0 && S_ISDIR(st.st_mode))   /* lstat: /lib/modules/<release>/build is a link to a whole source tree */ found = uio_find_ko(p, depth - 1, budget, out, cap);
+    }
+    closedir(d);
+    return found;
+}
+
+/* CONFIG_<name>=y|m, or "# CONFIG_<name> is not set", out of one config's text; out is "" when it is not mentioned. */
+static inline void uio_cfg_value(const char *line, const char *name, char *out, size_t cap) {
+    char want[64];
+    snprintf(want, sizeof want, "CONFIG_%s", name);
+    size_t n = strlen(want);
+    if (!strncmp(line, want, n) && line[n] == '=') { uio_copy(out, cap, (line[n + 1] == 'y' || line[n + 1] == 'm') ? (line[n + 1] == 'y' ? "y" : "m") : "other"); return; }
+    if (!strncmp(line, "# ", 2) && !strncmp(line + 2, want, n) && !strncmp(line + 2 + n, " is not set", 11)) uio_copy(out, cap, "not set");
+}
+
+/* Reads a kernel config: /proc/config.gz (through gzip), /boot/config-<release>, or the build tree's .config. Returns 1 when one was read. */
+static inline int uio_read_config(UioUdl *u) {
+    char path[PATH_MAX], cmd[PATH_MAX + 32];
+    FILE *f = NULL;
+    int piped = 0;
+    if (uio_path(path, sizeof path, uio_root("R3I6NOS_PROC", "/proc"), "config.gz") == 0 && uio_exists(path) && !strchr(path, '\'')) {
+        snprintf(cmd, sizeof cmd, "gzip -dc '%s' 2>/dev/null", path);
+        f = popen(cmd, "r");
+        piped = 1;
+        if (f) uio_copy(u->cfg_src, sizeof u->cfg_src, path);
+    }
+    if (!f) {
+        char rel[PATH_MAX];
+        snprintf(rel, sizeof rel, "config-%s", u->release);
+        if (uio_cat(path, sizeof path, uio_root("R3I6NOS_BOOT", "/boot"), rel) == 0 && (f = fopen(path, "r"))) { piped = 0; uio_copy(u->cfg_src, sizeof u->cfg_src, path); }
+    }
+    if (!f) {
+        char rel[PATH_MAX];
+        snprintf(rel, sizeof rel, "%s/build/.config", u->release);
+        if (uio_cat(path, sizeof path, uio_root("R3I6NOS_MODULES", "/lib/modules"), rel) == 0 && (f = fopen(path, "r"))) { piped = 0; uio_copy(u->cfg_src, sizeof u->cfg_src, path); }
+    }
+    if (!f) return 0;
+    char line[512];
+    int lines = 0;
+    while (fgets(line, sizeof line, f)) {
+        lines++;
+        uio_cfg_value(line, "DRM_UDL", u->cfg_drm, sizeof u->cfg_drm);
+        uio_cfg_value(line, "FB_UDL", u->cfg_fb, sizeof u->cfg_fb);
+    }
+    if (piped) pclose(f); else fclose(f);
+    u->cfg_read = lines > 0;
+    return u->cfg_read;
+}
+
+/* Probes the four things DisplayLink needs, in the order the report asks them. `devs` are the USB devices already scanned. */
+static inline void uio_udl_probe(UioUdl *u, const UioDev *devs, int ndev) {
+    memset(u, 0, sizeof *u);
+    const char *rel = getenv("R3I6NOS_KERNEL_RELEASE");
+    if (rel && *rel) uio_copy(u->release, sizeof u->release, rel);
+    else {
+        FILE *f = fopen("/proc/sys/kernel/osrelease", "r");
+        char v[64] = "";
+        if (f) { if (fgets(v, sizeof v, f)) v[strcspn(v, "\n")] = 0; fclose(f); }
+        uio_copy(u->release, sizeof u->release, v);
+    }
+    char p[PATH_MAX], root[PATH_MAX];
+
+    /* 1. is udl loaded: a module in /proc/modules, or built in (a /sys/module entry), or its USB driver registered */
+    if (uio_path(p, sizeof p, uio_root("R3I6NOS_PROC", "/proc"), "modules") == 0) {
+        FILE *f = fopen(p, "r");
+        char line[512];
+        while (f && fgets(line, sizeof line, f)) if (!strncmp(line, "udl ", 4)) { u->loaded = 1; uio_copy(u->loaded_how, sizeof u->loaded_how, "module loaded"); break; }
+        if (f) fclose(f);
+    }
+    if (!u->loaded && uio_path(p, sizeof p, uio_root("R3I6NOS_SYS", "/sys"), "module/udl") == 0 && uio_exists(p)) { u->loaded = 1; uio_copy(u->loaded_how, sizeof u->loaded_how, "built in"); }
+    if (!u->loaded && uio_path(p, sizeof p, uio_root("R3I6NOS_SYS", "/sys"), "bus/usb/drivers/udl") == 0 && uio_exists(p)) { u->loaded = 1; uio_copy(u->loaded_how, sizeof u->loaded_how, "USB driver registered"); }
+
+    /* 2. does its module file exist: udl.ko under /lib/modules/<release>, or listed as built in by modules.builtin */
+    if (uio_cat(root, sizeof root, uio_root("R3I6NOS_MODULES", "/lib/modules"), u->release) == 0) {
+        if (uio_cat(p, sizeof p, root, "modules.builtin") == 0 && uio_file_has(p, "/udl.ko")) { u->file = 1; uio_copy(u->file_how, sizeof u->file_how, "built in (listed by modules.builtin)"); }
+        int budget = 40000;
+        char found[PATH_MAX];
+        if (!u->file && uio_find_ko(root, 8, &budget, found, sizeof found)) { u->file = 1; uio_copy(u->file_how, sizeof u->file_how, found); }
+    }
+
+    /* 3. is it enabled in the kernel's config */
+    uio_read_config(u);
+
+    /* 4a. a DisplayLink adapter plugged in (USB vendor 17e9), and 4b. a DRM card behind USB */
+    for (int i = 0; i < ndev && !u->adapter; i++)
+        if (!strncmp(devs[i].vidpid, "17e9:", 5)) { u->adapter = 1; uio_copy(u->adapter_name, sizeof u->adapter_name, devs[i].name); uio_copy(u->adapter_product, sizeof u->adapter_product, devs[i].product); }
+    char base[PATH_MAX];
+    if (uio_path(base, sizeof base, uio_root("R3I6NOS_SYS", "/sys"), "class/drm") == 0) {
+        DIR *d = opendir(base);
+        struct dirent *e;
+        while (d && (e = readdir(d))) {
+            if (strncmp(e->d_name, "card", 4) != 0 || strchr(e->d_name, '-')) continue;
+            char dev[PATH_MAX + 300], drv[40];
+            uio_cat3(dev, sizeof dev, base, e->d_name, "device");
+            if (!uio_is_usb(dev)) continue;
+            u->drm_usb++;
+            if (uio_cat(p, sizeof p, dev, "driver") != 0) continue;
+            uio_link_base(p, drv, sizeof drv);
+            if (!strcmp(drv, "udl") && !u->drm_udl) { u->drm_udl = 1; uio_copy(u->drm_name, sizeof u->drm_name, e->d_name); }
+            else if (!u->drm_name[0]) uio_copy(u->drm_name, sizeof u->drm_name, e->d_name);
+        }
+        if (d) closedir(d);
+    }
 }
 
 #endif /* R3_USB_IO_H */
