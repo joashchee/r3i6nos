@@ -115,7 +115,7 @@ for d in "Love 11.5" "Love 12.0" native_deb; do [ -d "$T/mnt/$d" ] || fail "fold
 [ -z "$(find "$T/mnt" -name '._*')" ] || fail "AppleDouble ._ files left on the card"
 echo "$out" | grep -q 'Ports copied: 4 file(s)' || fail "copy count: $out"
 # ... and the test corpus, all of it in "Test files/", Neumetik's music and KlamANSI's drawing in their own folders (corpus/README.md)
-n="$(find corpus/files -type f | wc -l | tr -d ' ')"
+n="$(find corpus/files -type f ! -name .DS_Store | wc -l | tr -d ' ')" # Finder's .DS_Store is not corpus, and flash-macos.sh rightly leaves it
 [ "$(find "$T/mnt/Test files" -type f | wc -l | tr -d ' ')" = "$n" ] || fail "the whole corpus is not in Test files/"
 cmp -s corpus/files/music/midi/midi.mid "$T/mnt/Test files/music/midi/midi.mid" || fail "corpus file not copied whole, in its sub-folder"
 for f in video/clip.mp4 archives/game.7z images/photo.png; do

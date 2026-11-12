@@ -58,7 +58,11 @@ end
    filesystem type (from `/proc/mounts`: exFAT or FAT32 decide what works) and free space.
 4. **The app's own sections:** every open question its roadmap marks "untested on the unit" that a program can answer: speed against the
    app's goal, memory (peak `VmHWM` from `/proc/self/status`), start-up time, whether a library or device it needs opens.
-5. **`== summary ==`** with the counts, then `end`.
+5. **`== power ==`** (CLAUDE.md rule 14; `docs/POWER.md`): the port's own CPU %, wake-ups a second and memory, idle and working; the draw in mW
+   and the time left (battery `Discharging` only, else one SKIP saying to unplug); the busiest other processes; goals (FAIL when missed); and
+   a last INFO line on what to cut first. For energy efficiency, so the unit lasts longer: it is where an idle app that draws 60 times a
+   second shows up.
+6. **`== summary ==`** with the counts, then `end`.
 
 What a program can't judge (how the screen looks, whether a button feels right) is not faked: the report says what to look at, and the
 maintainer says it in words.
@@ -91,7 +95,7 @@ if the file is missing or has no `end`, that the report stopped and where its `.
 
 ## Shared code
 
-- **Native (C and SDL2):** `theme/r3i6nos_report.h` (open, sections, lines, the system and card sections, peak memory, close with the summary).
+- **Native (C and SDL2):** `theme/r3i6nos_report.h` (open, sections, lines, the system and card sections, peak memory, close with the summary; and the **power section**: `r3_report_power_section`, `r3_report_power_idle`, `r3_power_begin` / `r3_power_sample` / `r3_report_power_end`, `r3_report_power_advice`, `docs/POWER.md` "In a native port").
   Header-only, MIT, like the rest of `theme/`; its self-test is `tests/test_report.c` (run by `scripts/check.sh`).
 - **Command-line tools:** `tools/qjs-node/report.py` (Python 3 standard library), shipped by `package-tool.sh`.
 - **LÖVE:** no shared module yet (an app must work on an image whose `/opt/loveos/theme` predates one); follow this file's grammar.
@@ -107,11 +111,11 @@ Its sibling, **Rec demo** (`docs/DEMO-RECORDINGS.md`, CLAUDE.md rule 11), sits r
 | TinyNTT | TinyNTT repo `r36s/` | Files > Device report, `tinyntt --report` | `/roms/TinyNTT/r36s-report.txt` |
 | KlamANSI | KlamANSI repo `r36s/` | Start > Device report, `klamansi --report` | `/roms/KlamANSI/r36s-report.txt` |
 | NoCoGaMa (device spike) | NoCoGaMa repo `spike/device/` | its Report page | `/roms/NoCoGaMa/r36s-report-11.5.txt` and `-12.0.txt` (one a runtime) |
-| IO Checker (the hardware: input, video, sound, cards) | `apps/io-checker-love/`, `apps/io-checker-native/` | its Device report item, or `io-checker-native --report` | `/roms/IO_Checker/r36s-report-11.5.txt`, `-12.0.txt`, `-native.txt` (one a build) |
+| IO Checker (the hardware: input, video, sound, cards; the native build also has the power section: idle on its list, the Motion pattern working, and the **usb sections**: devices, video out, MIDI, storage, network, keyboard, mouse, pads: what the OTG port brings, `docs/IO-CHECKER.md`) | `apps/io-checker-love/`, `apps/io-checker-native/` | its Device report item, or `io-checker-native --report` (headless: no power windows) | `/roms/IO_Checker/r36s-report-11.5.txt`, `-12.0.txt`, `-native.txt` (one a build) |
 | Composer, Painter, Animator | their repos' `r36s/` (the package from `tools/qjs-node/`) | Settings > Device reports, or `compose-report`, `sprites-report`, `animate-report` | `/roms/Composer/`, `/roms/Painter/`, `/roms/Animator/r36s-report.txt` |
 
 **A report started from Settings runs as `loveos`, not root.** The image has no D-Bus, so `systemctl` and `systemd-analyze` cannot reach
 systemd from a report ("Failed to connect to bus", seen 2026-11-09). r3i6nos's own report reads what they say from `/run/r3i6nos/boot-state`,
 written by the root timer `r3i6nos-bootstate`; an app's report that needs a unit's state reads it there too.
 
-Commander is this repo's own and is tried on the unit directly. The IO Checker (`docs/IO-CHECKER.md`) is the hardware's report: buttons, sticks, keys, screen, sound and cards, with what the person saw and heard.
+Commander has `commander --report` (2026-11-12: the system, the card, memory and the power section; **no Start menu item yet**, and no Rec demo: ROADMAP section 23); it writes `/roms/Commander/r36s-report.txt` and needs a window, so it runs on the unit's screen (or under a dummy video driver on a laptop). Beyond that it is this repo's own and tried on the unit directly. The IO Checker (`docs/IO-CHECKER.md`) is the hardware's report: buttons, sticks, keys, screen, sound and cards, with what the person saw and heard.

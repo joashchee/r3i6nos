@@ -15,7 +15,7 @@ is blocked and on what.
 - `overlay/`: files copied onto the image's root filesystem as-is
   (`usr/local/bin/`, `etc/systemd/system/`). Paths mirror the device.
 - `menu/`: the boot menu, a LÖVE 11.5 app installed at `/opt/loveos/menu`; its Settings has Network and SSH (a root helper, `overlay/usr/local/bin/r3i6nos-net`, does the work) Battery (`docs/BATTERY.md`; its top bar shows the charge) Sound mixer (`docs/SOUND.md`: Volume and Boost from `/etc/asound.conf`, the codec, a test sound) Date and time (`docs/CLOCK.md`; asked on a card's first boot, set by the root helper `r3i6nos-clock`, kept across restarts) Device reports (`menu/reports.lua`, rule 9) and About (`docs/ABOUT.md`: the build, the unit, Check for updates).
-- `apps/`: the apps (each has an `app.conf`, native or LÖVE, and its own workflow, `.github/workflows/app-<name>.yml`; only `DEFAULT=1` apps enter the image). The default apps built into the image (`/opt/loveos/defaults`): the IO Checker (`docs/IO-CHECKER.md`: input, video, sound, files, a device report) as LÖVE 11.5, LÖVE 12.0 and native ARM64, and Commander (a native ARM64 file manager whose viewer identifies and opens about 150 formats: pictures, ANSI art, archives, packages, disk images, documents, and plays Rec demo recordings, WAV and, with ffmpeg, video; `apps/README.md`). See `apps/README.md`.
+- `apps/`: the apps (each has an `app.conf`, native or LÖVE, and its own workflow, `.github/workflows/app-<name>.yml`; only `DEFAULT=1` apps enter the image). The default apps built into the image (`/opt/loveos/defaults`): the IO Checker (`docs/IO-CHECKER.md`: input, video, sound, files, USB and OTG, a device report) as LÖVE 11.5, LÖVE 12.0 and native ARM64, and Commander (a native ARM64 file manager whose viewer identifies and opens about 150 formats: pictures, ANSI art, archives, packages, disk images, documents, and plays Rec demo recordings, WAV and, with ffmpeg, video; `apps/README.md`). See `apps/README.md`.
 - `theme/`: the r3i6nos-ansiapps text-mode theme for LÖVE (`.lua`) and C/SDL2 (`.h`): font, screen, list dialogs; installed at `/opt/loveos/theme`. See `docs/R3I6NOS-ANSIAPPS-THEME.md`.
 - `tools/ffmpeg-min/`: the minimal GPL ffmpeg (one 5.3 MiB binary: the decoders Commander's Play tab and Diskette's audio and video lists need, WebP/TIFF/PSD stills, and Rec demo's H.264 + AAC encode; `scripts/build-ffmpeg-min.sh` builds and checks it; `configure_rootfs.sh` installs it at `/usr/bin/ffmpeg` with its GPL terms; ROADMAP section 20).
 - `tools/qjs-node/`: the shims and builder that turn a Node-style CLI into one QuickJS executable (`docs/QJS-CLI-PORTS.md`); an app's folder is only ever read, never copied in.
@@ -24,7 +24,7 @@ is blocked and on what.
 - `tests/`: Python (`unittest`) and Lua tests; no hardware needed.
 - `vendor/`, `build/`, `local_hardware_assets/`: fetched, built or captured, gitignored.
 - `docs/DEVICE-REPORTS.md`: the device report every R36S port has (rule 9) and its file format.
-- `docs/POWER.md`: what the background work (the hot-plug daemon, the toast poll, the periodic jobs) costs the battery, and the `== power ==` section of `r3i6nos-report` that measures it on the unit.
+- `docs/POWER.md`: the power section every device report has (rule 14), and what the background work (the hot-plug daemon, the toast poll, the periodic jobs) costs the battery, and the `== power ==` section of `r3i6nos-report` that measures it on the unit.
 - `docs/HOTPLUG.md`: the toast over the top bar when headphones, a USB device or DC power is plugged in or out (rule 13); `r3i6nos-hotplug` writes the events, `theme/r3i6nos_toast.{h,lua}` show them.
 - `docs/DEMO-RECORDINGS.md`: Rec demo, the screenshots and video every R36S port records to a `Demo` folder (rule 11).
 - `docs/TWO-SLOT-SETUP.md`: the console prepares its own card from the original (`overlay/usr/local/bin/r3i6nos-setup`, a no-op on every normal boot; the web guide at r3i6nos.ansiapps.com/bootdisk is in the ansiapps-site repo); trials T1-T10 are untested on a unit.
@@ -68,8 +68,9 @@ is blocked and on what.
 10. **Every R36S port has a local build script** that makes its card file on this Mac with one command and no arguments: a native or
    tool port's **`r36s/build-deb.sh`** in its own repo (Docker only; it builds in Debian 12 arm64 and runs the package's self-test;
    `--clean-room` also installs it with `deb_watcher.py` in a clean Debian 12), a LÖVE port's `scripts/build.sh`. It fetches what it
-   needs (a pinned tarball, checked by hash) or says where to put it, and leaves the file where `flash-macos.sh`'s `PORTS` list looks
-   for it; that list names the script as the port's build command. A new port is not done until its script has been run.
+   needs (a pinned tarball, checked by hash) or says where to put it, and leaves the file where the `PORTS` list (`scripts/ports.conf`, read by
+   `flash-macos.sh` and **`scripts/build-ports.sh`**, which refreshes every port's build in one command) looks for it; that list names the script as
+   the port's build command. A new port is not done until its script has been run and its line is in `scripts/ports.conf`.
 11. **Every R36S port has a Rec demo** (`docs/DEMO-RECORDINGS.md`) next to its Device report: an item **Rec demo** in its menu right after
    **Device report** (and a `--rec-demo` flag; a command-line tool's `<command>-demo`, which Settings > Rec demos starts). It first opens a
    **checklist of the hero features** (all ticked) so the person picks which ones the demo shows; then it runs the real app through a scripted
@@ -89,6 +90,17 @@ is blocked and on what.
    out, a **toast over the top bar flashes for 3 seconds** saying what changed (from `/run/r3i6nos-hotplug/events`, written by the root service `r3i6nos-hotplug`;
    `theme/r3i6nos_toast.h` for native ports, `theme/r3i6nos_toast.lua` for LÖVE). **A failure stays until a key is pressed**, and that key is used up (it clears the
    toast and does nothing else). A new port wires it in (poll each frame, `key` first on every input, draw after composing) and says untested what has not run on the unit. It also announces a pad, the battery (low, critical, full) and the TF cards in and out. **A Rec demo shows no toast; a failure stops and closes it, then the failure(s) show** (rule 11).
+14. **Every R36S port's device report has a `== power ==` section, for making the port use less energy** (`docs/POWER.md`; reference:
+   `power_section` in `overlay/usr/local/bin/r3i6nos-report`). It measures, from `/proc` and `/sys` only, in one window (30 s by default, on
+   battery): **the port's own process** (CPU as a % of a core, wake-ups a second, resident and peak memory, and its busiest threads), **the
+   draw in mW** (`current_now` x `voltage_now`, only while the battery says `Discharging`; otherwise one SKIP that says to unplug) with the
+   time left at that draw, and the **busiest other processes**, so a surprise shows. It measures **two states** where the app has them: **idle**
+   (open, nothing pressed, which must cost almost nothing: block on input or a timer, redraw only when something changed, never a busy loop,
+   never `vsync` at 60 fps for a still screen) and **working** (the hero features, as Rec demo's tour drives them). Each has a **goal** (a
+   missed one is a `FAIL` line), and a final `INFO` line says what to cut first. Rec demo's tour is the load, so a number is the same on any
+   unit. **A new port is not done until its power section exists and is tested**; say untested what has not run on a unit, and repeat on a
+   unit at 100%, 50% and 20% charge before trusting a small difference. When a report comes back, fix what it flags and put the new figures
+   in the port's roadmap (the menu's 60% idle, found by it on 2026-11-12, is the example).
 
 ## Check before committing
 

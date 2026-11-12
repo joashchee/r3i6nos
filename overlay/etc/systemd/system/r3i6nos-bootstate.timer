@@ -1,9 +1,9 @@
 [Unit]
-Description=Write how the boot went a minute after boot, then every 5 minutes
+Description=Write how the boot went a minute after boot, then every 15 minutes
 
 [Timer]
 OnBootSec=1min
-OnUnitActiveSec=5min
+OnUnitActiveSec=15min
 AccuracySec=5s
 
 [Install]

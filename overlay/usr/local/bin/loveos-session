@@ -6,7 +6,7 @@
 # the menu's memory is free while a game runs, then shows the menu again.
 #
 # Battery history (Settings > Battery): r3i6nos-battery records a sample at the start of the session (boot), when an app starts and
-# ends, every R3I6NOS_BATTERY_INTERVAL seconds (300) while an app runs, and just before a shutdown. It never fails the session.
+# ends, every R3I6NOS_BATTERY_INTERVAL seconds (900) while an app runs, and just before a shutdown. It never fails the session.
 #
 # A "system<TAB>poweroff" request (Settings > Shutdown) ends the loop; see r3i6nos-poweroff.
 #
@@ -24,7 +24,7 @@ WATCHER="${R3I6NOS_WATCHER:-/usr/local/bin/deb_watcher.py}"
 
 GPU_DIR="${R3I6NOS_GPU_DIR:-/opt/libmali}"
 BATTERY="${R3I6NOS_BATTERY:-/usr/local/bin/r3i6nos-battery}"
-BATTERY_INTERVAL="${R3I6NOS_BATTERY_INTERVAL:-300}"
+BATTERY_INTERVAL="${R3I6NOS_BATTERY_INTERVAL:-900}"
 
 # battery_sample EVENT [DETAIL]: one sample into the history; a missing or failing sampler is ignored.
 battery_sample() {

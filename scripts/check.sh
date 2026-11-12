@@ -35,6 +35,7 @@ if command -v luajit >/dev/null; then
     luajit tests/test_reports.lua || fail=1
     luajit tests/test_demos.lua || fail=1
     luajit tests/test_toast.lua || fail=1
+    luajit tests/test_redraw.lua || fail=1
     luajit tests/test_about.lua || fail=1
     luajit tests/test_net_menu.lua || fail=1
     luajit tests/test_theme.lua || fail=1
@@ -48,6 +49,7 @@ elif command -v lua >/dev/null; then
     lua tests/test_reports.lua || fail=1
     lua tests/test_demos.lua || fail=1
     lua tests/test_toast.lua || fail=1
+    lua tests/test_redraw.lua || fail=1
     lua tests/test_net_menu.lua || fail=1
     lua tests/test_theme.lua || fail=1
     lua tests/test_menu_view.lua || fail=1
@@ -160,6 +162,7 @@ step "shell tests"
 bash tests/test_configure_rootfs.sh || fail=1
 bash tests/test_flash_macos.sh || fail=1
 bash tests/test_build_port.sh || fail=1
+bash tests/test_build_ports.sh || fail=1
 bash tests/test_image.sh || fail=1
 
 step "shell syntax"

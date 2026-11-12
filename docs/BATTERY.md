@@ -24,7 +24,7 @@ Every figure that depends on them says "not reported" when the battery does not 
 | --- | --- |
 | `session` | the session starts: boot (and again if the session restarts after a failure) |
 | `app-start`, `app-end` | around every app, named by its file name |
-| `tick` | every 300 s while an app runs (`R3I6NOS_BATTERY_INTERVAL`) |
+| `tick` | every 900 s while an app runs (`R3I6NOS_BATTERY_INTERVAL`) |
 | `shutdown` | just before Settings > Shutdown powers off |
 
 Each line holds the boot id, the uptime, the clock, the event, the app, the charge, the state, millivolts, the full and design capacity, the temperature and the cycle

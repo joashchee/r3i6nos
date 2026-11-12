@@ -26,7 +26,9 @@
  *
  * `--selftest` checks the logic against a temporary folder and prints one R3I6NOS_SMOKE line; `--screenshot out.bmp` draws the
  * real screen once, without a window (`--view FILE [--tab N] [--page N]` first opens the viewer on FILE). `--info FILE` and
- * `--content FILE` print the viewer's Info and Content pages as text. */
+ * `--content FILE` print the viewer's Info and Content pages as text. `--report` opens the real window and writes the device report
+ * (docs/DEVICE-REPORTS.md) to /roms/Commander/r36s-report.txt: system, card, memory and the power section (CLAUDE.md rule 14: the app
+ * idle, then identifying the test corpus). */
 #define _GNU_SOURCE
 #include <dirent.h>
 #include <stdarg.h>
@@ -41,6 +43,7 @@
 
 #include "r3i6nos_ansiapps.h"
 #include "r3i6nos_toast.h"
+#include "r3i6nos_report.h"
 #include "formats.h"
 #include "ansiart.h"
 #include "player.h"
@@ -3059,8 +3062,107 @@ static void open_pads(void) {
     for (int i = 0; i < SDL_NumJoysticks(); i++) SDL_JoystickOpen(i);
 }
 
+/* ---- the device report: `commander --report` (docs/DEVICE-REPORTS.md; the power section is CLAUDE.md rule 14, docs/POWER.md) ---------- */
+
+typedef struct { App *app; SDL_Renderer *r; R3Video *video; R3Toast *toast; R3Screen screen; } ReportCtx;
+
+/* One pass of the idle loop as main runs it, minus input (a report in progress takes none): wait for an event, a quarter of a second
+ * when nothing is changing, and draw. */
+static void report_idle_turn(void *arg) {
+    ReportCtx *c = arg;
+    SDL_Event e;
+    if (SDL_WaitEventTimeout(&e, (c->video->settle > 0 || r3_toast_active(c->toast)) ? 16 : 250)) {
+        while (SDL_PollEvent(&e)) { /* dropped */ }
+    }
+    app_tick(c->app, 25);
+    r3_toast_poll(c->toast, SDL_GetTicks());
+    app_compose(c->app, &c->screen);
+    r3_toast_draw(c->toast, &c->screen);
+    app_video_draw(c->video, c->r, &c->screen, c->app, 0);
+}
+
+/* Every regular file under dir (up to four levels, up to `cap`, none over 8 MB: the report times the identifying, not the card). */
+static int corpus_walk(const char *dir, int depth, char **out, int n, int cap) {
+    DIR *d = opendir(dir);
+    if (!d) return n;
+    struct dirent *e;
+    while ((e = readdir(d)) && n < cap) {
+        if (e->d_name[0] == '.') continue;
+        char path[PATH_MAX];
+        struct stat st;
+        if (snprintf(path, sizeof path, "%s/%s", dir, e->d_name) >= (int)sizeof path || lstat(path, &st) != 0) continue;
+        if (S_ISDIR(st.st_mode) && depth < 4) n = corpus_walk(path, depth + 1, out, n, cap);
+        else if (S_ISREG(st.st_mode) && st.st_size > 0 && st.st_size <= 8 * 1024 * 1024) out[n++] = strdup(path);
+    }
+    closedir(d);
+    return n;
+}
+
+#define REPORT_IDENTIFY_PER_S 20.0   /* files a second the viewer's identify and info may take: a first guess, set before any measurement */
+
+static int commander_report(App *app, SDL_Renderer *r, R3Video *video, R3Toast *toast, int quiet) {
+    const char *roms = getenv("R3I6NOS_ROMS") && *getenv("R3I6NOS_ROMS") ? getenv("R3I6NOS_ROMS") : "/roms";
+    char dir[PATH_MAX];
+    snprintf(dir, sizeof dir, "%s/Commander", roms);
+    R3Report rep;
+    memset(&rep, 0, sizeof rep);
+    rep.quiet = quiet;
+    if (r3_report_open_named(&rep, dir, "r36s-report.txt", "Commander", VERSION, "r36s-commander-native", "commander --report", "r3i6nos") != 0) {
+        fprintf(stderr, "commander: cannot write the report in %s: %s\n", dir, strerror(errno));
+        return 1;
+    }
+    r3_report_system(&rep);
+    r3_report_card(&rep, dir);
+    r3_report_memory(&rep);
+    r3_report_power_section(&rep);
+    ReportCtx c;
+    memset(&c, 0, sizeof c);
+    c.app = app;
+    c.r = r;
+    c.video = video;
+    c.toast = toast;
+    R3PowerResult idle, work;
+    memset(&work, 0, sizeof work);
+    r3_report_power_idle(&rep, r3_report_power_seconds(10), report_idle_turn, &c, &idle);
+    /* working: identify the files of the test corpus as the viewer's Info page does, as fast as it will, for a few seconds */
+    const char *corpus = getenv("R3I6NOS_TEST_FILES") && *getenv("R3I6NOS_TEST_FILES") ? getenv("R3I6NOS_TEST_FILES") : "/opt/loveos/test-files";
+    char **list = calloc(600, sizeof *list);
+    int n = list ? corpus_walk(corpus, 0, list, 0, 600) : 0;
+    if (n == 0) {
+        r3_report_line(&rep, R3_SKIP, "working", "no test files in %s: the image has them (corpus/README.md)", corpus);
+    } else {
+        R3Power p;
+        r3_power_begin(&p);
+        double t0 = r3_report_ms(), secs = r3_report_power_seconds(5);
+        long done = 0;
+        for (int i = 0; r3_report_ms() - t0 < secs * 1000.0; i = (i + 1) % n) {
+            char err[256];
+            FFile f;
+            if (ff_open(&f, list[i], err, sizeof err) == 0) {
+                FInfo in = {0, 0, 0};
+                ff_info(&f, ff_identify(&f), &in);
+                info_free(&in);
+                ff_close(&f);
+                done++;
+            }
+            if ((done & 15) == 0) r3_power_sample(&p);
+        }
+        double wall = (r3_report_ms() - t0) / 1000.0;
+        r3_report_power_end(&rep, &p, "working", 0, 0, &work);
+        double rate = wall > 0 ? (double)done / wall : 0;
+        r3_report_line(&rep, rate >= REPORT_IDENTIFY_PER_S ? R3_PASS : R3_FAIL, "identify speed", "%.0f files a second over %d files (goal at least %.0f)", rate, n, REPORT_IDENTIFY_PER_S);
+    }
+    for (int i = 0; i < n; i++) free(list[i]);
+    free(list);
+    r3_report_power_advice(&rep, &idle, &work);
+    int pass = rep.pass, fail = rep.fail, skip = rep.skip;
+    if (r3_report_close(&rep) != 0) { fprintf(stderr, "commander: cannot write the report in %s\n", dir); return 1; }
+    if (!quiet) printf("Written: %s/r36s-report.txt (PASS %d FAIL %d SKIP %d)\n", dir, pass, fail, skip);
+    return 0;
+}
+
 int main(int argc, char **argv) {
-    int selftest = 0, tab = 0, page = 0;
+    int selftest = 0, report = 0, tab = 0, page = 0;
     const char *shot = NULL, *view = NULL;
     const char *left = getenv("R3I6NOS_FM_LEFT"), *right = getenv("R3I6NOS_FM_RIGHT");
     if (!left || !*left) left = access("/roms", R_OK) == 0 ? "/roms" : (getenv("HOME") ? getenv("HOME") : "/");
@@ -3068,13 +3170,14 @@ int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--selftest")) selftest = 1;
         else if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) shot = argv[++i];
+        else if (!strcmp(argv[i], "--report")) report = 1;
         else if (!strcmp(argv[i], "--version")) { puts("commander " VERSION); return 0; }
         else if ((!strcmp(argv[i], "--info") || !strcmp(argv[i], "--content")) && i + 1 < argc) return print_info(argv[i + 1], argv[i][2] == 'c');
         else if (!strcmp(argv[i], "--view") && i + 1 < argc) view = argv[++i];
         else if (!strcmp(argv[i], "--tab") && i + 1 < argc) tab = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--page") && i + 1 < argc) page = atoi(argv[++i]);
         else {
-            fprintf(stderr, "usage: %s [--selftest | --version | --info FILE | --content FILE | [--view FILE [--tab N] [--page N]] [--screenshot out.bmp]]\n", argv[0]);
+            fprintf(stderr, "usage: %s [--selftest | --report | --version | --info FILE | --content FILE | [--view FILE [--tab N] [--page N]] [--screenshot out.bmp]]\n", argv[0]);
             return 2;
         }
     }
@@ -3115,6 +3218,31 @@ int main(int argc, char **argv) {
         SDL_GetVersion(&v);
         printf("R3I6NOS_SMOKE ok commander=%s sdl=%d.%d.%d joysticks=%d renderer=%s\n", VERSION, v.major, v.minor, v.patch,
                SDL_NumJoysticks(), SDL_GetCurrentVideoDriver());
+        /* the report, with short power windows, into a throwaway folder: the power section must be in it */
+        char tmpl[PATH_MAX];
+        snprintf(tmpl, sizeof tmpl, "%s/commander-selftest-XXXXXX", getenv("TMPDIR") && *getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp");
+        char *tdir = mkdtemp(tmpl);
+        int rbad = 1;
+        if (tdir) {
+            setenv("R3I6NOS_ROMS", tdir, 1);
+            setenv("R3I6NOS_REPORT_POWER_S", "0.2", 1);
+            R3Toast ttoast;
+            r3_toast_init(&ttoast);
+            char path[PATH_MAX + 64], text[24576] = "";
+            if (commander_report(&app, r, &video, &ttoast, 1) == 0) {
+                snprintf(path, sizeof path, "%s/Commander/r36s-report.txt", tdir);
+                FILE *f = fopen(path, "r");
+                size_t got = f ? fread(text, 1, sizeof text - 1, f) : 0;
+                text[got] = 0;
+                if (f) fclose(f);
+                rbad = !(strstr(text, "== power ==") && strstr(text, "idle cpu: ") && strstr(text, "cut first: ") && strstr(text, "\nend\n"));
+            }
+            char cmd[PATH_MAX + 16];
+            snprintf(cmd, sizeof cmd, "rm -rf '%s'", tdir);
+            if (system(cmd) != 0) fprintf(stderr, "could not remove %s\n", tdir);
+        }
+        printf("R3I6NOS_SMOKE power-report %s\n", rbad ? "missing" : "ok");
+        if (rbad) { fprintf(stderr, "commander: the report has no power section\n"); app_free(&app); r3_video_free(&video); SDL_DestroyRenderer(r); SDL_DestroyWindow(win); SDL_Quit(); return 1; }
         app_free(&app);
         r3_video_free(&video);
         SDL_DestroyRenderer(r);
@@ -3123,6 +3251,16 @@ int main(int argc, char **argv) {
         return 0;
     }
 
+    if (report) {
+        open_pads();
+        int rc = commander_report(&app, r, &video, &toast, 0);
+        app_free(&app);
+        r3_video_free(&video);
+        SDL_DestroyRenderer(r);
+        SDL_DestroyWindow(win);
+        SDL_Quit();
+        return rc;
+    }
     open_pads();
     int typing = 0, force = 1;
     while (!app.quit) {

@@ -54,7 +54,7 @@ BOOTSTATE_CMD = ENV("R3I6NOS_BOOTSTATE_CMD", "/usr/local/bin/r3i6nos-bootstate")
 MENU_MATCH = ENV("R3I6NOS_MENU_MATCH", "/opt/loveos/menu")
 # the goals the power section checks against (docs/POWER.md): a goal missed is a FAIL line, not a silent number
 GOAL_DAEMON_CPU = 1.0        # % of one core, the hot-plug daemon
-GOAL_DAEMON_WAKEUPS = 4.0    # context switches a second, the hot-plug daemon (its poll is 2 a second)
+GOAL_DAEMON_WAKEUPS = 4.0    # context switches a second, the hot-plug daemon (its poll is once a second)
 GOAL_JOBS_CPU = 0.05         # % of one core, the periodic jobs together, averaged over an hour
 GOAL_DAEMON_MW = 20.0        # mW the daemon may cost beyond the measuring noise
 WANT_FS = ("exfat", "vfat", "ext4", "squashfs")
@@ -643,7 +643,7 @@ def power_section(r):
         r.line("FAIL", "hotplug daemon", "r3i6nos-hotplug start is not running, so its cost cannot be measured (docs/HOTPLUG.md)")
     else:
         r.line("PASS" if h["cpu"] <= GOAL_DAEMON_CPU else "FAIL", "hotplug cpu", f"{h['cpu']:.2f}% of a core (goal at most {GOAL_DAEMON_CPU:.1f}%)")
-        r.line("PASS" if h["wake"] <= GOAL_DAEMON_WAKEUPS else "FAIL", "hotplug wakeups", f"{h['wake']:.1f}/s (goal at most {GOAL_DAEMON_WAKEUPS:.1f}; its poll is 2 a second)")
+        r.line("PASS" if h["wake"] <= GOAL_DAEMON_WAKEUPS else "FAIL", "hotplug wakeups", f"{h['wake']:.1f}/s (goal at most {GOAL_DAEMON_WAKEUPS:.1f}; its poll is once a second)")
         r.line("INFO", "hotplug memory", f"{h['rss']} kB resident")
     cost = job_cost([HOTPLUG, "status"], {})
     r.line("INFO" if cost else "SKIP", "hotplug one look", f"{cost[0] * 1000:.0f} ms CPU, {cost[1] * 1000:.0f} ms wall (status: every sysfs read the daemon does each poll, plus Python's start)" if cost else "r3i6nos-hotplug status would not run")

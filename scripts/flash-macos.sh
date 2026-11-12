@@ -50,17 +50,8 @@ fail() { echo "flash-macos: $*" >&2; exit 1; }
 # --- the R36S ports, from their local builds ---
 # name|repo folder|kind|its build in the repo ({v}: the LÖVE version)|the command that makes it, run in the repo
 PORTS_ROOT="${R3I6NOS_PORTS_ROOT:-$(cd "$(dirname "$0")/../.." && pwd)}"
-PORTS=(
-    "KlamANSI|klamansi|deb|r36s/build/pkg/KlamANSI.deb|r36s/build-deb.sh"
-    "Neumetik|neumetik|deb|r36s/build/pkg/Neumetik.deb|r36s/build-deb.sh"
-    "Composer|composer|deb|r36s/build/pkg/compose.deb|r36s/build-deb.sh"
-    "Painter|painter|deb|r36s/build/pkg/sprites.deb|r36s/build-deb.sh"
-    "Animator|animator|deb|r36s/build/pkg/animate.deb|r36s/build-deb.sh"
-    "Crunchy|crunchy|deb|r36s/build/pkg/Crunchy.deb|r36s/build-deb.sh"
-    "Chordica|chordica|deb|r36s/build/pkg/Chordica.deb|r36s/build-deb.sh"
-    "TinyNTT|tinyntt|deb|r36s/build/pkg/TinyNTT.deb|r36s/build-deb.sh"
-    "NoCoGaMa|nocogama|love|build/Love {v}/*.love|scripts/build.sh"
-)
+# shellcheck source=/dev/null  # scripts/ports.conf: data, read here
+. "$(dirname "$0")/ports.conf"
 PORT_COPY=()      # "source<TAB>path on EASYROMS"
 PORT_MISSING=()   # one line a port (or LÖVE version) with no local build
 PORT_STALE=()     # built before the repo's last commit

@@ -9,7 +9,7 @@ sysfs names of the unit's USB, jack and power supplies have never been read on i
 
 ## What is watched
 
-`overlay/usr/local/bin/r3i6nos-hotplug` is a root service (`r3i6nos-hotplug.service`, started before the menu). It looks every 0.5 s and announces a
+`overlay/usr/local/bin/r3i6nos-hotplug` is a root service (`r3i6nos-hotplug.service`, started before the menu). It looks every second (every 0.25 s while a change is being confirmed) and announces a
 change once it shows in **two looks in a row** (a bouncing jack contact is one event, not three). What is plugged in at start is not announced.
 
 | What | How it is read | Toast (info, 3 s) |

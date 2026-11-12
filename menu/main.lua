@@ -15,6 +15,8 @@ local theme = require("r3i6nos_ansiapps")
 local toast = require("r3i6nos_toast")
 local hotplug = toast.new() -- the hot-plug toast over the top bar: headphones, USB, DC power (docs/HOTPLUG.md)
 local view = require("view")
+local redraw = require("redraw")
+local rd = redraw.new() -- what needs drawing (menu/redraw.lua)
 
 local ROMS = os.getenv("R3I6NOS_ROMS") or "/roms"
 local ROMS2 = os.getenv("R3I6NOS_ROMS2") or "/roms2" -- the data card (docs/STORAGE.md)
@@ -96,7 +98,39 @@ function love.update(dt)
   settings.tick(dialog, dt)
   testSound()
   powerAge = powerAge + dt
-  if powerAge >= POWER_EVERY then powerAge, power = 0, battery.read() end
+  if powerAge >= POWER_EVERY then powerAge, power = 0, battery.read(); redraw.mark(rd) end
+end
+
+-- LÖVE's own loop redraws at the display's rate (60 a second) even when nothing moves: 60% of a core on the unit's idle menu
+-- (its device report, 2026-11-12). This loop draws only when something changed (menu/redraw.lua) and otherwise just pumps events
+-- and sleeps 50 ms: the menu is text, so a press waits at most that long.
+function love.run()
+  if love.load then love.load(love.arg.parseGameArguments(arg), arg) end
+  love.timer.step()
+  return function()
+    local started = love.timer.getTime()
+    love.event.pump()
+    for name, a, b, c, d, e, f in love.event.poll() do
+      if name == "quit" then
+        if not love.quit or not love.quit() then return a or 0 end
+      else
+        redraw.event(rd, name)
+        love.handlers[name](a, b, c, d, e, f)
+      end
+    end
+    love.update(love.timer.step())
+    local n = settings.isOpen(dialog) and settings.node(dialog)
+    local moving = n and (n.kind == "busy" or n.kind == "mixer") -- elapsed seconds, a progress bar, the test sound
+    local token = hotplug.showing and ((hotplug.error and "e" or "i") .. hotplug.text) or ""
+    local draw, nap = redraw.frame(rd, token, moving)
+    if draw and love.graphics.isActive() then
+      love.graphics.origin()
+      love.graphics.clear(love.graphics.getBackgroundColor())
+      love.draw()
+      love.graphics.present()
+    end
+    love.timer.sleep(math.max(0.001, nap - (love.timer.getTime() - started)))
+  end
 end
 
 local function typing()

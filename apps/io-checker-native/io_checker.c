@@ -28,6 +28,7 @@
 #include "r3i6nos_ansiapps.h"
 #include "r3i6nos_report.h"
 #include "r3i6nos_toast.h"
+#include "usb_io.h"
 
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
@@ -52,9 +53,11 @@
 enum { L_B = 1, L_A, L_X, L_Y, L_L1, L_R1, L_L2, L_R2, L_UP, L_DOWN, L_LEFT, L_RIGHT, L_SELECT, L_START, L_L3, L_R3, L_FN };
 static const char *NAMES[18] = {"", "B", "A", "X", "Y", "L1", "R1", "L2", "R2", "Up", "Down", "Left", "Right", "Select", "Start", "L3", "R3", "Fn"};
 
-enum { P_HOME, P_INPUT, P_VIDEO, P_PATTERN, P_SOUND, P_FILES, P_SYSTEM, P_COUNT };
-enum { H_INPUT, H_VIDEO, H_SOUND, H_FILES, H_SYSTEM, H_REPORT, H_QUIT, H_COUNT };
-static const char *HOME_LABEL[H_COUNT] = {"Buttons and sticks", "Video", "Sound", "Files", "System", "Device report", "Quit"};
+enum { P_HOME, P_INPUT, P_VIDEO, P_PATTERN, P_SOUND, P_FILES, P_SYSTEM, P_USB, P_USBSUB, P_COUNT };
+enum { H_INPUT, H_VIDEO, H_SOUND, H_FILES, H_USB, H_SYSTEM, H_REPORT, H_QUIT, H_COUNT };
+static const char *HOME_LABEL[H_COUNT] = {"Buttons and sticks", "Video", "Sound", "Files", "USB and OTG", "System", "Device report", "Quit"};
+/* The checks behind "USB and OTG": what the OTG port can bring (usb_io.h). */
+enum { U_DEVICES, U_VIDEO, U_MIDI, U_STORAGE, U_NETWORK, U_KEYBOARD, U_MOUSE, U_PADS, U_COUNT };
 static const char *HOME_ABOUT[H_COUNT][4] = {
     {"Every button, both sticks, the D-pad, and the power and", "volume keys, as the pad reports them. Press each one:",
      "the list of buttons never pressed shrinks to nothing.", "Hold SELECT+START for a second to come back."},
@@ -64,6 +67,8 @@ static const char *HOME_ABOUT[H_COUNT][4] = {
      "it or Y if not: the answers go in the device report.", "Shows the speaker path the system set."},
     {"On each card: makes its IO_Checker folder, writes,", "renames over, reads back and deletes a file, then times",
      "writing and reading 8 MB and shows the free space.", "Nothing else on the card is touched."},
+    {"What the OTG port brings: every USB device and what it is,", "video out (HDMI or DisplayLink docks), MIDI in and out,",
+     "USB storage, Ethernet, a keyboard, a mouse and game", "controllers. Plug one in and watch it appear."},
     {"The r3i6nos build, kernel, board, CPU, memory, battery,", "backlight, the pad's name and GUID, and the video and", "sound drivers.", NULL},
     {"Runs the checks again and writes everything, with your", "heard / silent answers and the buttons you pressed, to",
      "EASYROMS/IO_Checker/ on the games card, for Claude.", NULL},
@@ -101,9 +106,21 @@ enum { A_NONE, A_PLAYED, A_HEARD, A_SILENT };
 
 typedef struct { char status[5], card[16], item[48], value[96]; } Row;
 
+/* A game controller on USB (not the built-in pad): opened while the Game controllers page is up, its state kept after. */
+typedef struct {
+    SDL_Joystick *js;
+    SDL_JoystickID id;
+    char name[64];
+    int nb, na, nh;
+    Uint8 down[MAX_B], seen[MAX_B], moved[MAX_A];
+    float axis[MAX_A];
+    Uint8 hat;
+} ExtPad;
+
 typedef struct {
     /* the pad */
     SDL_Joystick *js;
+    SDL_JoystickID js_id;           /* the built-in pad's instance id: events from any other pad belong to the USB page */
     SDL_GameController *gc;
     char pad_name[64], guid[40];
     int nbuttons, naxes, nhats;
@@ -136,18 +153,45 @@ typedef struct {
     SDL_Texture *checker;
     /* sound */
     SDL_AudioDeviceID dev;
+    Uint32 audio_close_at;          /* when to close the device after a tone (an open one keeps a thread waking ~40 times a second: docs/POWER.md) */
     SDL_AudioSpec have;
     char audio_dev[128];
     int audio_error, answers[NTONE];
     char snd_card[96], snd_path[16], snd_jack[64], snd_hp[16];
     /* files, system, report */
-    Row files[24];
+    Row files[56];
     int nfiles, files_run;
     R3Item sys[28];
     int nsys;
     char report_file[96];
     int report_written;
     R3Toast toast;                  /* the hot-plug toast over the top bar (docs/HOTPLUG.md) */
+    /* USB and OTG (usb_io.h): the last scan, and the live checks */
+    int usb_sub, usb_scanned;
+    Uint32 usb_scan_at;
+    UioDev usb_dev[UIO_MAX];    int n_dev;
+    UioConn usb_conn[UIO_MAX];  int n_conn;
+    UioDisk usb_disk[8];        int n_disk;
+    UioNet usb_net[8];          int n_net;
+    UioMidi usb_midi[8];        int n_midi;
+    UioInput usb_in[16];        int n_in;
+    int displays;               /* SDL's display count, -1 while SDL's video is not up (--report) */
+    R3Item usb_rows[48];
+    char usb_detail[48][120];
+    int n_rows;
+    int midi_fd, midi_idx;      /* the port open for the live check, -1 when none */
+    unsigned midi_in_total;
+    int midi_in_msgs, midi_out_msgs;
+    char midi_log[4][56], midi_err[64];
+    Uint32 midi_off_at;
+    Uint8 kb_seen[SDL_NUM_SCANCODES];
+    int kb_n;
+    char kb_log[6][40];
+    int m_x, m_y, m_moves, m_wheel;
+    unsigned m_buttons;         /* bit n: button n was pressed */
+    ExtPad ext[4];
+    int n_ext;
+    struct Loop *loop;              /* what a pass of the main loop draws with; NULL with no window (--report) */
 } App;
 
 static const char *env_or(const char *name, const char *dflt) {
@@ -287,6 +331,15 @@ static void tone_sample(const Tone *t, int i, double *l, double *r) {
 }
 static int tone_frames(const Tone *t) { return (int)(t->secs * RATE); }
 
+#define AUDIO_TAIL_MS 500   /* after the tone's last sample: the device's own buffer plays out */
+
+/* Close the output. SDL's audio thread feeds an open device silence and wakes about 40 times a second until it is closed, so it is only open while a tone plays. */
+static void audio_close(App *a) {
+    if (a->dev) SDL_CloseAudioDevice(a->dev);
+    a->dev = 0;
+    a->audio_close_at = 0;
+}
+
 static int audio_open(App *a) {
     if (a->dev) return 1;
     if (!SDL_WasInit(SDL_INIT_AUDIO) && SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) {
@@ -330,6 +383,8 @@ static void play(App *a, int i) {
     free(buf);
     if (rc != 0) { say(a, R3_ST_ERROR, "Could not play: %s", SDL_GetError()); a->audio_error = 1; return; }
     SDL_PauseAudioDevice(a->dev, 0);
+    a->audio_close_at = SDL_GetTicks() + (Uint32)(t->secs * 1000) + AUDIO_TAIL_MS;
+    if (!a->audio_close_at) a->audio_close_at = 1;
     a->answers[i] = A_PLAYED;
     say(a, R3_ST_HINT, "Playing %s. Heard it? X yes, Y no.", t->label);
 }
@@ -608,6 +663,14 @@ static void run_files(App *a) {
     char fs[64], dev[256];
     int exact = 0;
     if ((mount_of(roms2, fs, sizeof fs, dev, sizeof dev, &exact) && exact) || getenv("R3I6NOS_ROMS2")) card_check(a, "Data card", roms2);
+    UioDisk disks[8];
+    int nd = uio_usb_disks(disks, 8);
+    for (int i = 0; i < nd; i++) {
+        if (!disks[i].mount[0]) continue;
+        char label[24];
+        snprintf(label, sizeof label, "USB %.15s", disks[i].dev);
+        card_check(a, label, disks[i].mount);
+    }
     a->files_run = 1;
     int bad = 0;
     for (int i = 0; i < a->nfiles; i++) bad += !strcmp(a->files[i].status, "FAIL");
@@ -673,6 +736,9 @@ static void report_input(App *a, R3Report *r) {
     if (keys[0]) r3_report_line(r, R3_INFO, "keys", "%s", keys);
 }
 
+static void power_windows(App *a, R3Report *r);
+static void report_usb(App *a, R3Report *r);
+
 static void write_report(App *a, const char *how) {
     const char *roms = env_or("R3I6NOS_ROMS", "/roms");
     char dir[PATH_MAX];
@@ -715,6 +781,7 @@ static void write_report(App *a, const char *how) {
     r3_report_line(&r, R3_INFO, "headphones", "%s, jack %s", a->snd_hp[0] ? a->snd_hp : "?", a->snd_jack[0] ? a->snd_jack : "none");
     audio_open(a);
     r3_report_check(&r, !a->audio_error, "output opened", a->audio_dev);
+    audio_close(a);     /* the check only needed it to open */
     char key[64];
     for (int i = 0; i < NTONE; i++) {
         snprintf(key, sizeof key, "heard %s", TONES[i].label);
@@ -732,7 +799,9 @@ static void write_report(App *a, const char *how) {
         snprintf(key, sizeof key, "%s %s", a->files[i].card, a->files[i].item);
         r3_report_line(&r, a->files[i].status, key, "%s", a->files[i].value);
     }
+    report_usb(a, &r);
     r3_report_memory(&r);
+    power_windows(a, &r);
     int pass = r.pass, fail = r.fail, skip = r.skip;
     if (r3_report_close(&r) == 0) {
         snprintf(a->report_file, sizeof a->report_file, "EASYROMS/IO_Checker/r36s-report-native.txt");
@@ -786,6 +855,7 @@ static void home_value(const App *a, int id, char *out, size_t cap) {
         if (bad) snprintf(out, cap, "%d FAIL", bad);
         else snprintf(out, cap, "ok");
     }
+    if (id == H_USB && a->usb_scanned) snprintf(out, cap, "%d device%s", a->n_dev, a->n_dev == 1 ? "" : "s");
     if (id == H_REPORT && a->report_written) snprintf(out, cap, "written");
 }
 
@@ -961,7 +1031,7 @@ static void page_sound(R3Screen *s, const App *a) {
 }
 
 static void page_files(R3Screen *s, const App *a) {
-    static R3Item items[24];
+    static R3Item items[56];
     for (int i = 0; i < a->nfiles; i++) {
         const Row *r = &a->files[i];
         char v[160];
@@ -993,6 +1063,494 @@ static void page_system(R3Screen *s, const App *a) {
     cmdline(s, a, "", left);
 }
 
+/* ---- USB and OTG (usb_io.h; docs/IO-CHECKER.md) ---------------------------------------------------------------------------------- */
+
+/* The reply line when a USB page opens. */
+static const char *const USB_HINT[U_COUNT] = {
+    "Every device on the USB bus. A scans again.", "Video outputs: plug in a dock or an adapter.", "Up/Down picks a port. Play a key, or press A to send C4.",
+    "USB drives. A tests a mounted one.", "Network adapters: plug one in, then a cable.", "Type on the USB keyboard. Esc goes back.",
+    "Move the mouse, click, turn the wheel.", "Press the buttons of a USB controller."};
+
+static const char *USB_LABEL[U_COUNT] = {"Devices", "Video out", "MIDI", "Storage", "Network", "Keyboard", "Mouse", "Game controllers"};
+static const char *USB_ABOUT[U_COUNT][3] = {
+    {"Every device on the USB bus, what it is (from its", "interfaces) and the driver the kernel gave it. A device", "with no driver is a FAIL in the report."},
+    {"The video outputs the kernel knows: this unit's own screen,", "and an HDMI or DisplayLink dock when one is plugged in:", "connected or not, and its first mode."},
+    {"USB MIDI ports. Pick one: what comes in is shown, and A", "sends middle C (note on, then off). Play a key, or loop", "a cable from the out to the in."},
+    {"USB drives and sticks: model, size, and whether the system", "has mounted them. A tests a mounted one like a card:", "write, rename, read, delete and the speed."},
+    {"Ethernet and Wi-Fi adapters: link, speed and address.", "Plug in an adapter and a cable and watch the link come up.", NULL},
+    {"Type on a USB keyboard: each different key is counted and", "the last six are shown. Esc goes back.", NULL},
+    {"Move a USB mouse, press its buttons, turn the wheel.", "B goes back.", NULL},
+    {"Other game controllers on USB: shape, and live buttons and", "axes. The built-in pad is on Buttons and sticks.", NULL},
+};
+
+/* -- MIDI: the port selected in the list is open (never blocking) while the page is up -- */
+
+static void midi_close(App *a) {
+    if (a->midi_fd >= 0) close(a->midi_fd);
+    a->midi_fd = a->midi_idx = -1;
+    a->midi_off_at = 0;
+}
+
+static void midi_open_sel(App *a) {
+    int want = a->sel[P_USBSUB];
+    if (want < 0 || want >= a->n_midi) return;      /* a log row is selected: keep the port that is open */
+    if (a->midi_idx == want && a->midi_fd >= 0) return;
+    midi_close(a);
+    a->midi_err[0] = 0;
+    const char *node = a->usb_midi[want].node;
+    int fd = open(node, O_RDWR | O_NONBLOCK);
+    if (fd < 0) fd = open(node, O_RDONLY | O_NONBLOCK);
+    if (fd < 0) fd = open(node, O_WRONLY | O_NONBLOCK);
+    a->midi_idx = want;
+    if (fd < 0) { snprintf(a->midi_err, sizeof a->midi_err, "%s", strerror(errno)); return; }
+    a->midi_fd = fd;
+}
+
+static void midi_log_add(App *a, const char *dir, const unsigned char *b, int n) {
+    char t[48];
+    uio_midi_text(b, n, t, sizeof t);
+    memmove(a->midi_log[1], a->midi_log[0], sizeof a->midi_log[0] * 3);
+    snprintf(a->midi_log[0], sizeof a->midi_log[0], "%s %s", dir, t);
+}
+
+/* What came in on the open port: counted, and each channel message put in words. */
+static void midi_poll(App *a) {
+    if (a->midi_fd < 0) return;
+    unsigned char buf[128];
+    ssize_t n = read(a->midi_fd, buf, sizeof buf);
+    if (n <= 0) return;
+    a->midi_in_total += (unsigned)n;
+    for (ssize_t i = 0; i < n;) {
+        if (buf[i] < 0x80 || buf[i] >= 0xF0) { i++; continue; }     /* data without a status, clock, system messages: counted, not shown */
+        int len = ((buf[i] & 0xF0) == 0xC0 || (buf[i] & 0xF0) == 0xD0) ? 2 : 3;
+        if (i + len > n) break;
+        midi_log_add(a, "in ", buf + i, len);
+        a->midi_in_msgs++;
+        i += len;
+    }
+}
+
+/* A sends middle C: note on now, note off 300 ms later (usb_tick). */
+static void midi_send(App *a, Uint32 now) {
+    if (a->midi_fd < 0) {
+        say(a, R3_ST_WARN, "No MIDI port is open%s%s", a->midi_err[0] ? ": " : ".", a->midi_err);
+        return;
+    }
+    static const unsigned char on[3] = {0x90, 60, 100};
+    if (write(a->midi_fd, on, 3) != 3) { say(a, R3_ST_ERROR, "Could not send: %s", strerror(errno)); return; }
+    midi_log_add(a, "out", on, 3);
+    a->midi_out_msgs++;
+    a->midi_off_at = now + 300;
+    if (!a->midi_off_at) a->midi_off_at = 1;
+    say(a, R3_ST_OK, "Sent middle C (note on, then note off).");
+}
+
+/* -- game controllers on USB: opened while their page is up; events carry the pad's instance id -- */
+
+static void ext_close_all(App *a) {
+    for (int i = 0; i < a->n_ext; i++)
+        if (a->ext[i].js) { SDL_JoystickClose(a->ext[i].js); a->ext[i].js = NULL; }
+}
+
+static void ext_open_all(App *a) {
+    ExtPad old[4];
+    int nold = a->n_ext;
+    memcpy(old, a->ext, sizeof old);
+    ext_close_all(a);
+    memset(a->ext, 0, sizeof a->ext);
+    a->n_ext = 0;
+    if (!SDL_WasInit(SDL_INIT_JOYSTICK)) return;
+    for (int i = 0; i < SDL_NumJoysticks() && a->n_ext < 4; i++) {
+        if (a->js && SDL_JoystickGetDeviceInstanceID(i) == a->js_id) continue;     /* the built-in pad is the Buttons and sticks page's */
+        SDL_Joystick *j = SDL_JoystickOpen(i);
+        if (!j) continue;
+        ExtPad *p = &a->ext[a->n_ext++];
+        p->js = j;
+        p->id = SDL_JoystickInstanceID(j);
+        snprintf(p->name, sizeof p->name, "%.60s", SDL_JoystickName(j) ? SDL_JoystickName(j) : "?");
+        p->nb = SDL_JoystickNumButtons(j);
+        p->na = SDL_JoystickNumAxes(j);
+        p->nh = SDL_JoystickNumHats(j);
+        for (int k = 0; k < p->na && k + 1 < MAX_A; k++) p->axis[k + 1] = SDL_JoystickGetAxis(j, k) / 32768.0f;
+        for (int k = 0; k < nold; k++)      /* seen before on an earlier visit: keep what it pressed */
+            if (!strcmp(old[k].name, p->name)) { memcpy(p->seen, old[k].seen, sizeof p->seen); memcpy(p->moved, old[k].moved, sizeof p->moved); break; }
+    }
+}
+
+static void ext_event(App *a, const SDL_Event *e) {
+    SDL_JoystickID id = e->type == SDL_JOYAXISMOTION ? e->jaxis.which : e->type == SDL_JOYHATMOTION ? e->jhat.which : e->jbutton.which;
+    ExtPad *p = NULL;
+    for (int i = 0; i < a->n_ext; i++) if (a->ext[i].js && a->ext[i].id == id) p = &a->ext[i];
+    if (!p) return;
+    if (e->type == SDL_JOYBUTTONDOWN || e->type == SDL_JOYBUTTONUP) {
+        int b = e->jbutton.button + 1;
+        if (b < MAX_B) { p->down[b] = e->type == SDL_JOYBUTTONDOWN; if (p->down[b]) p->seen[b] = 1; }
+    } else if (e->type == SDL_JOYHATMOTION) {
+        p->hat = e->jhat.value;
+    } else {
+        int i = e->jaxis.axis + 1;
+        if (i < MAX_A) { p->axis[i] = e->jaxis.value / 32768.0f; if (fabsf(p->axis[i]) > 0.5f) p->moved[i] = 1; }
+    }
+}
+
+/* -- a keyboard: each different key counted, the last six shown -- */
+
+static void kb_press(App *a, int scancode, const char *name) {
+    if (scancode > 0 && scancode < SDL_NUM_SCANCODES && !a->kb_seen[scancode]) { a->kb_seen[scancode] = 1; a->kb_n++; }
+    memmove(a->kb_log[1], a->kb_log[0], sizeof a->kb_log[0] * 5);
+    snprintf(a->kb_log[0], sizeof a->kb_log[0], "%s", name);
+}
+
+/* -- the scan: every list, again (on entering a page, every 2 s while one is up, and on A) -- */
+
+static void usb_scan(App *a, Uint32 now) {
+    a->n_dev = uio_usb_devices(a->usb_dev, UIO_MAX);
+    a->n_conn = uio_connectors(a->usb_conn, UIO_MAX);
+    a->n_disk = uio_usb_disks(a->usb_disk, 8);
+    a->n_net = uio_nets(a->usb_net, 8);
+    a->n_midi = uio_midi_ports(a->usb_midi, 8);
+    a->n_in = uio_inputs(a->usb_in, 16);
+    a->displays = SDL_WasInit(SDL_INIT_VIDEO) ? SDL_GetNumVideoDisplays() : -1;
+    a->usb_scanned = 1;
+    a->usb_scan_at = now;
+}
+
+/* Once a pass: the 2 s rescan on a USB page, the MIDI port read, a note ended. */
+static void usb_tick(App *a, Uint32 now) {
+    if (a->page != P_USB && a->page != P_USBSUB) return;
+    if (now - a->usb_scan_at >= 2000) {
+        usb_scan(a, now);
+        if (a->page == P_USBSUB && a->usb_sub == U_PADS && a->n_ext < SDL_NumJoysticks() - (a->js ? 1 : 0)) ext_open_all(a);   /* one was plugged in */
+        if (a->page == P_USBSUB && a->usb_sub == U_MIDI) midi_open_sel(a);
+    }
+    if (a->page == P_USBSUB && a->usb_sub == U_MIDI) {
+        midi_poll(a);
+        if (a->midi_off_at && now >= a->midi_off_at && a->midi_fd >= 0) {
+            static const unsigned char off[3] = {0x80, 60, 0};
+            if (write(a->midi_fd, off, 3) == 3) midi_log_add(a, "out", off, 3);
+            a->midi_off_at = 0;
+        }
+    }
+}
+
+/* -- the rows of a page -- */
+
+static void urow(App *a, const char *label, const char *value, const char *detail) {
+    if (a->n_rows >= (int)(sizeof a->usb_rows / sizeof a->usb_rows[0])) return;
+    R3Item *it = &a->usb_rows[a->n_rows];
+    snprintf(it->label, sizeof it->label, "%s", label);
+    snprintf(it->value, sizeof it->value, "%s", value ? value : "");
+    snprintf(a->usb_detail[a->n_rows], sizeof a->usb_detail[0], "%s", detail ? detail : "");
+    a->n_rows++;
+}
+
+static void usb_build(App *a) {
+    a->n_rows = 0;
+    char l[240], v[240], d[300];
+    switch (a->usb_sub) {
+    case U_DEVICES:
+        for (int i = 0; i < a->n_dev; i++) {
+            const UioDev *u = &a->usb_dev[i];
+            snprintf(l, sizeof l, "%s %s", u->name, u->product);
+            snprintf(v, sizeof v, "%s%s", u->kinds, u->unbound && !u->hub ? " NO DRIVER" : "");
+            snprintf(d, sizeof d, "%s  %s Mb/s  %s", u->vidpid, u->speed[0] ? u->speed : "?", u->drivers[0] ? u->drivers : "no driver bound");
+            urow(a, l, v, d);
+        }
+        break;
+    case U_VIDEO:
+        if (a->displays >= 0) {
+            snprintf(v, sizeof v, "%d", a->displays);
+            urow(a, "Displays SDL can draw to now", v, "SDL's own count; this app draws to one");
+        }
+        for (int i = 0; i < a->n_conn; i++) {
+            const UioConn *c = &a->usb_conn[i];
+            snprintf(l, sizeof l, "%s%s", c->name, c->internal ? " (this unit's screen)" : c->usb ? " (USB adapter)" : "");
+            snprintf(v, sizeof v, "%s%s%s", c->status, c->mode[0] ? " " : "", c->mode);
+            snprintf(d, sizeof d, "%s: %s%s", c->name, c->status, !c->internal && !strcmp(c->status, "connected") ? ", an external display is attached" : "");
+            urow(a, l, v, d);
+        }
+        break;
+    case U_MIDI:
+        for (int i = 0; i < a->n_midi; i++) {
+            const UioMidi *m = &a->usb_midi[i];
+            snprintf(l, sizeof l, "%s  card %d device %d%s", m->name, m->card, m->device, m->usb ? " (USB)" : "");
+            if (i == a->midi_idx && a->midi_fd >= 0) snprintf(v, sizeof v, "open, %u bytes in", a->midi_in_total);
+            else if (i == a->midi_idx) snprintf(v, sizeof v, "cannot open: %s", a->midi_err);
+            else v[0] = 0;
+            urow(a, l, v, m->node);
+        }
+        if (a->n_midi) {
+            for (int i = 0; i < 4; i++)
+                if (a->midi_log[i][0]) { snprintf(l, sizeof l, "  %s", a->midi_log[i]); urow(a, l, "", "The last messages, newest first"); }
+            snprintf(v, sizeof v, "%d out, %d in", a->midi_out_msgs, a->midi_in_msgs);
+            urow(a, "Messages", v, "A sends middle C; what comes in is listed above");
+        }
+        break;
+    case U_STORAGE:
+        for (int i = 0; i < a->n_disk; i++) {
+            const UioDisk *k = &a->usb_disk[i];
+            snprintf(l, sizeof l, "%s %s", k->dev, k->model);
+            snprintf(v, sizeof v, "%.1f GB", (double)k->bytes / 1e9);
+            urow(a, l, v, "A tests a mounted one: write, rename, read, speed");
+            if (k->mount[0]) {
+                snprintf(l, sizeof l, "  mounted at %s", k->mount);
+                urow(a, l, k->fstype, "Mounted: A tests it like a card");
+            } else {
+                urow(a, "  not mounted", "", "Nothing mounts USB storage yet (a mount needs root)");
+            }
+        }
+        break;
+    case U_NETWORK:
+        for (int i = 0; i < a->n_net; i++) {
+            const UioNet *n = &a->usb_net[i];
+            snprintf(l, sizeof l, "%s %s%s", n->name, n->wifi ? "Wi-Fi" : "Ethernet", n->usb ? " (USB)" : "");
+            int up = n->carrier == 1 || !strcmp(n->state, "up");
+            if (up && n->speed > 0) snprintf(v, sizeof v, "up %d Mb/s%s%s", n->speed, n->ip[0] ? " " : "", n->ip);
+            else if (up) snprintf(v, sizeof v, "up%s%s", n->ip[0] ? " " : "", n->ip);
+            else snprintf(v, sizeof v, "%s", n->state);
+            snprintf(d, sizeof d, "%s  %llu bytes in, %llu out", n->mac[0] ? n->mac : "no address", n->rx, n->tx);
+            urow(a, l, v, d);
+        }
+        break;
+    case U_KEYBOARD: {
+        int found = 0;
+        for (int i = 0; i < a->n_in; i++)
+            if (a->usb_in[i].keyboard) { found++; urow(a, a->usb_in[i].name, a->usb_in[i].usb ? "USB" : "built in", "A keyboard the kernel made an input device for"); }
+        if (!found) urow(a, "No keyboard found", "plug one in", "A USB keyboard appears here; its keys are counted below");
+        snprintf(v, sizeof v, "%d", a->kb_n);
+        urow(a, "Different keys pressed", v, "Each key counts once, however often it is pressed");
+        SDL_Keymod m = SDL_GetModState();
+        snprintf(v, sizeof v, "%s%s%s%s%s", m & KMOD_SHIFT ? "Shift " : "", m & KMOD_CTRL ? "Ctrl " : "", m & KMOD_ALT ? "Alt " : "", m & KMOD_GUI ? "Gui " : "",
+                 m & (KMOD_SHIFT | KMOD_CTRL | KMOD_ALT | KMOD_GUI) ? "" : "none");
+        urow(a, "Modifiers held", v, "Hold Shift, Ctrl or Alt to see them");
+        for (int i = 0; i < 6; i++)
+            if (a->kb_log[i][0]) { snprintf(l, sizeof l, "  %s", a->kb_log[i]); urow(a, l, "", "The last keys, newest first"); }
+        break;
+    }
+    case U_MOUSE: {
+        int found = 0;
+        for (int i = 0; i < a->n_in; i++)
+            if (a->usb_in[i].mouse) { found++; urow(a, a->usb_in[i].name, a->usb_in[i].usb ? "USB" : "built in", "A mouse the kernel made an input device for"); }
+        if (!found) urow(a, "No mouse found", "plug one in", "A USB mouse appears here; its movement is counted below");
+        snprintf(v, sizeof v, "x %d  y %d  (%d moves)", a->m_x, a->m_y, a->m_moves);
+        urow(a, "Pointer moved", v, "Relative movement since this page opened");
+        static const char *const bn[6] = {"", "left", "middle", "right", "x1", "x2"};
+        v[0] = 0;
+        for (int b = 1; b <= 5; b++) if (a->m_buttons & (1u << b)) { size_t u = strlen(v); snprintf(v + u, sizeof v - u, "%s%s", u ? " " : "", bn[b]); }
+        urow(a, "Buttons pressed", v[0] ? v : "none yet", "Press each button once");
+        snprintf(v, sizeof v, "%d", a->m_wheel);
+        urow(a, "Wheel", v, "Turn it up and down; up counts positive");
+        break;
+    }
+    case U_PADS:
+        for (int i = 0; i < a->n_ext; i++) {
+            const ExtPad *p = &a->ext[i];
+            snprintf(v, sizeof v, "%d btn %d axes %d hats", p->nb, p->na, p->nh);
+            urow(a, p->name, v, "A game controller on USB: press its buttons");
+            char held[96] = "";
+            int seen = 0;
+            for (int b = 1; b <= p->nb && b < MAX_B; b++) {
+                seen += p->seen[b];
+                if (p->down[b]) { size_t u = strlen(held); snprintf(held + u, sizeof held - u, "%s%d", u ? " " : "", b); }
+            }
+            urow(a, "  held now", held[0] ? held : "-", "Buttons down this moment, numbered from 1");
+            snprintf(v, sizeof v, "%d of %d", seen, p->nb);
+            urow(a, "  buttons pressed", v, "Press every button once");
+            char ax[96] = "";
+            for (int k = 1; k <= p->na && k <= 4; k++) { size_t u = strlen(ax); snprintf(ax + u, sizeof ax - u, "%sA%d %.2f", u ? "  " : "", k, p->axis[k]); }
+            urow(a, "  axes", ax[0] ? ax : "-", "Move the sticks: each axis from -1 to 1");
+        }
+        break;
+    default: break;
+    }
+}
+
+static void usb_summary(const App *a, int i, char *out, size_t cap) {
+    out[0] = 0;
+    int n = 0;
+    switch (i) {
+    case U_DEVICES: if (a->n_dev) snprintf(out, cap, "%d found", a->n_dev); break;
+    case U_VIDEO:
+        for (int k = 0; k < a->n_conn; k++) n += !a->usb_conn[k].internal && !strcmp(a->usb_conn[k].status, "connected");
+        if (n) snprintf(out, cap, "%d connected", n);
+        break;
+    case U_MIDI: if (a->n_midi) snprintf(out, cap, "%d port%s", a->n_midi, a->n_midi == 1 ? "" : "s"); break;
+    case U_STORAGE: if (a->n_disk) snprintf(out, cap, "%d found", a->n_disk); break;
+    case U_NETWORK: if (a->n_net) snprintf(out, cap, "%d adapter%s", a->n_net, a->n_net == 1 ? "" : "s"); break;
+    case U_KEYBOARD: for (int k = 0; k < a->n_in; k++) n += a->usb_in[k].keyboard && a->usb_in[k].usb; if (n) snprintf(out, cap, "%d on USB", n); break;
+    case U_MOUSE: for (int k = 0; k < a->n_in; k++) n += a->usb_in[k].mouse && a->usb_in[k].usb; if (n) snprintf(out, cap, "%d on USB", n); break;
+    case U_PADS:
+        n = SDL_WasInit(SDL_INIT_JOYSTICK) ? SDL_NumJoysticks() - (a->js ? 1 : 0) : 0;
+        if (n > 0) snprintf(out, cap, "%d found", n);
+        break;
+    default: break;
+    }
+}
+
+static void usb_empty_lines(int sub, const char *out[6]) {
+    for (int i = 0; i < 6; i++) out[i] = NULL;
+    switch (sub) {
+    case U_DEVICES: out[0] = "Nothing is plugged into the OTG port."; out[1] = "Plug in a device or a hub; a dock shows as a hub"; out[2] = "with the things behind it."; break;
+    case U_VIDEO: out[0] = "No video connector found in /sys/class/drm."; break;
+    case U_MIDI: out[0] = "No MIDI port."; out[1] = "Plug in a USB MIDI keyboard or interface. If it is"; out[2] = "plugged in already, the kernel has no USB MIDI driver."; break;
+    case U_STORAGE: out[0] = "No USB storage."; out[1] = "Plug a stick or a drive into the OTG port."; break;
+    case U_NETWORK: out[0] = "No network adapter."; out[1] = "Plug a USB Ethernet or Wi-Fi adapter into the OTG port."; break;
+    case U_PADS: out[0] = "No other game controller."; out[1] = "Plug one into the OTG port; the built-in pad is on"; out[2] = "Buttons and sticks."; break;
+    default: break;
+    }
+}
+
+static void page_usb(R3Screen *s, const App *a) {
+    R3Item items[U_COUNT];
+    for (int i = 0; i < U_COUNT; i++) { snprintf(items[i].label, sizeof items[i].label, "%s", USB_LABEL[i]); usb_summary(a, i, items[i].value, sizeof items[i].value); }
+    R3List l = {0, 1, R3_COLS, U_COUNT + 2, "USB and OTG", "A open  B back", items, U_COUNT, a->sel[P_USB], {NULL}};
+    r3_list_dialog(s, &l);
+    int top = U_COUNT + 3, sel = a->sel[P_USB];
+    R3Box b = {0, USB_LABEL[sel], NULL, NULL, 0};
+    r3_box(s, 0, top, R3_COLS, R3_DISPLAY_TOP + R3_DISPLAY_ROWS - top, &b);
+    for (int i = 0; i < 3 && USB_ABOUT[sel][i]; i++) r3_text_fit(s, 2, top + 1 + i, USB_ABOUT[sel][i], R3_COLS - 4, R3_ST(R3_ST_BODY));
+    char line[64], left[32];
+    snprintf(line, sizeof line, "open %s", USB_LABEL[sel]);
+    snprintf(left, sizeof left, "%d USB device%s", a->n_dev, a->n_dev == 1 ? "" : "s");
+    cmdline(s, a, line, left);
+}
+
+static void page_usbsub(R3Screen *s, const App *a) {
+    static const char *const foot[U_COUNT] = {"A scan again  B back", "A scan again  B back", "A send C4  B back", "A test  B back", "A scan again  B back",
+                                              "type keys  Esc back", "move, click  B back", "press buttons  B back"};
+    R3List l = {0, 1, R3_COLS, R3_DISPLAY_ROWS, USB_LABEL[a->usb_sub], foot[a->usb_sub], a->usb_rows, a->n_rows, a->sel[P_USBSUB], {NULL}};
+    const char *em[6];
+    usb_empty_lines(a->usb_sub, em);
+    for (int i = 0; i < 6; i++) l.empty[i] = em[i];
+    r3_list_dialog(s, &l);
+    char left[32];
+    snprintf(left, sizeof left, "%d of %d", a->sel[P_USBSUB] + 1, a->n_rows);
+    int sel = a->sel[P_USBSUB];
+    cmdline(s, a, a->n_rows && sel < a->n_rows ? a->usb_detail[sel] : "", a->n_rows ? left : NULL);
+}
+
+/* ---- the device report's USB sections (docs/DEVICE-REPORTS.md; usb_io.h) --------------------------------------------------------------- */
+
+/* A scan, then one section a kind of thing the OTG port can bring. Nothing plugged in is SKIP, never FAIL; a device that is there and does not
+ * work (no driver, will not open, not mounted) is FAIL. What a person has to do (type, move, play) is SKIP until they have, from the USB pages. */
+static void report_usb(App *a, R3Report *r) {
+    usb_scan(a, SDL_GetTicks());
+    char key[128];
+
+    r3_report_section(r, "usb devices");
+    if (!a->n_dev) r3_report_line(r, R3_SKIP, "devices", "nothing is plugged into the OTG port");
+    else r3_report_line(r, R3_INFO, "devices", "%d on USB", a->n_dev);
+    for (int i = 0; i < a->n_dev; i++) {
+        const UioDev *u = &a->usb_dev[i];
+        snprintf(key, sizeof key, "device %s", u->name);
+        r3_report_line(r, R3_INFO, key, "%s (%s), %s Mb/s: %s; drivers: %s", u->product, u->vidpid, u->speed[0] ? u->speed : "?", u->kinds, u->drivers[0] ? u->drivers : "none");
+        if (u->unbound && !u->hub) {
+            snprintf(key, sizeof key, "driver %s", u->name);
+            r3_report_line(r, R3_FAIL, key, "%d of %d interface(s) of %s have no driver: the kernel cannot use this device", u->unbound, u->interfaces, u->product);
+        }
+    }
+
+    r3_report_section(r, "usb video out");
+    int external = 0;
+    for (int i = 0; i < a->n_conn; i++) {
+        const UioConn *c = &a->usb_conn[i];
+        snprintf(key, sizeof key, "connector %s", c->name);
+        r3_report_line(r, R3_INFO, key, "%s%s%s%s", c->status, c->mode[0] ? ", " : "", c->mode, c->internal ? " (this unit's screen)" : c->usb ? " (USB adapter)" : "");
+        if (!c->internal && !strcmp(c->status, "connected")) {
+            external++;
+            r3_report_line(r, R3_PASS, "external display", "connected on %s%s%s", c->name, c->mode[0] ? ", first mode " : "", c->mode);
+        }
+    }
+    if (!a->n_conn) r3_report_line(r, R3_SKIP, "connectors", "no video connectors in /sys/class/drm here");
+    else if (!external) r3_report_line(r, R3_SKIP, "external display", "none connected (an HDMI or DisplayLink dock would show here)");
+    if (a->displays >= 0) r3_report_line(r, R3_INFO, "SDL displays", "%d", a->displays);
+
+    r3_report_section(r, "usb midi");
+    if (!a->n_midi) r3_report_line(r, R3_SKIP, "ports", "no MIDI port: nothing USB MIDI is plugged in, or the kernel has no USB MIDI driver");
+    for (int i = 0; i < a->n_midi; i++) {
+        const UioMidi *m = &a->usb_midi[i];
+        snprintf(key, sizeof key, "%s opens", m->name);
+        int fd = open(m->node, O_RDWR | O_NONBLOCK);
+        if (fd < 0) fd = open(m->node, O_RDONLY | O_NONBLOCK);
+        if (fd < 0) fd = open(m->node, O_WRONLY | O_NONBLOCK);
+        if (fd >= 0) { close(fd); r3_report_line(r, R3_PASS, key, "%s%s", m->node, m->usb ? " (USB)" : ""); }
+        else r3_report_line(r, R3_FAIL, key, "%s: %s", m->node, strerror(errno));
+    }
+    if (a->n_midi) {
+        if (a->midi_in_msgs || a->midi_out_msgs) r3_report_line(r, R3_PASS, "messages", "%d in, %d out", a->midi_in_msgs, a->midi_out_msgs);
+        else r3_report_line(r, R3_SKIP, "messages", "not tried: open USB and OTG > MIDI, play a key, and press A to send middle C");
+    }
+
+    r3_report_section(r, "usb storage");
+    if (!a->n_disk) r3_report_line(r, R3_SKIP, "disks", "no USB storage");
+    for (int i = 0; i < a->n_disk; i++) {
+        const UioDisk *k = &a->usb_disk[i];
+        snprintf(key, sizeof key, "disk %s", k->dev);
+        r3_report_line(r, R3_INFO, key, "%s, %.1f GB", k->model, (double)k->bytes / 1e9);
+        snprintf(key, sizeof key, "%s mounted", k->dev);
+        if (k->mount[0]) r3_report_line(r, R3_PASS, key, "%s on %s (%s); its checks are in the files section as USB %s", k->part, k->mount, k->fstype, k->dev);
+        else r3_report_line(r, R3_FAIL, key, "not mounted: nothing mounts USB storage for apps yet, so it cannot be read or written (a mount needs root)");
+    }
+
+    r3_report_section(r, "usb network");
+    if (!a->n_net) r3_report_line(r, R3_SKIP, "adapters", "no network adapter");
+    for (int i = 0; i < a->n_net; i++) {
+        const UioNet *n = &a->usb_net[i];
+        int up = n->carrier == 1 || !strcmp(n->state, "up");
+        snprintf(key, sizeof key, "%s", n->name);
+        if (n->wifi) r3_report_line(r, R3_INFO, key, "Wi-Fi%s, %s%s%s", n->usb ? " (USB)" : "", n->state, n->ip[0] ? ", " : "", n->ip);
+        else if (up) {
+            char sp[24] = "";
+            if (n->speed > 0) snprintf(sp, sizeof sp, ", %d Mb/s", n->speed);
+            r3_report_line(r, R3_PASS, key, "Ethernet%s: link up%s%s%s", n->usb ? " (USB)" : "", sp, n->ip[0] ? ", " : ", no IPv4 address yet", n->ip);
+        }
+        else r3_report_line(r, R3_INFO, key, "Ethernet%s: no link (%s): no cable, or the other end is off", n->usb ? " (USB)" : "", n->state);
+        snprintf(key, sizeof key, "%s traffic", n->name);
+        r3_report_line(r, R3_INFO, key, "%llu bytes in, %llu out, address %s", n->rx, n->tx, n->mac[0] ? n->mac : "none");
+    }
+
+    r3_report_section(r, "usb keyboard");
+    int found = 0;
+    for (int i = 0; i < a->n_in; i++)
+        if (a->usb_in[i].keyboard) { found++; r3_report_line(r, R3_INFO, "keyboard", "%s%s", a->usb_in[i].name, a->usb_in[i].usb ? " (USB)" : " (built in)"); }
+    if (!found) r3_report_line(r, R3_SKIP, "keyboard", "none found: plug a USB keyboard in");
+    if (a->kb_n) r3_report_line(r, R3_PASS, "keys pressed", "%d different keys reached SDL", a->kb_n);
+    else r3_report_line(r, R3_SKIP, "keys pressed", "not tried: open USB and OTG > Keyboard and type");
+
+    r3_report_section(r, "usb mouse");
+    found = 0;
+    for (int i = 0; i < a->n_in; i++)
+        if (a->usb_in[i].mouse) { found++; r3_report_line(r, R3_INFO, "mouse", "%s%s", a->usb_in[i].name, a->usb_in[i].usb ? " (USB)" : " (built in)"); }
+    if (!found) r3_report_line(r, R3_SKIP, "mouse", "none found: plug a USB mouse in");
+    if (a->m_moves || a->m_buttons || a->m_wheel) r3_report_line(r, R3_PASS, "mouse events", "%d moves, buttons %s%s%s%s%s, wheel %d", a->m_moves,
+                                                                    a->m_buttons & 2 ? "left " : "", a->m_buttons & 4 ? "middle " : "", a->m_buttons & 8 ? "right " : "",
+                                                                    a->m_buttons & 0x30 ? "side " : "", a->m_buttons ? "" : "none", a->m_wheel);
+    else r3_report_line(r, R3_SKIP, "mouse events", "not tried: open USB and OTG > Mouse, move it and click");
+
+    r3_report_section(r, "usb pads");
+    int others = 0;
+    if (SDL_WasInit(SDL_INIT_JOYSTICK)) {
+        for (int i = 0; i < SDL_NumJoysticks(); i++) {
+            if (a->js && SDL_JoystickGetDeviceInstanceID(i) == a->js_id) continue;
+            others++;
+            char guid[40];
+            SDL_JoystickGetGUIDString(SDL_JoystickGetDeviceGUID(i), guid, sizeof guid);
+            snprintf(key, sizeof key, "pad %d", others);
+            r3_report_line(r, R3_INFO, key, "%s, guid %s", SDL_JoystickNameForIndex(i) ? SDL_JoystickNameForIndex(i) : "?", guid);
+        }
+    }
+    if (!others) r3_report_line(r, R3_SKIP, "pads", "no other game controller (the built-in pad is in the input section)");
+    for (int i = 0; i < a->n_ext; i++) {
+        const ExtPad *p = &a->ext[i];
+        int seen = 0;
+        for (int b = 1; b <= p->nb && b < MAX_B; b++) seen += p->seen[b];
+        snprintf(key, sizeof key, "%s buttons", p->name);
+        if (p->nb && seen == p->nb) r3_report_line(r, R3_PASS, key, "all %d pressed", p->nb);
+        else if (seen) r3_report_line(r, R3_INFO, key, "%d of %d pressed (open USB and OTG > Game controllers and press the rest)", seen, p->nb);
+        else r3_report_line(r, R3_SKIP, key, "not tried: open USB and OTG > Game controllers and press its buttons");
+    }
+}
+
 static void compose(App *a, R3Screen *s, Uint32 now) {
     r3_clear(s);
     r3_top_bar(s, "IO Checker", runtime());
@@ -1002,6 +1560,12 @@ static void compose(App *a, R3Screen *s, Uint32 now) {
     case P_SOUND: page_sound(s, a); break;
     case P_FILES: page_files(s, a); break;
     case P_SYSTEM: page_system(s, a); break;
+    case P_USB: page_usb(s, a); break;
+    case P_USBSUB:
+        usb_build(a);
+        if (a->sel[P_USBSUB] >= a->n_rows) a->sel[P_USBSUB] = a->n_rows ? a->n_rows - 1 : 0;
+        page_usbsub(s, a);
+        break;
     default: page_home(s, a);
     }
 }
@@ -1062,6 +1626,7 @@ static void draw_pattern(App *a, SDL_Renderer *r) {
 /* ---- pages and actions ------------------------------------------------------------------------------------------------------ */
 
 static void go(App *a, int page, Uint32 now) {
+    if (a->page == P_USBSUB && page != P_USBSUB) { midi_close(a); ext_close_all(a); }     /* the live checks end with their page */
     a->page = page;
     a->chord_since = 0;
     a->idle_since = now;
@@ -1069,6 +1634,15 @@ static void go(App *a, int page, Uint32 now) {
     if (page == P_INPUT) say(a, R3_ST_HINT, "Press every button. Hold SELECT+START to go back.");
     if (page == P_SYSTEM) system_rows(a);
     if (page == P_SOUND) sound_status(a);
+    if (page == P_USB || page == P_USBSUB) usb_scan(a, now);
+    if (page == P_USB) say(a, R3_ST_HINT, "What the OTG port can bring. A opens a check.");
+    if (page == P_USBSUB) {
+        say(a, R3_ST_HINT, "%s", USB_HINT[a->usb_sub]);
+        if (a->usb_sub == U_MIDI) midi_open_sel(a);
+        if (a->usb_sub == U_PADS) ext_open_all(a);
+        if (a->usb_sub == U_KEYBOARD) { memset(a->kb_seen, 0, sizeof a->kb_seen); a->kb_n = 0; memset(a->kb_log, 0, sizeof a->kb_log); }
+        if (a->usb_sub == U_MOUSE) { a->m_x = a->m_y = a->m_moves = a->m_wheel = 0; a->m_buttons = 0; }
+    }
 }
 
 static void show_pattern(App *a, int i) {
@@ -1085,10 +1659,12 @@ static int count_of(const App *a, int page) {
     case P_SOUND: return NTONE;
     case P_FILES: return a->nfiles;
     case P_SYSTEM: return a->nsys;
+    case P_USB: return U_COUNT;
+    case P_USBSUB: return a->n_rows;
     default: return 0;
     }
 }
-static int per_of(int page) { return page == P_HOME ? H_COUNT : page == P_VIDEO ? NPAT : page == P_SOUND ? NTONE : r3_list_rows(R3_DISPLAY_ROWS); }
+static int per_of(int page) { return page == P_HOME ? H_COUNT : page == P_VIDEO ? NPAT : page == P_SOUND ? NTONE : page == P_USB ? U_COUNT : r3_list_rows(R3_DISPLAY_ROWS); }
 
 static void act(App *a, int act_, Uint32 now) {
     int page = a->page;
@@ -1115,6 +1691,7 @@ static void act(App *a, int act_, Uint32 now) {
         else if (act_ == R3_ACCEPT) {
             if (sel == H_QUIT) a->quit = 1;
             else if (sel == H_REPORT) { a->pending = H_REPORT; say(a, R3_ST_WARN, "Writing the device report (the card test takes a few seconds)..."); }
+            else if (sel == H_USB) go(a, P_USB, now);
             else if (sel == H_FILES) { go(a, P_FILES, now); if (!a->files_run) { a->pending = H_FILES; say(a, R3_ST_WARN, "Testing the cards..."); } }
             else go(a, sel == H_INPUT ? P_INPUT : sel == H_VIDEO ? P_VIDEO : sel == H_SOUND ? P_SOUND : P_SYSTEM, now);
         }
@@ -1132,6 +1709,22 @@ static void act(App *a, int act_, Uint32 now) {
     case P_FILES:
         if (act_ == R3_BACK) go(a, P_HOME, now);
         else if (act_ == R3_ACCEPT) { a->pending = H_FILES; say(a, R3_ST_WARN, "Testing the cards..."); }
+        break;
+    case P_USB:
+        if (act_ == R3_BACK) go(a, P_HOME, now);
+        else if (act_ == R3_ACCEPT) { a->usb_sub = sel; a->sel[P_USBSUB] = 0; go(a, P_USBSUB, now); }
+        break;
+    case P_USBSUB:
+        if (act_ == R3_BACK) go(a, P_USB, now);
+        else if (act_ == R3_ACCEPT) {
+            if (a->usb_sub == U_MIDI) midi_send(a, now);
+            else if (a->usb_sub == U_STORAGE) {
+                int mounted = 0;
+                for (int i = 0; i < a->n_disk; i++) mounted += a->usb_disk[i].mount[0] != 0;
+                if (!mounted) say(a, R3_ST_WARN, "Nothing to test: no USB storage is mounted.");
+                else { go(a, P_FILES, now); a->pending = H_FILES; say(a, R3_ST_WARN, "Testing the cards and the USB storage..."); }
+            } else { usb_scan(a, now); say(a, R3_ST_OK, "Scanned again."); }
+        } else if (a->usb_sub == U_MIDI) midi_open_sel(a);   /* the selection moved: that port is the open one */
         break;
     default:
         if (act_ == R3_BACK) go(a, P_HOME, now);
@@ -1153,6 +1746,7 @@ static int open_pad(App *a, int index) {
     if (SDL_IsGameController(index)) a->gc = SDL_GameControllerOpen(index);
     a->js = a->gc ? SDL_GameControllerGetJoystick(a->gc) : SDL_JoystickOpen(index);
     if (!a->js) return 0;
+    a->js_id = SDL_JoystickInstanceID(a->js);
     snprintf(a->pad_name, sizeof a->pad_name, "%.60s", SDL_JoystickName(a->js) ? SDL_JoystickName(a->js) : "?");
     SDL_JoystickGetGUIDString(SDL_JoystickGetGUID(a->js), a->guid, sizeof a->guid);
     a->nbuttons = SDL_JoystickNumButtons(a->js);
@@ -1166,14 +1760,25 @@ static void app_init(App *a) {
     memset(a, 0, sizeof *a);
     say(a, R3_ST_HINT, "Pick a check with the D-pad and A.");
     a->force = 1;
+    a->midi_fd = a->midi_idx = -1;
+    a->displays = -1;
     snprintf(a->mode, sizeof a->mode, "?");
     snprintf(a->renderer, sizeof a->renderer, "?");
     snprintf(a->backlight, sizeof a->backlight, "?");
     snprintf(a->snd_card, sizeof a->snd_card, "?");
 }
 
+/* Whether a pad event is from a pad that is not the built-in one: it belongs to the Game controllers page, never to the built-in pad's record. */
+static int foreign_pad(const App *a, SDL_JoystickID which) {
+    return a->js && which != a->js_id;
+}
+
 /* One SDL event. Every button, axis, hat and key is recorded on every page; the list pages also act on them. */
 static void handle(App *a, const SDL_Event *e, Uint32 now) {
+    if (a->js && (e->type == SDL_JOYBUTTONDOWN || e->type == SDL_JOYBUTTONUP || e->type == SDL_JOYAXISMOTION || e->type == SDL_JOYHATMOTION)) {
+        SDL_JoystickID which = e->type == SDL_JOYAXISMOTION ? e->jaxis.which : e->type == SDL_JOYHATMOTION ? e->jhat.which : e->jbutton.which;
+        if (foreign_pad(a, which)) { ext_event(a, e); return; }      /* another pad (USB): the Game controllers page's, not the built-in pad's record */
+    }
     switch (e->type) {
     case SDL_QUIT: a->quit = 1; break;
     case SDL_WINDOWEVENT: a->force = 1; break;
@@ -1227,6 +1832,15 @@ static void handle(App *a, const SDL_Event *e, Uint32 now) {
         }
         break;
     }
+    case SDL_MOUSEMOTION:
+        if (a->page == P_USBSUB && a->usb_sub == U_MOUSE) { a->m_x += e->motion.xrel; a->m_y += e->motion.yrel; a->m_moves++; }
+        break;
+    case SDL_MOUSEBUTTONDOWN:
+        if (a->page == P_USBSUB && a->usb_sub == U_MOUSE && e->button.button < 32) a->m_buttons |= 1u << e->button.button;
+        break;
+    case SDL_MOUSEWHEEL:
+        if (a->page == P_USBSUB && a->usb_sub == U_MOUSE) a->m_wheel += e->wheel.y;
+        break;
     case SDL_KEYDOWN:
     case SDL_KEYUP: {
         if (e->key.repeat) break;
@@ -1246,6 +1860,11 @@ static void handle(App *a, const SDL_Event *e, Uint32 now) {
         if (!isdown) break;
         rec_key(a, lname);
         if (a->page == P_INPUT) { if (k == SDLK_ESCAPE) go(a, P_HOME, now); break; }
+        if (a->page == P_USBSUB && a->usb_sub == U_KEYBOARD) {    /* every key is a test here; Esc, or B on the pad, goes back */
+            kb_press(a, (int)e->key.keysym.scancode, SDL_GetKeyName(k));
+            if (k == SDLK_ESCAPE) act(a, R3_BACK, now);
+            break;
+        }
         if (k == SDLK_h) act(a, R3_X, now);
         else if (k == SDLK_n) act(a, R3_Y, now);
         else { int ac = r3_key_action(k); if (ac != R3_NONE) act(a, ac, now); }
@@ -1267,10 +1886,81 @@ static void tick(App *a, Uint32 now) {
             else { go(a, P_HOME, now); say(a, R3_ST_HINT, "Back."); }
         }
     }
+    usb_tick(a, now);
+    if (a->dev && a->audio_close_at && now >= a->audio_close_at) audio_close(a);      /* the tone is over */
     if (a->page == P_INPUT && now - a->idle_since >= IDLE_LIMIT_MS) {
         go(a, P_HOME, now);
         say(a, R3_ST_WARN, "No input for 15 s: back to the list.");
     }
+}
+
+#define IDLE_NAP_MS 100 /* how long an idle pass sleeps on a quiet page: about 10 wake-ups a second, where 16 ms was 60 (CLAUDE.md rule 14; docs/POWER.md) */
+
+/* How long the main loop sleeps after a pass: a frame (16 ms) while something is changing or about to (a screen still being presented, a toast,
+ * the exit chord counting up, a job about to run) or on a live page, else IDLE_NAP_MS. A press waits at most that long. Not
+ * SDL_WaitEventTimeout: on a video driver without a native wait SDL turns it into a 1 ms polling loop (docs/POWER.md). */
+static unsigned nap_ms(App *a, const R3Video *v) {
+    /* the pages where a person is pressing things and wants to see them at once keep the frame: the button test, the live USB checks */
+    if (a->page == P_INPUT || (a->page == P_USBSUB && (a->usb_sub == U_KEYBOARD || a->usb_sub == U_MOUSE || a->usb_sub == U_PADS || a->usb_sub == U_MIDI))) return 16;
+    if (a->force || v->settle > 0 || r3_toast_active(&a->toast) || a->chord_since || a->pending || a->midi_off_at) return 16;
+    return IDLE_NAP_MS;
+}
+
+/* ---- the power section of the device report (CLAUDE.md rule 14; docs/POWER.md) ------------------------------------------------ */
+
+/* What a pass of the main loop draws with. Set by main; NULL for --report, which has no window and so nothing to measure. */
+struct Loop { SDL_Renderer *r; R3Video *video; R3Screen screen; };
+
+/* The part of a pass that draws, shared by the main loop and the idle window below, so the report measures the real thing. */
+static void draw_frame(App *a, Uint32 now) {
+    compose(a, &a->loop->screen, now);
+    r3_toast_draw(&a->toast, &a->loop->screen);
+    r3_video_draw(a->loop->video, a->loop->r, &a->loop->screen, a->force);
+    a->force = 0;
+}
+
+static void drain_events(void) {
+    SDL_Event e;
+    while (SDL_PollEvent(&e)) { /* a report in progress takes no input */ }
+}
+
+/* One pass of the idle loop as main runs it (the home page), minus input. */
+static void idle_turn(void *arg) {
+    App *a = arg;
+    Uint32 now = SDL_GetTicks();
+    drain_events();
+    tick(a, now);
+    r3_toast_poll(&a->toast, now);
+    draw_frame(a, now);
+    SDL_Delay(nap_ms(a, a->loop->video));
+}
+
+#define POWER_WORK_CPU 40.0    /* % of a core on the Motion pattern: a first guess, set before any measurement (docs/POWER.md) */
+#define POWER_WORK_WAKE 180.0  /* wake-ups a second there: vsync at 60 a second, a few switches each */
+
+/* idle: the app open on its list, nothing pressed. working: the Motion pattern, its heaviest page (a frame every vsync). */
+static void power_windows(App *a, R3Report *r) {
+    r3_report_power_section(r);
+    if (!a->loop) {
+        r3_report_line(r, R3_SKIP, "idle", "no window (--report): open Device report in the app to measure the app itself");
+        return;
+    }
+    R3PowerResult idle, work;
+    r3_report_power_idle(r, r3_report_power_seconds(10), idle_turn, a, &idle);
+    int was = a->sel[P_VIDEO];
+    a->sel[P_VIDEO] = PAT_MOTION;
+    R3Power p;
+    r3_power_begin(&p);
+    double t0 = r3_report_ms();
+    while (r3_report_ms() - t0 < r3_report_power_seconds(5) * 1000.0) {
+        drain_events();
+        draw_pattern(a, a->loop->r);
+        r3_power_sample(&p);
+    }
+    r3_report_power_end(r, &p, "working", POWER_WORK_CPU, POWER_WORK_WAKE, &work);
+    a->sel[P_VIDEO] = was;
+    a->force = 1;           /* the list is drawn again */
+    r3_report_power_advice(r, &idle, &work);
 }
 
 /* ---- self-test, screenshot, headless report ----------------------------------------------------------------------------- */
@@ -1291,6 +1981,386 @@ static SDL_Event joy(int type, int button) {
     e.type = (Uint32)type;
     e.jbutton.button = (Uint8)(button - 1);
     return e;
+}
+
+/* One screen to a BMP (R3I6NOS_IO_SHOTS=dir io-checker-native --selftest saves the USB pages, as Commander's R3I6NOS_FM_SHOTS saves its screens). */
+static void save_bmp(const R3Screen *s, const char *path) {
+    Uint32 *px = malloc((size_t)R3_W * R3_H * sizeof(Uint32));
+    SDL_Surface *surf = px ? SDL_CreateRGBSurfaceWithFormatFrom(px, R3_W, R3_H, 32, R3_W * 4, SDL_PIXELFORMAT_ARGB8888) : NULL;
+    if (surf) { r3_render(s, px); SDL_SaveBMP(surf, path); SDL_FreeSurface(surf); }
+    free(px);
+}
+
+/* ---- the USB and OTG checks against a fake /sys, /proc and /dev (usb_io.h) --------------------------------------------------------- */
+
+static void ut_file(const char *root, const char *rel, const char *text) {
+    char p[PATH_MAX + 200], d[PATH_MAX + 200];
+    snprintf(p, sizeof p, "%s/%s", root, rel);
+    snprintf(d, sizeof d, "%s", p);
+    char *sl = strrchr(d, '/');
+    if (sl) { *sl = 0; r3_report_mkdirs(d); }
+    FILE *f = fopen(p, "w");
+    if (f) { fputs(text, f); fclose(f); }
+}
+static void ut_dir(const char *root, const char *rel) {
+    char p[PATH_MAX + 200];
+    snprintf(p, sizeof p, "%s/%s", root, rel);
+    r3_report_mkdirs(p);
+}
+/* link (relative to root) -> target (relative to root, or an absolute text when it starts with "text:") */
+static void ut_link(const char *root, const char *link, const char *target) {
+    char l[PATH_MAX + 200], t[PATH_MAX + 200], d[PATH_MAX + 200];
+    snprintf(l, sizeof l, "%s/%s", root, link);
+    if (!strncmp(target, "text:", 5)) snprintf(t, sizeof t, "%s", target + 5);
+    else snprintf(t, sizeof t, "%s/%s", root, target);
+    snprintf(d, sizeof d, "%s", l);
+    char *sl = strrchr(d, '/');
+    if (sl) { *sl = 0; r3_report_mkdirs(d); }
+    if (symlink(t, l) != 0) fprintf(stderr, "io-checker selftest: symlink %s: %s\n", l, strerror(errno));
+}
+static void ut_usb_iface(const char *root, const char *dev, const char *iface, const char *cls, const char *sub, const char *proto, const char *driver) {
+    char rel[200];
+    snprintf(rel, sizeof rel, "sys/bus/usb/devices/%s/%s/bInterfaceClass", dev, iface); ut_file(root, rel, cls);
+    snprintf(rel, sizeof rel, "sys/bus/usb/devices/%s/%s/bInterfaceSubClass", dev, iface); ut_file(root, rel, sub);
+    snprintf(rel, sizeof rel, "sys/bus/usb/devices/%s/%s/bInterfaceProtocol", dev, iface); ut_file(root, rel, proto);
+    if (driver) {
+        char link[200], tgt[200];
+        snprintf(link, sizeof link, "sys/bus/usb/devices/%s/%s/driver", dev, iface);
+        snprintf(tgt, sizeof tgt, "text:../../../../../bus/usb/drivers/%s", driver);
+        ut_link(root, link, tgt);
+    }
+}
+static void ut_usb_dev(const char *root, const char *name, const char *vid, const char *pid, const char *product, const char *speed) {
+    char rel[200];
+    snprintf(rel, sizeof rel, "sys/bus/usb/devices/%s/idVendor", name); ut_file(root, rel, vid);
+    snprintf(rel, sizeof rel, "sys/bus/usb/devices/%s/idProduct", name); ut_file(root, rel, pid);
+    snprintf(rel, sizeof rel, "sys/bus/usb/devices/%s/product", name); ut_file(root, rel, product);
+    snprintf(rel, sizeof rel, "sys/bus/usb/devices/%s/speed", name); ut_file(root, rel, speed);
+}
+static const UioDev *ut_find(const App *u, const char *name) {
+    for (int i = 0; i < u->n_dev; i++) if (!strcmp(u->usb_dev[i].name, name)) return &u->usb_dev[i];
+    return NULL;
+}
+static int ut_rows_have(const App *u, const char *text) {
+    for (int i = 0; i < u->n_rows; i++) if (strstr(u->usb_rows[i].label, text) || strstr(u->usb_rows[i].value, text)) return 1;
+    return 0;
+}
+
+static void selftest_usb(void) {
+    char tmpl[PATH_MAX];
+    snprintf(tmpl, sizeof tmpl, "%s/io-checker-usb-XXXXXX", env_or("TMPDIR", "/tmp"));
+    char *root = mkdtemp(tmpl);
+    if (!root) { CHECK(0, "usb: a temporary folder"); return; }
+    char sysd[PATH_MAX + 8], procd[PATH_MAX + 8], devd[PATH_MAX + 8];
+    snprintf(sysd, sizeof sysd, "%s/sys", root);
+    snprintf(procd, sizeof procd, "%s/proc", root);
+    snprintf(devd, sizeof devd, "%s/dev", root);
+    setenv("R3I6NOS_SYS", sysd, 1);
+    setenv("R3I6NOS_PROC", procd, 1);
+    setenv("R3I6NOS_DEV", devd, 1);
+
+    /* USB devices: a keyboard, a MIDI keyboard (audio + MIDI), a hub, a device the kernel has no driver for, Ethernet, a pad, a stick */
+    ut_dir(root, "sys/bus/usb/devices/usb1");
+    ut_usb_dev(root, "1-1", "046d", "c31c", "USB Keyboard", "12");
+    ut_usb_iface(root, "1-1", "1-1:1.0", "03", "01", "01", "usbhid");
+    ut_usb_dev(root, "1-2", "1235", "0036", "Launchkey Mini", "480");
+    ut_usb_iface(root, "1-2", "1-2:1.0", "01", "01", "00", "snd-usb-audio");
+    ut_usb_iface(root, "1-2", "1-2:1.1", "01", "03", "00", "snd-usb-audio");
+    ut_usb_dev(root, "1-3", "05e3", "0610", "USB2.0 Hub", "480");
+    ut_usb_iface(root, "1-3", "1-3:1.0", "09", "00", "01", "hub");
+    ut_usb_dev(root, "1-4", "dead", "beef", "Mystery Gadget", "480");
+    ut_usb_iface(root, "1-4", "1-4:1.0", "ff", "00", "00", NULL);
+    ut_usb_dev(root, "1-5", "0b95", "1790", "USB Ethernet", "480");
+    ut_usb_iface(root, "1-5", "1-5:1.0", "ff", "ff", "00", "asix");
+    ut_usb_dev(root, "1-6", "045e", "028e", "Gamepad", "12");
+    ut_usb_iface(root, "1-6", "1-6:1.0", "03", "00", "00", "usbhid");
+    ut_dir(root, "sys/bus/usb/devices/1-6/1-6:1.0/input/input7/js0");
+    ut_usb_dev(root, "1-7", "0781", "5581", "Ultra", "480");
+    ut_usb_iface(root, "1-7", "1-7:1.0", "08", "06", "50", "usb-storage");
+    /* video: this unit's panel, an HDMI port with nothing in it, a USB display adapter with a monitor */
+    ut_file(root, "sys/class/drm/card0-DSI-1/status", "connected\n");
+    ut_file(root, "sys/class/drm/card0-DSI-1/modes", "640x480\n480x320\n");
+    ut_file(root, "sys/class/drm/card0-HDMI-A-1/status", "disconnected\n");
+    ut_file(root, "sys/class/drm/card1-DVI-I-1/status", "connected\n");
+    ut_file(root, "sys/class/drm/card1-DVI-I-1/modes", "1920x1080\n1280x720\n");
+    ut_dir(root, "sys/devices/platform/ff400000.gpu");
+    ut_dir(root, "sys/devices/usb1/1-6/drm");
+    ut_link(root, "sys/class/drm/card0/device", "sys/devices/platform/ff400000.gpu");
+    ut_link(root, "sys/class/drm/card1/device", "sys/devices/usb1/1-6/drm");
+    /* storage: a stick on USB (mounted, with a space in the path) and an SD card that is not USB */
+    ut_file(root, "sys/devices/usb1/1-7/host6/target6:0:0/6:0:0:0/vendor", "SanDisk \n");
+    ut_file(root, "sys/devices/usb1/1-7/host6/target6:0:0/6:0:0:0/model", "Ultra\n");
+    ut_link(root, "sys/block/sda/device", "sys/devices/usb1/1-7/host6/target6:0:0/6:0:0:0");
+    ut_file(root, "sys/block/sda/size", "15564800\n");
+    ut_dir(root, "sys/devices/platform/ff0f0000.mmc");
+    ut_link(root, "sys/block/mmcblk0/device", "sys/devices/platform/ff0f0000.mmc");
+    ut_file(root, "proc/mounts", "/dev/mmcblk0p3 /roms exfat rw 0 0\n/dev/sda1 /media/My\\040Stick vfat rw 0 0\n");
+    /* network: a USB Ethernet with a link, a USB Wi-Fi adapter that is down */
+    ut_dir(root, "sys/devices/usb1/1-5/net");
+    ut_dir(root, "sys/devices/usb1/1-8/net");
+    ut_file(root, "sys/class/net/eth1/operstate", "up\n");
+    ut_file(root, "sys/class/net/eth1/carrier", "1\n");
+    ut_file(root, "sys/class/net/eth1/speed", "1000\n");
+    ut_file(root, "sys/class/net/eth1/address", "aa:bb:cc:dd:ee:ff\n");
+    ut_file(root, "sys/class/net/eth1/statistics/rx_bytes", "1000\n");
+    ut_file(root, "sys/class/net/eth1/statistics/tx_bytes", "2000\n");
+    ut_link(root, "sys/class/net/eth1/device", "sys/devices/usb1/1-5/net");
+    ut_file(root, "sys/class/net/wlan0/operstate", "down\n");
+    ut_dir(root, "sys/class/net/wlan0/wireless");
+    ut_link(root, "sys/class/net/wlan0/device", "sys/devices/usb1/1-8/net");
+    ut_file(root, "sys/class/net/lo/operstate", "unknown\n");
+    /* MIDI: one port, a FIFO standing in for the device (what is written to it is read back: a loopback) */
+    ut_dir(root, "dev/snd");
+    char fifo[PATH_MAX + 64];
+    snprintf(fifo, sizeof fifo, "%s/snd/midiC1D0", devd);
+    CHECK(mkfifo(fifo, 0600) == 0, "usb: a fake MIDI node");
+    ut_file(root, "proc/asound/card1/id", "Launchkey\n");
+    ut_file(root, "proc/asound/card1/usbbus", "001/005\n");
+    /* input devices: a USB keyboard, a USB mouse, a pad, and the unit's power key (not a keyboard: no LEDs) */
+    ut_file(root, "proc/bus/input/devices",
+            "I: Bus=0003 Vendor=046d Product=c31c Version=0110\nN: Name=\"Logitech USB Keyboard\"\nS: Sysfs=/devices/platform/ff580000.usb/usb1/1-1/1-1:1.0/input/input3\nH: Handlers=sysrq kbd leds event3 \n\n"
+            "I: Bus=0003 Vendor=046d Product=c077 Version=0111\nN: Name=\"Optical Mouse\"\nS: Sysfs=/devices/platform/ff580000.usb/usb1/1-2/1-2:1.0/input/input4\nH: Handlers=mouse0 event4 \n\n"
+            "I: Bus=0003 Vendor=045e Product=028e Version=0110\nN: Name=\"Gamepad\"\nS: Sysfs=/devices/platform/ff580000.usb/usb1/1-6/1-6:1.0/input/input7\nH: Handlers=js0 event7 \n\n"
+            "I: Bus=0019 Vendor=0001 Product=0001 Version=0100\nN: Name=\"rk8xx_pwrkey\"\nS: Sysfs=/devices/platform/rk8xx/input/input0\nH: Handlers=kbd event0 \n\n");
+
+    App *u = calloc(1, sizeof(App));
+    if (!u) { CHECK(0, "usb: memory"); return; }
+    app_init(u);
+    usb_scan(u, 0);
+    /* every parser */
+    CHECK(u->n_dev == 7, "usb: seven devices (the root hub and the interfaces are not devices)");
+    const UioDev *d = ut_find(u, "1-1");
+    CHECK(d && !strcmp(d->kinds, "keyboard") && !strcmp(d->drivers, "usbhid") && !strcmp(d->vidpid, "046d:c31c") && !strcmp(d->speed, "12") && !strcmp(d->product, "USB Keyboard"), "usb: the keyboard");
+    d = ut_find(u, "1-2");
+    CHECK(d && strstr(d->kinds, "audio") && strstr(d->kinds, "midi") && !strcmp(d->drivers, "snd-usb-audio") && d->interfaces == 2 && d->unbound == 0, "usb: the MIDI keyboard is audio and MIDI (in either order: a directory is not sorted)");
+    d = ut_find(u, "1-3");
+    CHECK(d && d->hub && !strcmp(d->kinds, "hub"), "usb: the hub");
+    d = ut_find(u, "1-4");
+    CHECK(d && d->unbound == 1 && !strcmp(d->kinds, "other") && !d->drivers[0], "usb: a device with no driver");
+    d = ut_find(u, "1-5");
+    CHECK(d && !strcmp(d->kinds, "network") && !strcmp(d->drivers, "asix"), "usb: Ethernet from its driver");
+    d = ut_find(u, "1-6");
+    CHECK(d && !strcmp(d->kinds, "pad"), "usb: a HID with a joystick node is a pad");
+    d = ut_find(u, "1-7");
+    CHECK(d && !strcmp(d->kinds, "storage"), "usb: storage");
+    CHECK(u->n_conn == 3, "usb: three connectors");
+    int dsi = 0, hdmi = 0, dvi = 0;
+    for (int i = 0; i < u->n_conn; i++) {
+        const UioConn *c = &u->usb_conn[i];
+        if (!strcmp(c->name, "DSI-1")) dsi = c->internal && !strcmp(c->status, "connected") && !strcmp(c->mode, "640x480") && !c->usb;
+        if (!strcmp(c->name, "HDMI-A-1")) hdmi = !c->internal && !strcmp(c->status, "disconnected") && !c->usb;
+        if (!strcmp(c->name, "DVI-I-1")) dvi = !c->internal && !strcmp(c->status, "connected") && !strcmp(c->mode, "1920x1080") && c->usb;
+    }
+    CHECK(dsi && hdmi && dvi, "usb: the panel is internal, HDMI is empty, the DVI adapter on USB is connected at 1920x1080");
+    CHECK(u->n_disk == 1 && !strcmp(u->usb_disk[0].dev, "sda") && !strcmp(u->usb_disk[0].model, "SanDisk Ultra") && u->usb_disk[0].bytes == 15564800ULL * 512 &&
+          !strcmp(u->usb_disk[0].mount, "/media/My Stick") && !strcmp(u->usb_disk[0].fstype, "vfat") && !strcmp(u->usb_disk[0].part, "sda1"),
+          "usb: the stick, its model, size and mount (the SD card is not USB)");
+    CHECK(u->n_net == 2, "usb: two adapters (not lo)");
+    int eth = 0, wifi = 0;
+    for (int i = 0; i < u->n_net; i++) {
+        const UioNet *n = &u->usb_net[i];
+        if (!strcmp(n->name, "eth1")) eth = !n->wifi && n->usb && n->carrier == 1 && n->speed == 1000 && !strcmp(n->state, "up") && !strcmp(n->mac, "aa:bb:cc:dd:ee:ff") && n->rx == 1000 && n->tx == 2000;
+        if (!strcmp(n->name, "wlan0")) wifi = n->wifi && n->usb && !strcmp(n->state, "down") && n->carrier == -1;
+    }
+    CHECK(eth && wifi, "usb: Ethernet with a link at 1000 Mb/s, Wi-Fi down, both on USB");
+    CHECK(u->n_midi == 1 && u->usb_midi[0].card == 1 && u->usb_midi[0].device == 0 && !strcmp(u->usb_midi[0].name, "Launchkey") && u->usb_midi[0].usb, "usb: the MIDI port");
+    CHECK(u->n_in == 3 && u->usb_in[0].keyboard && u->usb_in[0].usb && u->usb_in[1].mouse && u->usb_in[2].pad, "usb: a keyboard, a mouse and a pad (not the power key)");
+    unsigned char on[3] = {0x90, 60, 100}, cc[3] = {0xB0, 7, 90}, off[3] = {0x80, 60, 0}, pc[2] = {0xC1, 5};
+    char mt[64];
+    uio_midi_text(on, 3, mt, sizeof mt); CHECK(!strcmp(mt, "ch1 note on C4 vel 100"), "usb: a note on in words");
+    uio_midi_text(off, 3, mt, sizeof mt); CHECK(!strcmp(mt, "ch1 note off C4"), "usb: a note off in words");
+    uio_midi_text(cc, 3, mt, sizeof mt); CHECK(!strcmp(mt, "ch1 control 7 = 90"), "usb: a controller in words");
+    uio_midi_text(pc, 2, mt, sizeof mt); CHECK(!strcmp(mt, "ch2 program 5"), "usb: a program change in words");
+
+    /* the pages: the list, then each sub-page's rows */
+    u->page = P_USB;
+    R3Screen sc;
+    compose(u, &sc, 0);
+    CHECK(screen_has(&sc, "USB and OTG") && screen_has(&sc, "Game controllers") && screen_has(&sc, "7 found") && screen_has(&sc, "1 connected"), "usb: the list shows what was found");
+    u->page = P_USBSUB;
+    u->usb_sub = U_DEVICES; compose(u, &sc, 0);
+    CHECK(u->n_rows == 7 && ut_rows_have(u, "NO DRIVER") && ut_rows_have(u, "Mystery Gadget") && screen_has(&sc, "USB Keyboard"), "usb: seven device rows, the one with no driver says so");
+    u->usb_sub = U_VIDEO; compose(u, &sc, 0);
+    CHECK(u->n_rows == 3 && ut_rows_have(u, "connected 1920x1080") && ut_rows_have(u, "(USB adapter)"), "usb: video rows");
+    u->usb_sub = U_STORAGE; compose(u, &sc, 0);
+    CHECK(u->n_rows == 2 && ut_rows_have(u, "SanDisk Ultra") && ut_rows_have(u, "mounted at /media/My Stick") && ut_rows_have(u, "7.968") == 0 && ut_rows_have(u, "8.0 GB"), "usb: storage rows");
+    u->usb_sub = U_NETWORK; compose(u, &sc, 0);
+    CHECK(u->n_rows == 2 && ut_rows_have(u, "up 1000 Mb/s") && ut_rows_have(u, "Ethernet (USB)") && ut_rows_have(u, "Wi-Fi (USB)"), "usb: network rows");
+    u->usb_sub = U_KEYBOARD; compose(u, &sc, 0);
+    CHECK(ut_rows_have(u, "Logitech USB Keyboard") && ut_rows_have(u, "Different keys pressed") && !ut_rows_have(u, "rk8xx"), "usb: keyboard rows");
+    u->usb_sub = U_PADS; compose(u, &sc, 0);
+    CHECK(u->n_rows == 0 && screen_has(&sc, "No other game controller"), "usb: no controller opened yet: the page says what to do");
+
+    const char *shots = getenv("R3I6NOS_IO_SHOTS");
+    if (shots && *shots) {
+        char f[PATH_MAX + 64];
+        r3_report_mkdirs(shots);
+        u->page = P_HOME; u->sel[P_HOME] = H_USB; compose(u, &sc, 0); snprintf(f, sizeof f, "%s/home.bmp", shots); save_bmp(&sc, f);
+        u->page = P_USB; compose(u, &sc, 0); snprintf(f, sizeof f, "%s/usb.bmp", shots); save_bmp(&sc, f);
+        u->page = P_USBSUB;
+        for (int sub = 0; sub < U_COUNT; sub++) {
+            u->usb_sub = sub; u->sel[P_USBSUB] = 0;
+            if (sub == U_PADS) { u->n_ext = 1; snprintf(u->ext[0].name, sizeof u->ext[0].name, "Xbox 360 Controller"); u->ext[0].nb = 11; u->ext[0].na = 6; u->ext[0].nh = 1;
+                                 u->ext[0].seen[1] = u->ext[0].seen[2] = u->ext[0].seen[5] = 1; u->ext[0].down[2] = 1; u->ext[0].axis[1] = -0.5f; u->ext[0].axis[2] = 0.99f; }
+            if (sub == U_KEYBOARD) { u->kb_n = 3; snprintf(u->kb_log[0], sizeof u->kb_log[0], "Space"); snprintf(u->kb_log[1], sizeof u->kb_log[1], "B"); snprintf(u->kb_log[2], sizeof u->kb_log[2], "A"); }
+            if (sub == U_MOUSE) { u->m_x = 120; u->m_y = -40; u->m_moves = 31; u->m_buttons = 2 | 8; u->m_wheel = 3; }
+            if (sub == U_MIDI) { u->midi_in_msgs = 2; u->midi_out_msgs = 1; snprintf(u->midi_log[0], sizeof u->midi_log[0], "in  ch1 note off C4"); snprintf(u->midi_log[1], sizeof u->midi_log[1], "in  ch1 note on C4 vel 100"); snprintf(u->midi_log[2], sizeof u->midi_log[2], "out ch1 note on C4 vel 100"); }
+            compose(u, &sc, 0);
+            snprintf(f, sizeof f, "%s/usb-%d.bmp", shots, sub);
+            save_bmp(&sc, f);
+            if (sub == U_PADS) { u->n_ext = 0; memset(u->ext, 0, sizeof u->ext); }
+        }
+        u->midi_in_msgs = u->midi_out_msgs = 0; u->kb_n = 0; memset(u->kb_log, 0, sizeof u->kb_log); memset(u->midi_log, 0, sizeof u->midi_log);
+        u->m_x = u->m_y = u->m_moves = u->m_wheel = 0; u->m_buttons = 0;
+    }
+
+    /* MIDI: open the port, send middle C, see it come back, then the note off */
+    u->usb_sub = U_MIDI;
+    u->sel[P_USBSUB] = 0;
+    midi_open_sel(u);
+    CHECK(u->midi_fd >= 0 && u->midi_idx == 0, "usb: the MIDI port opens");
+    midi_send(u, 1000);
+    CHECK(u->midi_out_msgs == 1 && u->midi_off_at == 1300, "usb: A sends middle C and schedules the note off");
+    midi_poll(u);
+    CHECK(u->midi_in_msgs == 1 && strstr(u->midi_log[0], "ch1 note on C4 vel 100"), "usb: the note came back in, in words");
+    usb_tick(u, 1400);
+    midi_poll(u);
+    CHECK(u->midi_off_at == 0 && u->midi_in_msgs == 2 && strstr(u->midi_log[0], "note off C4"), "usb: the note off was sent and read");
+    compose(u, &sc, 0);
+    CHECK(ut_rows_have(u, "Launchkey") && ut_rows_have(u, "open, 6 bytes in") && ut_rows_have(u, "note on C4") && ut_rows_have(u, "1 out, 2 in"), "usb: the MIDI page shows the port and the messages");
+    midi_close(u);
+    CHECK(u->midi_fd == -1, "usb: closed");
+
+    /* a keyboard: each different key counts once; Esc goes back */
+    SDL_Event ev;
+    u->page = P_USBSUB; u->usb_sub = U_KEYBOARD; u->kb_n = 0;
+    SDL_zero(ev);
+    ev.type = SDL_KEYDOWN; ev.key.keysym.sym = SDLK_a; ev.key.keysym.scancode = SDL_SCANCODE_A;
+    handle(u, &ev, 100);
+    handle(u, &ev, 120);
+    ev.key.keysym.sym = SDLK_b; ev.key.keysym.scancode = SDL_SCANCODE_B;
+    handle(u, &ev, 140);
+    CHECK(u->kb_n == 2 && u->page == P_USBSUB && !strcmp(u->kb_log[0], "B") && !strcmp(u->kb_log[1], "A"), "usb: two different keys counted, the last in the log, no key acted on the page");
+    ev.key.keysym.sym = SDLK_h; ev.key.keysym.scancode = SDL_SCANCODE_H;
+    handle(u, &ev, 160);
+    CHECK(u->kb_n == 3 && u->answers[0] == 0, "usb: H on this page is a key under test, not 'heard'");
+    ev.key.keysym.sym = SDLK_ESCAPE; ev.key.keysym.scancode = SDL_SCANCODE_ESCAPE;
+    handle(u, &ev, 180);
+    CHECK(u->page == P_USB, "usb: Esc goes back to the list");
+
+    /* a mouse */
+    u->page = P_USBSUB; u->usb_sub = U_MOUSE;
+    SDL_zero(ev);
+    ev.type = SDL_MOUSEMOTION; ev.motion.xrel = 5; ev.motion.yrel = -3;
+    handle(u, &ev, 200); handle(u, &ev, 210);
+    SDL_zero(ev); ev.type = SDL_MOUSEBUTTONDOWN; ev.button.button = SDL_BUTTON_LEFT; handle(u, &ev, 220);
+    SDL_zero(ev); ev.type = SDL_MOUSEWHEEL; ev.wheel.y = 2; handle(u, &ev, 230);
+    CHECK(u->m_x == 10 && u->m_y == -6 && u->m_moves == 2 && (u->m_buttons & 2) && u->m_wheel == 2, "usb: a mouse's motion, left button and wheel");
+    compose(u, &sc, 0);
+    CHECK(ut_rows_have(u, "x 10  y -6") && ut_rows_have(u, "left") && ut_rows_have(u, "Optical Mouse"), "usb: mouse rows");
+    u->usb_sub = U_MOUSE; u->page = P_USBSUB;
+
+    /* the home list reaches it: Down x4 and A (USB and OTG), A (Devices), B, B */
+    u->page = P_HOME;
+    u->sel[P_HOME] = 0;
+    Uint32 t = 1000;
+    SDL_Event e2;
+#define UPRESS(btn) do { e2 = joy(SDL_JOYBUTTONDOWN, btn); handle(u, &e2, t); e2 = joy(SDL_JOYBUTTONUP, btn); handle(u, &e2, t); t += 100; } while (0)
+    UPRESS(L_DOWN); UPRESS(L_DOWN); UPRESS(L_DOWN); UPRESS(L_DOWN);
+    CHECK(u->sel[P_HOME] == H_USB && !strcmp(HOME_LABEL[u->sel[P_HOME]], "USB and OTG"), "usb: USB and OTG is the fifth entry");
+    UPRESS(L_A);
+    CHECK(u->page == P_USB, "usb: A opens the USB list");
+    UPRESS(L_DOWN); UPRESS(L_DOWN); UPRESS(L_A);
+    CHECK(u->page == P_USBSUB && u->usb_sub == U_MIDI && u->midi_fd >= 0, "usb: A opens MIDI and the port is open");
+    UPRESS(L_B);
+    CHECK(u->page == P_USB && u->midi_fd == -1, "usb: B goes back and closes the port");
+    UPRESS(L_B);
+    CHECK(u->page == P_HOME, "usb: B goes home");
+#undef UPRESS
+
+    /* a pad that is not the built-in one: its events go to the USB page, never to the built-in pad's record */
+    App *x = calloc(1, sizeof(App));
+    if (x) {
+        app_init(x);
+        x->js = (SDL_Joystick *)1;      /* the built-in pad, pretend; instance id 0 */
+        x->js_id = 0;
+        x->n_ext = 1;
+        x->ext[0].js = (SDL_Joystick *)1;
+        x->ext[0].id = 9;
+        x->ext[0].nb = 17;
+        snprintf(x->ext[0].name, sizeof x->ext[0].name, "USB Pad");
+        SDL_zero(ev);
+        ev.type = SDL_JOYBUTTONDOWN; ev.jbutton.which = 9; ev.jbutton.button = 1;
+        handle(x, &ev, 100);
+        CHECK(x->ext[0].seen[2] && x->ext[0].down[2] && !x->down[2] && x->presses[2] == 0, "usb: a USB pad's button is its own, not the built-in pad's");
+        CHECK(foreign_pad(x, 9) && !foreign_pad(x, 0), "usb: only another pad's events are foreign (the built-in pad is instance 0)");
+        x->js = NULL;
+        CHECK(!foreign_pad(x, 9), "usb: with no built-in pad, nothing is foreign (a first pad is the built-in one)");
+        x->js = (SDL_Joystick *)1;
+        x->ext[0].js = NULL;            /* never passed to SDL */
+        free(x);
+    }
+
+    /* the report's sections */
+    R3Report rep;
+    memset(&rep, 0, sizeof rep);
+    rep.quiet = 1;
+    char rdir[PATH_MAX + 16];
+    snprintf(rdir, sizeof rdir, "%s/report", root);
+    CHECK(r3_report_open(&rep, rdir, "USB test", "1", "usb-test", "selftest") == 0, "usb: the report opens");
+    u->midi_in_msgs = 2; u->midi_out_msgs = 1; u->kb_n = 3; u->m_moves = 2; u->m_buttons = 2; u->m_wheel = 2;
+    report_usb(u, &rep);
+    CHECK(r3_report_close(&rep) == 0, "usb: the report closes");
+    char rpath[PATH_MAX + 64], text[16384];
+    snprintf(rpath, sizeof rpath, "%s/r36s-report.txt", rdir);
+    FILE *rf = fopen(rpath, "r");
+    size_t got = rf ? fread(text, 1, sizeof text - 1, rf) : 0;
+    text[got] = 0;
+    if (rf) fclose(rf);
+    const char *want[] = {
+        "== usb devices ==", "INFO devices: 7 on USB", "INFO device 1-1: USB Keyboard (046d:c31c), 12 Mb/s: keyboard; drivers: usbhid",
+        "FAIL driver 1-4: 1 of 1 interface(s) of Mystery Gadget have no driver",
+        "== usb video out ==", "INFO connector DSI-1: connected, 640x480 (this unit's screen)", "PASS external display: connected on DVI-I-1, first mode 1920x1080",
+        "== usb midi ==", "PASS Launchkey opens: ", "PASS messages: 2 in, 1 out",
+        "== usb storage ==", "INFO disk sda: SanDisk Ultra, 8.0 GB", "PASS sda mounted: sda1 on /media/My Stick (vfat)",
+        "== usb network ==", "PASS eth1: Ethernet (USB): link up, 1000 Mb/s", "INFO wlan0: Wi-Fi (USB), down",
+        "== usb keyboard ==", "INFO keyboard: Logitech USB Keyboard (USB)", "PASS keys pressed: 3 different keys reached SDL",
+        "== usb mouse ==", "INFO mouse: Optical Mouse (USB)", "PASS mouse events: 2 moves, buttons left",
+        "== usb pads ==", "SKIP pads: no other game controller",
+    };
+    for (size_t i = 0; i < sizeof want / sizeof *want; i++) {
+        char m[200];
+        snprintf(m, sizeof m, "usb report says: %s", want[i]);
+        CHECK(strstr(text, want[i]) != NULL, m);
+    }
+    /* nothing plugged in: every section SKIPs, none FAILs */
+    unsetenv("R3I6NOS_SYS"); unsetenv("R3I6NOS_PROC"); unsetenv("R3I6NOS_DEV");
+    char empty[PATH_MAX + 16];
+    snprintf(empty, sizeof empty, "%s/empty", root);
+    setenv("R3I6NOS_SYS", empty, 1); setenv("R3I6NOS_PROC", empty, 1); setenv("R3I6NOS_DEV", empty, 1);
+    App *z = calloc(1, sizeof(App));
+    if (z) {
+        app_init(z);
+        R3Report r2;
+        memset(&r2, 0, sizeof r2);
+        r2.quiet = 1;
+        snprintf(rdir, sizeof rdir, "%s/report2", root);
+        if (r3_report_open(&r2, rdir, "USB test", "1", "usb-test", "selftest") == 0) {
+            report_usb(z, &r2);
+            CHECK(r2.fail == 0 && r2.skip >= 8, "usb: with nothing plugged in the sections SKIP and nothing FAILs");
+            r3_report_close(&r2);
+        }
+        z->page = P_USBSUB;
+        for (int sub = 0; sub < U_COUNT; sub++) { z->usb_sub = sub; compose(z, &sc, 0); }   /* every empty page draws */
+        z->usb_sub = U_MIDI; compose(z, &sc, 0);
+        CHECK(screen_has(&sc, "No MIDI port."), "usb: an empty MIDI page says what to plug in");
+        free(z);
+    }
+    unsetenv("R3I6NOS_SYS"); unsetenv("R3I6NOS_PROC"); unsetenv("R3I6NOS_DEV");
+    free(u);
+    char cmd[PATH_MAX + 16];
+    snprintf(cmd, sizeof cmd, "rm -rf '%s'", root);
+    if (system(cmd) != 0) fprintf(stderr, "io-checker selftest: could not remove %s\n", root);
 }
 
 static int selftest_logic(void) {
@@ -1442,6 +2512,34 @@ static int selftest_logic(void) {
     PRESS(L_DOWN); PRESS(L_Y); CHECK(a->answers[1] == A_SILENT, "Y marks silent");
     PRESS(L_B); PRESS(L_B); CHECK(a->quit, "B on the list quits");
 #undef PRESS
+    selftest_usb();
+    /* the loop's pacing (CLAUDE.md rule 14): a frame while something changes, a long nap when nothing does */
+    {
+        R3Video v;
+        memset(&v, 0, sizeof v);
+        a->force = 0; a->pending = 0; a->chord_since = 0; a->page = P_HOME;
+        r3_toast_init(&a->toast);
+        CHECK(nap_ms(a, &v) == IDLE_NAP_MS, "idle: the long nap");
+        a->force = 1;
+        CHECK(nap_ms(a, &v) == 16, "a redraw owed: a frame");
+        a->force = 0; v.settle = 2;
+        CHECK(nap_ms(a, &v) == 16, "a change still being presented: a frame");
+        v.settle = 0; a->chord_since = 5;
+        CHECK(nap_ms(a, &v) == 16, "the exit chord counting up: a frame");
+        a->chord_since = 0; a->pending = H_REPORT;
+        CHECK(nap_ms(a, &v) == 16, "a job about to run: a frame");
+        a->pending = 0;
+        CHECK(nap_ms(a, &v) == IDLE_NAP_MS && IDLE_NAP_MS >= 40, "back to idle; at most ~25 wake-ups a second");
+        a->page = P_INPUT;
+        CHECK(nap_ms(a, &v) == 16, "the button test is a live page: a frame");
+        a->page = P_USBSUB; a->usb_sub = U_KEYBOARD;
+        CHECK(nap_ms(a, &v) == 16, "the keyboard test is a live page: a frame");
+        a->usb_sub = U_DEVICES;
+        CHECK(nap_ms(a, &v) == IDLE_NAP_MS, "the device list is quiet: the long nap");
+        a->page = P_SYSTEM;
+        CHECK(nap_ms(a, &v) == IDLE_NAP_MS, "the system page is quiet: the long nap");
+        a->page = P_HOME;
+    }
     free(a);
     return bad;
 }
@@ -1464,10 +2562,11 @@ static int save_screenshot(const char *path, const char *page) {
     snprintf(a->snd_hp, sizeof a->snd_hp, "out");
     snprintf(a->snd_jack, sizeof a->snd_jack, "rk817-sound Headphone Jack");
     a->answers[0] = A_HEARD; a->answers[1] = A_PLAYED;
-    const char *names[] = {"home", "input", "video", "pattern", "sound", "files", "system"};
+    const char *names[] = {"home", "input", "video", "pattern", "sound", "files", "system", "usb", "usbsub"};
     for (int i = 0; i < P_COUNT; i++) if (page && !strcmp(page, names[i])) a->page = i;
     if (a->page == P_SYSTEM) system_rows(a);
     if (a->page == P_FILES) run_files(a);
+    if (a->page == P_USB || a->page == P_USBSUB) usb_scan(a, 0);
     R3Screen s;
     compose(a, &s, 0);
     Uint32 *px = malloc((size_t)R3_W * R3_H * sizeof(Uint32));
@@ -1540,6 +2639,10 @@ int main(int argc, char **argv) {
     video_info(a, win, r);
     sound_status(a);
     R3Screen screen;
+    struct Loop loop;
+    loop.r = r;
+    loop.video = &video;
+    a->loop = &loop;
 
     if (selftest) {
         compose(a, &screen, SDL_GetTicks());
@@ -1548,6 +2651,36 @@ int main(int argc, char **argv) {
         SDL_GetVersion(&v);
         printf("R3I6NOS_SMOKE ok io-checker-native=%s sdl=%d.%d.%d joysticks=%d renderer=%s\n", VERSION, v.major, v.minor, v.patch,
                SDL_NumJoysticks(), SDL_GetCurrentVideoDriver());
+        /* the windowed report, with short power windows, into a throwaway folder: the power section must be in it */
+        /* the output is open only while a tone plays: an open device keeps a thread waking ~40 times a second */
+        play(a, 0);
+        if (!a->audio_error) {
+            CHECK(a->dev != 0 && a->audio_close_at != 0, "a tone opens the device and schedules its close");
+            tick(a, a->audio_close_at - 1);
+            CHECK(a->dev != 0, "the device stays open until the tone has played out");
+            tick(a, a->audio_close_at + 1);
+            CHECK(a->dev == 0 && a->audio_close_at == 0, "the device is closed once the tone is over");
+        }
+        char tmpl[PATH_MAX];
+        snprintf(tmpl, sizeof tmpl, "%s/io-checker-selftest-XXXXXX", env_or("TMPDIR", "/tmp"));
+        char *dir = mkdtemp(tmpl);
+        if (dir) {
+            setenv("R3I6NOS_ROMS", dir, 1);
+            setenv("R3I6NOS_REPORT_POWER_S", "0.2", 1);
+            write_report(a, "selftest");
+            char path[PATH_MAX + 64], text[24576] = "";
+            snprintf(path, sizeof path, "%s/IO_Checker/r36s-report-native.txt", dir);
+            FILE *f = fopen(path, "r");
+            size_t n = f ? fread(text, 1, sizeof text - 1, f) : 0;
+            text[n] = 0;
+            if (f) fclose(f);
+            CHECK(strstr(text, "== power ==") && strstr(text, "idle cpu: ") && strstr(text, "working cpu: ") && strstr(text, "cut first: "), "the windowed report has its power section");
+            printf("R3I6NOS_SMOKE power-report %s\n", strstr(text, "working cpu: ") ? "ok" : "missing");
+            char cmd[PATH_MAX + 16];
+            snprintf(cmd, sizeof cmd, "rm -rf '%s'", dir);
+            if (system(cmd) != 0) fprintf(stderr, "could not remove %s\n", dir);
+        }
+        if (bad) { fprintf(stderr, "io-checker: %d selftest check(s) failed\n", bad); return 1; }
     }
 
     Uint64 freq = SDL_GetPerformanceFrequency(), last = SDL_GetPerformanceCounter();
@@ -1564,10 +2697,7 @@ int main(int argc, char **argv) {
             last = t;
             continue;
         }
-        compose(a, &screen, now);
-        r3_toast_draw(&a->toast, &screen);
-        r3_video_draw(&video, r, &screen, a->force);
-        a->force = 0;
+        draw_frame(a, now);
         if (a->pending && video.settle == 0) { /* after "Testing..." has been presented in full: the job blocks for seconds */
             int job = a->pending;
             a->pending = 0;
@@ -1575,7 +2705,7 @@ int main(int argc, char **argv) {
             else write_report(a, "Device report (native)");
             continue;
         }
-        SDL_Delay(16);
+        SDL_Delay(nap_ms(a, &video));
         last = SDL_GetPerformanceCounter();
     }
     close_pad(a);

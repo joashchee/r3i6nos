@@ -10,7 +10,7 @@ Built into every image (`/opt/loveos/defaults`), so the menu is never empty. Any
 The R36S's hardware check, three ways (spec: `docs/IO-CHECKER.md`): what goes in (every button, both sticks, the D-pad, the
 power and volume keys, with presses, chatter, axis ranges and the buttons never pressed), what comes out (full-screen video
 test patterns and a measured frame rate; test tones on each channel that you mark heard or silent; file checks and speed on
-both cards), the system, and a **device report** at `EASYROMS/IO_Checker/r36s-report-<build>.txt`. It replaced the R36S Input
+both cards), **what the OTG port brings** (USB devices, video out, MIDI in and out, storage, Ethernet, a keyboard, a mouse, game controllers: native build only so far), the system, and a **device report** at `EASYROMS/IO_Checker/r36s-report-<build>.txt`. It replaced the R36S Input
 Checker (2026-11-09), which measured the pad's layout.
 
 | App | Where it is built in | Source |
@@ -25,7 +25,7 @@ Checker (2026-11-09), which measured the pad's layout.
   read from `/opt/loveos/theme` (`R3I6NOS_THEME` overrides).
 - Native: `scripts/build_native_apps.sh` cross-compiles it in a Debian 12 container and packs the `.deb` (the `native` job in
   `.github/workflows/build.yml`); `scripts/smoke_native.sh` runs its `--selftest` under qemu. `io-checker-native --screenshot out.bmp
-  [page]` draws a page to a file; `--report` writes the device report without a window (over SSH).
+  [page]` draws a page to a file; `--report` writes the device report without a window (over SSH; with no window it has no power windows, CLAUDE.md rule 14: the Device report item in the app measures the idle list and the Motion pattern). Commander: `commander --report` (a window; the power section: idle, then identifying the test corpus).
 
 **Leaving:** B or Quit on the list, or hold Select+Start (raw 13 and 14) for a second, which goes back to the list from any page.
 The input page goes back by itself after **15 seconds** without input (counted down in the last 10), so a dead Select or Start cannot
@@ -144,7 +144,7 @@ Each native app builds on its own; the firmware only bundles the results.
 
 - `apps/<name>-native/app.conf` is the app's manifest (deb name, binary, package, source file, `THEME=1` to compile against `theme/`,
   `DEFAULT=1` to put it in the image, description). `scripts/build_native_app.sh <name>-native [--smoke]` builds that one app in a Debian 12 container
-  into `build/native/<NAME>.deb`, and `--smoke` runs its `--selftest` under qemu. **`scripts/build-commander.sh`** is that for Commander with no arguments, on this
+  into `build/native/<NAME>.deb`, and `--smoke` runs its `--selftest` under qemu. **`scripts/build-ports.sh`** refreshes every port and this repo's apps in one command (out-of-date or missing only; `--all`, `--list`, or names); **`scripts/build-native-local.sh <app>`** is the one-app version for any native app, and **`scripts/build-commander.sh`** is that for Commander with no arguments, on this
   Mac (Docker or Colima only, CLAUDE.md rule 10): it takes the version from `commander.c`, builds in `debian:bookworm` arm64, smoke-tests, and leaves `build/native/Commander.deb`
   (`--no-smoke` skips the test); it needs no firmware workflow. `scripts/check.sh` compiles and self-tests every `app.conf`.
 - `.github/workflows/native-app.yml` is the reusable build (cache keyed on that app's files, smoke test, artifact `native-<name>-native-arm64`).

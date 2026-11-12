@@ -44,7 +44,8 @@ CARDS_STATE = Path(ENV("R3I6NOS_CARDS_STATE", "/run/r3i6nos/cards"))   # r3i6nos
 RUN = Path(ENV("R3I6NOS_HOTPLUG_DIR", "/run/r3i6nos-hotplug"))   # root writes, everyone reads (loveos.service owns /run/loveos)
 KMSG = ENV("R3I6NOS_KMSG", "/dev/kmsg")
 SOUND = ENV("R3I6NOS_SOUND", "/usr/local/bin/r3i6nos-sound")
-POLL = float(ENV("R3I6NOS_HOTPLUG_POLL", "0.5"))
+QUICK = 0.25   # the re-look while a change or a volume press is pending
+POLL = float(ENV("R3I6NOS_HOTPLUG_POLL", "1.0"))
 VOLUME_FILE = Path(ENV("R3I6NOS_VOLUME_FILE", "/run/r3i6nos/volume"))   # r3i6nos-sound writes "<count> <percent>" after each volume key
 VOLUME_SETTLE = 0.6   # seconds the keys must rest before the toast: a held key is one toast with the last level, not a queue of them
 KEEP = 40
@@ -410,7 +411,8 @@ def watch(rounds=None, sound=None, devices=None, events=None, kmsg=None):
         if msg and (last_error is None or t - last_error >= ERROR_GAP):
             last_error = t
             events.add("error", "A USB device did not start: its cable or the device may be bad")
-        time.sleep(POLL)
+        # a change waiting to be confirmed, or a volume press settling, is looked at again soon; an idle unit is looked at once a poll
+        time.sleep(min(POLL, QUICK) if candidate is not None or vol.pending else POLL)
     return 0
 
 
