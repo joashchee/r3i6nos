@@ -338,6 +338,9 @@ static void audio_close(App *a) {
     if (a->dev) SDL_CloseAudioDevice(a->dev);
     a->dev = 0;
     a->audio_close_at = 0;
+    /* Closing the device is not enough: with the subsystem up SDL's ALSA hotplug thread keeps waking 10 times a second (the unit's first power
+     * report, 2026-11-12: SDLHotplugALSA 10.1/s of the idle 25.3). audio_open starts it again for the next tone. */
+    if (SDL_WasInit(SDL_INIT_AUDIO)) SDL_QuitSubSystem(SDL_INIT_AUDIO);
 }
 
 static int audio_open(App *a) {
@@ -787,7 +790,13 @@ static void write_report(App *a, const char *how) {
         snprintf(key, sizeof key, "heard %s", TONES[i].label);
         switch (a->answers[i]) {
         case A_HEARD: r3_report_line(&r, R3_PASS, key, "yes"); break;
-        case A_SILENT: r3_report_line(&r, R3_FAIL, key, "no (silent)"); break;
+        case A_SILENT:
+            /* the right channel alone, on the speaker path with the left and both heard: the unit has one speaker, so this is not a fault until
+             * headphones say so (the unit's reports of 2026-11-09 and 2026-11-12: silent with the headphones out) */
+            if (TONES[i].left == 0 && TONES[i].right > 0 && !strcmp(a->snd_hp, "out") && a->answers[0] == A_HEARD)
+                r3_report_line(&r, R3_INFO, key, "no (silent) with the headphones out: the speaker may play one channel; repeat with headphones in to tell a dead channel");
+            else r3_report_line(&r, R3_FAIL, key, "no (silent)");
+            break;
         case A_PLAYED: r3_report_line(&r, R3_SKIP, key, "played, not answered (X heard, Y silent)"); break;
         default: r3_report_line(&r, R3_SKIP, key, "not played");
         }
@@ -1987,7 +1996,7 @@ static void idle_turn(void *arg) {
 }
 
 #define POWER_WORK_CPU 40.0    /* % of a core on the Motion pattern: a first guess, set before any measurement (docs/POWER.md) */
-#define POWER_WORK_WAKE 180.0  /* wake-ups a second there: vsync at 60 a second, a few switches each */
+#define POWER_WORK_WAKE 600.0  /* wake-ups a second there. Measured on the unit (2026-11-12): 544/s = this thread 273 + the Mali driver's 241 (vsync at 60 a second, about 9 each); the first guess, 180, was set before any measurement */
 
 /* idle: the app open on its list, nothing pressed. working: the Motion pattern, its heaviest page (a frame every vsync). */
 static void power_windows(App *a, R3Report *r) {
