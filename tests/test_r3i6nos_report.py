@@ -356,7 +356,7 @@ class PowerSection(Fake):
         boot.write_text('#!/bin/sh\n[ -n "$R3I6NOS_BOOTSTATE" ] && echo x > "$R3I6NOS_BOOTSTATE"\n')
         boot.chmod(0o755)
         p = self.power_text(R3I6NOS_BATTERY=str(sample), R3I6NOS_BOOTSTATE_CMD=str(boot))
-        self.assertRegex(p, r"INFO job battery sample tick: \d+ ms CPU, \d+ ms wall a run, 12 runs an hour = [0-9.]+% of a core")
+        self.assertRegex(p, r"INFO job battery sample tick: \d+ ms CPU, \d+ ms wall a run, 4 runs an hour = [0-9.]+% of a core")
         self.assertRegex(p, r"INFO job bootstate: ")
         self.assertRegex(p, r"PASS jobs cpu: [0-9.]+% of a core averaged, for battery sample tick, bootstate")
         self.assertFalse((self.t / "run/boot-state").exists(), "the real boot state is not touched")

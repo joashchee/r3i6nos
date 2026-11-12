@@ -98,20 +98,35 @@ def usb_kind(dev):
     return "other"
 
 
+USB_SEEN = {}   # sysfs name -> (devnum, (product, kind)): what a device is does not change while it stays plugged in
+
+
 def usb_devices():
-    """{sysfs name: (product, kind)} of the real USB devices: not interfaces ("1-1:1.0"), not the root hubs ("usb1")."""
+    """{sysfs name: (product, kind)} of the real USB devices: not interfaces ("1-1:1.0"), not the root hubs ("usb1").
+    The product and kind are read once for each device and kept while its devnum (the kernel gives a new one at each enumeration) stays the same:
+    a poll is then one listing and one small read a device, not a glob and six reads (the daemon was 2.1% of a core on the unit, 2026-11-12)."""
     out = {}
     base = SYS / "bus/usb/devices"
     try:
         names = sorted(os.listdir(base))
     except OSError:
+        USB_SEEN.clear()
         return out
     for name in names:
         if ":" in name or name.startswith("usb"):
             continue
         dev = base / name
-        product = " ".join(read(dev / "product").split()) or f"{read(dev / 'idVendor') or '????'}:{read(dev / 'idProduct') or '????'}"
-        out[name] = (product[:40], usb_kind(dev))
+        num = read(dev / "devnum")
+        kept = USB_SEEN.get(name)
+        if kept is None or kept[0] != num:
+            product = " ".join(read(dev / "product").split()) or f"{read(dev / 'idVendor') or '????'}:{read(dev / 'idProduct') or '????'}"
+            kept = USB_SEEN[name] = (num, (product[:40], usb_kind(dev)))
+        if kept[1][1] == "input":   # a pad's joystick handler can appear after the device does: keep looking until it is not plain input
+            kept = USB_SEEN[name] = (num, (kept[1][0], usb_kind(dev)))
+        out[name] = kept[1]
+    for name in list(USB_SEEN):
+        if name not in out:
+            del USB_SEEN[name]
     return out
 
 

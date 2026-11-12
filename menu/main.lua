@@ -120,7 +120,7 @@ function love.run()
     end
     love.update(love.timer.step())
     local n = settings.isOpen(dialog) and settings.node(dialog)
-    local moving = n and (n.kind == "busy" or n.kind == "mixer") -- elapsed seconds, a progress bar, the test sound
+    local moving = n and (n.kind == "mixer" or (n.kind == "busy" and "slow")) -- the test sound; a helper's wait counts seconds (a report held this at 30 fps: 35% of a core)
     local token = hotplug.showing and ((hotplug.error and "e" or "i") .. hotplug.text) or ""
     local draw, nap = redraw.frame(rd, token, moving)
     if draw and love.graphics.isActive() then

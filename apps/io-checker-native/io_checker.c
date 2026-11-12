@@ -1244,6 +1244,14 @@ static void urow(App *a, const char *label, const char *value, const char *detai
     a->n_rows++;
 }
 
+/* The plain-words reason a Billboard device gives: a USB-C dock asked for video (DisplayPort alternate mode) and the OTG port, USB 2.0 data only, could not give it. */
+#define BILLBOARD_WHY "a USB-C dock is asking for video (DisplayPort) and this port cannot carry it: it is USB 2.0 data only, so a monitor on the dock's HDMI stays dark"
+
+static int usb_has_billboard(const App *a) {
+    for (int i = 0; i < a->n_dev; i++) if (strstr(a->usb_dev[i].kinds, "billboard")) return 1;
+    return 0;
+}
+
 static void usb_build(App *a) {
     a->n_rows = 0;
     char l[240], v[240], d[300];
@@ -1254,6 +1262,7 @@ static void usb_build(App *a) {
             snprintf(l, sizeof l, "%s %s", u->name, u->product);
             snprintf(v, sizeof v, "%s%s", u->kinds, u->unbound && !u->hub ? " NO DRIVER" : "");
             snprintf(d, sizeof d, "%s  %s Mb/s  %s", u->vidpid, u->speed[0] ? u->speed : "?", u->drivers[0] ? u->drivers : "no driver bound");
+            if (strstr(u->kinds, "billboard")) snprintf(d, sizeof d, "Billboard: %s", BILLBOARD_WHY);
             urow(a, l, v, d);
         }
         break;
@@ -1269,6 +1278,7 @@ static void usb_build(App *a) {
             snprintf(d, sizeof d, "%s: %s%s", c->name, c->status, !c->internal && !strcmp(c->status, "connected") ? ", an external display is attached" : "");
             urow(a, l, v, d);
         }
+        if (usb_has_billboard(a)) urow(a, "A dock asked for video", "Billboard", "Billboard: " BILLBOARD_WHY);
         break;
     case U_MIDI:
         for (int i = 0; i < a->n_midi; i++) {
@@ -1444,6 +1454,10 @@ static void report_usb(App *a, R3Report *r) {
         const UioDev *u = &a->usb_dev[i];
         snprintf(key, sizeof key, "device %s", u->name);
         r3_report_line(r, R3_INFO, key, "%s (%s), %s Mb/s: %s; drivers: %s", u->product, u->vidpid, u->speed[0] ? u->speed : "?", u->kinds, u->drivers[0] ? u->drivers : "none");
+        if (strstr(u->kinds, "billboard")) {
+            snprintf(key, sizeof key, "billboard %s", u->name);
+            r3_report_line(r, R3_INFO, key, "%s: %s; nothing is wrong with the unit, and no driver is meant for it", u->product, BILLBOARD_WHY);
+        }
         if (u->unbound && !u->hub) {
             snprintf(key, sizeof key, "driver %s", u->name);
             r3_report_line(r, R3_FAIL, key, "%d of %d interface(s) of %s have no driver: the kernel cannot use this device", u->unbound, u->interfaces, u->product);
@@ -1463,6 +1477,7 @@ static void report_usb(App *a, R3Report *r) {
     }
     if (!a->n_conn) r3_report_line(r, R3_SKIP, "connectors", "no video connectors in /sys/class/drm here");
     else if (!external) r3_report_line(r, R3_SKIP, "external display", "none connected (an HDMI or DisplayLink dock would show here)");
+    if (usb_has_billboard(a) && !external) r3_report_line(r, R3_INFO, "billboard", "%s; a USB 2.0 DisplayLink adapter is the kind that could work", BILLBOARD_WHY);
     if (a->displays >= 0) r3_report_line(r, R3_INFO, "SDL displays", "%d", a->displays);
 
     r3_report_section(r, "usb midi");
@@ -1488,7 +1503,8 @@ static void report_usb(App *a, R3Report *r) {
         snprintf(key, sizeof key, "disk %s", k->dev);
         r3_report_line(r, R3_INFO, key, "%s, %.1f GB", k->model, (double)k->bytes / 1e9);
         snprintf(key, sizeof key, "%s mounted", k->dev);
-        if (k->mount[0]) r3_report_line(r, R3_PASS, key, "%s on %s (%s); its checks are in the files section as USB %s", k->part, k->mount, k->fstype, k->dev);
+        if (!k->bytes) r3_report_line(r, R3_SKIP, key, "no media in it (an empty slot of a card reader): put a card in");
+        else if (k->mount[0]) r3_report_line(r, R3_PASS, key, "%s on %s (%s); its checks are in the files section as USB %s", k->part, k->mount, k->fstype, k->dev);
         else r3_report_line(r, R3_FAIL, key, "not mounted: nothing mounts USB storage for apps yet, so it cannot be read or written (a mount needs root)");
     }
 
@@ -2077,6 +2093,8 @@ static void selftest_usb(void) {
     ut_dir(root, "sys/bus/usb/devices/1-6/1-6:1.0/input/input7/js0");
     ut_usb_dev(root, "1-7", "0781", "5581", "Ultra", "480");
     ut_usb_iface(root, "1-7", "1-7:1.0", "08", "06", "50", "usb-storage");
+    ut_usb_dev(root, "1-9", "2109", "0100", "USB 2.0 BILLBOARD", "480");     /* a dock's notice: class 0x11, no driver is meant to bind */
+    ut_usb_iface(root, "1-9", "1-9:1.0", "11", "00", "00", NULL);
     /* video: this unit's panel, an HDMI port with nothing in it, a USB display adapter with a monitor */
     ut_file(root, "sys/class/drm/card0-DSI-1/status", "connected\n");
     ut_file(root, "sys/class/drm/card0-DSI-1/modes", "640x480\n480x320\n");
@@ -2091,6 +2109,9 @@ static void selftest_usb(void) {
     ut_file(root, "sys/devices/usb1/1-7/host6/target6:0:0/6:0:0:0/vendor", "SanDisk \n");
     ut_file(root, "sys/devices/usb1/1-7/host6/target6:0:0/6:0:0:0/model", "Ultra\n");
     ut_link(root, "sys/block/sda/device", "sys/devices/usb1/1-7/host6/target6:0:0/6:0:0:0");
+    ut_dir(root, "sys/devices/usb1/1-7/host6/target6:0:0/6:0:0:1");           /* the card reader's second slot, empty */
+    ut_link(root, "sys/block/sdb/device", "sys/devices/usb1/1-7/host6/target6:0:0/6:0:0:1");
+    ut_file(root, "sys/block/sdb/size", "0\n");
     ut_file(root, "sys/block/sda/size", "15564800\n");
     ut_dir(root, "sys/devices/platform/ff0f0000.mmc");
     ut_link(root, "sys/block/mmcblk0/device", "sys/devices/platform/ff0f0000.mmc");
@@ -2121,6 +2142,7 @@ static void selftest_usb(void) {
             "I: Bus=0003 Vendor=046d Product=c31c Version=0110\nN: Name=\"Logitech USB Keyboard\"\nS: Sysfs=/devices/platform/ff580000.usb/usb1/1-1/1-1:1.0/input/input3\nH: Handlers=sysrq kbd leds event3 \n\n"
             "I: Bus=0003 Vendor=046d Product=c077 Version=0111\nN: Name=\"Optical Mouse\"\nS: Sysfs=/devices/platform/ff580000.usb/usb1/1-2/1-2:1.0/input/input4\nH: Handlers=mouse0 event4 \n\n"
             "I: Bus=0003 Vendor=045e Product=028e Version=0110\nN: Name=\"Gamepad\"\nS: Sysfs=/devices/platform/ff580000.usb/usb1/1-6/1-6:1.0/input/input7\nH: Handlers=js0 event7 \n\n"
+            "I: Bus=0003 Vendor=413c Product=301a Version=0111\nN: Name=\"Event Mouse\"\nS: Sysfs=/devices/platform/ff580000.usb/usb1/1-9/1-9:1.0/input/input8\nB: EV=17\nB: KEY=1f0000 0 0 0 0\nB: REL=903\nH: Handlers=event8 \n\n"
             "I: Bus=0019 Vendor=0001 Product=0001 Version=0100\nN: Name=\"rk8xx_pwrkey\"\nS: Sysfs=/devices/platform/rk8xx/input/input0\nH: Handlers=kbd event0 \n\n");
 
     App *u = calloc(1, sizeof(App));
@@ -2128,7 +2150,7 @@ static void selftest_usb(void) {
     app_init(u);
     usb_scan(u, 0);
     /* every parser */
-    CHECK(u->n_dev == 7, "usb: seven devices (the root hub and the interfaces are not devices)");
+    CHECK(u->n_dev == 8, "usb: eight devices (the root hub and the interfaces are not devices)");
     const UioDev *d = ut_find(u, "1-1");
     CHECK(d && !strcmp(d->kinds, "keyboard") && !strcmp(d->drivers, "usbhid") && !strcmp(d->vidpid, "046d:c31c") && !strcmp(d->speed, "12") && !strcmp(d->product, "USB Keyboard"), "usb: the keyboard");
     d = ut_find(u, "1-2");
@@ -2152,7 +2174,10 @@ static void selftest_usb(void) {
         if (!strcmp(c->name, "DVI-I-1")) dvi = !c->internal && !strcmp(c->status, "connected") && !strcmp(c->mode, "1920x1080") && c->usb;
     }
     CHECK(dsi && hdmi && dvi, "usb: the panel is internal, HDMI is empty, the DVI adapter on USB is connected at 1920x1080");
-    CHECK(u->n_disk == 1 && !strcmp(u->usb_disk[0].dev, "sda") && !strcmp(u->usb_disk[0].model, "SanDisk Ultra") && u->usb_disk[0].bytes == 15564800ULL * 512 &&
+    d = ut_find(u, "1-9");
+    CHECK(d && !strcmp(d->kinds, "billboard") && d->unbound == 0, "usb: a Billboard device is a notice, not a missing driver");
+    CHECK(u->n_disk == 2 && u->usb_disk[1].bytes == 0 && !strcmp(u->usb_disk[1].dev, "sdb"), "usb: an empty card reader slot has no size");
+    CHECK(u->n_disk == 2 && !strcmp(u->usb_disk[0].dev, "sda") && !strcmp(u->usb_disk[0].model, "SanDisk Ultra") && u->usb_disk[0].bytes == 15564800ULL * 512 &&
           !strcmp(u->usb_disk[0].mount, "/media/My Stick") && !strcmp(u->usb_disk[0].fstype, "vfat") && !strcmp(u->usb_disk[0].part, "sda1"),
           "usb: the stick, its model, size and mount (the SD card is not USB)");
     CHECK(u->n_net == 2, "usb: two adapters (not lo)");
@@ -2164,7 +2189,8 @@ static void selftest_usb(void) {
     }
     CHECK(eth && wifi, "usb: Ethernet with a link at 1000 Mb/s, Wi-Fi down, both on USB");
     CHECK(u->n_midi == 1 && u->usb_midi[0].card == 1 && u->usb_midi[0].device == 0 && !strcmp(u->usb_midi[0].name, "Launchkey") && u->usb_midi[0].usb, "usb: the MIDI port");
-    CHECK(u->n_in == 3 && u->usb_in[0].keyboard && u->usb_in[0].usb && u->usb_in[1].mouse && u->usb_in[2].pad, "usb: a keyboard, a mouse and a pad (not the power key)");
+    CHECK(u->n_in == 4 && u->usb_in[0].keyboard && u->usb_in[0].usb && u->usb_in[1].mouse && u->usb_in[2].pad && u->usb_in[3].mouse && !u->usb_in[3].keyboard,
+          "usb: a keyboard, a mouse, a pad and a mouse with no mousedev handler, told by its X and Y axes (not the power key)");
     unsigned char on[3] = {0x90, 60, 100}, cc[3] = {0xB0, 7, 90}, off[3] = {0x80, 60, 0}, pc[2] = {0xC1, 5};
     char mt[64];
     uio_midi_text(on, 3, mt, sizeof mt); CHECK(!strcmp(mt, "ch1 note on C4 vel 100"), "usb: a note on in words");
@@ -2176,14 +2202,14 @@ static void selftest_usb(void) {
     u->page = P_USB;
     R3Screen sc;
     compose(u, &sc, 0);
-    CHECK(screen_has(&sc, "USB and OTG") && screen_has(&sc, "Game controllers") && screen_has(&sc, "7 found") && screen_has(&sc, "1 connected"), "usb: the list shows what was found");
+    CHECK(screen_has(&sc, "USB and OTG") && screen_has(&sc, "Game controllers") && screen_has(&sc, "8 found") && screen_has(&sc, "1 connected"), "usb: the list shows what was found");
     u->page = P_USBSUB;
     u->usb_sub = U_DEVICES; compose(u, &sc, 0);
-    CHECK(u->n_rows == 7 && ut_rows_have(u, "NO DRIVER") && ut_rows_have(u, "Mystery Gadget") && screen_has(&sc, "USB Keyboard"), "usb: seven device rows, the one with no driver says so");
+    CHECK(u->n_rows == 8 && ut_rows_have(u, "NO DRIVER") && ut_rows_have(u, "Mystery Gadget") && screen_has(&sc, "USB Keyboard"), "usb: eight device rows, the one with no driver says so");
     u->usb_sub = U_VIDEO; compose(u, &sc, 0);
-    CHECK(u->n_rows == 3 && ut_rows_have(u, "connected 1920x1080") && ut_rows_have(u, "(USB adapter)"), "usb: video rows");
+    CHECK(u->n_rows == 4 && ut_rows_have(u, "A dock asked for video") && ut_rows_have(u, "connected 1920x1080") && ut_rows_have(u, "(USB adapter)"), "usb: video rows");
     u->usb_sub = U_STORAGE; compose(u, &sc, 0);
-    CHECK(u->n_rows == 2 && ut_rows_have(u, "SanDisk Ultra") && ut_rows_have(u, "mounted at /media/My Stick") && ut_rows_have(u, "7.968") == 0 && ut_rows_have(u, "8.0 GB"), "usb: storage rows");
+    CHECK(u->n_rows == 4 && ut_rows_have(u, "SanDisk Ultra") && ut_rows_have(u, "mounted at /media/My Stick") && ut_rows_have(u, "7.968") == 0 && ut_rows_have(u, "8.0 GB"), "usb: storage rows");
     u->usb_sub = U_NETWORK; compose(u, &sc, 0);
     CHECK(u->n_rows == 2 && ut_rows_have(u, "up 1000 Mb/s") && ut_rows_have(u, "Ethernet (USB)") && ut_rows_have(u, "Wi-Fi (USB)"), "usb: network rows");
     u->usb_sub = U_KEYBOARD; compose(u, &sc, 0);
@@ -2318,11 +2344,11 @@ static void selftest_usb(void) {
     text[got] = 0;
     if (rf) fclose(rf);
     const char *want[] = {
-        "== usb devices ==", "INFO devices: 7 on USB", "INFO device 1-1: USB Keyboard (046d:c31c), 12 Mb/s: keyboard; drivers: usbhid",
+        "== usb devices ==", "INFO devices: 8 on USB", "INFO device 1-1: USB Keyboard (046d:c31c), 12 Mb/s: keyboard; drivers: usbhid",
         "FAIL driver 1-4: 1 of 1 interface(s) of Mystery Gadget have no driver",
         "== usb video out ==", "INFO connector DSI-1: connected, 640x480 (this unit's screen)", "PASS external display: connected on DVI-I-1, first mode 1920x1080",
         "== usb midi ==", "PASS Launchkey opens: ", "PASS messages: 2 in, 1 out",
-        "== usb storage ==", "INFO disk sda: SanDisk Ultra, 8.0 GB", "PASS sda mounted: sda1 on /media/My Stick (vfat)",
+        "== usb storage ==", "INFO billboard 1-9: USB 2.0 BILLBOARD: a USB-C dock is asking for video", "SKIP sdb mounted: no media in it", "INFO disk sda: SanDisk Ultra, 8.0 GB", "PASS sda mounted: sda1 on /media/My Stick (vfat)",
         "== usb network ==", "PASS eth1: Ethernet (USB): link up, 1000 Mb/s", "INFO wlan0: Wi-Fi (USB), down",
         "== usb keyboard ==", "INFO keyboard: Logitech USB Keyboard (USB)", "PASS keys pressed: 3 different keys reached SDL",
         "== usb mouse ==", "INFO mouse: Optical Mouse (USB)", "PASS mouse events: 2 moves, buttons left",

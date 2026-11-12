@@ -651,14 +651,14 @@ def power_section(r):
     if m is None:
         r.line("SKIP", "menu", f"no process matching {MENU_MATCH} (run from Settings > Device reports, so the menu is showing)")
     else:
-        r.line("INFO", "menu cpu", f"{m['cpu']:.1f}% of a core while showing, {m['rss']} kB resident (every frame polls the toast; the battery is read every 10 s)")
+        r.line("INFO", "menu cpu", f"{m['cpu']:.1f}% of a core while showing, {m['rss']} kB resident (every loop polls the toast; the battery is read every 10 s; started from Settings the menu shows the report's wait screen, which draws 4 a second, so this is not the bare idle menu)")
 
     r.step("the periodic jobs")
     jobs, total = [], 0.0
     with tempfile.TemporaryDirectory(prefix="r3i6nos-power.") as tmp:
         for name, cmd, env, per_hour in (
-            ("battery sample tick", [BATTERY_CMD, "sample", "tick", "power-report"], {"R3I6NOS_BATTERY_DIR": tmp}, 12),
-            ("bootstate", [BOOTSTATE_CMD], {"R3I6NOS_BOOTSTATE": os.path.join(tmp, "boot-state")}, 12),
+            ("battery sample tick", [BATTERY_CMD, "sample", "tick", "power-report"], {"R3I6NOS_BATTERY_DIR": tmp}, 4),   # loveos-session: every 900 s
+            ("bootstate", [BOOTSTATE_CMD], {"R3I6NOS_BOOTSTATE": os.path.join(tmp, "boot-state")}, 4),   # the timer: every 15 min
         ):
             c = job_cost(cmd, env)
             if c is None or not Path(cmd[0]).exists():

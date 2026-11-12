@@ -27,4 +27,9 @@ R.mark(r); eq(select(1, R.frame(r, "", false)), true, "a marked change redraws (
 for _ = 1, 3 do d, nap = R.frame(r, "", true); eq(d, true, "a moving screen draws every loop"); eq(nap, R.ACTIVE) end
 d = R.frame(r, "", false); eq(d, true, "the loop it stops moving draws once more (the answer lands in update)")
 d = R.frame(r, "", false); eq(d, false, "then rests")
+
+local drawn = 0
+for _ = 1, 20 do if R.frame(r, "", "slow") then drawn = drawn + 1 end end
+eq(drawn, 4, "a slow screen (a helper's wait) draws 1 loop in 5, not every loop")
+d = R.frame(r, "", false); eq(d, true, "and once more when the wait ends")
 print("test_redraw: ok")

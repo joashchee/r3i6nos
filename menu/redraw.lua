@@ -7,6 +7,7 @@ local M = {}
 
 M.ACTIVE = 1 / 30 -- seconds a frame takes while something is changing
 M.IDLE = 1 / 20 -- seconds between looks at the event queue while nothing is
+M.SLOW_EVERY = 5 -- a "slow" screen (elapsed seconds, a step bar) draws every this many loops: 4 a second, not 30
 
 -- Events that do not change what is on the screen (the menu reads raw buttons, so a stick moving is not news).
 local QUIET = { joystickaxis = true, mousemoved = true, joystickhat = true }
@@ -24,11 +25,17 @@ end
 function M.mark(r) r.dirty = true end
 
 --- Once a loop, after update. `token` is a string for what the toast shows (same string, nothing to redraw);
---- `moving` is true while a screen animates by itself. Returns true to draw now, and the seconds to sleep after.
+--- `moving` is true while a screen animates by itself (the mixer: every loop), or "slow" while it only counts seconds (waiting for a helper). Returns true to draw now, and the seconds to sleep after.
 function M.frame(r, token, moving)
   if token ~= r.token then r.token, r.dirty = token, true end
-  moving = moving and true or false
-  if moving or moving ~= r.moving then r.dirty = true end -- and once more when it stops: its answer lands inside update
+  if moving == "slow" then
+    r.slow = (r.slow or 0) + 1
+    if r.slow >= M.SLOW_EVERY or r.moving ~= "slow" then r.slow, r.dirty = 0, true end
+  else
+    r.slow = nil
+    moving = moving and true or false
+    if moving or moving ~= r.moving then r.dirty = true end -- and once more when it stops: its answer lands inside update
+  end
   r.moving = moving
   local draw = r.dirty
   r.dirty = false

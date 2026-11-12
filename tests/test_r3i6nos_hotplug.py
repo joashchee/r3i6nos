@@ -171,6 +171,14 @@ class Hotplug(unittest.TestCase):
         self.pad("1-3")
         self.assertEqual(self.mod.usb_devices()["1-3"], ("Tiny Keyboard", "pad"))
 
+    def test_a_device_is_read_once_while_it_stays_plugged_in(self):
+        self.usb("1-4", "Card Reader", "08")
+        self.assertEqual(self.mod.usb_devices()["1-4"], ("Card Reader", "storage"))
+        (self.sys / "bus/usb/devices/1-4/product").write_text("Renamed\n")   # not read again: the cache answers
+        self.assertEqual(self.mod.usb_devices()["1-4"], ("Card Reader", "storage"))
+        (self.sys / "bus/usb/devices/1-4/devnum").write_text("9\n")          # a new enumeration is read again
+        self.assertEqual(self.mod.usb_devices()["1-4"], ("Renamed", "storage"))
+
     def test_tf_cards_in_and_out(self):
         self.card("mmcblk0")
         self.mounts("/dev/mmcblk0p3")

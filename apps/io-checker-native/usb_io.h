@@ -152,6 +152,7 @@ static inline const char *uio_iface_kind(unsigned cls, unsigned sub, unsigned pr
     case 0x08: return "storage";
     case 0x09: return "hub";
     case 0x0e: return "camera";
+    case 0x11: return "billboard";  /* a dock or cable saying an alternate mode (video out) it could not start: a notice, no driver is meant to bind */
     case 0x0a: return NULL;         /* CDC data: the other half of a network or serial pair */
     case 0xe0: return sub == 0x01 ? "bluetooth" : "wifi";
     default: break;
@@ -215,7 +216,7 @@ static inline int uio_usb_devices(UioDev *out, int cap) {
             uio_cat(p, sizeof p, ifd, "driver");
             uio_link_base(p, drv, sizeof drv);
             u->interfaces++;
-            if (!drv[0]) u->unbound++; else uio_add_word(u->drivers, sizeof u->drivers, drv);
+            if (!drv[0]) { if (cls != 0x11) u->unbound++; } else uio_add_word(u->drivers, sizeof u->drivers, drv);
             const char *k = uio_iface_kind(cls, sub, proto, drv);
             if (cls == 0x03) {  /* a HID that the kernel gave a joystick node is a pad */
                 char *jsglob = NULL;
@@ -496,7 +497,7 @@ static inline int uio_inputs(UioInput *out, int cap) {
     FILE *f = fopen(path, "r");
     if (!f) return 0;
     char line[512], name[64] = "", handlers[160] = "";
-    int usb = 0, have = 0, n = 0;
+    int usb = 0, have = 0, n = 0, rel_xy = 0;
     for (;;) {
         char *got = fgets(line, sizeof line, f);
         if (!got || line[0] == '\n' || line[0] == '\r') {
@@ -505,13 +506,14 @@ static inline int uio_inputs(UioInput *out, int cap) {
                 memset(u, 0, sizeof *u);
                 snprintf(u->name, sizeof u->name, "%s", name);
                 u->keyboard = strstr(handlers, "kbd") && strstr(handlers, "leds");
-                u->mouse = strstr(handlers, "mouse") != NULL;
+                /* this kernel (4.4.189) may have no mousedev: then a mouse has only an event node, told by its relative X and Y axes */
+                u->mouse = strstr(handlers, "mouse") != NULL || rel_xy;
                 u->pad = strstr(handlers, "js") != NULL;
                 u->usb = usb;
                 if (u->keyboard || u->mouse || u->pad) n++;
             }
             name[0] = handlers[0] = 0;
-            usb = have = 0;
+            usb = have = rel_xy = 0;
             if (!got) break;
             continue;
         }
@@ -522,6 +524,10 @@ static inline int uio_inputs(UioInput *out, int cap) {
             if (q) *q = 0;
         } else if (!strncmp(line, "H: Handlers=", 12)) {
             uio_copy(handlers, sizeof handlers, line + 12);
+        } else if (!strncmp(line, "B: REL=", 7)) {
+            const char *w = strrchr(line, ' ');   /* the last word holds the low bits: REL_X is bit 0, REL_Y bit 1 */
+            if (w && !strncmp(w + 1, "REL=", 4)) w += 4;   /* one word: "B: REL=903" has no space after the "=" */
+            rel_xy = w && (strtoul(w + 1, NULL, 16) & 3) == 3;
         } else if (!strncmp(line, "S: Sysfs=", 9)) {
             usb = strstr(line, "/usb") != NULL;
         }

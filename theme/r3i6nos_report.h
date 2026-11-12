@@ -613,10 +613,20 @@ static inline void r3_report_power_end(R3Report *r, R3Power *p, const char *stat
     R3PowerTask *t1 = r3_power_threads(&n1);
     double best = -1;
     unsigned long long wakes = 0;
+    unsigned long long top_n[3] = {0, 0, 0};    /* the three threads that woke most: where a wake-up goal is missed, this says which thread */
+    char top_name[3][24] = {"", "", ""};
     for (int i = 0; i < n1; i++)
         for (int j = 0; j < p->nthr0; j++) {
             if (t1[i].id != p->thr0[j].id) continue;
-            wakes += t1[i].ctx > p->thr0[j].ctx ? t1[i].ctx - p->thr0[j].ctx : 0;
+            unsigned long long dctx = t1[i].ctx > p->thr0[j].ctx ? t1[i].ctx - p->thr0[j].ctx : 0;
+            wakes += dctx;
+            for (int k = 0; k < 3 && dctx; k++)
+                if (dctx > top_n[k]) {
+                    for (int m = 2; m > k; m--) { top_n[m] = top_n[m - 1]; memcpy(top_name[m], top_name[m - 1], sizeof top_name[m]); }
+                    top_n[k] = dctx;
+                    snprintf(top_name[k], sizeof top_name[k], "%.23s", t1[i].name);
+                    break;
+                }
             double c = (double)(t1[i].ticks > p->thr0[j].ticks ? t1[i].ticks - p->thr0[j].ticks : 0) / clk / wall * 100.0;
             if (c > best) { best = c; snprintf(res->busiest_thread, sizeof res->busiest_thread, "%s", t1[i].name); }
         }
@@ -627,6 +637,14 @@ static inline void r3_report_power_end(R3Report *r, R3Power *p, const char *stat
             res->wake_fail = res->wake > goal_wake;
             r3_report_line(r, res->wake_fail ? R3_FAIL : R3_PASS, key, "%.1f/s (goal at most %.1f)", res->wake, goal_wake);
         } else r3_report_line(r, R3_INFO, key, "%.1f/s", res->wake);
+        if (top_n[0]) {
+            char w[160] = "";
+            for (int k = 0; k < 3 && top_n[k]; k++) {
+                size_t l = strlen(w);
+                snprintf(w + l, sizeof w - l, "%s%s %.1f/s", k ? ", " : "", top_name[k], (double)top_n[k] / wall);
+            }
+            r3_report_line(r, R3_INFO, r3_power_key(key, sizeof key, state, "busiest wakers"), "%s (threads by wake-ups a second)", w);
+        }
         if (best >= 0) r3_report_line(r, R3_INFO, r3_power_key(key, sizeof key, state, "busiest thread"), "%s, %.2f%% of a core (%d threads)", res->busiest_thread, best, n1);
     } else r3_report_line(r, R3_SKIP, r3_power_key(key, sizeof key, state, "wakeups"), "no /proc/self/task here (not Linux)");
     free(t1);
