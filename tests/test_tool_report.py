@@ -22,7 +22,7 @@ def make(dirpath):
     rep.write_text(text)
     tool = d / "bin/fake"
     tool.write_text('#!/bin/sh\ncase "$1" in\n  ok) echo fine; echo made > o/out.txt ;;\n  bad) echo "no such kit" >&2; exit 2 ;;\n'
-                    '  crash) kill -9 $$ ;;\nesac\n')
+                    '  crash) kill -9 $$ ;;\n  long) sleep 2.2 ;;\nesac\n')
     for p in (rep, tool):
         p.chmod(p.stat().st_mode | stat.S_IEXEC)
     (d / "share/r36s-fake/commands.txt").write_text("# a comment\n\nok\nbad --strict\n!SLOW ok slowly\ncrash\n")
@@ -70,11 +70,65 @@ class ToolReport(unittest.TestCase):
                                  env={**os.environ, "R3I6NOS_ROMS": str(roms), "R3I6NOS_REPORT_PROGRESS": str(prog)}, capture_output=True, text=True, timeout=60)
             self.assertEqual(out.returncode, 0, out.stderr)
             kv = dict(l.split("=", 1) for l in prog.read_text().splitlines())
-            self.assertEqual(kv["steps"], "6", "system, card and the four commands")
-            self.assertEqual(kv["step"], "6")
+            self.assertEqual(kv["steps"], "8", "system, card, the power baseline, the four commands and the power section")
+            self.assertEqual(kv["step"], "8")
             self.assertEqual(kv["doing"], "done")
             self.assertEqual(kv["file"], str(roms / "Fake App/r36s-report.txt"))
             self.assertFalse(Path(str(prog) + ".tmp").exists())
+
+    def run_power(self, status, commands, extra_env=None):
+        """The report with a fake battery (status; 700 mA at 3.8 V = 2660 mW), and the given commands.txt; returns the report's text."""
+        with tempfile.TemporaryDirectory() as t:
+            rep = make(t)
+            (Path(t) / "share/r36s-fake/commands.txt").write_text(commands)
+            bat = Path(t) / "sys/class/power_supply/battery"
+            bat.mkdir(parents=True)
+            for name, text in (("type", "Battery"), ("status", status), ("capacity", "69"), ("current_now", "-700000"), ("voltage_now", "3800000"), ("charge_full", "3380000")):
+                (bat / name).write_text(text + "\n")
+            roms = Path(t) / "roms"
+            env = {**os.environ, "R3I6NOS_ROMS": str(roms), "R3I6NOS_SYS": str(Path(t) / "sys"), "R3I6NOS_REPORT_POWER_S": "1", **(extra_env or {})}
+            out = subprocess.run([sys.executable, str(rep), "--quiet"], env=env, capture_output=True, text=True, timeout=90)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            return (roms / "Fake App/r36s-report.txt").read_text()
+
+    def test_power_section_on_battery(self):
+        """Discharging: the idle baseline, the draw during a command of a second or more, the energy over idle, the wake-up goal and what to cut first."""
+        text = self.run_power("Discharging", "ok\nlong\n")
+        self.assertIn("\n== power ==\n", text)
+        self.assertLess(text.index("== commands =="), text.index("== power =="), "the section follows the commands it measures")
+        self.assertIn("INFO battery supply: battery: 69%, Discharging", text)
+        self.assertRegex(text, r"INFO working window: 2 commands, [0-9.]+ s of running")
+        self.assertRegex(text, r"INFO command fake long: 2\.\d+ s, [0-9.]+ CPU s \(\d+% of a core\), \d+ wake-ups/s, peak \d+ KB, draw 2660 mW")
+        self.assertNotRegex(text, r"INFO command fake ok:", "a command under a second is not listed: its start-up dominates")
+        self.assertRegex(text, r"PASS working wakeups: worst [0-9.]+/s \(fake long; goal at most 200")
+        self.assertRegex(text, r"INFO working draw: 2660 mW mean \(min 2660, max 2660, \d+ readings")
+        self.assertRegex(text, r"INFO idle draw: 2660 mW with nothing running \(\d+ readings\): the commands cost \+0 mW over it")
+        self.assertRegex(text, r"INFO working energy: about 0\.0 J over idle for the 1 command of 1 s or more")
+        self.assertRegex(text, r"INFO working time left: [0-9.]+ h at this draw \(69% of 3380 mAh\)")
+        self.assertIn("INFO cut first: CPU time is the energy of a tool: `fake long` took", text)
+        self.assertIn("INFO reading this: one run on one battery", text)
+        self.assertTrue(text.endswith("end\n"))
+
+    def test_power_section_on_the_charger_says_to_unplug(self):
+        text = self.run_power("Charging", "ok\nlong\n")
+        self.assertIn("SKIP draw: the battery says Charging, not Discharging: unplug the power", text)
+        self.assertNotIn("working draw", text)
+        self.assertRegex(text, r"PASS working wakeups: worst", "CPU and wake-ups are measured on any power")
+
+    def test_power_section_with_no_battery_and_only_short_commands(self):
+        with tempfile.TemporaryDirectory() as t:
+            rep = make(t)
+            roms = Path(t) / "roms"
+            sysdir = Path(t) / "emptysys"
+            sysdir.mkdir()
+            out = subprocess.run([sys.executable, str(rep), "--quiet"], env={**os.environ, "R3I6NOS_ROMS": str(roms), "R3I6NOS_SYS": str(sysdir)},
+                                 capture_output=True, text=True, timeout=60)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            text = (roms / "Fake App/r36s-report.txt").read_text()
+            self.assertIn("SKIP battery: no battery supply found", text)
+            self.assertIn("INFO idle state: a command-line tool is not running between commands", text)
+            self.assertRegex(text, r"SKIP working wakeups: no command ran 1 s or more")
+            self.assertRegex(text, r"INFO working cpu: [0-9.]+ CPU s in [0-9.]+ s")
 
     def test_no_command_list_is_a_fail_not_a_crash(self):
         with tempfile.TemporaryDirectory() as t:

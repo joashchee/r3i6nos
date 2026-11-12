@@ -8,6 +8,27 @@ system), or `r3i6nos-report`, now has a `== power ==` section.
 
 **Every port, not only this system (CLAUDE.md rule 14):** each R36S port's device report has a `== power ==` section built the same way (its own CPU, wake-ups and memory idle and working, the draw in mW on battery, goals, what to cut first); this file's grammar and goals are the reference, and `power_section` in `r3i6nos-report` the code. Shared code for native, tool and LÖVE ports: ROADMAP section 23.
 
+## In a command-line tool (`tools/qjs-node/report.py`, tested by `tests/test_tool_report.py`)
+
+Every tool's `<command>-report` (generated from `report.py` by `package-tool.sh`, so every tool gets it after a rebuild) writes a `== power ==` section after
+its `== commands ==`. **A tool has no idle state** (it is not running between commands), so only the working one is measured, from the commands the report just ran:
+
+| Line | What it says |
+| --- | --- |
+| `battery supply`, `draw` | the charge and status; **SKIP "unplug"** unless the battery says `Discharging` |
+| `idle state` | INFO: there is none; the working state only |
+| `working window`, `working cpu` | commands run, seconds running, CPU seconds, % of a core (a tool is one thread) |
+| `command <line>` | for each command of **1 s or more** (a shorter one is its own start-up): wall, CPU seconds, % of a core, **wake-ups a second** (the child's own context switches from `wait4`), peak KB, and its draw |
+| `working wakeups` | **PASS or FAIL**: the worst of those commands against **at most 200 a second** (a first guess, set before any measurement): more means it polls or sleeps in a loop |
+| `working system busy`, `working busiest other <name>` | the system's busy %, interrupts and context switches a second over the whole run, and the three busiest other processes (the report's own wait loop is in the first) |
+| `working draw`, `idle draw`, `working energy`, `working time left` | the battery's draw in mW **read once a second during commands of 1 s or more**, a 5 s idle baseline taken first (`R3I6NOS_REPORT_POWER_S`), the difference as mW and as **J over idle**, and the hours left at that draw |
+| `cut first` | the command with the most CPU seconds (a tool's energy is its CPU time), or the one that wakes too often: make it faster, or make its output ahead of time |
+
+Nothing is read but `/proc`, `/sys` and the child's `rusage` (`R3I6NOS_PROC`, `R3I6NOS_SYS` name other roots). A command under a second has no battery reading
+(the gauge changes about once a second), so a tool whose commands are all short gets CPU time and wake-ups only, and `SKIP working wakeups`.
+**Tested** with a fake tool, a fake battery (discharging and charging) and no battery (`tests/test_tool_report.py`) on a Mac and in Debian 12. **Untested on the
+unit**; the first run there sets the real wake-up goal. Composer's `make ambient` (16 s) and Painter's `draw character` and `convert` (13-18 s) are the commands that will show a figure.
+
 ## In a native port (`theme/r3i6nos_report.h`, tested by `tests/test_report.c`)
 
 ```c
