@@ -916,8 +916,8 @@ static void page_input(R3Screen *s, const App *a, Uint32 now) {
         key_cell(s, 9, 9, "VOL-", a->k_vdown);
         key_cell(s, 16, 9, "VOL+", a->k_vup);
     } else {
-        key_cell(s, 1, 2, "L2", down(a, L_L2)); key_cell(s, 6, 2, "L1", down(a, L_L1));
-        key_cell(s, 23, 2, "R1", down(a, L_R1)); key_cell(s, 28, 2, "R2", down(a, L_R2));
+        key_cell(s, 1, 2, "L1", down(a, L_L1)); key_cell(s, 6, 2, "L2", down(a, L_L2));
+        key_cell(s, 23, 2, "R2", down(a, L_R2)); key_cell(s, 28, 2, "R1", down(a, L_R1));
         Uint8 h = a->hat;
         arrow_cell(s, 5, 4, 24, down(a, L_UP) || (h & SDL_HAT_UP));
         arrow_cell(s, 2, 5, 27, down(a, L_LEFT) || (h & SDL_HAT_LEFT));

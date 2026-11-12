@@ -46,12 +46,28 @@ local screen
 local power, powerAge = nil, 0 -- the battery reading for the top bar, re-read every few seconds
 local POWER_EVERY = 10
 
+-- The first screen goes up before anything slow runs (the card scan forks `ls` for every folder): a black panel for
+-- seconds feels like a hang. Shown twice, so both buffers of the display hold it.
+local function splash(done, total, doing)
+  view.splash(screen, done, total, doing)
+  for _ = 1, 2 do
+    love.graphics.origin()
+    love.graphics.clear(love.graphics.getBackgroundColor())
+    theme.draw(screen)
+    love.graphics.present()
+  end
+end
+
 function love.load()
   love.mouse.setVisible(false)
   theme.init()
   screen = theme.screen()
+  splash(0, 3, "Starting")
+  splash(1, 3, "Looking for games and apps")
   entries = scan.entries(ROMS, LAUNCHERS, DEFAULTS, ROMS2)
+  splash(2, 3, "Reading the battery")
   power = battery.read()
+  splash(3, 3, "Ready")
   if require("clock").needed() then settings.openClock(dialog) end -- the card's first boot: ask for the date and time (docs/CLOCK.md)
 end
 

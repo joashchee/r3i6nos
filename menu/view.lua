@@ -199,6 +199,21 @@ function view.battery(scr, reading)
   scr:textRight(theme.COLS - 2, theme.TOP_ROW, text, fg, bg)
 end
 
+--- The start-up screen, drawn at once, before the card is scanned, so the panel is never black while the menu loads.
+--- done of total steps, and what the step is doing.
+function view.splash(scr, done, total, doing)
+  scr:clear()
+  local st = theme.STYLE
+  theme.topBar(scr, "r3i6nos")
+  local w, h = 40, 7
+  local col, row = centered(w, h)
+  scr:box(col, row, w, h, { title = "r3i6nos", foot = "Starting" })
+  scr:text(col + 3, row + 2, theme.fit(doing, w - 6), st.hint.fg, st.hint.bg)
+  local bw = w - 6
+  local filled = total > 0 and math.floor(bw * done / total + 0.5) or 0
+  for i = 0, bw - 1 do scr:put(col + 3 + i, row + 4, i < filled and 219 or 176, st.body.fg, st.body.bg) end
+end
+
 --- Draw the whole screen. state: entries, selected (1-based), dialog (settings state), reply (optional { text, kind }).
 function view.render(scr, state)
   scr:clear()

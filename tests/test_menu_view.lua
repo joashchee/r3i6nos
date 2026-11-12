@@ -245,3 +245,19 @@ for i = 1, 64 * 24 do
 end
 
 print("menu view: ok")
+
+-- the start-up screen: up before the card is scanned, with a progress bar and the step
+do
+  local sp = theme.screen()
+  view.splash(sp, 1, 3, "Looking for games and apps")
+  local r = sp:dump()
+  eq(#r, 24)
+  has(r[1], "r3i6nos")
+  local text = table.concat(r, "\n")
+  has(text, "Looking for games and apps"); has(text, "Starting")
+  local lit = select(2, text:gsub("\219", "")) -- the dump may show the bar as ?; count either form
+  assert(text:find("[\219?]"), "a progress bar is drawn")
+  view.splash(sp, 3, 3, "Ready")
+  has(table.concat(sp:dump(), "\n"), "Ready")
+end
+print("splash ok")

@@ -112,8 +112,8 @@ local function input(scr, s)
     key(scr, 16, 9, "VOL+", model.keyHeld(s.keysDown, "vol_up"))
   else
     local L, down = model.LAYOUT, p.down
-    key(scr, 1, 2, "L2", down(L.l2)); key(scr, 6, 2, "L1", down(L.l1))
-    key(scr, 23, 2, "R1", down(L.r1)); key(scr, 28, 2, "R2", down(L.r2))
+    key(scr, 1, 2, "L1", down(L.l1)); key(scr, 6, 2, "L2", down(L.l2))
+    key(scr, 23, 2, "R2", down(L.r2)); key(scr, 28, 2, "R1", down(L.r1))
     local d = model.dpad(p.hat, down)
     key(scr, 5, 4, string.char(0), d.up); scr:put(6, 4, ARROW.up, d.up and V.LIT.fg or ST.body.fg)
     key(scr, 2, 5, string.char(0), d.left); scr:put(3, 5, ARROW.left, d.left and V.LIT.fg or ST.body.fg)
