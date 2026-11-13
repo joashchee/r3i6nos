@@ -42,7 +42,7 @@ local function drawPages(scr, n)
   local pages = #n.pages
   scr:box(FULL.col, FULL.row, FULL.w, FULL.h, {
     title = n.title, right = pages > 1 and ("Page %d/%d"):format(n.page, pages) or nil,
-    foot = pages > 1 and "L1/R1 Page  B Back" or "B Back",
+    foot = n.go and ((pages > 1 and "L1/R1 Page  " or "") .. "A Ready  " .. (n.runs and "Y Other run  " or "") .. "B Cancel") or (pages > 1 and "L1/R1 Page  B Back" or "B Back"),
   })
   for i, l in ipairs(n.pages[n.page]) do
     local s = lineStyle(l)

@@ -1,4 +1,12 @@
 #!/usr/bin/env python3
+# RUNS: 3
+# NEEDS: Leave the pad alone while it runs (about a minute).
+# RUN 1: Nothing in the USB-C (OTG) port, charger out
+# RUN 1: (the power numbers need the battery).
+# RUN 2: The wired Ethernet adapter in the port, its
+# RUN 2: cable to a router or a computer.
+# RUN 3: A plain USB cable from the port to a computer
+# RUN 3: (it charges, so power is skipped: that is fine).
 """r3i6nos-report - the device report of r3i6nos itself (docs/DEVICE-REPORTS.md, docs/STORAGE.md).
 
     r3i6nos-report [--from-settings] [--quiet]
@@ -6,23 +14,29 @@
 Checks and measures what only the unit can answer about the system, and writes r3i6nos/r36s-report.txt on the data card when one is
 mounted (so the boot card can stay in), else on the system card, for Claude to read in the r3i6nos repo. Settings > Device reports
 starts it (it is linked into /opt/loveos/bin as a report); over SSH, run `r3i6nos-report`. It runs as loveos and needs no root.
+It must be run three times, once for each USB setup (the `# RUNS` and `# RUN k` lines at the top, which the menu shows); the menu passes
+R3I6NOS_REPORT_SETUP=k/3, and each run writes r36s-report-run<k>.txt (r36s-report.txt is a copy of the latest).
 
 Sections: system (the build, kernel, CPU, memory), setup (whether r3i6nos-setup made this card, docs/TWO-SLOT-SETUP.md), boot (units that failed, how long boot took), sound (the RK817's Playback
 Path, the headphone jack, the volume keys and the mixer, from r3i6nos-sound), clock (r3i6nos-clock status), storage (every mmc disk and slot, what
 r3i6nos-cards mounted, the kernel's filesystems, loop devices, and on each mounted card a write/rename/read/delete check and its speed),
-power (what the background work costs the battery: the hot-plug daemon, the menu, the periodic jobs; the idle draw in mW; docs/POWER.md).
+power (what the background work costs the battery: the hot-plug daemon, the menu, the periodic jobs; the idle draw in mW; docs/POWER.md),
+usb gadget and usb ethernet (whether the OTG port can act as a network card for a computer, or host a wired adapter: the answers the screen
+mirror needs, ROADMAP section 28, docs/SCREEN-MIRROR.md; read-only, from /proc and /sys).
 
 Standard library only. Overrides, for tests: R3I6NOS_ETC (/etc), R3I6NOS_PROC (/proc), R3I6NOS_SYS (/sys), R3I6NOS_DEV (/dev),
 R3I6NOS_CARDS_STATE (/run/r3i6nos/cards), R3I6NOS_REPORT_DIR (the folder to write in), R3I6NOS_REPORT_MB (16: the speed test's size),
 R3I6NOS_SETUP_VAR, R3I6NOS_SETUP_RUN, R3I6NOS_SETUP_BOOT (where r3i6nos-setup leaves its record, state and report),
 R3I6NOS_SOUND (r3i6nos-sound), R3I6NOS_HOTPLUG (r3i6nos-hotplug),
 R3I6NOS_CLOCK (r3i6nos-clock), and for the power section (docs/POWER.md): R3I6NOS_REPORT_POWER_S (30: seconds per measuring window),
-R3I6NOS_BATTERY (r3i6nos-battery), R3I6NOS_BOOTSTATE_CMD (r3i6nos-bootstate), R3I6NOS_MENU_MATCH (/opt/loveos/menu: how the menu's process
+R3I6NOS_BATTERY (r3i6nos-battery), R3I6NOS_MODULES (/lib/modules), R3I6NOS_BOOTSTATE_CMD (r3i6nos-bootstate), R3I6NOS_MENU_MATCH (/opt/loveos/menu: how the menu's process
 is told), R3I6NOS_POWER_AB (1: do the stop-and-compare even when not root, tests).
 """
+import gzip
 import os
 import re
 import resource
+import shutil
 import signal
 import subprocess
 import sys
@@ -49,6 +63,7 @@ SETUP_RUN = Path(ENV("R3I6NOS_SETUP_RUN", "/run/r3i6nos"))
 SETUP_BOOT = Path(ENV("R3I6NOS_SETUP_BOOT", "/boot"))
 PROGRESS = ENV("R3I6NOS_REPORT_PROGRESS")   # set by the menu (menu/reports.lua): where to say how far it has got
 POWER_S = float(ENV("R3I6NOS_REPORT_POWER_S", "30"))
+MODULES = Path(ENV("R3I6NOS_MODULES", "/lib/modules"))
 BATTERY_CMD = ENV("R3I6NOS_BATTERY", "/usr/local/bin/r3i6nos-battery")
 BOOTSTATE_CMD = ENV("R3I6NOS_BOOTSTATE_CMD", "/usr/local/bin/r3i6nos-bootstate")
 MENU_MATCH = ENV("R3I6NOS_MENU_MATCH", "/opt/loveos/menu")
@@ -76,12 +91,23 @@ def keyvals(path):
     return out
 
 
+def setup_run():
+    """(k, n) when the menu says this is run k of n of a report that must be run several times (R3I6NOS_REPORT_SETUP=k/n), else None."""
+    m = re.fullmatch(r"(\d)/(\d)", ENV("R3I6NOS_REPORT_SETUP", ""))
+    if m and 1 <= int(m.group(1)) <= int(m.group(2)) and int(m.group(2)) >= 2:
+        return int(m.group(1)), int(m.group(2))
+    return None
+
+
 class Report:
     def __init__(self, folder, how, version, card, quiet=False):
         self.quiet = quiet
         self.counts = {"PASS": 0, "FAIL": 0, "INFO": 0, "SKIP": 0}
         os.makedirs(folder, exist_ok=True)
-        self.path = os.path.join(folder, "r36s-report.txt")
+        self.run = setup_run()
+        # one file for each run of a several-run report, so the next run does not replace the last; r36s-report.txt is a copy of the latest
+        self.latest = os.path.join(folder, "r36s-report.txt")
+        self.path = os.path.join(folder, f"r36s-report-run{self.run[0]}.txt") if self.run else self.latest
         self.tmp = self.path + ".tmp"
         self.f = open(self.tmp, "w", encoding="ascii", errors="replace", newline="\n")
         self.done_steps, self.steps = 0, 1
@@ -89,7 +115,8 @@ class Report:
                  f"app: {APP} {version} ({PACKAGE})\n"
                  f"made: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
                  f"how: {how}\n"
-                 f"for: Claude. Copy r3i6nos/r36s-report.txt from the {card} to a computer and give it to Claude in the r3i6nos repo.\n")
+                 + (f"run: {self.run[0]} of {self.run[1]} (one report for each setup: give Claude all {self.run[1]} files)\n" if self.run else "")
+                 + f"for: Claude. Copy r3i6nos/{os.path.basename(self.path)} from the {card} to a computer and give it to Claude in the r3i6nos repo.\n")
 
     def step(self, doing):
         """Say what is being checked now, for the menu's progress bar (docs/DEVICE-REPORTS.md, "Progress"). Never fails the report."""
@@ -127,6 +154,10 @@ class Report:
         os.fsync(self.f.fileno())
         self.f.close()
         os.replace(self.tmp, self.path)
+        if self.run:
+            tmp = self.latest + ".tmp"
+            shutil.copyfile(self.path, tmp)
+            os.replace(tmp, self.latest)
 
 
 def run(cmd, timeout=10):
@@ -702,6 +733,336 @@ def power_section(r):
     r.line("INFO", "reading this", "one window each, on one battery: a short test. Repeat on charge levels 100%, 50%, 20% and on a warm unit before trusting a small number")
 
 
+# ---- usb gadget and usb ethernet (ROADMAP section 28, docs/SCREEN-MIRROR.md) ----
+# The screen mirror needs a wired link to a computer. Two ways, and this answers both without root and without changing anything: the unit as a
+# network card on the computer (a USB *gadget*: a device-mode controller, configfs, an ethernet function), or the unit hosting a USB Ethernet
+# adapter (a host driver). Each fact is PASS (the running kernel has it), FAIL (the kernel config says it does not: only a config proves an absence,
+# because a symbol name or a module file can be missing while the code is built in) or SKIP (nothing readable says; the line names what to try).
+GADGET_FUNCS = (   # (name, kernel config, module, a symbol the code has, who can use it: from memory, not tried)
+    ("ECM", "USB_CONFIGFS_ECM", "usb_f_ecm", "ecm_alloc_inst", "macOS and Linux"),
+    ("NCM", "USB_CONFIGFS_NCM", "usb_f_ncm", "ncm_alloc_inst", "macOS, Linux and Windows 11"),
+    ("RNDIS", "USB_CONFIGFS_RNDIS", "usb_f_rndis", "rndis_alloc_inst", "Windows and Linux"),
+    ("EEM", "USB_CONFIGFS_EEM", "usb_f_eem", "eem_alloc_inst", "Linux"),
+)
+HOST_NET = (       # (module = USB driver name, kernel config, what it drives)
+    ("usbnet", "USB_USBNET", "the base every adapter driver below needs"),
+    ("asix", "USB_NET_AX8817X", "ASIX AX88772 and AX88172, the common 10/100 adapter"),
+    ("ax88179_178a", "USB_NET_AX88179_178A", "ASIX AX88179 and AX88178A, gigabit"),
+    ("r8152", "USB_RTL8152", "Realtek RTL8152 and RTL8153, many 100 Mb and gigabit dongles"),
+    ("cdc_ether", "USB_NET_CDCETHER", "generic CDC ethernet, some adapters and phones' USB tethering"),
+    ("cdc_ncm", "USB_NET_CDC_NCM", "CDC NCM adapters and tethering"),
+    ("smsc95xx", "USB_NET_SMSC95XX", "SMSC LAN9500, Raspberry Pi style"),
+    ("rndis_host", "USB_NET_RNDIS_HOST", "Android USB tethering"),
+    ("dm9601", "USB_NET_DM9601", "Davicom DM9601, cheap 10/100"),
+)
+HOST_ADAPTERS = ("asix", "ax88179_178a", "r8152", "cdc_ether", "cdc_ncm", "smsc95xx", "rndis_host", "dm9601")
+NET_CLASSES = ("02", "0a", "e0", "ff")     # a USB interface that may be a network adapter: CDC comm and data, wireless controller, vendor specific
+
+
+def norm(name):
+    return name.replace("-", "_")
+
+
+def readlink_name(path):
+    try:
+        return os.path.basename(os.readlink(path))
+    except OSError:
+        return None
+
+
+class Kernel:
+    """What the running kernel can be asked: its config (when it ships one), its symbols, its module files and loaded modules."""
+
+    def __init__(self):
+        self.release = read(PROC / "sys/kernel/osrelease") or ""
+        self.cfg, self.cfg_src = None, None
+        for path in (PROC / "config.gz", SETUP_BOOT / f"config-{self.release}", SETUP_BOOT / "config", MODULES / self.release / "config",
+                     MODULES / self.release / "build/.config"):
+            try:
+                raw = gzip.open(path, "rt", errors="replace").read() if path.suffix == ".gz" else path.read_text(errors="replace")
+            except (OSError, EOFError, gzip.BadGzipFile):
+                continue
+            cfg = {}
+            for ln in raw.splitlines():
+                m = re.match(r"CONFIG_(\w+)=(.*)$", ln)
+                if m:
+                    cfg[m.group(1)] = m.group(2).strip('"')
+            if cfg:
+                self.cfg, self.cfg_src = cfg, str(path)
+                break
+        text = read(PROC / "kallsyms")
+        self.syms = {p[2] for p in (ln.split() for ln in text.splitlines()) if len(p) >= 3} if text else None
+        self.loaded = {norm(ln.split()[0]) for ln in (read(PROC / "modules") or "").splitlines() if ln.split()}
+        base = MODULES / self.release
+        self.files, self.builtin = set(), set()
+        if self.release and base.is_dir():
+            for _, _, names in os.walk(base):
+                for f in names:
+                    m = re.match(r"(.+?)\.ko(\.\w+)?$", f)
+                    if m:
+                        self.files.add(norm(m.group(1)))
+            for ln in (read(base / "modules.builtin") or "").splitlines():
+                m = re.match(r"(?:.*/)?(.+?)\.ko$", ln.strip())
+                if m:
+                    self.builtin.add(norm(m.group(1)))
+
+    def probe(self, opts=(), mods=(), syms=(), usb_driver=None):
+        """(True, how) when the running kernel has it; (False, why) when its config says it does not; (None, why) when nothing readable says."""
+        how, only_m = [], []
+        for m in mods:
+            n = norm(m)
+            if n in self.loaded:
+                how.append(f"module {m} loaded")
+            elif n in self.builtin:
+                how.append(f"{m} built in")
+            elif n in self.files:
+                how.append(f"module file {m}.ko")
+        for o in opts:
+            v = (self.cfg or {}).get(o)
+            if v == "y":
+                how.append(f"CONFIG_{o}=y")
+            elif v == "m":
+                (how if how else only_m).append(f"CONFIG_{o}=m")
+        if usb_driver and (SYS / "bus/usb/drivers" / usb_driver).is_dir():
+            how.append("registered USB driver")
+        found = [x for x in syms if self.syms and x in self.syms]
+        if found:
+            how.append(f"kernel symbol {found[0]}")
+        if how:
+            return True, "; ".join(how)
+        if only_m:
+            return False, f"{only_m[0]} but no such module file under {MODULES}/{self.release or '?'}"
+        if self.cfg is not None:
+            return False, "; ".join(f"CONFIG_{o} is {self.cfg.get(o, 'not set')}" for o in opts) or "not in the kernel config"
+        return None, "nothing readable says: no kernel config, and no module file, loaded driver or symbol by that name"
+
+
+def state_status(state):
+    return {True: "PASS", False: "FAIL", None: "SKIP"}[state]
+
+
+def usb_nodes():
+    """The device tree's USB controller nodes that have a role (dwc2 / dwc_otg, or a dr_mode): (name, compatible, dr_mode, status)."""
+    out = []
+    for dirpath, dirs, files in os.walk(PROC / "device-tree"):
+        dirs.sort()
+        if "compatible" not in files and "dr_mode" not in files:
+            continue
+        d = Path(dirpath)
+        try:
+            comp = [c.decode("ascii", "replace") for c in (d / "compatible").read_bytes().split(b"\0") if c]
+        except OSError:
+            comp = []
+        mode = read(d / "dr_mode")
+        if mode or any("dwc" in c or "otg" in c for c in comp):
+            out.append((d.name, comp, mode, read(d / "status") or "okay"))
+        if len(out) >= 8:
+            break
+    return out
+
+
+def usb_devices():
+    """Every USB device but the root hubs, with each interface's class and bound driver; None when there is no USB bus in /sys."""
+    base = SYS / "bus/usb/devices"
+    if not base.is_dir():
+        return None
+    out = []
+    for d in sorted(base.iterdir()):
+        if ":" in d.name or d.name.startswith("usb"):
+            continue
+        ifaces = [(read(i / "bInterfaceClass"), readlink_name(i / "driver")) for i in sorted(base.glob(d.name + ":*"))]
+        out.append({"name": d.name, "vid": read(d / "idVendor") or "????", "pid": read(d / "idProduct") or "????", "product": read(d / "product") or "?",
+                    "mfr": read(d / "manufacturer") or "", "speed": read(d / "speed") or "?", "cls": read(d / "bDeviceClass"), "ifaces": ifaces})
+    return out
+
+
+def net_ifaces():
+    """Every network interface but lo: (name, kind gadget|usb|other, wifi, driver, operstate, carrier, speed Mb/s, mac)."""
+    base = SYS / "class/net"
+    out = []
+    if not base.is_dir():
+        return out
+    for d in sorted(base.iterdir()):
+        if d.name == "lo":
+            continue
+        dev = d / "device"
+        real = os.path.realpath(dev) if dev.exists() else ""
+        parts = Path(real).parts
+        kind = "gadget" if "gadget" in parts else "usb" if any(re.fullmatch(r"usb\d+", p) for p in parts) else "other"
+        wifi = (d / "wireless").is_dir() or (d / "phy80211").exists()
+        out.append((d.name, kind, wifi, readlink_name(dev / "driver"), read(d / "operstate") or "?", read(d / "carrier"), read(d / "speed"), read(d / "address") or "?"))
+    return out
+
+
+def usb_gadget(r):
+    """== usb gadget ==: can the OTG port be a network card for a computer? Returns "ready", "no" or "unknown" for the verdict."""
+    r.step("the USB gadget (device mode)")
+    r.section("usb gadget")
+    k = Kernel()
+    r.line("INFO", "kernel", k.release or "unknown")
+    if k.cfg is None:
+        r.line("SKIP", "kernel config", "none readable (no /proc/config.gz, no config on the boot partition or under /lib/modules): what the kernel lacks cannot be proved, only what it has")
+    else:
+        r.line("INFO", "kernel config", f"{k.cfg_src}, {len(k.cfg)} options")
+    r.line("INFO" if k.syms is not None else "SKIP", "kernel symbols", "readable" if k.syms is not None else "/proc/kallsyms is not readable")
+    r.line("INFO", "module files", f"{len(k.files)} under {MODULES}/{k.release or '?'}, {len(k.builtin)} built in by modules.builtin")
+
+    nodes = usb_nodes()
+    if not nodes:
+        r.line("SKIP", "usb controller", "no dwc2 / dwc_otg node or dr_mode in /proc/device-tree")
+    for name, comp, mode, status in nodes:
+        r.line("INFO", f"usb controller {name}", f"{', '.join(comp) or 'no compatible'}; dr_mode {mode or 'not set (the driver default)'}; status {status}")
+    drivers = sorted(p.name for p in (SYS / "bus/platform/drivers").glob("*") if re.search(r"dwc|otg|udc|usb", p.name)) if (SYS / "bus/platform/drivers").is_dir() else []
+    r.line("INFO" if drivers else "SKIP", "usb platform drivers", ", ".join(drivers) or "none listed in /sys/bus/platform/drivers")
+    host_only = bool(nodes) and all(m == "host" for _, _c, m, _s in nodes)   # every role-bearing controller is pinned to host
+
+    udcs = sorted(p.name for p in (SYS / "class/udc").glob("*")) if (SYS / "class/udc").is_dir() else []
+    for u in udcs:
+        base = SYS / "class/udc" / u
+        r.line("INFO", f"udc {u}", f"state {read(base / 'state') or '?'}; speed {read(base / 'current_speed') or '?'} (max {read(base / 'maximum_speed') or '?'}); otg {read(base / 'is_otg') or '?'}")
+    for e in sorted((SYS / "class/extcon").glob("*")) if (SYS / "class/extcon").is_dir() else []:
+        r.line("INFO", f"extcon {read(e / 'name') or e.name}", (read(e / "state") or "?").replace("\n", " "))
+    for s in sorted((SYS / "class/power_supply").glob("*")) if (SYS / "class/power_supply").is_dir() else []:
+        if read(s / "type") in ("USB", "Mains") or "usb" in s.name.lower() or s.name.lower().startswith("ac"):
+            r.line("INFO", f"supply {s.name}", f"type {read(s / 'type') or '?'}; online {read(s / 'online') or '?'}")
+
+    # 1. a device-mode controller: only a UDC in /sys/class/udc proves it; a host-only device tree or a config without USB_GADGET proves its absence
+    if udcs:
+        udc = (True, "registered: " + ", ".join(udcs))
+    elif nodes and host_only:
+        udc = (False, "the device tree sets the controller to dr_mode host: device mode is off (a device tree change, from the user's own card, rule 2)")
+    else:
+        g = k.probe(("USB_GADGET",), (), ("usb_add_gadget_udc", "usb_gadget_probe_driver"))
+        udc = (g[0], g[1]) if g[0] is False else (None, "no UDC is listed in /sys/class/udc" + ("; the gadget core is in the kernel, so the port may only register one in device mode: plug the unit into a computer and run this report again" if g[0] else "; " + g[1]))
+    r.line(state_status(udc[0]), "device-mode controller", udc[1])
+
+    # 2. configfs and the composite framework
+    configfs = "configfs" in (read(PROC / "filesystems") or "")
+    if configfs:
+        cfs = (True, "configfs is in /proc/filesystems")
+    else:   # a module is not in /proc/filesystems until it loads, so only the config can prove it missing
+        cfs = k.probe(("CONFIGFS_FS",), ("configfs",), ("configfs_register_subsystem",))
+    r.line(state_status(cfs[0]), "configfs", cfs[1])
+    mounted = (SYS / "kernel/config").is_dir() and any((SYS / "kernel/config").iterdir())
+    r.line("INFO", "configfs mounted", "yes at /sys/kernel/config" if mounted else "no (a root helper would mount it)")
+    gdir = SYS / "kernel/config/usb_gadget"
+    r.line("INFO", "gadgets set up now", ", ".join(sorted(p.name for p in gdir.iterdir())) or "none" if gdir.is_dir() else "none (no usb_gadget in configfs)")
+    comp = k.probe(("USB_LIBCOMPOSITE",), ("libcomposite",), ("usb_composite_probe",))
+    if gdir.is_dir():
+        comp = (True, "usb_gadget is in configfs")
+    r.line(state_status(comp[0]), "composite gadget core", comp[1])
+    ucfg = k.probe(("USB_CONFIGFS",))
+    if gdir.is_dir():
+        ucfg = (True, "usb_gadget is in configfs")
+    r.line(state_status(ucfg[0]), "USB gadget by configfs", ucfg[1])
+
+    # 3. an ethernet function a computer can use
+    funcs = []
+    for name, opt, mod, sym, who in GADGET_FUNCS:
+        st = k.probe((opt,), (mod,), (sym,))
+        funcs.append((name, st, who))
+        r.line(state_status(st[0]), f"function {name}", f"{st[1]} (works with {who}, from memory)" if st[0] else st[1])
+    geth = k.probe(("USB_ETH",), ("g_ether",))
+    r.line("INFO" if geth[0] else state_status(geth[0]), "legacy g_ether", geth[1])
+    uvc = k.probe(("USB_CONFIGFS_F_UVC",), ("usb_f_uvc",))
+    r.line("INFO", "function UVC", f"{'present' if uvc[0] else 'not found'}: {uvc[1]} (the unit as a camera, an alternative link for pictures, ROADMAP section 24)")
+    have = [n for n, st, _ in funcs if st[0]] + (["g_ether"] if geth[0] else [])
+    if have:
+        fn = (True, ", ".join(have))
+    elif all(st[0] is False for _, st, _ in funcs) and geth[0] is False:
+        fn = (False, "no ethernet function (ECM, NCM, RNDIS, EEM or g_ether) is in the kernel config")
+    else:
+        fn = (None, "no ethernet function found by name, and no config to prove they are missing")
+
+    pieces = (("device-mode controller", udc), ("configfs", cfs), ("composite core", comp), ("USB gadget by configfs", ucfg), ("an ethernet function", fn))
+    missing = [n for n, st in pieces if st[0] is False]
+    unknown = [n for n, st in pieces if st[0] is None]
+    if missing:
+        r.line("FAIL", "gadget ethernet", f"cannot work as the kernel is: missing {', '.join(missing)}" + (f"; unknown {', '.join(unknown)}" if unknown else ""))
+        return "no"
+    if unknown:
+        r.line("SKIP", "gadget ethernet", f"not decided: nothing says whether {', '.join(unknown)} is there. Next: run this report with the cable to a computer, and over SSH look at /sys/class/udc, `zcat /proc/config.gz` and `modinfo usb_f_ecm`")
+        return "unknown"
+    r.line("PASS", "gadget ethernet", f"ready to try: a UDC, configfs and {', '.join(have)}. Next: a root helper makes an ECM or NCM gadget and the report checks a computer sees it")
+    return "ready"
+
+
+def usb_ethernet(r, gadget):
+    """== usb ethernet ==: can the OTG port host a wired adapter, what is plugged in now, and the verdict for the mirror's link."""
+    r.step("the USB Ethernet adapters (host mode)")
+    r.section("usb ethernet")
+    k = Kernel()
+    states = {}
+    for mod, opt, what in HOST_NET:
+        st = k.probe((opt,), (mod,), (), usb_driver=mod)
+        states[mod] = st[0]
+        r.line("PASS" if st[0] else "INFO", f"host driver {mod}", f"{st[1]}; {what}" if st[0] else f"{st[1]} ({what})")
+    ok = [m for m in HOST_ADAPTERS if states.get(m)]
+    if states.get("usbnet") is False or all(states.get(m) is False for m in HOST_ADAPTERS):
+        r.line("FAIL", "usb ethernet adapter", "no adapter driver in the kernel config: a wired adapter cannot work as the kernel is")
+        adapter = "no"
+    elif ok:
+        r.line("PASS", "usb ethernet adapter", f"drivers present: {', '.join(ok)}")
+        adapter = "ready"
+    else:
+        r.line("SKIP", "usb ethernet adapter", "no driver found by name and no config to prove none: plug an adapter in and run this report again")
+        adapter = "unknown"
+
+    devs = usb_devices()
+    if devs is None:
+        r.line("SKIP", "usb devices", "no USB bus in /sys/bus/usb/devices")
+    elif not devs:
+        r.line("SKIP", "usb devices", "none plugged in: plug the adapter in (or the cable to a computer) and run this report again")
+    for d in devs or []:
+        drvs = sorted({drv for _, drv in d["ifaces"] if drv}) or ["none"]
+        name = f"{d['mfr']} {d['product']}".strip()
+        netlike = [c for c, drv in d["ifaces"] if c in NET_CLASSES and not drv]
+        line = f"{d['vid']}:{d['pid']} {name}; {d['speed']} Mb/s; driver {', '.join(drvs)}"
+        if netlike:
+            r.line("FAIL", f"usb device {d['name']}", line + f"; interface class {netlike[0]} has no driver: if this is an adapter, the kernel has none for it (find its chip and driver in the table above)")
+        else:
+            r.line("INFO", f"usb device {d['name']}", line)
+
+    wired_up = False
+    nets = net_ifaces()
+    if not nets:
+        r.line("SKIP", "network interfaces", "none but lo")
+    for name, kind, wifi, drv, oper, carrier, speed, mac in nets:
+        sp = f"{speed} Mb/s" if speed and speed.lstrip("-").isdigit() and int(speed) > 0 else "speed unknown"
+        what = ("wifi" if wifi else "wired") + {"gadget": " (this unit as a USB gadget)", "usb": " (a USB adapter)", "other": ""}[kind]
+        addr = (run(["ip", "-4", "-o", "addr", "show", name]) or "").split()
+        ip = addr[addr.index("inet") + 1] if "inet" in addr else "no IPv4 address"
+        r.line("INFO", f"network {name}", f"{what}; driver {drv or 'none'}; {oper}; carrier {carrier or '?'}; {sp}; mac {mac}; {ip}")
+        if not wifi and kind in ("gadget", "usb") and carrier == "1":
+            r.line("PASS", f"wired link {name}", f"up ({what}, {sp}): the mirror can use this link")
+            wired_up = True
+        elif not wifi and kind == "gadget":
+            r.line("INFO", f"wired link {name}", "the gadget exists but nothing is connected to it (no carrier): plug the cable into a computer")
+    if not wired_up and not any(not n[2] and n[1] in ("gadget", "usb") for n in nets):
+        r.line("SKIP", "wired link", "no wired USB interface exists now: plug in an adapter, or (when the gadget helper exists) start the gadget")
+    r.line("INFO", "tools", ", ".join(f"{t} {'yes' if shutil.which(t) else 'no'}" for t in ("ip", "modprobe", "udhcpd", "dnsmasq", "busybox", "python3")))
+
+    if gadget == "ready":
+        how = "use the gadget: one cable to the computer, which also powers the unit; no adapter. Offer ECM first (macOS and Linux need no driver), RNDIS for Windows"
+    elif adapter == "ready":
+        how = "use a USB Ethernet adapter on the OTG port (host mode): it draws from the battery, and the one port cannot also charge; measure its draw with the power section"
+    elif gadget == "no" and adapter == "no":
+        how = "neither wire works as the kernel and device tree are: a Wi-Fi dongle works (tested by the maintainer 2026-11-13) as a person-chosen link, or build the missing pieces out of tree"
+    else:
+        how = "undecided: send this report from three runs (nothing plugged in, an Ethernet adapter, the cable to a computer) and read the SKIP lines"
+    r.line("INFO", "wired mirror verdict", how)
+
+
+def usb_sections(r):
+    """Both USB sections; a crash in the gadget checks still lets the adapter checks run."""
+    try:
+        gadget = usb_gadget(r)
+    except Exception as e:
+        r.line("FAIL", "usb gadget", f"a check crashed: {e}")
+        gadget = "unknown"
+    usb_ethernet(r, gadget)
+
+
 def demo_recording():
     """True while a Rec demo holds /run/loveos/demo/lock with a live pid (docs/DEMO-RECORDINGS.md: the unit's whole power is its)."""
     try:
@@ -725,11 +1086,11 @@ def main(argv):
     try:
         folder, card = where(cards)
         r = Report(folder, how, rel.get("VERSION", "?"), card, quiet)
-        r.steps = 9 + 2 * len(mounted_cards(cards))
+        r.steps = 11 + 2 * len(mounted_cards(cards))
     except OSError as e:
         print(f"r3i6nos-report: cannot write the report: {e}", file=sys.stderr)
         return 1
-    for part in (lambda: (system(r, rel), setup_section(r)), lambda: boot(r), lambda: sound(r), lambda: clock(r), lambda: storage(r, cards), lambda: power_section(r)):
+    for part in (lambda: (system(r, rel), setup_section(r)), lambda: boot(r), lambda: sound(r), lambda: clock(r), lambda: storage(r, cards), lambda: usb_sections(r), lambda: power_section(r)):
         try:
             part()
         except Exception as e:  # a broken check is a line in the report, never a missing report

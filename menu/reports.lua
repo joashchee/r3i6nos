@@ -51,14 +51,39 @@ M.sys = {
 --- A safe command name: letters, digits, dot, dash, underscore, ending in -report.
 local function valid(name) return name:match("^[%w%._%-]+%-report$") ~= nil end
 
+M.HEAD = 80 -- lines of a report's file that are read for its APP and NEEDS lines
+
 --- The app a report is for: its APP = "..." line, following deb_watcher's wrapper to the script it runs.
 local function appOf(sys, path, depth)
-  for _, line in ipairs(sys.head(path, 40)) do
+  for _, line in ipairs(sys.head(path, M.HEAD)) do
     local app = line:match('^APP%s*=%s*"([^"]+)"')
     if app then return app end
     local target = line:match('exec%s+"([^"]+)"')
     if target and (depth or 0) < 2 then return appOf(sys, target, (depth or 0) + 1) end
   end
+  return nil
+end
+
+--- What a report declares about its setup, in comment lines in its first M.HEAD lines (following the wrapper like appOf):
+---   `# NEEDS: text`    a line every run needs (a bare `# NEEDS:` is a blank line)
+---   `# RUNS: n`        it must be run n times (2 to 9), once for each setup
+---   `# RUN k: text`    a line of the setup for run k (repeat it for more lines)
+--- Returns { needs = {...}, runs = n or nil, runtext = { [k] = {...} } }, or nil when it declares nothing (it then runs at once).
+--- The menu shows them in a dialog and waits for a keypress (docs/DEVICE-REPORTS.md).
+local function declOf(sys, path, depth)
+  local d, target = { needs = {}, runtext = {} }, nil
+  for _, line in ipairs(sys.head(path, M.HEAD)) do
+    local t = line:match("^#%s*NEEDS:%s?(.*)$")
+    if t then d.needs[#d.needs + 1] = t end
+    local n = line:match("^#%s*RUNS:%s*(%d+)")
+    if n then d.runs = tonumber(n) end
+    local k, rt = line:match("^#%s*RUN%s+(%d+):%s?(.*)$")
+    if k then k = tonumber(k); d.runtext[k] = d.runtext[k] or {}; table.insert(d.runtext[k], rt) end
+    target = target or line:match('exec%s+"([^"]+)"')
+  end
+  if d.runs and (d.runs < 2 or d.runs > 9) then d.runs = nil end
+  if #d.needs > 0 or d.runs then return d end
+  if target and (depth or 0) < 2 then return declOf(sys, target, (depth or 0) + 1) end
   return nil
 end
 
@@ -69,7 +94,9 @@ function M.list(sys)
   for _, name in ipairs(sys.ls(M.DIR)) do
     if valid(name) then
       local tool = name:gsub("%-report$", "")
-      out[#out + 1] = { cmd = name, tool = tool, app = appOf(sys, M.DIR .. "/" .. name) or tool }
+      local d = declOf(sys, M.DIR .. "/" .. name)
+      out[#out + 1] = { cmd = name, tool = tool, app = appOf(sys, M.DIR .. "/" .. name) or tool,
+        needs = d and #d.needs > 0 and d.needs or nil, runs = d and d.runs, runtext = d and d.runtext }
     end
   end
   for _, r in ipairs(out) do if r.cmd == M.SYSTEM then r.app, r.system = "r3i6nos (this system)", true end end
@@ -95,19 +122,40 @@ function M.running(sys)
   return (name:gsub("%s+$", ""))
 end
 
+--- A report that must be run several times (`# RUNS: n`): which run was started last, kept in M.RUN/last-<command> (it lasts until a reboot).
+--- currentRun is the run most recently started (nil before the first); nextRun is the one to do now, wrapping to 1 after the last.
+function M.currentRun(r, sys)
+  sys = sys or M.sys
+  if not (r and r.runs) then return nil end
+  local k = tonumber((sys.read(M.RUN .. "/last-" .. r.cmd) or ""):match("%d+"))
+  if k and k >= 1 and k <= r.runs then return k end
+  return nil
+end
+
+function M.nextRun(r, sys)
+  local k = M.currentRun(r, sys)
+  return k and (k % r.runs + 1) or 1
+end
+
 --- Starts one in the background, through a shell that writes M.RUN/done when it ends. true, or false and why.
---- The clearing and the "running" file happen before this returns; only the report and its "done" run in the background
+--- `which` is the run of a multi-run report to start (the next one when nil). The clearing and the "running" file happen before this returns; only the report and its "done" run in the background
 --- (`a && b && ( c ) &` would put the whole list in the background, and a poll could see the last run's "done").
-function M.start(r, sys)
+function M.start(r, sys, which)
   sys = sys or M.sys
   if not (r and r.cmd and valid(r.cmd)) then return false, "not a report command" end
   if package.loaded["demos"] and package.loaded["demos"].active(sys) then return false, "a Rec demo is recording: the unit is busy until it ends" end
   local busy = M.running(sys)
   if busy then return false, busy .. " is still running: wait for it to finish" end
   local run = quote(M.RUN)
+  local runs, setup = "", ""
+  if r.runs then -- run k of n: the report names its file after it, and the menu remembers which run was started
+    local k = math.max(1, math.min(r.runs, tonumber(which) or M.nextRun(r, sys)))
+    runs = "printf '%s\\n' " .. k .. " > " .. run .. "/last-" .. r.cmd .. " && "
+    setup = "R3I6NOS_REPORT_SETUP=" .. quote(k .. "/" .. r.runs) .. " "
+  end
   local cmd = "mkdir -p " .. run .. " && rm -f " .. run .. "/progress " .. run .. "/done " .. run .. "/done.tmp && "
-    .. "printf '%s\\n' " .. quote(r.cmd) .. " > " .. run .. "/running && "
-    .. "{ ( R3I6NOS_REPORT_PROGRESS=" .. quote(M.RUN .. "/progress") .. " " .. quote(M.DIR .. "/" .. r.cmd) .. " --from-settings --quiet >/dev/null 2>&1; "
+    .. "printf '%s\\n' " .. quote(r.cmd) .. " > " .. run .. "/running && " .. runs
+    .. "{ ( R3I6NOS_REPORT_PROGRESS=" .. quote(M.RUN .. "/progress") .. " " .. setup .. quote(M.DIR .. "/" .. r.cmd) .. " --from-settings --quiet >/dev/null 2>&1; "
     .. "echo \"exit=$?\" > " .. run .. "/done.tmp; mv " .. run .. "/done.tmp " .. run .. "/done ) >/dev/null 2>&1 & }"
   local ok = sys.exec(cmd)
   if ok == true or ok == 0 then return true end
@@ -154,12 +202,12 @@ function M.where(file)
 end
 
 --- What the screen says when it has finished: (lines, whether it ended well).
-function M.doneLines(r, res, sum)
+function M.doneLines(r, res, sum, run)
   local name = r.system and "The system report" or (r.app .. "'s report")
   local card, path = M.where(res.file)
   if sum and sum.ended then
-    return {
-      name .. " is done.",
+    local lines = {
+      name .. (run and r.runs and (" run %d of %d is done."):format(run, r.runs) or " is done."),
       "",
       ("PASS %d   FAIL %d   INFO %d   SKIP %d"):format(sum.pass, sum.fail, sum.info, sum.skip),
       "",
@@ -167,7 +215,18 @@ function M.doneLines(r, res, sum)
       "  " .. path,
       "",
       "Copy it to a computer and give it to Claude.",
-    }, true
+    }
+    if run and r.runs then
+      lines[#lines + 1] = ""
+      if run < r.runs then
+        lines[#lines + 1] = ("NOT FINISHED: %d more to run."):format(r.runs - run)
+        lines[#lines + 1] = ("Set up for run %d of %d, then choose this"):format(run + 1, r.runs)
+        lines[#lines + 1] = "report again in Device reports."
+      else
+        lines[#lines + 1] = ("All %d runs are done: give Claude all %d files."):format(r.runs, r.runs)
+      end
+    end
+    return lines, true
   end
   return {
     name .. " stopped without a whole file" .. (res.exit and (" (exit " .. res.exit .. ").") or "."),

@@ -26,6 +26,7 @@ is blocked and on what.
 - `vendor/`, `build/`, `local_hardware_assets/`: fetched, built or captured, gitignored.
 - `docs/DEVICE-REPORTS.md`: the device report every R36S port has (rule 9) and its file format.
 - `docs/POWER.md`: the power section every device report has (rule 14), and what the background work (the hot-plug daemon, the toast poll, the periodic jobs) costs the battery, and the `== power ==` section of `r3i6nos-report` that measures it on the unit.
+- `docs/SCREEN-MIRROR.md`: the unit's screen on a computer or TV over a wired link (changed text cells to a web page, not VNC); the `== usb gadget ==` and `== usb ethernet ==` sections of `r3i6nos-report` answer what the OTG port can do (ROADMAP section 28).
 - `docs/HOTPLUG.md`: the toast over the top bar when headphones, a USB device or DC power is plugged in or out (rule 13); `r3i6nos-hotplug` writes the events, `theme/r3i6nos_toast.{h,lua}` show them.
 - `docs/DEMO-RECORDINGS.md`: Rec demo, the screenshots and video every R36S port records to a `Demo` folder (rule 11).
 - `docs/TWO-SLOT-SETUP.md`: the console prepares its own card from the original (`overlay/usr/local/bin/r3i6nos-setup`, a no-op on every normal boot; the web guide at r3i6nos.ansiapps.com/bootdisk is in the ansiapps-site repo); trials T1-T10 are untested on a unit.
@@ -64,7 +65,7 @@ is blocked and on what.
    that checks and measures what only the R36S can answer (the system, the pad's GUID, sound, the games card and its filesystem,
    speed against the app's goal, peak memory, every "untested on the unit" item a program can answer) and writes
    **`/roms/<App>/r36s-report.txt`** for Claude to read: `STATUS key: value` lines (PASS, FAIL, INFO, SKIP), sections, a summary,
-   and `end` last. Native ports use `theme/r3i6nos_report.h`; tools get `tools/qjs-node/report.py` from `package-tool.sh`. A new port
+   and `end` last. **A report that needs a setup (a charger out, an adapter or a cable in, headphones) lists it first on a screen and waits for a keypress** (A runs, B cancels; `docs/DEVICE-REPORTS.md`, "Setup the report needs"). **One that must be run several times counts them ("run 2 of 3": a `# RUNS: n` header, a file for each run, never one replacing another)**. Native ports use `theme/r3i6nos_report.h`; tools get `tools/qjs-node/report.py` from `package-tool.sh`. A new port
    is not done until its report exists and is tested; when a report comes back, update the port and both roadmaps from it.
 10. **Every R36S port has a local build script** that makes its card file on this Mac with one command and no arguments: a native or
    tool port's **`r36s/build-deb.sh`** in its own repo (Docker only; it builds in Debian 12 arm64 and runs the package's self-test;

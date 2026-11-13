@@ -109,3 +109,56 @@ do
 end
 
 print("reports: ok")
+
+-- a report that needs a setup says so with `# NEEDS:` lines (a bare one is a blank line), found through the wrapper like APP; none means it runs at once
+do
+  local f3 = {
+    ["/opt/loveos/bin/r3i6nos-report"] = { "#!/usr/bin/env python3", "# NEEDS: Unplug the charger.", "# NEEDS:", "# NEEDS:  1. a cable", '"""doc"""', 'APP = "r3i6nos"' },
+    ["/opt/loveos/bin/wrapped-report"] = { "#!/bin/sh", 'exec "/opt/native_apps/W/wrapped-report" "$@"' },
+    ["/opt/native_apps/W/wrapped-report"] = { "#!/usr/bin/env python3", "# NEEDS: Plug in the dongle.", 'APP = "Wrapped"' },
+    ["/opt/loveos/bin/plain-report"] = { "#!/usr/bin/env python3", 'APP = "Plain"' },
+  }
+  local sys3 = { ls = function() return { "plain-report", "r3i6nos-report", "wrapped-report" } end, head = function(p) return f3[p] or {} end, exec = sys.exec, read = sys.read }
+  local l3 = reports.list(sys3)
+  eq(l3[1].cmd, "r3i6nos-report"); eq(#l3[1].needs, 3); eq(l3[1].needs[1], "Unplug the charger."); eq(l3[1].needs[2], "", "a bare NEEDS is a blank line"); eq(l3[1].needs[3], " 1. a cable")
+  eq(l3[2].app, "Plain"); eq(l3[2].needs, nil, "no NEEDS: it runs at once")
+  eq(l3[3].app, "Wrapped"); eq(l3[3].needs[1], "Plug in the dongle.", "found through the wrapper")
+  print("reports needs: ok")
+end
+
+-- a report that must be run several times: `# RUNS: n`, `# RUN k:` lines; the menu remembers the last run started and passes k/n to the report
+do
+  local f4 = { ["/opt/loveos/bin/r3i6nos-report"] = { "#!/usr/bin/env python3", "# RUNS: 3", "# NEEDS: Hands off.", "# RUN 1: nothing in the port", "# RUN 1: charger out",
+    "# RUN 2: the adapter", "# RUN 3: a cable", 'APP = "r3i6nos"' },
+    ["/opt/loveos/bin/silly-report"] = { "# RUNS: 1", 'APP = "Silly"' }, ["/opt/loveos/bin/many-report"] = { "# RUNS: 12", 'APP = "Many"' } }
+  local last, cmds = nil, {}
+  local sys4 = { ls = function() return { "many-report", "r3i6nos-report", "silly-report" } end, head = function(p) return f4[p] or {} end,
+    exec = function(c) cmds[#cmds + 1] = c; return true end,
+    read = function(p) if p == "/run/loveos/report/last-r3i6nos-report" then return last end return nil end }
+  local l4 = reports.list(sys4)
+  local r = l4[1]
+  eq(r.cmd, "r3i6nos-report"); eq(r.runs, 3); eq(r.needs[1], "Hands off."); eq(#r.runtext[1], 2); eq(r.runtext[1][2], "charger out"); eq(r.runtext[3][1], "a cable")
+  eq(l4[2].runs, nil, "RUNS: 12 is out of range"); eq(l4[3].runs, nil, "RUNS: 1 is not several runs")
+  -- nothing started yet: run 1; then the last started decides the next, and it wraps after the last
+  eq(reports.currentRun(r, sys4), nil); eq(reports.nextRun(r, sys4), 1)
+  assert(reports.start(r, sys4))
+  assert(cmds[1]:find("R3I6NOS_REPORT_SETUP='1/3' '/opt/loveos/bin/r3i6nos-report'", 1, true), cmds[1])
+  assert(cmds[1]:find("printf '%s\\n' 1 > '/run/loveos/report'/last-r3i6nos-report", 1, true), cmds[1])
+  last = "1\n"; eq(reports.currentRun(r, sys4), 1); eq(reports.nextRun(r, sys4), 2)
+  assert(reports.start(r, sys4)); assert(cmds[2]:find("SETUP='2/3'", 1, true), "the next run")
+  assert(reports.start(r, sys4, 3)); assert(cmds[3]:find("SETUP='3/3'", 1, true), "a chosen run")
+  assert(reports.start(r, sys4, 9)); assert(cmds[4]:find("SETUP='3/3'", 1, true), "a run past the last is the last")
+  last = "3\n"; eq(reports.nextRun(r, sys4), 1, "wraps after the last")
+  last = "banana"; eq(reports.currentRun(r, sys4), nil, "a bad state file is no state")
+  -- a report that is not a series gets no setup variable
+  assert(reports.start({ cmd = "x-report" }, sys4)); assert(not cmds[5]:find("R3I6NOS_REPORT_SETUP", 1, true))
+  -- the done screen says which run it was and that more are left
+  local sum = { pass = 10, fail = 0, info = 5, skip = 1, ended = true }
+  local ls = table.concat(reports.doneLines(r, { file = "/roms2/r3i6nos/r36s-report-run1.txt" }, sum, 1), "\n")
+  assert(ls:find("run 1 of 3 is done", 1, true) and ls:find("NOT FINISHED: 2 more to run.", 1, true) and ls:find("run 2 of 3", 1, true), ls)
+  ls = table.concat(reports.doneLines(r, { file = "/roms2/r3i6nos/r36s-report-run3.txt" }, sum, 3), "\n")
+  assert(ls:find("run 3 of 3 is done", 1, true) and ls:find("All 3 runs are done: give Claude all 3 files.", 1, true) and not ls:find("NOT FINISHED", 1, true), ls)
+  ls = table.concat(reports.doneLines({ app = "X" }, { file = "/roms/X/r36s-report.txt" }, sum), "\n")
+  assert(not ls:find("run", 1, true) and ls:find("X's report is done.", 1, true), "a single report is told as before")
+  print("reports runs: ok")
+end

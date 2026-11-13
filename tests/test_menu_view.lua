@@ -223,6 +223,33 @@ do
   snap("report wait, no steps")
 end
 
+-- the setup dialog of a report that needs one: its lines, and the keys in the foot (A Ready, B Cancel)
+do
+  local fakerep = { WAIT = 10, ABOUT = { "about" }, NONE = { "none" }, running = function() return nil end,
+    list = function() return { { cmd = "r3i6nos-report", app = "r3i6nos (this system)", system = true,
+      needs = { "Run this once for each setup:", "", " 1. nothing in the USB-C (OTG) port, charger out", " 3. a plain USB cable from the port to a computer" } } } end }
+  dialog = settings.new(io_, nil, fakerep); settings.open(dialog)
+  pick("Device reports"); pick("r3i6nos (this system)"); rows = draw()
+  local j = table.concat(rows, "\n")
+  has(j, "r3i6nos (this system) report: set up"); has(j, "Set this up first, then press A:"); has(j, "1. nothing in the USB-C (OTG) port, charger out")
+  has(j, "A Ready  B Cancel")
+  snap("report setup dialog")
+end
+
+-- the setup dialog of a report to run several times: the count in the title and the Y key in the foot
+do
+  local fakerep = { WAIT = 10, ABOUT = { "about" }, NONE = { "none" }, running = function() return nil end,
+    nextRun = function() return 2 end, currentRun = function() return 1 end,
+    list = function() return { { cmd = "r3i6nos-report", app = "r3i6nos (this system)", system = true, runs = 3, runtext = { { "one" }, { "the adapter in the port" }, { "three" } } } } end }
+  dialog = settings.new(io_, nil, fakerep); settings.open(dialog)
+  pick("Device reports"); rows = draw()
+  has(table.concat(rows, "\n"), "run 2 of 3")
+  pick("r3i6nos (this system)"); rows = draw()
+  local j = table.concat(rows, "\n")
+  has(j, "run 2 of 3"); has(j, "the adapter in the port"); has(j, "A Ready  Y Other run  B Cancel")
+  snap("report setup dialog, run 2 of 3")
+end
+
 -- every cell is a code page 437 index, every colour a palette colour, every pair passes 4.5:1, on every screen above
 for _, sc in ipairs(screens) do
   for i = 1, 64 * 24 do

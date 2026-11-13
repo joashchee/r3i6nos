@@ -256,9 +256,56 @@ do
   settings.press(d, "back"); done = nil; fakerep.ok = false; choose(d, "Composer"); assert(settings.node(d).bad, "a report that cannot start says so")
   settings.press(d, "back"); choose(d, "What these are"); eq(settings.node(d).pages[1][1], "about")
   settings.press(d, "back"); choose(d, "Back"); eq(title(d), "Settings")
+  -- a report with needs shows them first and waits for A; B cancels and starts nothing
+  fakerep.found = { { cmd = "r3i6nos-report", app = "r3i6nos (this system)", system = true, needs = { "Unplug the charger.", "", " 1. a cable" } },
+                    { cmd = "compose-report", tool = "compose", app = "Composer" } }
+  fakerep.ok = true; done = nil; running = nil
+  local before = #started
+  choose(d, "Device reports")
+  choose(d, "r3i6nos (this system)")
+  eq(kind(d), "pages", "the setup dialog"); assert(settings.node(d).go, "it waits for a keypress"); eq(settings.node(d).title, "r3i6nos (this system) report: set up")
+  eq(settings.node(d).pages[1][1], "Set this up first, then press A:"); eq(settings.node(d).pages[1][3], "Unplug the charger."); eq(settings.node(d).pages[1][5], " 1. a cable")
+  eq(#started, before, "nothing runs before the keypress")
+  settings.press(d, "back"); eq(title(d), "Device reports", "B cancels"); eq(#started, before, "and starts nothing")
+  choose(d, "r3i6nos (this system)"); settings.press(d, "accept")
+  eq(started[#started], "r3i6nos-report", "A runs it"); eq(#started, before + 1); eq(kind(d), "busy")
+  settings.press(d, "back"); done = nil; running = nil
+  choose(d, "Composer"); eq(kind(d), "busy", "a report with no needs starts at once")
+  settings.press(d, "back"); running = "r3i6nos-report"
+  choose(d, "r3i6nos (this system)"); eq(kind(d), "busy", "a report already running goes to its wait, not the dialog")
+  running = nil; settings.press(d, "back"); settings.press(d, "back")
   fakerep.found = {}
   choose(d, "Device reports"); eq(settings.node(d).items[1].label, "None installed")
   choose(d, "None installed"); eq(settings.node(d).pages[1][1], "none")
+  -- a report to run several times: "run 1 of 3" in the title, its own setup, Y shows another run's, and the list says which run is next
+  local lastRun = nil
+  function fakerep.nextRun(r) return lastRun and (lastRun % r.runs + 1) or 1 end
+  function fakerep.currentRun(r) return lastRun end
+  local startedRuns = {}
+  function fakerep.start(r, _, k) started[#started + 1] = r.cmd; startedRuns[#startedRuns + 1] = k; lastRun = k; running = r.cmd; return true end
+  fakerep.found = { { cmd = "r3i6nos-report", app = "r3i6nos (this system)", system = true, runs = 3, needs = { "Hands off." },
+    runtext = { { "nothing in the port" }, { "the adapter" }, { "a cable" } } } }
+  settings.press(d, "back"); settings.press(d, "back"); done = nil; running = nil -- the None installed page, then the list
+  choose(d, "Device reports")
+  eq(settings.node(d).items[1].value, "run 1 of 3", "the list says it needs several runs, and which is next")
+  choose(d, "r3i6nos (this system)")
+  eq(settings.node(d).title, "r3i6nos (this system) report: run 1 of 3")
+  local flat = table.concat(settings.node(d).pages[1], "\n")
+  assert(flat:find("nothing in the port", 1, true) and flat:find("Hands off.", 1, true) and flat:find("needs 3 runs", 1, true) and not flat:find("a cable", 1, true), flat)
+  settings.press(d, "y"); eq(settings.node(d).title, "r3i6nos (this system) report: run 2 of 3")
+  assert(table.concat(settings.node(d).pages[1], "\n"):find("the adapter", 1, true), "Y shows another run's setup")
+  settings.press(d, "y"); settings.press(d, "y"); eq(settings.node(d).title, "r3i6nos (this system) report: run 1 of 3", "Y wraps")
+  settings.press(d, "back"); eq(#startedRuns, 0, "B starts nothing")
+  choose(d, "r3i6nos (this system)"); settings.press(d, "accept")
+  eq(startedRuns[1], 1, "A starts the run shown"); eq(kind(d), "busy"); eq(settings.node(d).title, "r3i6nos (this system) report (run 1 of 3)", "the wait says which run")
+  settings.press(d, "back"); settings.press(d, "back"); running = nil; done = nil
+  choose(d, "Device reports"); eq(settings.node(d).items[1].value, "run 2 of 3", "the next run after one is started")
+  choose(d, "r3i6nos (this system)"); eq(settings.node(d).title, "r3i6nos (this system) report: run 2 of 3")
+  settings.press(d, "y"); settings.press(d, "accept"); eq(startedRuns[2], 3, "a run chosen with Y is the one started")
+  settings.press(d, "back"); settings.press(d, "back"); running = nil
+  fakerep.found = {}
+  choose(d, "Device reports"); eq(settings.node(d).items[1].label, "None installed")
+  settings.press(d, "back")
   print("settings device reports: ok")
 end
 

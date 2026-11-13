@@ -93,6 +93,25 @@ uses three files in `/run/loveos/report/`:
 When `done` appears, the screen shows the report's own summary line (`PASS n  FAIL n  INFO n  SKIP n`) and which card the file is on, or,
 if the file is missing or has no `end`, that the report stopped and where its `.tmp` is. B leaves the wait; the report goes on.
 
+### Setup the report needs (2026-11-13, maintainer's request)
+
+A report whose answers depend on how the unit is set up (a charger out so the battery is measured, an adapter or a cable in the OTG port, headphones
+in, a card in a slot) **says so before it runs, and waits for a keypress**: it does not start and then FAIL or SKIP for a condition a person could have
+met. The report declares it in its first 80 lines as `# NEEDS: <text>` comment lines (a bare `# NEEDS:` is a blank line; at most 56 columns a line; the
+menu follows deb_watcher's wrapper to the script, like `APP`). **Settings > Device reports** then shows a dialog, "<App> report: set up", titled with
+the lines, and **A** starts the report, **B** cancels and starts nothing. A report with no `NEEDS` lines starts at once, as before; one already
+running goes to its wait, not to the dialog. (Over SSH there is no dialog: the person is at a shell and reads the report's header.) **A report that must be
+run several times** (one setup each) declares `# RUNS: n` (2 to 9) and a `# RUN k: <text>` line or more for each run's setup; `# NEEDS:` lines are what
+every run needs. The menu then counts: the list says **"run 2 of 3"** next to the report, the dialog is titled **"<App> report: run 2 of 3"** and shows
+that run's setup, **Y** shows another run's setup (to repeat one or skip ahead), the wait says "(run 2 of 3)", and the done screen says "run 2 of 3 is
+done", **"NOT FINISHED: 1 more to run"** and what to do, or "All 3 runs are done: give Claude all 3 files". The menu remembers the last run started in
+`/run/loveos/report/last-<command>` (it lasts until a reboot; after the last run the count wraps to 1), and passes `R3I6NOS_REPORT_SETUP=k/n` to the
+report. **The report writes `r36s-report-run<k>.txt`** (so a later run never replaces an earlier one), says `run: k of n` in its header, and also copies it to
+`r36s-report.txt` (the latest). `r3i6nos-report`'s is the example (the USB cases of the screen mirror, `docs/SCREEN-MIRROR.md`). Code: `needsOf` in `menu/reports.lua`, the `go` dialog in `menu/settings.lua`; tests `tests/test_reports.lua`,
+`tests/test_settings.lua`, `tests/test_menu_view.lua`, `tests/test_r3i6nos_report.py` (`NeedsDialog`).
+**An app with a screen** shows the same dialog from its own Start menu's **Device report** item (list the conditions on a screen in the app's theme, A to run,
+B to cancel): not built yet, ROADMAP section 28.
+
 ## Shared code
 
 - **Native (C and SDL2):** `theme/r3i6nos_report.h` (open, sections, lines, the system and card sections, peak memory, close with the summary; and the **power section**: `r3_report_power_section`, `r3_report_power_idle`, `r3_power_begin` / `r3_power_sample` / `r3_report_power_end`, `r3_report_power_advice`, `docs/POWER.md` "In a native port").
@@ -106,7 +125,7 @@ Its sibling, **Rec demo** (`docs/DEMO-RECORDINGS.md`, CLAUDE.md rule 11), sits r
 
 | Port | Where it lives | How it is started | File |
 |---|---|---|---|
-| r3i6nos itself (the system, boot, both card slots, and the battery cost of its background work: `docs/POWER.md`) | `overlay/usr/local/bin/r3i6nos-report` (`docs/STORAGE.md`) | Settings > Device reports > r3i6nos (this system), or `r3i6nos-report` | `r3i6nos/r36s-report.txt` on the data card (`/roms2`), else the system card |
+| r3i6nos itself (the system, boot, both card slots, **the USB gadget and USB Ethernet questions of the screen mirror: `docs/SCREEN-MIRROR.md`**, and the battery cost of its background work: `docs/POWER.md`) | `overlay/usr/local/bin/r3i6nos-report` (`docs/STORAGE.md`) | Settings > Device reports > r3i6nos (this system), or `r3i6nos-report` | `r3i6nos/r36s-report.txt` on the data card (`/roms2`), else the system card |
 | Neumetik | Neumetik repo `r36s/` | Start > Device report, `neumetik --report` | `/roms/Neumetik/r36s-report.txt` |
 | TinyNTT | TinyNTT repo `r36s/` | Files > Device report, `tinyntt --report` | `/roms/TinyNTT/r36s-report.txt` |
 | KlamANSI | KlamANSI repo `r36s/` | Start > Device report, `klamansi --report` | `/roms/KlamANSI/r36s-report.txt` |

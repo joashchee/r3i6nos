@@ -173,12 +173,32 @@ local function batteryMenu(s)
   }, 48))
 end
 
+-- A report that must be run several times (`# RUNS: n`): " (run 2 of 3)" for a title, and the dialog's lines for run k.
+local function runTag(rep, r, k)
+  return (r.runs and k) and (" (run %d of %d)"):format(k, r.runs) or ""
+end
+
+local function setupLines(r, k)
+  local lines = { "Set this up first, then press A:", "" }
+  if r.runs then
+    for _, l in ipairs(r.runtext and r.runtext[k] or {}) do lines[#lines + 1] = l end
+    if r.needs and #r.needs > 0 then lines[#lines + 1] = "" end
+  end
+  for _, l in ipairs(r.needs or {}) do lines[#lines + 1] = l end
+  if r.runs then
+    lines[#lines + 1] = ""
+    lines[#lines + 1] = ("This report needs %d runs, one for each setup."):format(r.runs)
+    lines[#lines + 1] = "Y shows the setup of another run."
+  end
+  return lines
+end
+
 -- Wait for a running report: its step and a bar when it says them, the time so far, then its summary and where the file is.
 -- B leaves the wait; the report goes on, and choosing it again comes back here.
 local function waitReport(s, r)
   local rep = s.rep
   push(s, {
-    kind = "busy", title = r.app .. " report", elapsed = 0, timeout = rep.WAIT, waiting = "Checking this unit...",
+    kind = "busy", title = r.app .. " report" .. runTag(rep, r, rep.currentRun and rep.currentRun(r)), elapsed = 0, timeout = rep.WAIT, waiting = "Checking this unit...",
     foot = "B Back (it keeps running)",
     poll = function(n)
       local p = rep.poll(r)
@@ -187,7 +207,7 @@ local function waitReport(s, r)
     end,
     lost = { "The report has run for 15 minutes and is not done.", "", "It may still be working. Choose it again later to see." },
     on_result = function(sx, res)
-      local lines, ok = rep.doneLines(r, res, rep.summary(res.file))
+      local lines, ok = rep.doneLines(r, res, rep.summary(res.file), rep.currentRun and rep.currentRun(r))
       show(sx, r.app .. " report", lines, ok)
     end,
   })
@@ -201,12 +221,33 @@ local function reportsMenu(s)
   local items = {}
   for _, r in ipairs(found) do
     local mine = running == r.cmd
-    items[#items + 1] = { label = r.app, value = mine and "running" or r.cmd,
-      hint = mine and "Running now: choose it to see how far it has got" or ("Check " .. r.app .. " on this unit, for Claude"), run = function(sx)
+    local nextRun = r.runs and rep.nextRun and rep.nextRun(r) or nil
+    local value = mine and "running" or (nextRun and ("run %d of %d"):format(nextRun, r.runs)) or r.cmd
+    items[#items + 1] = { label = r.app, value = value,
+      hint = mine and "Running now: choose it to see how far it has got"
+        or (nextRun and ("Run it %d times, one setup each: this is run %d"):format(r.runs, nextRun))
+        or ("Check " .. r.app .. " on this unit, for Claude"), run = function(sx)
       if rep.running and rep.running() == r.cmd then return waitReport(sx, r) end
-      local ok, err = rep.start(r)
-      if ok then waitReport(sx, r)
-      else show(sx, r.app .. " report", { "Could not start the report:", tostring(err) }, false) end
+      local function go(sy, k)
+        local ok, err = rep.start(r, nil, k)
+        if ok then waitReport(sy, r)
+        else show(sy, r.app .. " report", { "Could not start the report:", tostring(err) }, false) end
+      end
+      -- a report that needs a setup (a cable, a charger out) says so first and waits for a keypress: A runs it, B cancels.
+      -- One that must be run several times says which run this is ("run 2 of 3"); Y shows another run's setup.
+      if (r.needs and #r.needs > 0) or r.runs then
+        local k = r.runs and (rep.nextRun and rep.nextRun(r) or 1) or nil
+        local node = { kind = "pages", page = 1, runs = r.runs, run = k }
+        function node.rebuild()
+          node.title = r.app .. " report" .. (r.runs and (": run %d of %d"):format(node.run, r.runs) or ": set up")
+          node.pages = pages.paginate(setupLines(r, node.run))
+          node.page = 1
+        end
+        node.go = function(sy) go(sy, node.run) end
+        node.rebuild()
+        return push(sx, node)
+      end
+      go(sx)
     end }
   end
   if #found == 0 then
@@ -335,7 +376,9 @@ function settings.press(s, action)
     end
   elseif n.kind == "pages" then
     local c = #n.pages
-    if action == "back" or action == "accept" then pop(s)
+    if n.go and action == "accept" then pop(s); n.go(s) -- a setup dialog: A says it is ready (go starts the report)
+    elseif n.go and n.runs and action == "y" then n.run = n.run % n.runs + 1; n.rebuild() -- the setup of another run
+    elseif action == "back" or action == "accept" then pop(s)
     elseif action == "right" or action == "pagedown" or action == "down" then n.page = math.min(c, n.page + 1)
     elseif action == "left" or action == "pageup" or action == "up" then n.page = math.max(1, n.page - 1)
     elseif action == "home" then n.page = 1
