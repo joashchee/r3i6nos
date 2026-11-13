@@ -812,12 +812,15 @@ static int is_picture_kind(int k) {
     return k == K_PNG || k == K_JPEG || k == K_GIF || k == K_BMP || k == K_ICO || k == K_TGA || k == K_QOI || k == K_PCX || k == K_PNM;
 }
 
-/* How a kind plays (player.h): a Rec demo's frames and a PCM WAV by themselves, other sound and video through ffmpeg. */
+/* How a kind plays (player.h): a Rec demo's frames and a PCM WAV by themselves, other sound and video through ffmpeg, MIDI, modules and music as text through nttplay. */
 static int play_mode(int k) {
     if (k == K_R3F) return PL_R3F;
     if (k == K_WAV) return PL_WAV;
     if (k == K_MP4 || k == K_AVI || k == K_MKV || k == K_ASF || k == K_FLV || k == K_MPEGPS || k == K_MPEGTS) return PL_VIDEO;
     if (k == K_AIFF || k == K_FLAC || k == K_MP3 || k == K_OGG || k == K_WAVPACK) return PL_AUDIO;
+    /* what Neumetik plays, through nttplay (ROADMAP section 27): MIDI, the Tracker's formats, music written as text */
+    if (k == K_MIDI || k == K_RMID || k == K_MOD || k == K_S3M || k == K_XM || k == K_IT || k == K_MTM || k == K_STM || k == K_669 || k == K_MED ||
+        k == K_OKT || k == K_TRACKER || k == K_UMF || k == K_MUSICTEXT) return PL_NTT;
     return PL_NONE;
 }
 
@@ -2962,6 +2965,42 @@ static void test_play(const char *root) {
     app_action(&a, R3_BACK);
     CHECK(a.view.pl.vpid == 0 && a.view.pl.vfd <= 0, "closing leaves no ffmpeg running");
 
+    /* MIDI through nttplay, with a stand-in: probe says one second, decode writes a second of sound; a file whose name has "bad" in it is refused */
+    {
+        char mid[PATH_MAX], badmid[PATH_MAX], nt[PATH_MAX];
+        static const char hdr[] = "MThd\0\0\0\6\0\0\0\1\1\340MTrk\0\0\0\4\0\377\57\0";
+        path_join(mid, sizeof mid, root, "tune.mid");
+        path_join(badmid, sizeof badmid, root, "bad.mid");
+        path_join(nt, sizeof nt, root, "fake-nttplay");
+        write_file(mid, hdr, sizeof hdr - 1);
+        write_file(badmid, hdr, sizeof hdr - 1);
+        FILE *fn = fopen(nt, "w");
+        if (fn) {
+            fputs("#!/bin/sh\ncase \"$1\" in\n probe) case \"$2\" in *bad*) echo \"nttplay: $2: not a MIDI file\" >&2; exit 1 ;; esac; echo kind=midi; echo title=x; echo duration=1.000 ;;\n decode) head -c 176400 /dev/zero ;;\nesac\n", fn);
+            fclose(fn);
+            chmod(nt, 0755);
+        }
+        setenv("R3I6NOS_NTTPLAY", "/nonexistent/nttplay", 1);
+        CHECK(start_viewer(&a, mid, 1, 0) == 0 && viewer_tab(&a.view)->kind != TAB_PLAY, "no nttplay: MIDI does not open on Play");
+        app_compose(&a, &s);
+        CHECK(dump_has(&s, "needs nttplay"), "Info says playing needs nttplay");
+        app_action(&a, R3_BACK);
+        setenv("R3I6NOS_NTTPLAY", nt, 1);
+        CHECK(start_viewer(&a, mid, 0, 0) == 0 && viewer_tab(&a.view)->kind == TAB_PLAY, "with nttplay a MIDI file opens on Play");
+        pl = &a.view.pl;
+        CHECK(pl->mode == PL_NTT && pl->has_audio && !pl->has_video, "MIDI is sound only, through nttplay");
+        CHECK(pl->total > 0.99 && pl->total < 1.01, "its length comes from probe (%.3f)", pl->total);
+        t0 = pl->last_ms;
+        for (int i = 0; i < 300 && !pl->ended; i++) { usleep(20000); pl_pump(pl, t0 + 50.0 * i); }
+        CHECK(pl->ended, "it ends when nttplay's output does");
+        CHECK(pl->fed > 0 || !pl->dev, "its sound reached the device queue (or there is no device)");
+        app_action(&a, R3_BACK);
+        CHECK(a.view.pl.apid == 0 && a.view.pl.afd <= 0, "closing leaves no nttplay running");
+        CHECK(start_viewer(&a, badmid, 1, 0) == 0 && viewer_tab(&a.view)->kind != TAB_PLAY, "a file nttplay cannot read does not open on Play");
+        app_compose(&a, &s);
+        CHECK(dump_has(&s, "not a MIDI file") && !dump_has(&s, "nttplay:"), "Info gives nttplay's own reason, without its prefix");
+        app_action(&a, R3_BACK);
+    }
     /* a Photoshop file (only its header matters here: 4 x 2 pixels), drawn by a stand-in ffmpeg that writes 4 x 2 x 4 white bytes */
     char psd[PATH_MAX], ffs[PATH_MAX];
     path_join(psd, sizeof psd, root, "pic.psd");

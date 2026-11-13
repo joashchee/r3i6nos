@@ -6,6 +6,10 @@
  *   PL_VIDEO  any video (the `demo-<stamp>.mp4` Rec demo makes), and PL_AUDIO any other sound: both through `ffmpeg` when the unit has one
  *             (R3I6NOS_FFMPEG names another), which decodes to raw frames and PCM on pipes. No H.264 or AAC decoder is built in.
  *
+ *   PL_NTT    MIDI, the Tracker's formats and music written as text, through `nttplay` (Neumetik's players as a command-line tool, always in the
+ *             image at /usr/bin/nttplay; R3I6NOS_NTTPLAY names another; ROADMAP section 27): `nttplay probe FILE` first (the length, or why it cannot
+ *             be read), then `nttplay decode FILE -ar 44100`, 16-bit stereo PCM on a pipe, read the way ffmpeg's is.
+ *
  * The clock is the sound: the seconds fed to the audio device minus what it still holds (so picture and sound cannot drift); with no sound
  * it is the caller's millisecond clock. Nothing here blocks: pipes are non-blocking, the UI loop calls pl_pump about every 16 ms.
  * R3I6NOS_FM_NOAUDIO=1 plays silently on the caller's clock (tests, and units whose sound device will not open).
@@ -24,7 +28,7 @@
 #define PL_H (R3_DISPLAY_ROWS * R3_CELL_H)
 #define PL_FRAME_BYTES ((size_t)PL_W * PL_H * 4)
 
-enum { PL_NONE, PL_R3F, PL_WAV, PL_VIDEO, PL_AUDIO };
+enum { PL_NONE, PL_R3F, PL_WAV, PL_VIDEO, PL_AUDIO, PL_NTT };
 
 typedef struct {
     int mode, has_video, has_audio, playing, ended;
@@ -90,18 +94,22 @@ static void pl_close(Player *p) {
     pl_zero(p);
 }
 
-static int pl_find_ffmpeg(char *out, size_t cap) {
-    const char *e = getenv("R3I6NOS_FFMPEG");
+/* Finds a helper program: the environment variable's file, else `name` in PATH, /usr/local/bin or /usr/bin. */
+static int pl_find_tool(const char *envvar, const char *name, char *out, size_t cap) {
+    const char *e = getenv(envvar);
     if (e && *e) { snprintf(out, cap, "%s", e); return access(e, X_OK) == 0; }
     const char *path = getenv("PATH");
     char list[4096];
     snprintf(list, sizeof list, "%s:/usr/local/bin:/usr/bin", path ? path : "");
     for (char *save = NULL, *dir = strtok_r(list, ":", &save); dir; dir = strtok_r(NULL, ":", &save)) {
-        snprintf(out, cap, "%s/ffmpeg", dir);
+        snprintf(out, cap, "%s/%s", dir, name);
         if (access(out, X_OK) == 0) return 1;
     }
     return 0;
 }
+
+static int pl_find_ffmpeg(char *out, size_t cap) { return pl_find_tool("R3I6NOS_FFMPEG", "ffmpeg", out, cap); }
+static int pl_find_nttplay(char *out, size_t cap) { return pl_find_tool("R3I6NOS_NTTPLAY", "nttplay", out, cap); }
 
 /* Starts argv with its standard output on a non-blocking pipe (standard error to nowhere). 0 or -1. */
 static int pl_spawn(char *const argv[], int *fd, pid_t *pid) {
@@ -277,6 +285,71 @@ static int pl_ffmpeg_start(Player *p, const char *path, int video, const char **
     return 0;
 }
 
+/* `nttplay probe FILE`, waited for (at most 10 s: it only reads the file): 0 and `*total` the length in seconds (0 when unknown), or -1 and `why` (nttplay's own
+ * one-line reason, "nttplay: " and the file name dropped). */
+static int pl_ntt_probe(const char *nt, const char *path, double *total, char *why, size_t cap) {
+    int fds[2];
+    *total = 0;
+    if (pipe(fds) != 0) { snprintf(why, cap, "nttplay would not start"); return -1; }
+    pid_t c = fork();
+    if (c < 0) { close(fds[0]); close(fds[1]); snprintf(why, cap, "nttplay would not start"); return -1; }
+    if (c == 0) {
+        dup2(fds[1], 1);
+        dup2(fds[1], 2);                     /* its one-line complaint comes back on the same pipe */
+        int nul = open("/dev/null", O_RDONLY);
+        if (nul >= 0) dup2(nul, 0);
+        for (int i = 3; i < 64; i++) close(i);
+        char *argv[] = {(char *)nt, "probe", (char *)path, NULL};
+        execv(nt, argv);
+        _exit(127);
+    }
+    close(fds[1]);
+    fcntl(fds[0], F_SETFL, fcntl(fds[0], F_GETFL) | O_NONBLOCK);
+    char out[4096];
+    size_t n = 0;
+    double t0 = (double)SDL_GetTicks();
+    int timed_out = 0;
+    for (;;) {
+        ssize_t got = n < sizeof out - 1 ? read(fds[0], out + n, sizeof out - 1 - n) : 0;
+        if (got > 0) { n += (size_t)got; continue; }
+        if (got == 0) break;                                  /* the end, or a full buffer: enough either way */
+        if (errno != EAGAIN && errno != EINTR) break;
+        if ((double)SDL_GetTicks() - t0 > 10000.0) { timed_out = 1; break; }
+        usleep(2000);
+    }
+    close(fds[0]);
+    if (timed_out) kill(c, SIGKILL);
+    int st = 0;
+    waitpid(c, &st, 0);
+    out[n] = 0;
+    if (timed_out) { snprintf(why, cap, "nttplay took too long to read it"); return -1; }
+    if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) {
+        char *m = out;
+        if (!strncmp(m, "nttplay: ", 9)) m += 9;
+        size_t pn = strlen(path);
+        if (!strncmp(m, path, pn) && m[pn] == ':' && m[pn + 1] == ' ') m += pn + 2;
+        m[strcspn(m, "\r\n")] = 0;
+        snprintf(why, cap, "%s", *m ? m : "nttplay could not read it");
+        return -1;
+    }
+    const char *d = strstr(out, "duration=");
+    if (d && (d == out || d[-1] == '\n')) *total = strtod(d + 9, NULL);
+    if (!(*total >= 0 && *total < 1e7)) *total = 0;
+    return 0;
+}
+
+static int pl_ntt_start(Player *p, const char *path, const char **why) {
+    static char reason[200];
+    char nt[PATH_MAX];
+    if (!pl_find_nttplay(nt, sizeof nt)) { *why = "needs nttplay, not installed here"; return -1; }
+    if (pl_ntt_probe(nt, path, &p->total, reason, sizeof reason) != 0) { *why = reason; return -1; }
+    char *argv[] = {nt, "decode", (char *)path, "-ar", "44100", NULL};
+    if (pl_spawn(argv, &p->afd, &p->apid) != 0) { *why = "nttplay would not start"; return -1; }
+    p->has_audio = 1;
+    pl_audio_open(p, 44100, 2, 16);
+    return 0;
+}
+
 /* Opens `path` for playing as `mode`. 0 and it plays at once (`now_ms` the caller's clock); -1 and `*why` says why not. */
 static int pl_open(Player *p, const char *path, int mode, double now_ms, const char **why) {
     pl_close(p);
@@ -287,6 +360,7 @@ static int pl_open(Player *p, const char *path, int mode, double now_ms, const c
     if (!p->px) { *why = "out of memory"; return -1; }
     int rc = -1;
     if (mode == PL_WAV) rc = pl_open_wav(p, path, why);
+    else if (mode == PL_NTT) rc = pl_ntt_start(p, path, why);
     else if (mode == PL_VIDEO || mode == PL_AUDIO) rc = pl_ffmpeg_start(p, path, mode == PL_VIDEO, why);
     else if (mode == PL_R3F) {
         p->r3f = fopen(path, "rb");

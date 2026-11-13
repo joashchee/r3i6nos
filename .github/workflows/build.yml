@@ -97,41 +97,6 @@ jobs:
           path: ffmpeg-min.tar
           retention-days: 7
 
-  nttplay:
-    # nttplay (ROADMAP section 27): Neumetik's players as a command-line tool, always in the image so Commander plays MIDI, tracker modules and music as text.
-    # The code is the Neumetik repository's (ansiapps' own, proprietary), checked out beside this one; scripts/build-nttplay.sh builds it in Debian 12 arm64
-    # and runs it once. If that repository is private, the secret NEUMETIK_TOKEN (read access to it) is needed; without access this job fails and the image
-    # has no nttplay (configure_rootfs.sh says so). NOT RUN YET: this job has never been through GitHub.
-    runs-on: ${{ vars.R3I6NOS_ARM_RUNNER || 'ubuntu-24.04-arm' }}
-    timeout-minutes: 90
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/checkout@v7
-        with:
-          repository: joashchee/neumetik
-          path: neumetik
-          token: ${{ secrets.NEUMETIK_TOKEN || github.token }}
-
-      - name: Emulation, only if this is not an arm64 runner
-        if: ${{ runner.arch != 'ARM64' }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y qemu-user-static binfmt-support
-
-      - name: Build and check (arm64, Debian 12)
-        run: scripts/build-nttplay.sh "$PWD/neumetik"
-
-      # A tar: upload-artifact zips and drops the executable bit.
-      - name: Pack
-        run: tar -C build -cf nttplay.tar nttplay
-
-      - uses: actions/upload-artifact@v7
-        with:
-          name: nttplay-arm64
-          path: nttplay.tar
-          retention-days: 7
-
   loveapps:
     # The LÖVE default apps, each built (checked, tested, packed) by its own reusable workflow, the same one its
     # app-<name>.yml uses; the firmware only bundles the .love files.
@@ -144,7 +109,7 @@ jobs:
       app: ${{ matrix.app }}
 
   rootfs:
-    needs: [love, native, loveapps, ffmpeg, nttplay]
+    needs: [love, native, loveapps, ffmpeg]
     # Build the rootfs with whatever runtimes were built, so a failing 12.0 does
     # not hide the rest. The run is still red: the love job failed.
     if: ${{ !cancelled() }}
@@ -180,15 +145,26 @@ jobs:
         run: |
           if [ -f ffmpeg-min.tar ]; then tar -C build -xf ffmpeg-min.tar; ls -l build/ffmpeg-min; else echo "::warning::no ffmpeg-min artifact: the image will have no ffmpeg"; fi
 
-      - uses: actions/download-artifact@v8
-        with:
-          name: nttplay-arm64
-          path: .
-        continue-on-error: true   # a failed nttplay job must not hide the rest: the image then has no nttplay and configure_rootfs.sh says so
-
-      - name: Unpack nttplay
+      # nttplay is built by the Neumetik repository's own workflow (r36s.yml, job `nttplay`: Debian 12 arm64, smoke-tested, kept as the artifact
+      # nttplay-arm64 with its NOTICE and SOURCE); this takes the newest one from main, so r3i6nos needs no checkout of Neumetik and no secret. Artifacts
+      # are kept 90 days and the workflow only runs when r36s/ changes: with none left (or Neumetik's repository not readable by this one) the image has
+      # no nttplay and configure_rootfs.sh says so. NOT RUN YET: never through GitHub.
+      - name: Fetch nttplay (Neumetik's newest build on main)
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -f nttplay.tar ]; then tar -C build -xf nttplay.tar; ls -l build/nttplay; else echo "::warning::no nttplay artifact: the image will have no nttplay"; fi
+          id="$(gh api "repos/joashchee/neumetik/actions/artifacts?name=nttplay-arm64&per_page=30" \
+            --jq '[.artifacts[] | select((.expired | not) and .workflow_run.head_branch == "main")][0].workflow_run.id // empty' || true)"
+          if [ -z "$id" ]; then echo "::warning::no nttplay-arm64 artifact from Neumetik's main: the image will have no nttplay"; exit 0; fi
+          echo "Neumetik workflow run $id"
+          if gh run download "$id" -R joashchee/neumetik -n nttplay-arm64 -D . && [ -f nttplay.tar ]; then
+            mkdir -p build
+            tar -C build -xf nttplay.tar
+            cat build/nttplay/SOURCE
+            ls -l build/nttplay
+          else
+            echo "::warning::could not download nttplay-arm64 from Neumetik's run $id: the image will have no nttplay"
+          fi
 
       - name: Unpack LÖVE
         run: |
