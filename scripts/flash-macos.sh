@@ -313,7 +313,19 @@ games_partition() {
         || { games_fail "waiting for macOS to see $s3" "the partition table is written but macOS has not re-read it in time" "eject and re-insert the card, check 'diskutil list $DISK' shows a third partition, then format it: diskutil eraseVolume ExFAT EASYROMS $s3  and make the folders (Love 11.5, Love 12.0, native_deb) on it. Do not re-run this script: partition 3 now exists."; return 1; }
 
     # 5. Format it exFAT, labelled EASYROMS.
-    diskutil eraseVolume ExFAT EASYROMS "$s3" \
+    # macOS auto-mounts a just-made partition and Spotlight/diskarbitration may hold it, so the
+    # first newfs_exfat can fail with "Resource busy". Unmount, let it settle, and retry.
+    formatted=0
+    for attempt in $(seq 1 "${R3I6NOS_FORMAT_TRIES:-5}"); do
+        diskutil unmount force "$s3" >/dev/null 2>&1 || true
+        sleep "$((attempt * 2))"
+        if diskutil eraseVolume ExFAT EASYROMS "$s3"; then
+            formatted=1
+            break
+        fi
+        echo "flash-macos: format attempt $attempt failed (the partition was busy); retrying..." >&2
+    done
+    [ "$formatted" = 1 ] \
         || { games_fail "formatting $s3 as exFAT" "diskutil eraseVolume failed (its message is above)" "try again: diskutil eraseVolume ExFAT EASYROMS $s3 ; or format partition 3 in Disk Utility as ExFAT named EASYROMS. Partition 3 exists, so do not re-run this script."; return 1; }
 
     # 6. The folders the menu looks in.
