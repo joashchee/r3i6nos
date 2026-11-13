@@ -57,6 +57,8 @@ for f in boot.ini "ScreenFiles/Panel 1/boot.ini"; do
         || fail "$f was not rewritten to $ROOT_UUID"
 done
 grep -q 'e139ce78' "$A/boot/boot.ini" || fail "inject-boot modified the assets"
+# the boot logo is r3i6nos's, not the stock one, and the stock one stays when asked
+mcopy -n -i "$IMG@@$((32768 * 512))" "::/logo.bmp" - | cmp - overlay/usr/share/r3i6nos/boot-logo.bmp || fail "the boot logo on BOOT is not r3i6nos's"
 
 # Kernel modules, firmware and the Mali blob go into the ROOTFS; the image stays valid; a second go is refused.
 G="$T/gpuassets"

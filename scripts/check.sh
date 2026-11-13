@@ -22,6 +22,9 @@ step "theme font up to date"
 if python3 -c "import PIL" 2>/dev/null; then python3 scripts/build_vga_font.py --check || fail=1
 else echo "NOT RUN: Pillow is not installed (the generated font files were not compared with the font)"; fi
 
+step "boot logo BMP up to date (docs/brand/boot-logo.png)"
+python3 -I scripts/make_boot_logo.py --check || fail=1
+
 step "python tests"
 python3 -I -m unittest discover -s tests -v || fail=1
 

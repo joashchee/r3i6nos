@@ -16,6 +16,10 @@
 # ROOTFS UUID (scripts/image-layout.sh), in a temporary copy: the files in
 # assets-dir are never modified.
 #
+# The boot logo: the stock card's boot/logo.bmp (the first picture the unit shows) is replaced by r3i6nos's
+# (overlay/usr/share/r3i6nos/boot-logo.bmp, made from docs/brand/boot-logo.png by scripts/make_boot_logo.py), in the
+# staged copy only. R3I6NOS_STOCK_LOGO=1 keeps the stock one; R3I6NOS_BOOT_LOGO=<file> names another BMP.
+#
 # Set R3I6NOS_BOOT_DEBUG=1 to see the boot on screen and get a boot log file on BOOT (below).
 #
 # The sector-64 start matches the stock card (captured 2026-11-06). The
@@ -91,6 +95,25 @@ print(f"    rewrote {total} root= entries")
 if total == 0:
     sys.exit("no root= found in any .ini or .conf: the image would not find its root")
 PY
+
+# The boot logo goes over the staged logo.bmp (never over the file in assets-dir). It must be a 640x480 24-bit BMP like the stock one.
+if [ "${R3I6NOS_STOCK_LOGO:-}" = 1 ]; then
+    echo "[*] Boot logo: the stock one is kept."
+else
+    LOGO="${R3I6NOS_BOOT_LOGO:-$REPO/overlay/usr/share/r3i6nos/boot-logo.bmp}"
+    [ -f "$LOGO" ] || fail "missing the boot logo $LOGO (scripts/make_boot_logo.py makes it; R3I6NOS_STOCK_LOGO=1 keeps the stock one)"
+    python3 -I - "$LOGO" <<'PY' || fail "the boot logo is not a 640x480 24-bit BMP: $LOGO"
+import struct, sys
+d = open(sys.argv[1], "rb").read()
+ok = len(d) >= 54 + 640 * 480 * 3 and d[:2] == b"BM"
+if ok:
+    size, w, h, planes, bpp, comp = struct.unpack("<IiiHHI", d[14:34])
+    ok = (w, h, planes, bpp, comp) == (640, 480, 1, 24, 0)
+sys.exit(0 if ok else 1)
+PY
+    cp "$LOGO" "$STAGE/logo.bmp"
+    echo "[*] Boot logo: r3i6nos's."
+fi
 
 # R3I6NOS_BOOT_DEBUG=1: show the console on the screen (the stock line sends it to the serial port with
 # `quiet splash`) and ask the image to write r3i6nos-bootlog.txt onto BOOT after booting.

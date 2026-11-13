@@ -31,6 +31,7 @@ is blocked and on what.
 - `docs/DEMO-RECORDINGS.md`: Rec demo, the screenshots and video every R36S port records to a `Demo` folder (rule 11).
 - `docs/TWO-SLOT-SETUP.md`: the console prepares its own card from the original (`overlay/usr/local/bin/r3i6nos-setup`, a no-op on every normal boot; the web guide at r3i6nos.ansiapps.com/bootdisk is in the ansiapps-site repo); trials T1-T10 are untested on a unit.
 - `docs/STORAGE.md`: the two card slots: the system card (TF1, `/roms`) and the data card (TF2, `/roms2`), mounted by role by `r3i6nos-cards`.
+- `docs/BRAND.md`: the logo (the butterfly "3i6", grey "r" and "n", no "os"); the boot logo is `docs/brand/boot-logo.png`, made into the BMP by `scripts/make_boot_logo.py` and put on BOOT by `inject-boot.sh`. The art is the maintainer's: never redraw it.
 - `docs/hardware-findings.md`: what the stock card showed (kernel 4.4.189, no panfrost, boot flow). Read it before touching boot or graphics.
 
 ## Rules
