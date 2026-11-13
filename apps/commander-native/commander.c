@@ -3101,6 +3101,18 @@ static void open_pads(void) {
     for (int i = 0; i < SDL_NumJoysticks(); i++) SDL_JoystickOpen(i);
 }
 
+/* SDL_WaitEventTimeout polls every millisecond under KMSDRM, which has no native wait (Neumetik's and TinyNTT's first power reports on the unit:
+ * about 920 wake-ups a second idle, goal 25). So this waits itself: poll, then nap `step` ms between looks until `ms` have passed. */
+static int wait_event(SDL_Event *e, int ms, int step) {
+    Uint32 end = SDL_GetTicks() + (Uint32)ms;
+    for (;;) {
+        if (SDL_PollEvent(e)) return 1;
+        int left = (int)(end - SDL_GetTicks());
+        if (left <= 0) return 0;
+        SDL_Delay((Uint32)(left < step ? left : step));
+    }
+}
+
 /* ---- the device report: `commander --report` (docs/DEVICE-REPORTS.md; the power section is CLAUDE.md rule 14, docs/POWER.md) ---------- */
 
 typedef struct { App *app; SDL_Renderer *r; R3Video *video; R3Toast *toast; R3Screen screen; } ReportCtx;
@@ -3110,7 +3122,8 @@ typedef struct { App *app; SDL_Renderer *r; R3Video *video; R3Toast *toast; R3Sc
 static void report_idle_turn(void *arg) {
     ReportCtx *c = arg;
     SDL_Event e;
-    if (SDL_WaitEventTimeout(&e, (c->video->settle > 0 || r3_toast_active(c->toast)) ? 16 : 250)) {
+    int busy = c->video->settle > 0 || r3_toast_active(c->toast);
+    if (wait_event(&e, busy ? 16 : 250, busy ? 16 : 100)) {
         while (SDL_PollEvent(&e)) { /* dropped */ }
     }
     app_tick(c->app, 25);
@@ -3302,10 +3315,14 @@ int main(int argc, char **argv) {
     }
     open_pads();
     int typing = 0, force = 1;
+    Uint32 last_input = 0;
     while (!app.quit) {
         SDL_Event e;
         /* a job polls; so does a screen still being presented (app_video_draw owes presents after a change); else wait */
-        int have = (app.mode == M_JOB) ? SDL_PollEvent(&e) : SDL_WaitEventTimeout(&e, (force || video.settle > 0 || app_playing(&app) || r3_toast_active(&toast)) ? 16 : 250);
+        int busy = force || video.settle > 0 || app_playing(&app) || r3_toast_active(&toast);
+        int recent = last_input && SDL_GetTicks() - last_input < 2000;   /* a press in the last 2 s keeps the looks quick */
+        int have = (app.mode == M_JOB) ? SDL_PollEvent(&e) : wait_event(&e, busy ? 16 : 250, busy ? 16 : recent ? 10 : 100);
+        if (have) last_input = SDL_GetTicks();
         while (have) {
             switch (e.type) {
             case SDL_QUIT: app.quit = 1; break;
