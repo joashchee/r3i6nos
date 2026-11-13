@@ -30,6 +30,7 @@
 #include <unistd.h>
 
 #include "images.h"
+#include "ase.h"
 #include "inflate.h"
 #include "lzma.h"
 #include "zstd.h"
@@ -213,7 +214,7 @@ static void fmt_time(time_t t, char *out, size_t cap) {
 
 enum {
     K_UNKNOWN, K_TEXT, K_EMPTY,
-    /* pictures */ K_PNG, K_JPEG, K_GIF, K_BMP, K_ICO, K_TIFF, K_WEBP, K_PSD, K_HEIF, K_TGA, K_QOI, K_PCX, K_PNM, K_SVG,
+    /* pictures */ K_PNG, K_JPEG, K_GIF, K_BMP, K_ICO, K_TIFF, K_WEBP, K_PSD, K_HEIF, K_TGA, K_QOI, K_PCX, K_PNM, K_SVG, K_ASE,
     /* text art */ K_ANSI, K_XBIN, K_BINART, K_ADF, K_IDF, K_TND, K_KAN,
     /* audio */ K_WAV, K_AIFF, K_FLAC, K_MP3, K_OGG, K_MIDI, K_RMID, K_WAVPACK, K_MOD, K_S3M, K_XM, K_IT, K_MTM, K_STM, K_669, K_MED,
     K_OKT, K_TRACKER, K_UMF, K_MUSICTEXT,
@@ -244,6 +245,7 @@ static const FSig FF_SIGS[] = {
     SIG(0, "8BPS", "Image", "Photoshop document", K_PSD),
     SIG(0, "XBIN\x1a", "Image", "XBin art", K_XBIN),
     SIG(0, "qoif", "Image", "QOI image", K_QOI),
+    SIG(4, "\xE0\xA5", "Image", "Aseprite sprite", K_ASE),
     SIG(0, "fLaC", "Audio", "FLAC audio", K_FLAC),
     SIG(28, "OpusHead", "Audio", "Opus audio", K_OGG),
     SIG(28, "\x01vorbis", "Audio", "Ogg Vorbis audio", K_OGG),
@@ -495,6 +497,7 @@ static FType ff_identify(const FFile *f) {
             if (s->kind == K_OLDARC && s->len == 2 && strcmp(ext, "arc") && strcmp(ext, "arj") && strcmp(ext, "z")) continue;
             if (s->kind == K_MPEGPS && strcmp(ext, "mpg") && strcmp(ext, "mpeg") && strcmp(ext, "vob")) return ff_type(K_MPEGPS, "Video", "MPEG video");
             if (s->kind == K_KAN && !FF_AT(f, 0, "klam 1")) continue;
+            if (s->kind == K_ASE && !ase_header_ok(h, f->hn, (uint64_t)f->size)) continue;
             if (s->kind == K_GZIP && (!strcmp(ext, "tgz") || strstr(f->name, ".tar.gz"))) return ff_type(K_GZIP, "Archive", "TAR archive, gzip compressed");
             return ff_type(s->kind, s->cat, s->label);
         }

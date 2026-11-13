@@ -96,6 +96,10 @@ step "xz and zstd decoders (apps/commander-native/lzma.h, zstd.h)"
 if command -v cc >/dev/null; then tests/test_unpack.sh || fail=1
 else echo "NOT RUN: needs a C compiler"; fi
 
+step "Aseprite reader (apps/commander-native/ase.h), cut and damaged files under the sanitizers"
+if command -v cc >/dev/null; then tests/test_ase.sh || fail=1
+else echo "NOT RUN: needs a C compiler"; fi
+
 step "theme video: presenting (theme/r3i6nos_ansiapps.h)"
 if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     tv_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-tv.XXXXXX")"

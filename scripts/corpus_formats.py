@@ -130,6 +130,10 @@ def images():
     for p in [(10, 20, 30, 255), (200, 100, 50, 255), (0, 0, 0, 0), (255, 255, 255, 128)]:
         q += b"\xff" + bytes(p)
     put("images/pic.qoi", q + b"\0" * 7 + b"\1", "QOI image", "2 x 2 RGBA")
+    # an Aseprite sprite, written by apps/commander-native/make_ase.py (also what the viewer's tests use): four frames, four layers, a tag
+    sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "apps" / "commander-native"))
+    import make_ase
+    put("images/sprite.aseprite", make_ase.sprite_corpus().to_bytes(), "Aseprite sprite", "48 x 32 RGBA, 4 frames, 4 layers, a tag")
     # a Photoshop file, raw RGB, planes of three values
     w, h = 32, 24
     psd = b"8BPS\0\1" + b"\0" * 6 + struct.pack(">HIIHH", 3, h, w, 8, 3) + b"\0" * 12 + b"\0\0"

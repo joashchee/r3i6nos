@@ -1,6 +1,6 @@
 # The r3i6nos test corpus
 
-One small file of each format the apps on r3i6nos read, **sorted into sub-folders**, for trying each app's file handling on the unit: 252 files in about
+One small file of each format the apps on r3i6nos read, **sorted into sub-folders**, for trying each app's file handling on the unit: 253 files in about
 1.4 MB. Commander's viewer identifies about 130 formats and the corpus has a file for each; Neumetik, Composer, Painter, Animator, KlamANSI and the menu have
 theirs. `MANIFEST.tsv` lists every file: its format, the apps that read it, what made it and, for Commander's, the `Type` line Commander must give it.
 
@@ -26,7 +26,7 @@ else's music, art or program. The files are MIT, like the rest of r3i6nos (its `
 | `music/notation/` | 13 | MusicXML (and compressed `.mxl`), ABC, Humdrum, ChordPro, Alda, mini-notation, RTTTL, TMF, FlMML, SiON, Composer notation and a cue sheet |
 | `music/mml/` | 11 | music macro language in eleven dialects (Mabinogi, ArcheAge, MapleStory 2, GW-BASIC, MSX, N88, C128, ZX Spectrum, Sakura) |
 | `audio/` | 9 | WAV, AIFF, FLAC, MP3, Ogg Vorbis, Opus, WavPack, M4A (AAC) and WMA: a second of two tones each, which Commander's Play tab plays |
-| `images/` | 24 | PNG (RGBA and interlaced palette), JPEG (baseline, progressive, grey), GIF, BMP (4 and 24 bit), ICO, TGA, PCX, PBM, PGM, PPM, PNM, QOI, TIFF, WebP (lossless and lossy), PSD, SVG, and HEIC and AVIF stubs (only the file-type box: Commander names them, it does not draw them) |
+| `images/` | 25 | PNG (RGBA and interlaced palette), JPEG (baseline, progressive, grey), GIF, BMP (4 and 24 bit), ICO, TGA, PCX, PBM, PGM, PPM, PNM, QOI, Aseprite sprite, TIFF, WebP (lossless and lossy), PSD, SVG, and HEIC and AVIF stubs (only the file-type box: Commander names them, it does not draw them) |
 | `art/` | 13 | text-mode art: ANSI (with SAUCE), iCE colours, NFO, DIZ, BIN, XBin (plain and with its own palette and font), ArtWorx ADF, iCE Draw IDF, TundraDraw, ASCII, and the KlamANSI drawing and Painter's ANSI |
 | `video/` | 13 | MP4, QuickTime, AVI, Matroska, WebM, FLV, WMV, MPEG-1 program stream, MPEG-2 transport stream, Ogg Theora and 3GP, each two seconds at 64 x 48; and Rec demo's own `.r3f` frames with the `.wav` beside them (Commander plays those without ffmpeg) |
 | `documents/` | 18 | PDF, RTF, HTML and XHTML, Word, Excel and PowerPoint (`docx`, `xlsx`, `pptx`), OpenDocument (`odt`, `ods`, `odp`), EPUB, the legacy `doc`, `xls`, `ppt` and an `msi` (OLE compound files), email (`eml`, `mbox`) and Markdown |
@@ -58,5 +58,5 @@ the manifest says**. The script then opens each app-made file with the app that 
 the manifest; to add a format, add it to `corpus_formats.py` (the container gives its `Type` line a check) or to `corpus_extra.py`'s `FORMATS` and `WHERE`.
 
 `tests/test_corpus.py` (run by `scripts/check.sh`) checks the manifest against the folders, that every file is committed (`.gitignore` excepts the corpus's `.love`, `.deb`, `.img` and `.zip`),
-that nothing is loose at the top, the sizes, the signatures of each family, the parts made here, and, when a C compiler and SDL2 are there, **that Commander identifies each of its 207 files
+that nothing is loose at the top, the sizes, the signatures of each family, the parts made here, and, when a C compiler and SDL2 are there, **that Commander identifies each of its 208 files
 as the manifest says**.

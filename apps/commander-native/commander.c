@@ -48,6 +48,7 @@
 #include "ansiart.h"
 #include "player.h"
 #include "selftest_data.h"
+#include "selftest_ase.h"
 
 #define VERSION "1.1"
 #define PANE_W 32
@@ -742,6 +743,9 @@ typedef struct {
     int ntabs, cur;
     FImage pic;                /* fitted to PIC_W x PIC_H */
     int pic_w, pic_h;          /* as decoded */
+    uint8_t *ase_buf;          /* an Aseprite sprite: its file in memory (ase.h indexes into it), the index, and the frame on show */
+    Ase ase;
+    int has_ase, frame;
     Art art;
     int art_page;
     Player pl;                 /* the Play tab: a Rec demo, a WAV or a video (player.h) */
@@ -753,6 +757,8 @@ typedef struct {
 static void viewer_free(Viewer *w) {
     for (int i = 0; i < w->ntabs; i++) view_free(&w->tab[i].v);
     img_free(&w->pic);
+    if (w->has_ase) ase_free(&w->ase);
+    free(w->ase_buf);
     art_free(&w->art);
     pl_close(&w->pl);
     arc_free(&w->arc);
@@ -883,6 +889,21 @@ static int view_from_members(View *v, const Arc *arc, const FText *head) {
     return line0;
 }
 
+/* Draw frame i of the open Aseprite sprite into the Picture tab's picture (fitted like any other); the frame stays as it was on failure. */
+static int ase_show_frame(Viewer *w, int i, char *err, size_t errsz) {
+    FImage full, fit;
+    if (ase_render(&w->ase, i, &full, err, errsz) != 0) return -1;
+    if (img_fit(&full, PIC_W, PIC_H, &fit) != 0) { img_free(&full); snprintf(err, errsz, "out of memory"); return -1; }
+    img_free(&w->pic);
+    w->pic = fit;
+    w->pic_w = full.w;
+    w->pic_h = full.h;
+    w->frame = i;
+    w->gen++;
+    img_free(&full);
+    return 0;
+}
+
 /* Open a file in the viewer: work out what it is, then make its tabs. Returns -1 (and err) only when it cannot be read at all. */
 static int viewer_open_as(Viewer *w, const char *path, const char *title, char *err, size_t errsz) {
     viewer_free(w);
@@ -903,7 +924,20 @@ static int viewer_open_as(Viewer *w, const char *path, const char *title, char *
 
     Tab *t = viewer_add(w, TAB_LINES, "Info");
     int content = -1;
-    if (is_picture_kind(k)) {
+    if (k == K_ASE) {
+        size_t n;
+        char why[160] = "";
+        w->ase_buf = ff_load(&f, 0, FF_MAX_LOAD, &n);
+        if (w->ase_buf && n < (size_t)f.size) snprintf(why, sizeof why, "the file is too big to draw here");
+        else if (w->ase_buf && ase_open(&w->ase, w->ase_buf, n, why, sizeof why) == 0) w->has_ase = 1;
+        if (w->has_ase && ase_show_frame(w, 0, why, sizeof why) == 0) { content = w->ntabs; viewer_add(w, TAB_PICTURE, "Picture"); }
+        else {
+            if (w->has_ase) { ase_free(&w->ase); w->has_ase = 0; }
+            free(w->ase_buf);
+            w->ase_buf = NULL;
+            info_add(&info, "Picture", "not shown: %s", why[0] ? why : "the file could not be read");
+        }
+    } else if (is_picture_kind(k)) {
         size_t n;
         uint8_t *b = ff_load(&f, 0, FF_MAX_LOAD, &n);
         FImage full;
@@ -1609,6 +1643,10 @@ static void app_action(App *a, int action) {
             list_move(w, action);
             break;
         }
+        if (w->tab[w->cur].kind == TAB_PICTURE && w->has_ase && w->ase.nframes > 1 && (action == R3_LEFT || action == R3_RIGHT)) {
+            if (ase_show_frame(w, (w->frame + (action == R3_RIGHT ? 1 : w->ase.nframes - 1)) % w->ase.nframes, err, sizeof err) != 0) say(a, R3_ST_ERROR, "%s", err);
+            break;
+        }
         if (action == R3_LEFT || action == R3_Y) viewer_show(w, (w->cur + w->ntabs - 1) % w->ntabs, err, sizeof err);
         else if (action == R3_RIGHT || action == R3_X) viewer_show(w, (w->cur + 1) % w->ntabs, err, sizeof err);
         else if (action == R3_UP || action == R3_PAGEUP) set_page(w, page_of(w) - 1);
@@ -1783,7 +1821,10 @@ static void app_compose(const App *a, R3Screen *s) {
         }
         char sz[16];
         fmt_size((unsigned long long)w->filesize, sz, sizeof sz);
-        if (t->kind == TAB_PICTURE)
+        if (t->kind == TAB_PICTURE && w->has_ase)
+            snprintf(left, sizeof left, "%dx%d, frame %d/%d, %u ms%s", w->pic_w, w->pic_h, w->frame + 1, w->ase.nframes, (unsigned)w->ase.dur[w->frame],
+                     w->ase.n_tile + w->ase.n_blend + w->ase.n_group ? ", some layers not drawn" : "");
+        else if (t->kind == TAB_PICTURE)
             snprintf(left, sizeof left, "%s, %dx%d%s", w->type.label, w->pic_w, w->pic_h,
                      w->pic.w > w->pic_w ? " (enlarged)" : w->pic.w < w->pic_w ? " (made smaller)" : "");
         else if (t->kind == TAB_PLAY) {
@@ -1795,6 +1836,7 @@ static void app_compose(const App *a, R3Screen *s) {
         else snprintf(left, sizeof left, "%s, %s bytes", w->type.label, sz);
         static char reply[160];
         if (t->kind == TAB_PLAY) snprintf(reply, sizeof reply, "%s", w->pl.note[0] ? w->pl.note : w->pl.ended ? "A play again  Left/Right tab  B close" : "A pause or play  Left/Right tab  B close");
+        else if (t->kind == TAB_PICTURE && w->has_ase && w->ase.nframes > 1) snprintf(reply, sizeof reply, "%s  Left/Right frame  X/Y tab", tabs);
         else if (t->kind != TAB_LINES) snprintf(reply, sizeof reply, "%s  Left/Right tab", tabs);
         else if (w->has_arc && w->cur == w->arc_tab) snprintf(reply, sizeof reply, "Up/Down pick  A open  Start extract  B %s", a->vdepth ? "back" : "close");
         else snprintf(reply, sizeof reply, "%s", t->v.truncated ? "Only the first part is shown" : a->vdepth ? "Left/Right tab  Up/Down page  B back" : "Left/Right tab  Up/Down page  B close");
@@ -2400,6 +2442,8 @@ static char g_fxdir[PATH_MAX];
 static const Fixture *fx_find(const char *id) {
     for (size_t i = 0; i < sizeof FIXTURES / sizeof FIXTURES[0]; i++)
         if (!strcmp(FIXTURES[i].id, id)) return &FIXTURES[i];
+    for (size_t i = 0; i < sizeof ASE_FIXTURES / sizeof ASE_FIXTURES[0]; i++)
+        if (!strcmp(ASE_FIXTURES[i].id, id)) return &ASE_FIXTURES[i];
     return NULL;
 }
 
@@ -2471,6 +2515,7 @@ static void test_formats(const char *root) {
         {"pcx", K_PCX}, {"ppm", K_PNM}, {"ico", K_ICO}, {"qoi", K_QOI}, {"wav", K_WAV}, {"midi", K_MIDI}, {"mod", K_MOD}, {"mp3", K_MP3},
         {"flac", K_FLAC}, {"docx", K_OOXML}, {"targz", K_GZIP}, {"gz", K_GZIP}, {"tarxz", K_XZ}, {"xz", K_XZ}, {"tarzst", K_ZSTD}, {"zst", K_ZSTD}, {"deb_xz", K_DEB}, {"deb_zst", K_DEB}, {"sqlite", K_SQLITE}, {"pdf", K_PDF}, {"rtf", K_RTF},
         {"html", K_HTML}, {"mbr", K_DISK}, {"ansi", K_ANSI}, {"xbin", K_XBIN},
+        {"ase_rgba", K_ASE}, {"ase_gray", K_ASE}, {"ase_idx", K_ASE}, {"ase_oldpal", K_ASE},
     };
     for (size_t i = 0; i < sizeof kinds / sizeof kinds[0]; i++) {
         FType t = fx_type(kinds[i].id);
@@ -2500,6 +2545,14 @@ static void test_formats(const char *root) {
     CHECK(fx_info("html", "Title", "Page title"), "HTML title");
     CHECK(fx_info("mbr", "Partition 1", "FAT32") && fx_info("mbr", "Partition 1", "R36S CARD") && fx_info("mbr", "Partition 1", "boot"), "MBR partition and label");
     CHECK(fx_info("xbin", "Characters", "3 x 1"), "XBin size");
+    CHECK(fx_info("ase_rgba", "Dimensions", "8 x 6") && fx_info("ase_rgba", "Colour", "RGBA, 32 bits") && fx_info("ase_rgba", "Frames", "3, 450 ms") && fx_info("ase_rgba", "Durations", "100, 200, 150 ms"), "Aseprite: size, colour, frames and durations");
+    CHECK(fx_info("ase_rgba", "Layers", "8") && fx_info("ase_rgba", "Layer 1", "Background") && fx_info("ase_rgba", "Layer 3", "Hidden (hidden)") && fx_info("ase_rgba", "Layer 4", "Fx (group) (hidden)") &&
+          fx_info("ase_rgba", "Layer 5", "InFx (hidden)") && fx_info("ase_rgba", "Layer 8", "Tiles (tilemap)"), "Aseprite: layers, groups, hidden and tilemap");
+    CHECK(fx_info("ase_rgba", "Tag 1", "walk, frames 1-2, forward") && fx_info("ase_rgba", "Tag 2", "back, frames 2-3, ping-pong"), "Aseprite: tags");
+    CHECK(fx_info("ase_rgba", "Not drawn", "1 tilemap layer") && fx_info("ase_rgba", "Not drawn", "1 layer with a hue"), "Aseprite: what is not drawn is said");
+    CHECK(fx_info("ase_gray", "Colour", "grayscale, 16 bits") && fx_info("ase_gray", "Dimensions", "4 x 4"), "Aseprite: grayscale");
+    CHECK(fx_info("ase_idx", "Colour", "indexed, 8 bits") && fx_info("ase_idx", "Palette", "4 colours") && fx_info("ase_idx", "Transparent index", "0"), "Aseprite: indexed, palette and transparent index");
+    CHECK(fx_info("ase_oldpal", "Palette", "3 colours") && fx_info("ase_oldpal", "Transparent index", "255"), "Aseprite: the old palette chunk");
 
     /* Content */
     CHECK(fx_content("docx", "Hello from a docx") && fx_content("docx", "Second & last"), "docx text");
@@ -2550,6 +2603,61 @@ static void test_formats(const char *root) {
         unsigned char zbuf[64];
         static const unsigned char bad[] = {0x78, 0x9C, 0xFF, 0xFF, 0xFF};
         CHECK(fi_zlib(bad, sizeof bad, zbuf, sizeof zbuf, NULL) < 0, "damaged DEFLATE is refused");
+    }
+
+    /* Aseprite: every probed pixel of every frame against the plain composite make_ase.py wrote (to within 1 for rounding) */
+    for (size_t i = 0; i < sizeof ASE_PIXELS / sizeof ASE_PIXELS[0]; i++) {
+        const AsePixel *px = &ASE_PIXELS[i];
+        const Fixture *fx = fx_find(px->id);
+        Ase ase;
+        FImage im;
+        char err[160] = "";
+        CHECK(ase_open(&ase, fx->data, fx->len, err, sizeof err) == 0, "%s opens: %s", px->id, err);
+        if (ase.nframes == 0) continue;
+        CHECK(ase_render(&ase, px->frame, &im, err, sizeof err) == 0, "%s frame %d draws: %s", px->id, px->frame, err);
+        if (im.px) {
+            uint32_t c = im.px[(size_t)px->y * im.w + px->x];
+            int r = (int)(c >> 16 & 255), g = (int)(c >> 8 & 255), b = (int)(c & 255), al = (int)(c >> 24);
+            CHECK(abs(r - px->r) <= 1 && abs(g - px->g) <= 1 && abs(b - px->b) <= 1 && abs(al - px->a) <= 1,
+                  "%s frame %d at %d,%d is %d,%d,%d,%d; the plain composite says %d,%d,%d,%d", px->id, px->frame, px->x, px->y, r, g, b, al, px->r, px->g, px->b, px->a);
+        }
+        img_free(&im);
+        ase_free(&ase);
+    }
+    {
+        /* cut short at every length and with a byte damaged anywhere: an answer or an error, never a crash (tests/test_ase.sh repeats this under the sanitizers) */
+        static const char *ids[] = {"ase_rgba", "ase_gray", "ase_idx", "ase_oldpal"};
+        long opened = 0, tries = 0;
+        for (size_t k = 0; k < sizeof ids / sizeof ids[0]; k++) {
+            const Fixture *fx = fx_find(ids[k]);
+            uint8_t *copy = (uint8_t *)malloc(fx->len);
+            for (unsigned len = 0; len <= fx->len; len++) {
+                for (int dmg = 0; dmg < 2; dmg++) {
+                    memcpy(copy, fx->data, len);
+                    if (dmg && len > 0) copy[len - 1] ^= 0xFF;
+                    Ase ase;
+                    char err[96];
+                    tries++;
+                    if (ase_open(&ase, copy, len, err, sizeof err) == 0) {
+                        opened++;
+                        for (int fr = 0; fr < ase.nframes; fr++) {
+                            FImage im;
+                            if (ase_render(&ase, fr, &im, err, sizeof err) == 0) img_free(&im);
+                        }
+                        ase_free(&ase);
+                    }
+                }
+            }
+            free(copy);
+        }
+        CHECK(tries > 2000 && opened > 0 && opened < tries, "damaged and cut-short Aseprite files: %ld tries, %ld still open", tries, opened);
+        const Fixture *fx = fx_find("ase_rgba");
+        uint8_t small[128];
+        memcpy(small, fx->data, 128);
+        Ase ase;
+        char err[96];
+        CHECK(ase_open(&ase, small, 128, err, sizeof err) != 0, "a header with no frame is refused");
+        CHECK(!ase_header_ok(fx->data, 100, fx->len) && ase_header_ok(fx->data, fx->len, fx->len), "the header check needs the whole 128 bytes");
     }
 
     /* art */
@@ -2798,6 +2906,57 @@ static void test_viewer_tabs(const char *root) {
         app_action(&a, R3_BACK);
     }
     unsetenv("R3I6NOS_FFMPEG");
+
+    /* an Aseprite sprite: opens on Picture, Left/Right step the frames (and wrap), X/Y change the tab */
+    CHECK(start_viewer(&a, fx_path("ase_rgba"), 0, 0) == 0 && viewer_tab(&a.view)->kind == TAB_PICTURE && a.view.ntabs == 3 && a.view.has_ase && !strcmp(a.view.tab[0].name, "Info"), "an Aseprite sprite opens on Picture (Info, Picture, Hex)");
+    {
+        int k = a.view.pic.w / 8;
+        CHECK(a.view.frame == 0 && a.view.pic_w == 8 && a.view.pic_h == 6 && k >= 1, "frame 1 of 3, 8x6, drawn %d times as big", k);
+        #define CELL(cx, cy) a.view.pic.px[(size_t)((cy) * k + k / 2) * a.view.pic.w + (size_t)((cx) * k + k / 2)]
+        CHECK(CELL(0, 0) == 0xFF000064u && CELL(2, 1) == 0xFFFF0000u, "frame 1: the background and the red art cel (%08x %08x)", CELL(0, 0), CELL(2, 1));
+        app_compose(&a, &s);
+        CHECK(dump_has(&s, "frame 1/3") && dump_has(&s, "100 ms") && dump_has(&s, "some layers not drawn") && dump_has(&s, "Left/Right frame"), "the foot says the frame, its time and the keys");
+        shot(&a, &s, "12-view-aseprite");
+        app_action(&a, R3_RIGHT);
+        CHECK(a.view.frame == 1 && viewer_tab(&a.view)->kind == TAB_PICTURE && CELL(0, 0) == 0xFF000064u && CELL(3, 2) != CELL(0, 0), "Right: frame 2 (the tab does not change)");
+        app_compose(&a, &s);
+        CHECK(dump_has(&s, "frame 2/3") && dump_has(&s, "200 ms"), "frame 2's time");
+        app_action(&a, R3_RIGHT);
+        CHECK(a.view.frame == 2 && CELL(4, 3) == 0xFFFF0000u, "Right: frame 3 (a linked cel at its own offset)");
+        app_action(&a, R3_RIGHT);
+        CHECK(a.view.frame == 0, "Right after the last frame wraps to the first");
+        app_action(&a, R3_LEFT);
+        CHECK(a.view.frame == 2, "Left from the first frame goes to the last");
+        #undef CELL
+        app_action(&a, R3_Y);
+        CHECK(a.view.cur == 0 && a.view.frame == 2, "Y goes to the Info tab, the frame stays");
+        app_compose(&a, &s);
+        CHECK(dump_has(&s, "Tint") && dump_has(&s, "walk") && dump_has(&s, "Page 1/2"), "Info lists the layers and tags");
+        shot(&a, &s, "13-view-aseprite-info");
+        app_action(&a, R3_DOWN);
+        app_compose(&a, &s);
+        CHECK(dump_has(&s, "Not drawn") && dump_has(&s, "tilemap layer") && dump_has(&s, "Page 2/2"), "page 2 of Info says what is not drawn");
+        app_action(&a, R3_BACK);
+    }
+    CHECK(start_viewer(&a, fx_path("ase_gray"), 0, 0) == 0 && viewer_tab(&a.view)->kind == TAB_PICTURE, "a one-frame sprite opens on Picture");
+    app_action(&a, R3_RIGHT);
+    CHECK(a.view.cur == 2 && a.view.frame == 0, "with one frame, Right changes the tab");
+    app_compose(&a, &s);
+    app_action(&a, R3_BACK);
+    {
+        /* too many pixels or a damaged cel: the sprite opens on Info and says why */
+        const Fixture *fx = fx_find("ase_gray");
+        char big[PATH_MAX];
+        unsigned char cut[230];
+        memcpy(cut, fx->data, fx->len < sizeof cut ? fx->len : sizeof cut);
+        cut[8] = 0xFF; cut[9] = 0xFF; cut[10] = 0xFF; cut[11] = 0xFF;      /* a 65535 x 65535 canvas */
+        path_join(big, sizeof big, g_fxdir, "huge.ase");
+        write_file(big, (const char *)cut, fx->len);
+        CHECK(start_viewer(&a, big, 0, 0) == 0 && viewer_tab(&a.view)->kind != TAB_PICTURE, "a canvas too big to draw opens on Info");
+        app_compose(&a, &s);
+        CHECK(dump_has(&s, "too big"), "Info says it is too big");
+        app_action(&a, R3_BACK);
+    }
 
     CHECK(viewer_open(&a.view, "/nonexistent/file", err, sizeof err) != 0 && strstr(err, "file"), "a missing file is an error");
     free(px);

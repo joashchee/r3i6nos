@@ -328,6 +328,56 @@ static void info_psd(const FFile *f, FInfo *in) {
     info_add(in, "Version", "%s", rd16be(h + 4) == 2 ? "large document (PSB)" : "1");
 }
 
+/* Aseprite: the header, then the layers, tags and palette from the chunks (ase.h reads the whole file, as the Picture tab will). */
+static void info_ase(const FFile *f, FInfo *in) {
+    size_t n;
+    uint8_t *b = ff_load(f, 0, FF_MAX_LOAD, &n);
+    Ase a;
+    char why[96];
+    if (!b) return;
+    if (ase_open(&a, b, n, why, sizeof why) != 0) { info_add(in, "Sprite", "not read: %s", why); free(b); return; }
+    info_dims(in, a.w, a.h);
+    info_add(in, "Colour", "%s, %d bits", a.depth == 32 ? "RGBA" : a.depth == 16 ? "grayscale" : "indexed", a.depth);
+    unsigned total = 0;
+    for (int i = 0; i < a.nframes; i++) total += a.dur[i];
+    info_add(in, "Frames", "%d, %u ms in all%s", a.nframes, total, a.cut ? " (the file is cut short)" : "");
+    if (a.nframes > 1) {
+        char d[200];
+        size_t k = 0;
+        d[0] = 0;
+        for (int i = 0; i < a.nframes && k + 12 < sizeof d; i++) k += (size_t)snprintf(d + k, sizeof d - k, "%s%u", i ? ", " : "", (unsigned)a.dur[i]);
+        info_add(in, "Durations", "%s%s ms", d, k + 12 >= sizeof d ? ", ..." : "");
+    }
+    info_add(in, "Layers", "%d", a.nlayer);
+    for (int i = 0; i < a.nlayer && i < 12; i++) {
+        char k[28];
+        snprintf(k, sizeof k, "Layer %d", i + 1);
+        info_add(in, k, "%s%s%s", a.layer[i].name[0] ? a.layer[i].name : "(no name)", a.layer[i].type == 1 ? " (group)" : a.layer[i].type == 2 ? " (tilemap)" : "",
+                 a.layer[i].visible ? "" : " (hidden)");
+    }
+    if (a.nlayer > 12) info_add(in, "More layers", "%d more, not listed", a.nlayer - 12);
+    static const char *dirs[] = {"forward", "reverse", "ping-pong", "ping-pong reverse"};
+    for (int i = 0; i < a.ntag && i < 8; i++) {
+        char k[28];
+        snprintf(k, sizeof k, "Tag %d", i + 1);
+        info_add(in, k, "%s, frames %d-%d, %s", a.tag[i].name[0] ? a.tag[i].name : "(no name)", a.tag[i].from + 1, a.tag[i].to + 1, a.tag[i].dir < 4 ? dirs[a.tag[i].dir] : "?");
+    }
+    if (a.ntag > 8) info_add(in, "More tags", "%d more, not listed", a.ntag - 8);
+    if (a.depth == 8) {
+        info_add(in, "Palette", "%d colours", a.pal_count);
+        info_add(in, "Transparent index", "%d", a.transp);
+    }
+    char skip[200];
+    size_t k = 0;
+    skip[0] = 0;
+    if (a.n_tile) k += (size_t)snprintf(skip + k, sizeof skip - k, "%d tilemap layer%s", a.n_tile, a.n_tile == 1 ? "" : "s");
+    if (a.n_blend) k += (size_t)snprintf(skip + k, sizeof skip - k, "%s%d layer%s with a hue, saturation, colour or luminosity blend", k ? "; " : "", a.n_blend, a.n_blend == 1 ? "" : "s");
+    if (a.n_group && k < sizeof skip) snprintf(skip + k, sizeof skip - k, "%sgroup opacity or blend mode (%d group%s)", k ? "; " : "", a.n_group, a.n_group == 1 ? "" : "s");
+    if (skip[0]) info_add(in, "Not drawn", "%s", skip);
+    ase_free(&a);
+    free(b);
+}
+
 static void info_svg(const FFile *f, FInfo *in) {
     char buf[FF_HEAD + 1];
     memcpy(buf, f->head, f->hn);
@@ -1180,6 +1230,7 @@ static int info_media(const FFile *f, int kind, FInfo *in) {
     case K_HEIF: info_heif(f, in); return 1;
     case K_PSD: info_psd(f, in); return 1;
     case K_SVG: info_svg(f, in); return 1;
+    case K_ASE: info_ase(f, in); return 1;
     case K_TGA: case K_QOI: case K_PCX: case K_PNM: case K_TIFF: info_simple_images(f, kind, in); return 1;
     case K_WAV: info_wav(f, in); return 1;
     case K_AIFF: info_aiff(f, in); return 1;

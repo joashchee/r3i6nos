@@ -76,7 +76,7 @@ class Corpus(unittest.TestCase):
         by_folder = {
             "audio": (".wav", ".aiff", ".flac", ".mp3", ".ogg", ".opus", ".wv", ".m4a", ".wma"),
             "video": (".mp4", ".mov", ".avi", ".mkv", ".webm", ".flv", ".wmv", ".mpg", ".ts", ".ogv", ".3gp", ".r3f", ".wav"),
-            "images": (".png", ".jpg", ".gif", ".bmp", ".ico", ".tga", ".pcx", ".ppm", ".pgm", ".pbm", ".pnm", ".tiff", ".webp", ".qoi", ".psd", ".heic", ".avif", ".svg"),
+            "images": (".png", ".jpg", ".gif", ".bmp", ".ico", ".tga", ".pcx", ".ppm", ".pgm", ".pbm", ".pnm", ".tiff", ".webp", ".qoi", ".aseprite", ".psd", ".heic", ".avif", ".svg"),
         }
         for folder, exts in by_folder.items():
             for p in (FILES / folder).rglob("*"):

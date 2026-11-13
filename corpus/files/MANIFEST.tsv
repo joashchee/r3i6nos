@@ -112,6 +112,7 @@ images/photo.webp	164	WebP image (lossless (drawn through ffmpeg))	Commander	scr
 images/pic.qoi	42	QOI image (2 x 2 RGBA)	Commander	scripts/corpus_formats.py	QOI image
 images/progressive.jpg	819	JPEG image (progressive (drawn through ffmpeg))	Commander	scripts/corpus_formats.py	JPEG image
 images/rle.tga	6220	Targa image (32-bit RLE)	Commander	scripts/corpus_formats.py	Targa image
+images/sprite.aseprite	2847	Aseprite sprite (48 x 32 RGBA, 4 frames, 4 layers, a tag)	Commander	scripts/corpus_formats.py	Aseprite sprite
 images/stub.avif	24	AVIF image (the ftyp box only: not a picture)	Commander	scripts/corpus_formats.py	AVIF image
 images/stub.heic	24	HEIC/HEIF image (the ftyp box only: not a picture)	Commander	scripts/corpus_formats.py	HEIC/HEIF image
 images/truecolour.bmp	4662	BMP image (24-bit)	Commander	scripts/corpus_formats.py	BMP image

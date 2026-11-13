@@ -31,9 +31,9 @@ The brief is the maintainer's (2026-11-10). What it left open was decided as bel
    second pass kept, so the reverb and notes ringing past the end are already sounding at the start.
 9. **Open: the release terms.** `r36s/package/copyright` carries Neumetik's grant (free on the R36S, unmodified; the music
    made is the composer's) marked **DRAFT**; `TINYNTT_RELEASE=1` refuses to build until the maintainer confirms it.
-10. **Open: Select and Start.** The brief makes Select rewind and Start play, and every r3i6nos app leaves on Select + Start.
-    Both hold: pressing the second while the first is down does nothing but start a one-second count, after which the app
-    leaves. The first button pressed still acts (a rewind, or a play that goes on for that second).
+10. **Decided (2026-11-13, maintainer): Select and Start do not leave.** The brief makes Select rewind and Start play, and each
+    acts alone. TinyNTT has a Quit item in Files, so it needs no Select + Start chord to leave (the TinyNTT repo has worked this
+    way since 2026-11-10). Only a running Rec demo reads Select + Start held together, to cancel it (rule 11).
 11. **Open: a GitHub workflow.** None was added; the package is built locally.
 
 ## 1. Shape
@@ -84,7 +84,7 @@ two-buffer guess puts recorded notes where they were meant.
 | Start | play / stop. Armed: a bar of count-in first (the bar before the playhead's, or the click alone at bar 1), then record |
 | Select | back to bar 1 |
 | Fn (raw 16) | Tracks: arm or disarm; while playing, punch-in, then punch-out, then clear. Instruments: the keyboard on / off |
-| Select + Start, a second | leave (unsaved work is kept for the next start) |
+| Files > Quit | leave (unsaved work is kept for the next start); Select + Start do not leave |
 | Volume keys | the volume (keyboard keys on this unit, not yet seen as events) |
 
 | | Song | Instruments | Tracks | Tracks, Draw |
@@ -136,7 +136,7 @@ Neumetik", and nothing changes.
 - **`tinyntt --selftest [--shots DIR]`:** every panel through the pad's buttons with no sound device (the engine rendered by
   hand, so time is exact): typing a name, lists, the carousel both ways, previews, the keyboard, Fill, Clear, Undo, drawing,
   moving a note by its middle, end and start, deleting, a recorded take and an overdub, punch markers, save, `.bak`, the three
-  exports, the library, the foreign-file warning, **a simulated crash and its recovery**, the report, Select + Start.
+  exports, the library, the foreign-file warning, **a simulated crash and its recovery**, the report, Select and Start each acting alone.
 - **`r36s/build-deb.sh --clean-room`:** section 8.
 - **Not testable here:** the engine's speed and the callback's load on the unit, latency felt, the sticks' directions and Fn
   as events, the roll on the panel.
@@ -154,7 +154,7 @@ songs (goals 2x real time and 99% of buffers in half their time) and the WAV exp
 1. **Built** (2026-11-10): the library, the host, the package, the self-test, the report. `r36s/build-deb.sh --clean-room` built `TinyNTT.deb` (3.4 MB; needs SDL2, libc, libm, libgcc_s; newest glibc symbol 2.34) in Debian 12 arm64, its self-test passed there, `deb_watcher.py` installed it in a clean Debian 12 and the launcher ran it, and a device report there had 21 PASS and 2 FAIL (both for no pad under Docker). Those figures are a Mac's under Docker, not the unit's: 79x to 148x real time with up to 19 voices, every 256-frame buffer in under 5% of its time, a save in 43 ms, peak memory 14 MB. The Linux run found a bug the Mac did not (reopening the last song at start copied a path onto itself; fixed).
 2. **On the unit:** `TinyNTT.deb` to `native_deb/` (`flash-macos.sh` does it), Files > Device report, bring the report back;
    then make a loop: the sticks, Fn, the note buttons' feel, whether takes land on the beat, the roll on the panel.
-3. **The open decisions** (section 0): the release terms, Select and Start, a workflow.
+3. **The open decisions** (section 0): the release terms and a workflow (Select and Start: decided, section 0).
 4. **Later:** velocity per note and swing; copy, paste and transpose of bars; more styles; Ogg or FLAC export; opening its
    songs from Neumetik's player on the unit; other platforms (the brief: R36S first).
 
