@@ -44,6 +44,7 @@ CARDS_STATE = Path(ENV("R3I6NOS_CARDS_STATE", "/run/r3i6nos/cards"))   # r3i6nos
 RUN = Path(ENV("R3I6NOS_HOTPLUG_DIR", "/run/r3i6nos-hotplug"))   # root writes, everyone reads (loveos.service owns /run/loveos)
 KMSG = ENV("R3I6NOS_KMSG", "/dev/kmsg")
 SOUND = ENV("R3I6NOS_SOUND", "/usr/local/bin/r3i6nos-sound")
+BATTERY_EVERY = 10.0   # seconds between battery reads: the gauge is read over I2C (a wake-up each file) and its thresholds are 15%, 5% and full
 QUICK = 0.25   # the re-look while a change or a volume press is pending
 POLL = float(ENV("R3I6NOS_HOTPLUG_POLL", "1.0"))
 VOLUME_FILE = Path(ENV("R3I6NOS_VOLUME_FILE", "/run/r3i6nos/volume"))   # r3i6nos-sound writes "<count> <percent>" after each volume key
@@ -130,6 +131,16 @@ def usb_devices():
     return out
 
 
+SUPPLY_TYPE = {}   # supply name -> its type: fixed for the life of the supply, so read once (each read of a charger or gauge file can wait on the I2C bus: a wake-up)
+
+
+def supply_type(base, name):
+    kind = SUPPLY_TYPE.get(name)
+    if kind is None:
+        kind = SUPPLY_TYPE[name] = read(base / name / "type")
+    return kind
+
+
 def power_supplies():
     """{name: label} of the supplies that are plugged in: DC port (Mains) and USB power, never the battery."""
     out = {}
@@ -139,7 +150,7 @@ def power_supplies():
     except OSError:
         return out
     for name in names:
-        kind = read(base / name / "type")
+        kind = supply_type(base, name)
         if kind == "Battery" or read(base / name / "online") != "1":
             continue
         out[name] = "DC power" if kind == "Mains" else "USB power"
@@ -184,7 +195,7 @@ def battery():
     except OSError:
         return None
     for name in names:
-        if read(base / name / "type") == "Battery":
+        if supply_type(base, name) == "Battery":
             cap = read(base / name / "capacity")
             if cap.isdigit():
                 return int(cap), read(base / name / "status")
@@ -390,7 +401,7 @@ def watch(rounds=None, sound=None, devices=None, events=None, kmsg=None):
     shown = snapshot(sound, devices)     # what is plugged in at start is not announced
     batt = BatteryWatch(battery())
     vol = VolumeWatch()
-    candidate, last_error, audio_since = None, None, {}
+    candidate, last_error, audio_since, batt_at = None, None, {}, time.monotonic()   # the battery was just read, for BatteryWatch
     log("watching: " + ", ".join(k for k, v in (("jack", bool(devices)), ("USB", True), ("power", True), ("kernel log", kmsg.fd is not None)) if v))
     while rounds is None or rounds > 0:
         if rounds is not None:
@@ -420,8 +431,10 @@ def watch(rounds=None, sound=None, devices=None, events=None, kmsg=None):
                 del audio_since[name]
         for level, text in vol.look(t):
             events.add(level, text)
-        for level, text in batt.look(battery()):
-            events.add(level, text)
+        if t - batt_at >= BATTERY_EVERY:
+            batt_at = t
+            for level, text in batt.look(battery()):
+                events.add(level, text)
         msg = kmsg.failure()
         if msg and (last_error is None or t - last_error >= ERROR_GAP):
             last_error = t

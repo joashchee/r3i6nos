@@ -98,6 +98,8 @@ daemon differ. The daemon's cost is the difference less the noise.
 | periodic jobs together | at most 0.05% of a core averaged |
 | hot-plug daemon draw | at most 20 mW beyond the noise |
 
+**Third run (2026-11-12, build e1d106c, 68% charge, nothing on the OTG port): 15 PASS, 1 FAIL.** Daemon 0.80% CPU (PASS), jobs 0.0425% (PASS), idle draw 1304 mW (6.7 h left), menu 13.6% on the report's wait screen (not the bare idle menu). **FAIL: daemon wake-ups 4.1/s (goal 4.0):** the 1 s poll should give about 1, and halving the poll (0.5 s to 1 s) only took it from 5.1 to 4.1, so about 3 a second come from something else; **Fix written, not measured:** each supply's `type` is read once and the battery every 10 s instead of every poll (I2C-backed files can sleep); a re-run says if it was the cause.
+
 The goals are first guesses, set before any measurement; change them from what the unit says. The menu's CPU has no goal yet (INFO): there is no baseline.
 
 ## Reading a report, and what to do about a FAIL

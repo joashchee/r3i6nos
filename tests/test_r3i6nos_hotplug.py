@@ -48,6 +48,7 @@ class Hotplug(unittest.TestCase):
         self.env = {"R3I6NOS_SYS": str(self.sys), "R3I6NOS_HOTPLUG_DIR": str(t / "run"), "R3I6NOS_KMSG": str(self.kmsg), "R3I6NOS_HOTPLUG_POLL": "0", "R3I6NOS_PROC": str(t / "proc"), "R3I6NOS_CARDS_STATE": str(t / "cards-state"), "R3I6NOS_VOLUME_FILE": str(t / "volume")}
         (t / "cards-state").write_text("BOOT_DISK=mmcblk0\n")
         self.mod = load(self.env)
+        self.mod.BATTERY_EVERY = 0      # a test steps the daemon faster than real time: read the battery at every look
         self.sound = FakeSound()
         self.events = self.mod.Events(t / "run/events")
         self.battery("Battery", "Discharging")
@@ -219,6 +220,23 @@ class Hotplug(unittest.TestCase):
             ("info", "Battery low: 14%"),
             ("info", "Battery low: 15%"),
         ])
+
+    def test_the_battery_and_each_supply_type_are_read_rarely(self):
+        """The gauge and charger are I2C: each file read can sleep, a wake-up. Types are read once, the battery every BATTERY_EVERY seconds."""
+        self.mod.BATTERY_EVERY = 10.0
+        self.mod.SUPPLY_TYPE.clear()
+        self.charge(60)
+        reads = []
+        real = self.mod.read
+
+        def counting(path, default=""):
+            reads.append(Path(path).name)
+            return real(path, default)
+        with mock.patch.object(self.mod, "read", side_effect=counting):
+            self.run_script([lambda: None] * 20)
+        self.assertEqual(reads.count("type"), 2)        # Battery and rk817-ac, once each for all 21 looks
+        self.assertEqual(reads.count("capacity"), 1)    # 21 looks in well under 10 s: only the start-up read
+        self.assertEqual(reads.count("online"), 22)     # the start-up snapshot and 21 looks: the DC port is still looked at every poll
 
     def test_a_battery_that_starts_low_is_not_announced(self):
         self.charge(12)
