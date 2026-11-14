@@ -1,7 +1,8 @@
 # Screen mirror: the R36S's screen on a computer, a monitor or a TV
 
-Status (2026-11-13): **designed, and the questions it depends on are now a report section. Nothing of the mirror itself is built, and nothing here has run on a
-unit.** Plan and order: ROADMAP section 28.
+Status (2026-11-14): **the mirror itself is built and tested on a laptop: the daemon, the page, the tap in both themes and Settings > Screen mirror. It
+has not run on a unit, and no link to a computer exists yet: the USB gadget (the unit as a network card) waits for the unit's answers below; a USB Ethernet
+adapter or a Wi-Fi dongle, set up in Settings > Network, is the link to use today (untested).** Plan and order: ROADMAP section 28.
 
 The goal: show what the unit shows on a bigger screen (a demo, a stream, a TV), **without making the unit work harder for it**. The unit is a battery
 device (CLAUDE.md rule 14); an idle screen must cost an idle mirror.
@@ -18,6 +19,32 @@ device (CLAUDE.md rule 14); an idle screen must cost an idle mirror.
 4. **Wi-Fi is allowed as a link** (a dongle was tested working on the unit, 2026-11-13): Settings > Network already joins a network when a person
    chooses. The mirror is the same kind of act: a person starts it, it is off at reboot, nothing connects by itself (rule 6). The wired links come first
    because they cost less than a radio and need no network at all.
+
+## What is built (2026-11-14)
+
+| Piece | Where | Tests |
+|---|---|---|
+| The daemon `r3i6nos-mirror` (`start`, `serve`, `stop`, `status`, `list`) | `overlay/usr/local/bin/r3i6nos-mirror` | `tests/test_r3i6nos_mirror.py` (a real daemon on loopback, a UDP socket for an app, a plain socket for a page) |
+| The page: a canvas painted from the cells with the VGA font embedded | `overlay/usr/share/r3i6nos/mirror/page.html`, made by `scripts/build_mirror_page.py` from `scripts/mirror_page.template.html` | the same file; `check.sh` fails when it is stale |
+| The tap, Lua and C | `theme/r3i6nos_mirror.lua` (in `T.draw`), `theme/r3i6nos_mirror.h` (in `r3_video_draw`) | `tests/test_mirror.lua`, `tests/test_mirror.c` (the same cases; a fuzz that every delta replays to the screen) |
+| Settings > Screen mirror (pick a link, the address, stop, instructions) | `menu/mirror.lua`, `menu/settings.lua` | `tests/test_mirror_menu.lua`, `tests/test_settings.lua` |
+
+**How an app learns a mirror is on, without polling (the open question 3, answered):** the daemon creates the flag file `/run/loveos/mirror/on` when it
+is listening and removes it when it stops. An app tests that file only when its screen has just changed (it was going to redraw anyway), and at most once
+a second, so a still screen does nothing and a moving one does one `stat` a second. When the flag appears the tap sends the whole screen first; a page
+that connects later is given the daemon's copy of the current screen. **The one gap:** a mirror started while the foreground app's screen stays still shows
+the daemon's last copy (blank on a fresh start) until that screen next changes; Settings > Screen mirror itself changes when it starts, so starting
+from the menu shows the menu, and an app launched after that sends its first screen whole.
+
+**The datagrams** (UDP to `127.0.0.1:36364`, `R3I6NOS_MIRROR_INGEST` moves it): `F` and 3072 bytes (cell i is byte 2i, a code page 437 index, and 2i+1, the
+attribute: foreground in the low nibble, background in the high one), or `D` and runs of (u16 big-endian start, u8 count, count x 2 bytes). A page gets the
+same as Server-Sent Events `full` and `delta`, base64. Local UDP, because LÖVE has luasocket but no Unix sockets, and a datagram to nobody costs nothing
+and can never block or kill an app (a pipe's SIGPIPE could). **Any local process can send cells**, so a game could write to a mirrored screen: the mirror is
+for showing what the unit shows, not for trusting; the page is read-only and the token and the chosen link are what keep others out.
+
+**What is not built:** the USB gadget link (below), a toast when the link comes up (ROADMAP section 19), pixel pages (Commander's picture viewer and
+video show as the text around them), power goals (rule 14: the states to measure are in "Power" below, none measured), and a sound stream. An app that
+does not draw through `T.draw` or `r3_video_draw` is not mirrored.
 
 ## The links, in the order to prefer them
 
@@ -95,6 +122,6 @@ without a mirror was about 2.96 W with a hub and peripherals on the port (ROADMA
 
 1. Is the OTG port able to be a device? (the report)
 2. Which Ethernet chips have drivers in the vendor kernel? (the report, with the adapter plugged in)
-3. How does an app learn a mirror is on, without polling and without a timer?
+3. ~~How does an app learn a mirror is on, without polling and without a timer?~~ Answered above: a flag file, tested when the screen has changed.
 4. Pixel pages: tiles, or only the cells around them?
 5. Audio: out of scope for the first version (the computer cannot hear the unit). A WAV or Opus stream over the same link is possible later.

@@ -422,6 +422,8 @@ static inline int r3_list_key(int sel, int n, int per, int action) {
     }
 }
 
+#include "r3i6nos_mirror.h" /* the screen mirror's tap (docs/SCREEN-MIRROR.md), called by r3_video_draw */
+
 /* ---- drawing to SDL ------------------------------------------------------------------------------------------------ */
 
 typedef struct {
@@ -477,6 +479,7 @@ static inline int r3_video_init(R3Video *v, SDL_Renderer *r) {
 static inline void r3_video_draw(R3Video *v, SDL_Renderer *r, const R3Screen *s, int force) {
     int changed = force || !v->have_prev || memcmp(&v->prev, s, sizeof *s) != 0;
     if (changed) {
+        r3_mirror_tap(s, v->have_prev ? &v->prev : NULL); /* a mirror, when one is on, gets the cells that changed */
         r3_render(s, v->px);
         SDL_UpdateTexture(v->tex, NULL, v->px, R3_W * (int)sizeof(uint32_t));
         v->prev = *s;

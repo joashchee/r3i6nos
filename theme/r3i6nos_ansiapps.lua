@@ -9,6 +9,8 @@
 -- and are turned into code page 437 (an unknown character shows as "?").
 
 local font = require("vga8x16")
+local okMirror, mirror = pcall(require, "r3i6nos_mirror") -- an image's theme folder may predate it
+if not okMirror then mirror = nil end
 
 local T = {}
 
@@ -428,6 +430,7 @@ end
 function T.draw(scr)
   if not same(scr, gfx.prev) then
     render(scr)
+    if mirror then mirror.tap(scr, gfx.prev) end -- a mirror, when one is on, gets the cells that changed (docs/SCREEN-MIRROR.md)
     gfx.prev = gfx.prev or { ch = {}, fg = {}, bg = {} }
     for i = 1, T.COLS * T.ROWS do gfx.prev.ch[i], gfx.prev.fg[i], gfx.prev.bg[i] = scr.ch[i], scr.fg[i], scr.bg[i] end
   end

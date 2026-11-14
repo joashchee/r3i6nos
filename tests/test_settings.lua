@@ -41,7 +41,7 @@ end
 local s = new()
 eq(title(s), "Settings"); eq(settings.node(s).items[1].label, "Network"); eq(settings.node(s).items[2].label, "SSH")
 eq(settings.node(s).items[3].label, "Battery"); eq(settings.node(s).items[4].label, "Sound mixer"); eq(settings.node(s).items[5].label, "Date and time")
-eq(settings.node(s).items[6].label, "Device reports"); eq(settings.node(s).items[7].label, "Rec demos"); eq(settings.node(s).items[8].label, "About"); eq(settings.node(s).items[9].label, "Shutdown")
+eq(settings.node(s).items[6].label, "Device reports"); eq(settings.node(s).items[7].label, "Rec demos"); eq(settings.node(s).items[8].label, "Screen mirror"); eq(settings.node(s).items[9].label, "About"); eq(settings.node(s).items[10].label, "Shutdown")
 choose(s, "Shutdown")
 eq(kind(s), "confirm"); eq(settings.node(s).sel, 2, "the confirmation starts on No")
 assert(settings.press(s, "accept") == nil and kind(s) == "menu", "accepting the default (No) must not power off")
@@ -377,4 +377,40 @@ do
   choose(d, "Rec demos"); eq(settings.node(d).items[1].label, "None installed")
   choose(d, "None installed"); eq(settings.node(d).pages[1][1], "none")
   print("settings rec demos: ok")
+end
+
+-- ---- Screen mirror: a link picked, the address shown, stopped (menu/mirror.lua has the daemon's side; the daemon has its own tests)
+do
+  local calls, st, links = {}, { running = false }, { { name = "eth0", addr = "192.168.1.50", kind = "wired" } }
+  local fakemr = { ABOUT = {}, INSTRUCTIONS = { { "help" } }, NO_LINK = { "no link" } }
+  function fakemr.status() return st end
+  function fakemr.interfaces() return links end
+  function fakemr.start(name)
+    calls[#calls + 1] = "start " .. name
+    if fakemr.fail then return false, "port in use" end
+    st = { running = true, url = "http://192.168.1.50:36363/abcd1234/", iface = name, address = "192.168.1.50", viewers = 0 }
+    return true, st.url
+  end
+  function fakemr.stop() calls[#calls + 1] = "stop"; st = { running = false }; return true end
+  function fakemr.addressLines(x) return { "open " .. x.url } end
+  local d = settings.new(fake(), nil, nil, nil, nil, nil, nil, fakemr); settings.open(d)
+  choose(d, "Screen mirror")
+  eq(title(d), "Screen mirror"); eq(settings.node(d).items[1].label, "Mirror on eth0"); eq(settings.node(d).items[1].value, "192.168.1.50")
+  fakemr.fail = true; choose(d, "Mirror on eth0")
+  assert(settings.node(d).bad, "a start that fails says so"); eq(settings.node(d).pages[1][2], "port in use")
+  settings.press(d, "back"); eq(title(d), "Screen mirror"); eq(settings.node(d).items[1].label, "Mirror on eth0", "still not running")
+  fakemr.fail = false; choose(d, "Mirror on eth0")
+  eq(calls[#calls], "start eth0"); eq(kind(d), "pages"); eq(settings.node(d).pages[1][1], "open http://192.168.1.50:36363/abcd1234/")
+  settings.press(d, "back"); eq(title(d), "Screen mirror")
+  eq(settings.node(d).items[1].label, "Address", "once it runs the menu offers the address and Stop, not the links")
+  eq(settings.node(d).items[2].label, "Stop mirroring")
+  choose(d, "Address"); eq(settings.node(d).pages[1][1], "open http://192.168.1.50:36363/abcd1234/")
+  settings.press(d, "back"); choose(d, "Stop mirroring")
+  eq(calls[#calls], "stop"); settings.press(d, "back"); eq(settings.node(d).items[1].label, "Mirror on eth0", "stopped: the links again")
+  choose(d, "Instructions"); eq(settings.node(d).pages[1][1], "help")
+  settings.press(d, "back"); settings.press(d, "back"); assert(settings.isOpen(d) and title(d) == "Settings")
+  links = {}
+  choose(d, "Screen mirror"); eq(settings.node(d).items[1].label, "No link is up")
+  choose(d, "No link is up"); assert(settings.node(d).bad); eq(settings.node(d).pages[1][1], "no link")
+  print("settings screen mirror: ok")
 end

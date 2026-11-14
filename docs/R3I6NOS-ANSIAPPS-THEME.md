@@ -100,3 +100,10 @@ loading step, and put any load error in `what`. There is no Lua version yet.
 - The IO Checker (`docs/IO-CHECKER.md`) is on the theme but for its video test patterns, which are pixels by necessity and say so.
 - Not run on a real R36S, or under LÖVE with a display: `theme.init` and `theme.draw` (the atlas, the canvas, the scaling) are only
   checked by reading them; the data side (font, mapping, layout, list logic, the menu's screen) is tested by luajit.
+
+## The screen mirror's tap
+
+`theme/r3i6nos_mirror.lua` (called by `T.draw`) and `theme/r3i6nos_mirror.h` (called by `r3_video_draw`) hand the cells that changed to the
+screen mirror (`docs/SCREEN-MIRROR.md`) when one is on. An app does nothing: the tap runs when a screen has changed and is about to be
+remembered as the previous one, and with no mirror it costs one test of a flag file, at most once a second. An app that draws its own screen
+without `T.draw` or `r3_video_draw` is not mirrored. The Lua module is optional (`pcall(require)`), so an image's theme folder that predates it still works.

@@ -2,7 +2,8 @@ r3i6nos: third-party material with its own licence
 
 The repository's own code is MIT (LICENSE). These parts are not:
 
-IBM VGA 8x16 font (theme/font/, theme/vga8x16.lua, theme/r3i6nos_vga8x16.h)
+IBM VGA 8x16 font (theme/font/, theme/vga8x16.lua, theme/r3i6nos_vga8x16.h, and the screen mirror's page,
+  overlay/usr/share/r3i6nos/mirror/page.html, which embeds it as base64 and carries the credit in its comment and footer)
   "WebPlus IBM VGA 8x16" from The Ultimate Oldschool PC Font Pack v2.2 by VileR,
   https://int10h.org/oldschool-pc-fonts/ , (c) 2016-2020 VileR.
   Licence: CC BY-SA 4.0, https://creativecommons.org/licenses/by-sa/4.0/ (theme/font/LICENSE.TXT).

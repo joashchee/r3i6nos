@@ -22,6 +22,9 @@ step "theme font up to date"
 if python3 -c "import PIL" 2>/dev/null; then python3 scripts/build_vga_font.py --check || fail=1
 else echo "NOT RUN: Pillow is not installed (the generated font files were not compared with the font)"; fi
 
+step "screen mirror page up to date (scripts/mirror_page.template.html and the font)"
+python3 -I scripts/build_mirror_page.py --check || fail=1
+
 step "boot logo BMP up to date (docs/brand/boot-logo.png)"
 python3 -I scripts/make_boot_logo.py --check || fail=1
 
@@ -38,6 +41,8 @@ if command -v luajit >/dev/null; then
     luajit tests/test_reports.lua || fail=1
     luajit tests/test_demos.lua || fail=1
     luajit tests/test_toast.lua || fail=1
+    luajit tests/test_mirror.lua || fail=1
+    luajit tests/test_mirror_menu.lua || fail=1
     luajit tests/test_redraw.lua || fail=1
     luajit tests/test_about.lua || fail=1
     luajit tests/test_net_menu.lua || fail=1
@@ -52,6 +57,8 @@ elif command -v lua >/dev/null; then
     lua tests/test_reports.lua || fail=1
     lua tests/test_demos.lua || fail=1
     lua tests/test_toast.lua || fail=1
+    lua tests/test_mirror.lua || fail=1
+    lua tests/test_mirror_menu.lua || fail=1
     lua tests/test_redraw.lua || fail=1
     lua tests/test_net_menu.lua || fail=1
     lua tests/test_theme.lua || fail=1
@@ -131,6 +138,16 @@ if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
         "$toast_bin" || fail=1
     else echo "FAIL: tests/test_toast.c does not compile"; fail=1; fi
     rm -f "$toast_bin"
+else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
+
+step "screen mirror tap (theme/r3i6nos_mirror.h)"
+if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
+    mirror_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-mirror.XXXXXX")"
+    # shellcheck disable=SC2046,SC2086  # sdl2-config prints separate flags; $werror is empty or one flag
+    if cc -std=c11 -Wall -Wextra $werror -O2 -I theme $(sdl2-config --cflags) -o "$mirror_bin" tests/test_mirror.c $(sdl2-config --libs) -lm; then
+        "$mirror_bin" || fail=1
+    else echo "FAIL: tests/test_mirror.c does not compile"; fail=1; fi
+    rm -f "$mirror_bin"
 else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
 
 step "Rec demo recorder (theme/r3i6nos_demo.h)"

@@ -1,0 +1,425 @@
+#!/usr/bin/env python3
+"""r3i6nos-mirror - the unit's screen on a computer, monitor or TV, as a web page (docs/SCREEN-MIRROR.md).
+
+Every r3i6nos app is the 64 x 24 text-mode screen, so this sends the CELLS THAT CHANGED, not pixels: a cell is a code page 437
+character byte and an attribute byte (foreground in the low nibble, background in the high one); a whole frame is 3072 bytes and an
+idle screen sends nothing. The viewer is a web page the daemon serves; it paints the cells with the VGA font. Read-only: the page
+sends nothing back to the unit.
+
+    r3i6nos-mirror start (--iface NAME | --bind ADDR) [--port N]   start one in the background and print its address (the menu uses this)
+    r3i6nos-mirror serve (--iface NAME | --bind ADDR) [--port N]   run in the foreground until stopped
+    r3i6nos-mirror stop                                            ask the running one to stop
+    r3i6nos-mirror status                                          its address, or "not running"
+    r3i6nos-mirror list                                            the network interfaces that have an IPv4 address
+
+Never at boot, never by itself (CLAUDE.md rule 6): a person starts it, it listens ONLY on the chosen interface's address, behind a
+random token that is part of the address, and it is gone at reboot. It runs as the unprivileged `loveos` user and reads nothing from
+the games card.
+
+How the cells arrive: the foreground app (theme/r3i6nos_mirror.lua or .h) sends UDP datagrams to 127.0.0.1:INGEST_PORT, only while
+the flag file DIR/on exists, so with no mirror the cost in an app is one file test when its screen changes. A datagram is
+    F + 3072 bytes                     the whole screen: cell i is bytes 2i (character) and 2i+1 (attribute)
+    D + runs of (u16 start, u8 count, count x 2 bytes)   the changed cells
+The daemon keeps the current screen, sends a page the whole of it when it connects, then each change. The stream is Server-Sent
+Events (one way, unit to page). There is no heartbeat and no timer: the process blocks on its socket and costs nothing at rest.
+
+Standard library only. Overrides, for tests: R3I6NOS_MIRROR_DIR, R3I6NOS_MIRROR_PAGE, R3I6NOS_MIRROR_INGEST, R3I6NOS_SYS_NET.
+"""
+
+import argparse
+import base64
+import fcntl
+import http.server
+import os
+import queue
+import select
+import secrets
+import signal
+import socket
+import socketserver
+import struct
+import subprocess
+import sys
+import time
+import threading
+from pathlib import Path
+
+COLS, ROWS = 64, 24
+CELLS = COLS * ROWS
+FRAME = CELLS * 2
+INGEST_PORT = int(os.environ.get("R3I6NOS_MIRROR_INGEST", "36364"))
+DEFAULT_PORT = 36363
+DIR = Path(os.environ.get("R3I6NOS_MIRROR_DIR", "/run/loveos/mirror"))
+PAGE = Path(os.environ.get("R3I6NOS_MIRROR_PAGE", "/usr/share/r3i6nos/mirror/page.html"))
+SYS_NET = Path(os.environ.get("R3I6NOS_SYS_NET", "/sys/class/net"))
+MAX_VIEWERS = 4
+START_WAIT = 6  # seconds `start` waits for the address
+QUEUE_DEPTH = 256
+BLANK = bytes([32, 0x07]) * CELLS  # a space, light gray on black
+
+
+# ---- the cells ------------------------------------------------------------------------------------------------------------------
+
+def apply_delta(state, body):
+    """Apply a delta body (runs) to the bytearray `state`. Returns True when it was well formed (nothing is applied otherwise)."""
+    runs, i = [], 0
+    while i < len(body):
+        if i + 3 > len(body):
+            return False
+        start, count = struct.unpack(">HB", body[i:i + 3])
+        i += 3
+        end = i + count * 2
+        if count == 0 or end > len(body) or start + count > CELLS:
+            return False
+        runs.append((start, body[i:end]))
+        i = end
+    for start, data in runs:
+        state[start * 2:start * 2 + len(data)] = data
+    return True
+
+
+def parse_datagram(state, data):
+    """One datagram from an app: returns "full", "delta" or None (ignored). `state` is updated in place."""
+    if data[:1] == b"F" and len(data) == 1 + FRAME:
+        state[:] = data[1:]
+        return "full"
+    if data[:1] == b"D" and len(data) > 1:
+        return "delta" if apply_delta(state, data[1:]) else None
+    return None
+
+
+# ---- the viewers ------------------------------------------------------------------------------------------------------------------
+
+class Hub:
+    """The current screen and the viewers' queues. All access is under one lock."""
+
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.state = bytearray(BLANK)
+        self.viewers = set()
+        self.on_count = None  # called with the viewer count when it changes
+
+    def join(self):
+        """A new viewer: its queue, already holding the whole screen. None when there are too many."""
+        with self.lock:
+            if len(self.viewers) >= MAX_VIEWERS:
+                return None
+            q = queue.Queue(QUEUE_DEPTH)
+            q.put(("full", bytes(self.state)))
+            self.viewers.add(q)
+            n = len(self.viewers)
+        if self.on_count:
+            self.on_count(n)
+        return q
+
+    def leave(self, q):
+        with self.lock:
+            self.viewers.discard(q)
+            n = len(self.viewers)
+        if self.on_count:
+            self.on_count(n)
+
+    def feed(self, data):
+        """A datagram from an app."""
+        with self.lock:
+            kind = parse_datagram(self.state, data)
+            if kind is None:
+                return
+            event = ("full", bytes(self.state)) if kind == "full" else ("delta", bytes(data[1:]))
+            for q in self.viewers:
+                try:
+                    q.put_nowait(event)
+                except queue.Full:  # a page too slow to follow: drop what it has and give it the whole screen
+                    while True:
+                        try:
+                            q.get_nowait()
+                        except queue.Empty:
+                            break
+                    q.put_nowait(("full", bytes(self.state)))
+
+
+def make_handler(hub, token, page_path):
+    prefix = "/" + token
+
+    class Handler(http.server.BaseHTTPRequestHandler):
+        protocol_version = "HTTP/1.1"
+        server_version = "r3i6nos-mirror"
+
+        def log_message(self, *args):  # nothing is logged: no addresses, no paths
+            pass
+
+        def _plain(self, code, text):
+            body = text.encode()
+            self.send_response(code)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.send_header("Content-Length", str(len(body)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("Connection", "close")
+            self.end_headers()
+            self.wfile.write(body)
+
+        def do_GET(self):
+            path = self.path.split("?", 1)[0]
+            if path == prefix:  # the address without its closing slash
+                self.send_response(301)
+                self.send_header("Location", prefix + "/")
+                self.send_header("Content-Length", "0")
+                self.send_header("Connection", "close")
+                self.end_headers()
+            elif path == prefix + "/":
+                try:
+                    body = Path(page_path).read_bytes()
+                except OSError:
+                    return self._plain(500, "The page is not installed on this unit.\n")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Content-Length", str(len(body)))
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Referrer-Policy", "no-referrer")
+                self.send_header("Content-Security-Policy",
+                                 "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'; img-src data:")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.write(body)
+            elif path == prefix + "/cells":
+                self._stream()
+            else:
+                self._plain(404, "Not found.\n")
+
+        def _stream(self):
+            q = hub.join()
+            if q is None:
+                return self._plain(503, "Too many pages are watching this screen.\n")
+            try:
+                self.connection.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)  # the kernel finds a dead page, not a timer here
+            except OSError:
+                pass
+            try:
+                self.send_response(200)
+                self.send_header("Content-Type", "text/event-stream")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Connection", "close")
+                self.end_headers()
+                self.wfile.flush()
+                while True:
+                    kind, data = q.get()
+                    self.wfile.write(f"event: {kind}\ndata: {base64.b64encode(data).decode()}\n\n".encode())
+                    self.wfile.flush()
+            except OSError:
+                pass  # the page went away
+            finally:
+                hub.leave(q)
+
+    return Handler
+
+
+class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
+    daemon_threads = True
+    allow_reuse_address = True
+
+
+# ---- the interfaces ---------------------------------------------------------------------------------------------------------------
+
+def iface_addr(name):
+    """The IPv4 address of an interface, or None."""
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        packed = fcntl.ioctl(s.fileno(), 0x8915, struct.pack("256s", name.encode()[:15]))  # SIOCGIFADDR
+        return socket.inet_ntoa(packed[20:24])
+    except (OSError, AttributeError):
+        return None
+    finally:
+        s.close()
+
+
+def list_ifaces():
+    """[(name, address, kind)] for every interface with an IPv4 address except loopback; kind: wifi, wired or other."""
+    out = []
+    try:
+        names = sorted(p.name for p in SYS_NET.iterdir())
+    except OSError:
+        return out
+    for name in names:
+        if name == "lo":
+            continue
+        addr = iface_addr(name)
+        if not addr or addr.startswith("127."):
+            continue
+        d = SYS_NET / name
+        kind = "wifi" if (d / "wireless").exists() or (d / "phy80211").exists() else ("wired" if name[:3] in ("eth", "usb", "enx", "end") else "other")
+        out.append((name, addr, kind))
+    return out
+
+
+# ---- the files the menu reads ---------------------------------------------------------------------------------------------------
+
+def write_atomic(path, text):
+    tmp = path.with_name(path.name + ".tmp")
+    tmp.write_text(text)
+    os.replace(tmp, path)
+
+
+def running_pid():
+    """The pid in DIR/on when that process is alive, else None."""
+    try:
+        pid = int((DIR / "on").read_text().split()[0])
+        os.kill(pid, 0)
+        return pid
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def clean_files():
+    for name in ("on", "info"):
+        try:
+            (DIR / name).unlink()
+        except OSError:
+            pass
+
+
+# ---- commands ---------------------------------------------------------------------------------------------------------------------
+
+def serve(args):
+    if args.bind:
+        addr, iface = args.bind, args.iface or "-"
+    else:
+        addr, iface = iface_addr(args.iface), args.iface
+        if not addr:
+            print(f"r3i6nos-mirror: {args.iface} has no IPv4 address (is the link up?)", file=sys.stderr)
+            return 2
+    if addr in ("0.0.0.0", "") or addr.startswith("127.") and not args.allow_loopback:
+        print("r3i6nos-mirror: it listens only on a chosen interface's address, not on every one or on loopback", file=sys.stderr)
+        return 2
+    DIR.mkdir(parents=True, exist_ok=True)
+    other = running_pid()
+    if other and other != os.getpid():
+        print(f"r3i6nos-mirror: already running (pid {other})", file=sys.stderr)
+        return 3
+    token = secrets.token_hex(4)
+    hub = Hub()
+    try:
+        httpd = Server((addr, args.port), make_handler(hub, token, PAGE))
+    except OSError as e:
+        print(f"r3i6nos-mirror: cannot listen on {addr}:{args.port}: {e}", file=sys.stderr)
+        return 4
+    port = httpd.server_address[1]
+    url = f"http://{addr}:{port}/{token}/"
+    ingest = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        ingest.bind(("127.0.0.1", INGEST_PORT))
+    except OSError as e:
+        print(f"r3i6nos-mirror: cannot take the cells' port {INGEST_PORT}: {e}", file=sys.stderr)
+        httpd.server_close()
+        return 4
+
+    def info(viewers):
+        try:
+            write_atomic(DIR / "info", f"url={url}\niface={iface}\naddress={addr}\nport={port}\nviewers={viewers}\npid={os.getpid()}\n")
+        except OSError:
+            pass
+
+    hub.on_count = info
+    info(0)
+    write_atomic(DIR / "on", f"{os.getpid()}\n")  # the flag apps look for: it comes last, when everything answers
+    threading.Thread(target=httpd.serve_forever, daemon=True).start()
+    print(url, flush=True)
+
+    def stop(_sig, _frame):
+        raise SystemExit(0)
+
+    signal.signal(signal.SIGTERM, stop)
+    signal.signal(signal.SIGINT, stop)
+    try:
+        while True:  # blocks until a datagram arrives: no timer, so an idle screen costs nothing
+            data = ingest.recv(FRAME + 16)
+            hub.feed(data)
+    except SystemExit:
+        pass
+    finally:
+        clean_files()
+        httpd.shutdown()
+        httpd.server_close()
+        ingest.close()
+    return 0
+
+
+def start(args):
+    """Run `serve` detached and wait (a few seconds at most) for its address. Prints the address, or why it did not start."""
+    DIR.mkdir(parents=True, exist_ok=True)
+    pid = running_pid()
+    if pid:
+        print("already running")
+        return status(args)
+    cmd = [sys.executable, os.path.abspath(__file__), "serve", "--port", str(args.port)]
+    cmd += ["--bind", args.bind] if args.bind else ["--iface", args.iface]
+    if args.allow_loopback:
+        cmd.append("--allow-loopback")
+    p = subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True)
+    deadline = time.monotonic() + START_WAIT
+    while time.monotonic() < deadline:
+        ready, _, _ = select.select([p.stdout, p.stderr], [], [], 0.1)
+        if p.stdout in ready:
+            line = p.stdout.readline().strip()
+            if line.startswith("http://"):
+                print(line)
+                return 0
+        if p.poll() is not None:
+            break
+    why = ""
+    if p.poll() is not None:
+        why = p.stderr.read().strip()
+    else:
+        p.terminate()
+    print(why or "it did not start in time", file=sys.stderr)
+    return p.returncode or 1
+
+
+def stop(_args):
+    pid = running_pid()
+    if not pid:
+        clean_files()
+        print("not running")
+        return 0
+    os.kill(pid, signal.SIGTERM)
+    print("stopping")
+    return 0
+
+
+def status(_args):
+    pid = running_pid()
+    if not pid:
+        print("not running")
+        return 1
+    try:
+        print((DIR / "info").read_text(), end="")
+    except OSError:
+        print(f"pid={pid}")
+    return 0
+
+
+def list_cmd(_args):
+    for name, addr, kind in list_ifaces():
+        print(f"{name}\t{addr}\t{kind}")
+    return 0
+
+
+def main(argv=None):
+    p = argparse.ArgumentParser(prog="r3i6nos-mirror", description=__doc__.splitlines()[0])
+    sub = p.add_subparsers(dest="cmd", required=True)
+    for name, fn in (("serve", serve), ("start", start)):
+        s = sub.add_parser(name)
+        g = s.add_mutually_exclusive_group(required=True)
+        g.add_argument("--iface", help="the interface to listen on (its IPv4 address)")
+        g.add_argument("--bind", help="an address to listen on (tests)")
+        s.add_argument("--port", type=int, default=DEFAULT_PORT)
+        s.add_argument("--allow-loopback", action="store_true", help=argparse.SUPPRESS)
+        s.set_defaults(fn=fn)
+    sub.add_parser("stop").set_defaults(fn=stop)
+    sub.add_parser("status").set_defaults(fn=status)
+    sub.add_parser("list").set_defaults(fn=list_cmd)
+    args = p.parse_args(argv)
+    return args.fn(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

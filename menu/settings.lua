@@ -11,6 +11,7 @@ local demos = require("demos")
 local about = require("about")
 local clock = require("clock")
 local mixer = require("mixer")
+local mirror = require("mirror")
 
 local settings = {}
 
@@ -19,9 +20,9 @@ settings.TIMEOUT = { default = 30, scan = 45, wifi = 75, wired = 60, test = 60, 
 
 --- A closed dialog. io is the helper's client (menu/netclient.lua); bat the battery module (menu/battery.lua); rep the device reports
 --- (menu/reports.lua); ab Settings > About (menu/about.lua); clk the Date and time dialog (menu/clock.lua); mx the Sound mixer
---- (menu/mixer.lua); dm Settings > Rec demos (menu/demos.lua). Tests pass fakes.
-function settings.new(io, bat, rep, ab, clk, mx, dm)
-  return { stack = {}, io = io, bat = bat or battery, rep = rep or reports, ab = ab or about, clk = clk or clock, mx = mx or mixer, dm = dm or demos }
+--- (menu/mixer.lua); dm Settings > Rec demos (menu/demos.lua); mr Settings > Screen mirror (menu/mirror.lua). Tests pass fakes.
+function settings.new(io, bat, rep, ab, clk, mx, dm, mr)
+  return { stack = {}, io = io, bat = bat or battery, rep = rep or reports, ab = ab or about, clk = clk or clock, mx = mx or mixer, dm = dm or demos, mr = mr or mirror }
 end
 
 local function top(s) return s.stack[#s.stack] end
@@ -283,6 +284,42 @@ local function demosMenu(s)
   push(s, menu("Rec demos", items, 48))
 end
 
+-- Screen mirror (docs/SCREEN-MIRROR.md): the unit's screen as a web page on a chosen link. A person starts it here; it is off at reboot.
+local mirrorMenu
+mirrorMenu = function(s)
+  local mr = s.mr
+  local st = mr.status()
+  local items = {}
+  local function again(sx, title, lines, ok)   -- the menu as it now is, with the answer on top
+    pop(sx)
+    mirrorMenu(sx)
+    show(sx, title, lines, ok)
+  end
+  if st.running then
+    items[#items + 1] = { label = "Address", value = (st.viewers or 0) .. " watching", hint = "What to open on the computer, monitor or TV",
+      run = function(sx) show(sx, "Screen mirror", mr.addressLines(mr.status()), true) end }
+    items[#items + 1] = { label = "Stop mirroring", hint = "Turn it off", run = function(sx)
+      local ok = mr.stop()
+      again(sx, "Screen mirror", ok and { "The mirror is off." } or { "Could not stop it." }, ok)
+    end }
+  else
+    local links = mr.interfaces()
+    for _, l in ipairs(links) do
+      items[#items + 1] = { label = "Mirror on " .. l.name, value = l.addr, hint = "Listen on this link only (" .. l.kind .. ")", run = function(sx)
+        local ok, res = mr.start(l.name)
+        if ok then again(sx, "Screen mirror", mr.addressLines(mr.status()), true)
+        else again(sx, "Screen mirror", { "Could not start it:", tostring(res) }, false) end
+      end }
+    end
+    if #links == 0 then
+      items[#items + 1] = { label = "No link is up", hint = "A network with an address is needed", run = function(sx) show(sx, "Screen mirror", mr.NO_LINK, false) end }
+    end
+  end
+  items[#items + 1] = { label = "Instructions", hint = "What to plug in and how to open the page", run = function(sx) showPages(sx, "Screen mirror help", mr.INSTRUCTIONS) end }
+  items[#items + 1] = { label = "Back", hint = "Return to Settings", run = function(sx) pop(sx) end }
+  push(s, menu("Screen mirror", items, 48))
+end
+
 -- About: this build and unit, the update check (the only network use here, and only when chosen), the licences.
 local function aboutMenu(s)
   local ab = s.ab
@@ -336,6 +373,7 @@ local function root(s)
     { label = "Date and time", hint = "Set the clock and time zone (kept across restarts)", run = function(sx) clockNode(sx, false) end },
     { label = "Device reports", hint = "Check this unit for an app's maker (a file for Claude)", run = reportsMenu },
     { label = "Rec demos", hint = "Screenshots and a video of an app, for its store page", run = demosMenu },
+    { label = "Screen mirror", hint = "Show this screen on a computer, monitor or TV", run = mirrorMenu },
     { label = "About", hint = "Version, updates, this unit and licences", run = aboutMenu },
     { label = "Shutdown", hint = "Power the device off", run = function(sx)
         confirm(sx, "Shut down the device?", "Yes, shut down", "Powers the device off", function() return "poweroff" end)
