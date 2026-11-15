@@ -32,6 +32,8 @@ Start opens Settings: **Network**, **SSH**, **Battery** (`docs/BATTERY.md`), **S
 - **Why a Wi-Fi link failed or dropped** (2026-11-15): `wpa_supplicant` logs to `/run/r3i6nos-net/private/wpa-<iface>.log` (root only, this join's run only), and the join result
   shows its last reasons (`Reason 15 (unit): handshake timed out (wrong password?)`, WRONG_KEY, an association refusal, a network not seen). After the address is
   got, the link is checked again 3 seconds later: a link that has dropped is reported, stopped and not saved, instead of "Connected".
+- **`wpa_supplicant` outlives the helper** (2026-11-15): the helper is a `Type=oneshot` service, whose control group systemd kills when its main process exits; `wpa_supplicant -B`
+  daemonizes into that group and was killed the moment "Connected" was shown. `KillMode=process` in `r3i6nos-net.service` stops only the main process. Not run on the unit.
 - The games card is only read (rule 7).
 
 ## How it works

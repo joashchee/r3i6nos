@@ -5,5 +5,10 @@ Description=r3i6nos network helper (Settings > Network and SSH)
 
 [Service]
 Type=oneshot
+# A oneshot service's control group is killed when its main process exits. `wpa_supplicant -B` (Wi-Fi) daemonizes into that group, so
+# without this it was killed the moment the helper reported "Connected": the link came up and was gone about 3 s later (2026-11-15, the
+# RTL8188EUS dongle on a home router; dmesg showed the keys set, then cleared). Only the main process is stopped; the supplicant stays up
+# until Disconnect, a new join or a reboot stops it (r3i6nos-net's stop_wifi, by pid file).
+KillMode=process
 ExecStart=/usr/local/bin/r3i6nos-net
 TimeoutStartSec=150

@@ -150,6 +150,7 @@ exec_start="$(sed -n 's/^ExecStart=//p' overlay/etc/systemd/system/loveos.servic
 [ -x "$R/usr/local/bin/r3i6nos-net" ]                || fail "r3i6nos-net not installed executable"
 [ -L "$R/etc/systemd/system/multi-user.target.wants/r3i6nos-net.path" ] || fail "the net path unit is not enabled"
 [ ! -e "$R/etc/systemd/system/multi-user.target.wants/r3i6nos-net.service" ] || fail "the helper service must not be wanted by a target (rule 6: nothing at boot)"
+grep -q '^KillMode=process$' "$R/etc/systemd/system/r3i6nos-net.service" || fail "r3i6nos-net.service lets systemd kill wpa_supplicant when the helper exits (Wi-Fi dropped 3 s after joining)"
 grep -q '^PathExists=/run/loveos/net/request' "$R/etc/systemd/system/r3i6nos-net.path" || fail "the path unit watches the wrong file"
 ! grep -q '^\[Install\]' "$R/etc/systemd/system/r3i6nos-net.service" || fail "the helper service must have no [Install]"
 [ ! -e "$R/etc/systemd/system/multi-user.target.wants/ssh.service" ] || fail "ssh.service is enabled at boot"
