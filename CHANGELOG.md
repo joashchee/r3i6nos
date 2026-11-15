@@ -5,6 +5,7 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased (0.1.1)
 
+- **The menu no longer opens the sound device at start** (2026-11-15; ROADMAP section 23; `menu/conf.lua`, `menu/main.lua`, `tests/test_menu_conf.lua`): on the unit, OpenAL's mixer thread woke 43 times a second mixing silence with the PCM held open, most of the idle menu's 6 to 8% of a core. `love.audio` is loaded the first time Settings > Sound mixer's test sound is wanted. Not run on the unit; needs a new image.
 - **Screen mirror: the LÖVE tap sends with `socket.udp4()`** (2026-11-15; ROADMAP section 28; `theme/r3i6nos_mirror.lua`): on the unit's LuaSocket 3.0-rc1, `socket.udp()` answered "refused" to every send to the daemon, so no screen ever reached the page (`fed=0`, "20 failed"); `udp4()` sends. A test checks the choice. Needs a new image.
 - **Screen mirror: the tap's error shows its whole reason** (2026-11-15; ROADMAP section 28; `theme/r3i6nos_mirror.lua`): the unit's Address screen cut it at the file:line prefix (`...r3i6nos_mirror.lua:73 sendto fai`); the errors are raised without a position now, so the 58 characters hold the reason.
 - **Wi-Fi no longer dies a few seconds after "Connected"** (2026-11-15; ROADMAP section 28; `overlay/etc/systemd/system/r3i6nos-net.service`): the helper is a oneshot service, systemd killed its whole control group when it exited, and that took `wpa_supplicant -B` with it. `KillMode=process`. Needs a new image.

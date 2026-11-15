@@ -86,6 +86,7 @@ local function launch()
 end
 
 -- Settings > Sound mixer's test sound: made by mixer.sample, looped while that screen is up and the sound is not Off.
+local audio                                      -- love.audio, loaded on first use
 local playing, playingKind, made = nil, 1, {} -- made: each sound's Source, built once (the music takes a moment on the unit)
 local function testSound()
   local n = settings.isOpen(dialog) and settings.node(dialog)
@@ -102,7 +103,8 @@ local function testSound()
       data:setSample(i, 1, l)
       data:setSample(i, 2, r)
     end
-    made[want] = love.audio.newSource(data, "static")
+    audio = audio or love.audio or require("love.audio")   -- conf.lua leaves the module off: loading it opens the device (menu/conf.lua)
+    made[want] = audio.newSource(data, "static")
     made[want]:setLooping(true)
   end
   playing = made[want]
