@@ -4,7 +4,10 @@
 # kernel has no readable config, so this builds the gadget and looks. Run as root over SSH, with a data cable from the OTG port to a
 # computer (unplug any USB adapter first: the one port is either host or device).
 #
-#   sudo r3i6nos-gadget-probe [--function ecm|ncm|rndis|eem] [--wait SECONDS] [--ip]
+#   sudo r3i6nos-gadget-probe [--function ecm|ncm|rndis|eem] [--legacy ether|ncm] [--wait SECONDS] [--ip]
+#
+# --legacy loads the one-shot gadget module g_ether or g_ncm instead of building a gadget by configfs (the kernel's older route: no configfs
+# needed). It is also tried by itself, as g_ether, when the kernel has no configfs gadget.
 #
 # It loads libcomposite and the function module, mounts configfs if needed, makes ONE gadget, binds it to the UDC, watches the UDC
 # state and the extcon for --wait seconds (default 30), then takes everything down again. --ip also gives usb0 169.254.77.1/24 while
@@ -25,18 +28,21 @@ IPCMD=${R3I6NOS_GADGET_IP:-ip}
 FUNC=ecm
 WAIT=30
 WANT_IP=0
+LEGACY=
 NAME=r3i6nos_probe
 
 while [ $# -gt 0 ]; do
     case $1 in
         --function) FUNC=${2:-}; shift 2 ;;
+        --legacy) LEGACY=${2:-}; shift 2 ;;
         --wait) WAIT=${2:-}; shift 2 ;;
         --ip) WANT_IP=1; shift ;;
         -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-        *) echo "usage: r3i6nos-gadget-probe [--function ecm|ncm|rndis|eem] [--wait SECONDS] [--ip]" >&2; exit 2 ;;
+        *) echo "usage: r3i6nos-gadget-probe [--function ecm|ncm|rndis|eem] [--legacy ether|ncm] [--wait SECONDS] [--ip]" >&2; exit 2 ;;
     esac
 done
 case $FUNC in ecm|ncm|rndis|eem) ;; *) echo "unknown function: $FUNC" >&2; exit 2 ;; esac
+case $LEGACY in ''|ether|ncm) ;; *) echo "unknown legacy gadget: $LEGACY (ether or ncm)" >&2; exit 2 ;; esac
 case $WAIT in ''|*[!0-9]*) echo "--wait wants whole seconds" >&2; exit 2 ;; esac
 
 if [ "${R3I6NOS_GADGET_NOROOT:-0}" != 1 ]; then
@@ -116,6 +122,84 @@ say INFO "before udc: $(udc_state)"
 say INFO "before extcon:$(extcon_line)"
 say INFO "before supply usb online: $(cat "$SYS/class/power_supply/usb/online" 2>/dev/null || echo unknown)"
 
+watch_host() { # needs UDC, IFACE (may be empty), WANT_IP, WAIT
+    if [ -n "$IFACE" ]; then
+        say INFO "interface: $IFACE"
+        if [ "$WANT_IP" = 1 ]; then
+            "$IPCMD" addr add 169.254.77.1/24 dev "$IFACE" 2>/dev/null
+            "$IPCMD" link set "$IFACE" up 2>/dev/null
+            say INFO "ip: $IFACE 169.254.77.1/24 (ping it from the computer's matching link-local address)"
+        fi
+    fi
+    say INFO "waiting: plug a data cable from the OTG port into a computer now; looking for ${WAIT}s"
+    SEEN=""
+    t=0
+    while [ "$t" -lt "$WAIT" ]; do
+        st=""
+        if [ -n "$UDC" ]; then
+            st=$(cat "$SYS/class/udc/$UDC/state" 2>/dev/null)
+        fi
+        if [ "$st" = configured ]; then
+            SEEN=configured
+            break
+        fi
+        case $st in
+            ""|"not attached"|unknown) ;;
+            *) SEEN=attached ;;
+        esac
+        sleep 1
+        t=$((t + 1))
+    done
+    say INFO "after udc: $(udc_state)"
+    say INFO "after extcon:$(extcon_line)"
+    say INFO "after supply usb online: $(cat "$SYS/class/power_supply/usb/online" 2>/dev/null || echo unknown)"
+    if [ -n "$IFACE" ]; then
+        say INFO "link $IFACE: $("$IPCMD" -br link show "$IFACE" 2>/dev/null | head -n 1)"
+    fi
+    case $SEEN in
+        configured) say PASS "host: a computer enumerated the gadget (UDC state configured, after ${t}s): the OTG port works as a USB network card" ;;
+        attached)   say INFO "host: the UDC saw a cable (not just configured): a computer is attached but did not finish; try --function ncm, or rndis for Windows" ;;
+        *)          say FAIL "host: the UDC never left not attached in ${WAIT}s: no cable, a charge-only cable, or no VBUS sense (read the extcon lines above); the gadget itself did build and bind" ;;
+    esac
+}
+
+find_udc() {
+    local u
+    UDC=""
+    for u in "$SYS"/class/udc/*; do
+        [ -e "$u" ] || continue
+        UDC=${u##*/}
+        break
+    done
+}
+
+# The kernel's older route: one module is the whole gadget (g_ether: CDC ECM and RNDIS; g_ncm: NCM), no configfs.
+legacy_run() {
+    local mod=g_$LEGACY
+    find_udc
+    if [ -z "$UDC" ]; then
+        say FAIL "udc: none in $SYS/class/udc (the controller is host-only, or the driver is not in device mode)"
+        return 0
+    fi
+    say PASS "udc: $UDC"
+    if "$MODPROBE" "$mod" 2>/dev/null; then
+        say PASS "legacy $mod: loaded (no configfs needed)"
+    else
+        say FAIL "legacy $mod: modprobe failed (no module, or the controller refused it)"
+        return 0
+    fi
+    IFACE=""
+    [ -e "$SYS/class/net/usb0" ] && IFACE=usb0
+    [ -n "$IFACE" ] || say INFO "interface: no usb0 appeared yet (it can come only when a computer attaches)"
+    watch_host
+    "$MODPROBE" -r "$mod" 2>/dev/null
+    if [ -e "$SYS/class/net/usb0" ]; then
+        say FAIL "teardown: $mod is still loaded (rmmod it by hand, or reboot)"
+    else
+        say PASS "teardown: $mod unloaded"
+    fi
+}
+
 # 1. the modules
 if "$MODPROBE" libcomposite 2>/dev/null; then
     say PASS "libcomposite: loaded"
@@ -128,6 +212,14 @@ else
     say FAIL "usb_f_$FUNC: modprobe failed"
 fi
 
+if [ -n "$LEGACY" ]; then
+    legacy_run
+    say INFO "summary: see the PASS/FAIL lines above"
+    echo end
+    echo end >> "$OUT" 2>/dev/null
+    exit 0
+fi
+
 # 2. configfs
 if [ ! -d "$CFG/usb_gadget" ]; then
     "$MOUNT" -t configfs none "$CFG" 2>/dev/null
@@ -136,6 +228,9 @@ if [ -d "$CFG/usb_gadget" ]; then
     say PASS "configfs: $CFG/usb_gadget exists (the kernel has USB gadget by configfs)"
 else
     say FAIL "configfs: no usb_gadget under $CFG after loading libcomposite: the kernel has no USB gadget by configfs"
+    LEGACY=ether
+    say INFO "legacy: trying the one-shot g_ether gadget instead (no configfs needed)"
+    legacy_run
     finish
     exit 0
 fi
@@ -203,44 +298,7 @@ IFACE=""
 if [ -f "$G/functions/$FUNC.usb0/ifname" ]; then
     IFACE=$(cat "$G/functions/$FUNC.usb0/ifname" 2>/dev/null)
 fi
-if [ -n "$IFACE" ]; then
-    say INFO "interface: $IFACE"
-    if [ "$WANT_IP" = 1 ]; then
-        "$IPCMD" addr add 169.254.77.1/24 dev "$IFACE" 2>/dev/null
-        "$IPCMD" link set "$IFACE" up 2>/dev/null
-        say INFO "ip: $IFACE 169.254.77.1/24 (ping it from the computer's matching link-local address)"
-    fi
-fi
-say INFO "waiting: plug a data cable from the OTG port into a computer now; looking for ${WAIT}s"
-SEEN=""
-t=0
-while [ "$t" -lt "$WAIT" ]; do
-    st=""
-    if [ -n "$UDC" ]; then
-        st=$(cat "$SYS/class/udc/$UDC/state" 2>/dev/null)
-    fi
-    if [ "$st" = configured ]; then
-        SEEN=configured
-        break
-    fi
-    case $st in
-        ""|"not attached"|unknown) ;;
-        *) SEEN=attached ;;
-    esac
-    sleep 1
-    t=$((t + 1))
-done
-say INFO "after udc: $(udc_state)"
-say INFO "after extcon:$(extcon_line)"
-say INFO "after supply usb online: $(cat "$SYS/class/power_supply/usb/online" 2>/dev/null || echo unknown)"
-if [ -n "$IFACE" ]; then
-    say INFO "link $IFACE: $("$IPCMD" -br link show "$IFACE" 2>/dev/null | head -n 1)"
-fi
-case $SEEN in
-    configured) say PASS "host: a computer enumerated the gadget (UDC state configured, after ${t}s): the OTG port works as a USB network card" ;;
-    attached)   say INFO "host: the UDC saw a cable (not just configured): a computer is attached but did not finish; try --function ncm, or rndis for Windows" ;;
-    *)          say FAIL "host: the UDC never left not attached in ${WAIT}s: no cable, a charge-only cable, or no VBUS sense (read the extcon lines above); the gadget itself did build and bind" ;;
-esac
+watch_host
 
 finish
 exit 0

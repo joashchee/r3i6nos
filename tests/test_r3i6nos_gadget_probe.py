@@ -67,7 +67,37 @@ class GadgetProbe(unittest.TestCase):
         self.assertIn("FAIL configfs:", r.stdout)
         self.assertIn(f"{self.t}/bin/mount -t configfs", (self.t / "calls").read_text())
 
+    def test_the_legacy_gadget_module_is_one_modprobe_and_is_unloaded_after(self):
+        (self.t / "sys/class/udc/ff300000.usb/state").write_text("configured\n")
+        r = self.run_probe("--legacy", "ether", "--wait", "3")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("PASS legacy g_ether: loaded", r.stdout)
+        self.assertIn("PASS host: a computer enumerated the gadget", r.stdout)
+        self.assertIn("PASS teardown: g_ether unloaded", r.stdout)
+        self.assertEqual(r.stdout.strip().splitlines()[-1], "end")
+        calls = (self.t / "calls").read_text()
+        self.assertIn(f"{self.t}/bin/modprobe g_ether", calls)
+        self.assertIn(f"{self.t}/bin/modprobe -r g_ether", calls)
+        self.assertNotIn("configfs", calls, "the legacy route needs no configfs")
+        self.assertFalse((self.t / "sys/kernel/config/usb_gadget/r3i6nos_probe").exists())
+
+    def test_without_a_configfs_gadget_the_probe_tries_g_ether_by_itself(self):
+        (self.t / "sys/kernel/config/usb_gadget").rmdir()
+        (self.t / "sys/class/udc/ff300000.usb/state").write_text("configured\n")
+        r = self.run_probe("--wait", "3")
+        self.assertIn("FAIL configfs:", r.stdout)
+        self.assertIn("legacy: trying the one-shot g_ether gadget", r.stdout)
+        self.assertIn("PASS legacy g_ether: loaded", r.stdout)
+        self.assertIn("PASS host: a computer enumerated the gadget", r.stdout)
+        self.assertEqual(r.stdout.strip().splitlines()[-1], "end")
+
+    def test_a_legacy_module_that_will_not_load_is_a_fail(self):
+        r = self.run_probe("--legacy", "ncm", "--wait", "1", env={"FAKE_MODPROBE_RC": "1"})
+        self.assertIn("FAIL legacy g_ncm: modprobe failed", r.stdout)
+        self.assertEqual(r.stdout.strip().splitlines()[-1], "end")
+
     def test_bad_arguments(self):
+        self.assertEqual(self.run_probe("--legacy", "nope").returncode, 2)
         self.assertEqual(self.run_probe("--function", "nope").returncode, 2)
         self.assertEqual(self.run_probe("--wait", "x").returncode, 2)
 
