@@ -156,6 +156,13 @@ grep -q '^PathExists=/run/loveos/net/request' "$R/etc/systemd/system/r3i6nos-net
 [ ! -e "$R/etc/systemd/system/sshd.service" ] || fail "the sshd alias is still there"
 [ ! -e "$R/etc/systemd/system/sockets.target.wants/ssh.socket" ] || fail "ssh.socket is still wired to start"
 [ "$(stat -c %a "$R/etc/sudoers.d/r3i6nos" 2>/dev/null || stat -f %Lp "$R/etc/sudoers.d/r3i6nos")" = 440 ] || fail "the sudoers file is not 0440 (sudo would ignore it)"
+# As root (a real build, or Debian under Docker with the overlay chowned to some other uid) nothing the overlay brought may keep the
+# checkout's owner: sudo refuses a sudoers.d that root does not own, which is what shipped on 2026-11-15 (the CI runner's uid 1001).
+if [ "$(id -u)" -eq 0 ]; then
+    for path in . etc etc/sudoers.d etc/sudoers.d/r3i6nos usr/local/bin etc/modprobe.d; do
+        [ "$(stat -c %u "$R/$path")" = 0 ] || fail "$path is not owned by root (uid $(stat -c %u "$R/$path")): the overlay's owner leaked into the image"
+    done
+fi
 grep -q '^blacklist r8188eu$' "$R/etc/modprobe.d/r3i6nos-wifi.conf" || fail "the staging r8188eu (wext only, no scan with iw) is not blacklisted"
 ! grep -v '^#' "$R/etc/sudoers.d/r3i6nos" | grep -q NOPASSWD || fail "sudo must ask for the password: every app runs as that user"
 [ -z "$(ls "$R"/etc/ssh/ssh_host_* 2>/dev/null)" ] || fail "host keys from the build are in the image: every card would share them"

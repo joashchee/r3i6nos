@@ -16,6 +16,13 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 echo "[*] Installing overlay and menu..."
 rm -f "$ROOTFS/etc/sudoers.d/r3i6nos"   # it ends up 0440, which a second run (not as root) could not overwrite
 cp -a "$REPO/overlay/." "$ROOTFS/"
+# cp -a keeps the owner of the checkout (uid 1001, the CI runner, on GitHub), onto the files AND the directories they sit in (/etc,
+# /etc/sudoers.d, /usr/local/bin): sudo refuses a sudoers.d that root does not own, and nothing in an image may belong to a build machine's
+# user. Every path the overlay brought is root's. (Not root = a test on a laptop: nothing to chown, and chown would fail.)
+if [ "$(id -u)" -eq 0 ]; then
+    # "." is included: cp -a gave the image's own root directory the checkout's owner too
+    (cd "$REPO/overlay" && find . -print0) | (cd "$ROOTFS" && xargs -0 chown -h 0:0)
+fi
 mkdir -p "$ROOTFS/opt/loveos"
 rm -rf "$ROOTFS/opt/loveos/menu"
 cp -a "$REPO/menu" "$ROOTFS/opt/loveos/menu"
@@ -217,7 +224,7 @@ mkdir -p "$ROOTFS/etc/ssh/sshd_config.d"
 # sudo ignores a sudoers file that is not root-owned and 0440 (the overlay copy keeps the builder's owner and mode).
 if [ -f "$ROOTFS/etc/sudoers.d/r3i6nos" ]; then
     chmod 0440 "$ROOTFS/etc/sudoers.d/r3i6nos"
-    chown 0:0 "$ROOTFS/etc/sudoers.d/r3i6nos" 2>/dev/null || [ "$(id -u)" -ne 0 ]   # a real build is root; a test on a laptop is not
+    chmod 0750 "$ROOTFS/etc/sudoers.d"   # root-owned (the chown above) and not writable by anyone else: sudo checks both
 fi
 # The wpasupplicant package enables its own D-Bus wpa_supplicant.service. The image has no D-Bus daemon, so it failed at
 # every boot ("Failed to start wpa_supplicant"), and Wi-Fi at boot breaks rule 6 anyway: r3i6nos-net starts
