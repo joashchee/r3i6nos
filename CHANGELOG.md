@@ -5,6 +5,7 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased (0.1.1)
 
+- **The gadget probe's first unit run: the kernel can do USB gadget by configfs** (2026-11-15 evening, build 8bca355; ROADMAP section 28): `libcomposite`, `usb_f_ecm`, configfs, the UDC, an ECM function and the bind all pass and `usb0` appears; no cable was seen (the controller stayed `not attached`, the extcon read 0), so whether the port senses a cable in device mode is still open.
 - **The idle menu's audio fix confirmed on the unit** (2026-11-15 evening, build 8bca355; ROADMAP section 23): the menu idles at 0.4% of a core (was 5.9 to 8%), OpenAL's mixer thread and `AudioPool` are gone, no sound descriptor is held, resident memory 53.5 MB (was 71).
 - **First checks on the flashed build 8bca355** (2026-11-15 evening, maintainer; ROADMAP section 28): Wi-Fi stays connected, the screen mirror shows the menu, and SSH works over the Wi-Fi link.
 - **r3i6nos's baseline device report read** (2026-11-15 16:35, build bdc9537, Ethernet adapter in with the link up; ROADMAP section 28): 33 PASS, 0 FAIL; the mixer cap is confirmed on the unit; a live gigabit link adds about 8000 interrupts a second (9520 against 1534) for almost no extra draw; the menu is at 13% with the report's wait screen.
