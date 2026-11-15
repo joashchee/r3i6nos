@@ -55,6 +55,14 @@ end
 
 -- ---- the world (tests replace it) -------------------------------------------------------------------------------------------------
 
+--- An IPv4 UDP socket from a luasocket module. LÖVE 11.5's LuaSocket 3.0-rc1 on the R36S answers "refused" to every `sendto` on a socket made by
+--- `socket.udp()` (seen on the unit 2026-11-15, with the daemon listening), while `socket.udp4()` sends: ask for IPv4 by name when there is a way to.
+function M.newSocket(socket)
+  if socket.udp4 then return socket.udp4() end
+  if socket.udp then return socket.udp() end
+  return nil
+end
+
 M.sys = {
   now = os.time,
   on = function()
@@ -65,7 +73,7 @@ M.sys = {
   send = function(data)
     if M.udp == nil then
       local ok, socket = pcall(require, "socket")
-      M.udp = (ok and socket.udp and socket.udp()) or false
+      M.udp = (ok and M.newSocket(socket)) or false
       if M.udp then M.udp:settimeout(0) end
     end
     if not M.udp then error("no socket library in this LÖVE", 0) end   -- level 0: no file:line prefix, the menu shows only 58 characters

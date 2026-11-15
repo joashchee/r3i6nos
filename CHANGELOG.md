@@ -5,6 +5,7 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased (0.1.1)
 
+- **Screen mirror: the LÖVE tap sends with `socket.udp4()`** (2026-11-15; ROADMAP section 28; `theme/r3i6nos_mirror.lua`): on the unit's LuaSocket 3.0-rc1, `socket.udp()` answered "refused" to every send to the daemon, so no screen ever reached the page (`fed=0`, "20 failed"); `udp4()` sends. A test checks the choice. Needs a new image.
 - **Screen mirror: the tap's error shows its whole reason** (2026-11-15; ROADMAP section 28; `theme/r3i6nos_mirror.lua`): the unit's Address screen cut it at the file:line prefix (`...r3i6nos_mirror.lua:73 sendto fai`); the errors are raised without a position now, so the 58 characters hold the reason.
 - **Wi-Fi no longer dies a few seconds after "Connected"** (2026-11-15; ROADMAP section 28; `overlay/etc/systemd/system/r3i6nos-net.service`): the helper is a oneshot service, systemd killed its whole control group when it exited, and that took `wpa_supplicant -B` with it. `KillMode=process`. Needs a new image.
 - **Image: nothing the overlay brings keeps the build machine's owner** (2026-11-15; ROADMAP section 28; `scripts/configure_rootfs.sh`, `tests/test_configure_rootfs.sh`): `sudo` refused to work on the unit ("/etc/sudoers.d is owned by uid 1001") because `cp -a` kept the CI runner's owner on the overlay's files and directories. As root, the build now chowns them to root and sets `/etc/sudoers.d` to 0750. Needs a new image.

@@ -180,4 +180,15 @@ do -- an app must never be broken by the mirror
   eq(M.stats.sent, 0)
 end
 
+do -- the IPv4 socket is asked for by name: socket.udp() refused every send on the unit's LuaSocket 3.0-rc1
+  local made = {}
+  local both = { udp = function() made[#made + 1] = "udp" return {} end, udp4 = function() made[#made + 1] = "udp4" return {} end }
+  M.newSocket(both)
+  eq(made[1], "udp4", "udp4 first")
+  local older = { udp = function() made[#made + 1] = "udp" return {} end }
+  M.newSocket(older)
+  eq(made[2], "udp", "an older luasocket without udp4 still gets a socket")
+  eq(M.newSocket({}), nil, "no socket library function: no socket, no error")
+end
+
 print("ok: test_mirror.lua")
