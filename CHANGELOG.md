@@ -5,6 +5,7 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased (0.1.1)
 
+- **First checks on the flashed build 8bca355** (2026-11-15 evening, maintainer; ROADMAP section 28): Wi-Fi stays connected, the screen mirror shows the menu, and SSH works over the Wi-Fi link.
 - **r3i6nos's baseline device report read** (2026-11-15 16:35, build bdc9537, Ethernet adapter in with the link up; ROADMAP section 28): 33 PASS, 0 FAIL; the mixer cap is confirmed on the unit; a live gigabit link adds about 8000 interrupts a second (9520 against 1534) for almost no extra draw; the menu is at 13% with the report's wait screen.
 - **The gadget probe tries the legacy `g_ether` and `g_ncm` too** (2026-11-15; ROADMAP section 28; `overlay/usr/local/bin/r3i6nos-gadget-probe`): the unit has both modules and a UDC, so the OTG port can probably be a USB network card with no configfs; `--legacy ether|ncm` tries it, and the probe falls back to `g_ether` by itself when the kernel has no configfs gadget. Not run on the unit.
 - **The menu no longer opens the sound device at start** (2026-11-15; ROADMAP section 23; `menu/conf.lua`, `menu/main.lua`, `tests/test_menu_conf.lua`): on the unit, OpenAL's mixer thread woke 43 times a second mixing silence with the PCM held open, most of the idle menu's 6 to 8% of a core. `love.audio` is loaded the first time Settings > Sound mixer's test sound is wanted. Not run on the unit; needs a new image.
