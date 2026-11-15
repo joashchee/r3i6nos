@@ -25,6 +25,10 @@ Start opens Settings: **Network**, **SSH**, **Battery** (`docs/BATTERY.md`), **S
 - Only user `loveos` can log in (never root), 3 tries, no forwarding, key or password. The `loveos` account is `nologin` until SSH starts, then
   `/bin/bash`; Stop SSH puts it back. A password is set only through Settings (typed twice); the helper passes it to `chpasswd` on stdin.
   A key login: put the public key in `ssh/authorized_keys` on the games card; it is **read only** and copied into `~loveos/.ssh` when SSH starts.
+- **Root over SSH is `sudo`, and it asks for the `loveos` password** (`overlay/etc/sudoers.d/r3i6nos`, 2026-11-15, maintainer's decision): `sudo r3i6nos-gadget-probe`,
+  `sudo r3i6nos-report`. Never passwordless: every game and app on the card runs as `loveos`, so a `NOPASSWD` rule would hand each of them root.
+  A key-only login has no password and cannot `sudo`: set a password in Settings too. Root still cannot log in. **Needs an image built after this change** (the
+  package and the rule are in the image); a card flashed before it has no `sudo`. Not run on the unit.
 - The games card is only read (rule 7).
 
 ## How it works

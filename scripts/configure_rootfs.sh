@@ -14,6 +14,7 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 [ -d "$ROOTFS" ] || { echo "configure_rootfs: no such directory: $ROOTFS" >&2; exit 1; }
 
 echo "[*] Installing overlay and menu..."
+rm -f "$ROOTFS/etc/sudoers.d/r3i6nos"   # it ends up 0440, which a second run (not as root) could not overwrite
 cp -a "$REPO/overlay/." "$ROOTFS/"
 mkdir -p "$ROOTFS/opt/loveos"
 rm -rf "$ROOTFS/opt/loveos/menu"
@@ -213,6 +214,11 @@ ln -sfn /etc/systemd/system/r3i6nos-net.path \
 rm -f "$ROOTFS"/etc/systemd/system/multi-user.target.wants/{ssh,sshd}.service "$ROOTFS"/etc/systemd/system/sshd.service \
     "$ROOTFS"/etc/systemd/system/sockets.target.wants/ssh.socket "$ROOTFS"/etc/ssh/ssh_host_*
 mkdir -p "$ROOTFS/etc/ssh/sshd_config.d"
+# sudo ignores a sudoers file that is not root-owned and 0440 (the overlay copy keeps the builder's owner and mode).
+if [ -f "$ROOTFS/etc/sudoers.d/r3i6nos" ]; then
+    chmod 0440 "$ROOTFS/etc/sudoers.d/r3i6nos"
+    chown 0:0 "$ROOTFS/etc/sudoers.d/r3i6nos" 2>/dev/null || [ "$(id -u)" -ne 0 ]   # a real build is root; a test on a laptop is not
+fi
 # The wpasupplicant package enables its own D-Bus wpa_supplicant.service. The image has no D-Bus daemon, so it failed at
 # every boot ("Failed to start wpa_supplicant"), and Wi-Fi at boot breaks rule 6 anyway: r3i6nos-net starts
 # `wpa_supplicant -B` itself, only when a person joins a network. Unwire it and mask it so nothing pulls it in.

@@ -1,0 +1,5 @@
+# r3i6nos: the one login user may become root, but only by typing its own password (set in Settings > Network and SSH).
+# Never NOPASSWD: every game and app on the card runs as this user, so a passwordless rule would give each of them root.
+# A key-only SSH login has no password, so it cannot sudo: set a password in Settings too. See docs/NETWORK.md.
+Defaults:loveos timestamp_timeout=5, passwd_tries=3, lecture=never
+loveos ALL=(ALL:ALL) ALL

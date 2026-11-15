@@ -37,6 +37,7 @@ PACKAGES=(
     tzdata                               # the Date and time dialog's zones (/usr/share/zoneinfo/Etc/GMT-8 and so on; r3i6nos-clock)
     iproute2 iw wpasupplicant udhcpc iputils-ping  # Settings > Network (r3i6nos-net): addresses, Wi-Fi scan and join, DHCP, tests
     ca-certificates                      # Settings > About > Check for updates (HTTPS to GitHub, only when chosen)
+    sudo                                 # root over SSH for diagnostics (r3i6nos-gadget-probe, the report's stop-and-compare); password required: overlay/etc/sudoers.d/r3i6nos
     openssh-server                       # Settings > SSH; its service is NOT enabled and its host keys are made on first start (configure_rootfs.sh)
 )
 
