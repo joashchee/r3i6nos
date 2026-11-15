@@ -125,3 +125,18 @@ without a mirror was about 2.96 W with a hub and peripherals on the port (ROADMA
 3. ~~How does an app learn a mirror is on, without polling and without a timer?~~ Answered above: a flag file, tested when the screen has changed.
 4. Pixel pages: tiles, or only the cells around them?
 5. Audio: out of scope for the first version (the computer cannot hear the unit). A WAV or Opus stream over the same link is possible later.
+
+## When the page is black or shows the test screen (2026-11-15)
+
+Until an app has sent a screen the page shows a **test screen** the daemon makes itself (`testcard` in `r3i6nos-mirror`): a frame, the 16 colours,
+all 256 code page 437 characters and what to do, with notes under it. If you see it, the page, its font, the colours and the link to the unit are
+fine, and the unit has not yet sent a screen. The first real datagram replaces it. A **black** page with only the font credit now means something
+else is wrong (a page that failed says so in its status line, and a lost link says "Cannot reach the unit").
+
+Why it can stay on the test screen: a screen that does not change sends nothing (so press a button on the unit), an app built before the mirror
+sends nothing (the menu does), or the tap failed. Settings > Screen mirror > Address ends with two lines: **what the menu has sent and how many
+failed** (the tap's own count, with the last error, for example no socket library in this LÖVE) and **whether the daemon's feed has received a
+screen** (`fed=` in `/run/loveos/mirror/info`). Read together: sent 0 and no error = the screen never changed or the flag was not seen; sent > 0
+and the feed says no = the datagrams do not reach the daemon (the ingest port 36364, a firewall on loopback); an error = the tap itself.
+Without the unit's screen, `cat /run/loveos/mirror/info` over SSH shows `fed=`.
+

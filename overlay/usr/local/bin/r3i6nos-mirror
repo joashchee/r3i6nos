@@ -58,6 +58,48 @@ QUEUE_DEPTH = 256
 BLANK = bytes([32, 0x07]) * CELLS  # a space, light gray on black
 
 
+def testcard():
+    """The screen a page shows until an app has sent one: a test card made of cells, so it exercises the whole path (the cells, the font,
+    the 16 colours, the page's painting) and says what to do. The first real datagram replaces it."""
+    cells = bytearray(BLANK)
+
+    def put(row, col, text, fg=7, bg=0):
+        for k, ch in enumerate(text):
+            if 0 <= col + k < COLS:
+                i = (row * COLS + col + k) * 2
+                cells[i], cells[i + 1] = ord(ch) if ord(ch) < 128 else 63, fg | (bg << 4)
+
+    def raw(row, col, code, fg=7, bg=0):
+        i = (row * COLS + col) * 2
+        cells[i], cells[i + 1] = code, fg | (bg << 4)
+
+    for c in range(1, COLS - 1):               # a double-line frame (code page 437)
+        raw(0, c, 0xCD, 11); raw(ROWS - 1, c, 0xCD, 11)
+    for r in range(1, ROWS - 1):
+        raw(r, 0, 0xBA, 11); raw(r, COLS - 1, 0xBA, 11)
+    raw(0, 0, 0xC9, 11); raw(0, COLS - 1, 0xBB, 11); raw(ROWS - 1, 0, 0xC8, 11); raw(ROWS - 1, COLS - 1, 0xBC, 11)
+    put(1, 2, "r3i6nos screen mirror: TEST SCREEN", 15, 1)
+    put(3, 2, "This page works: the font, the colours and the link to", 7)
+    put(4, 2, "the unit are fine. The unit has sent no screen yet.", 7)
+    put(6, 2, "On the unit: press any button, so its screen redraws.", 14)
+    put(7, 2, "It stays still when nothing changes, and a still screen", 7)
+    put(8, 2, "sends nothing. If this stays, see the notes under the", 7)
+    put(9, 2, "page, and Settings > Screen mirror > Instructions.", 7)
+    put(11, 2, "16 colours:", 7)
+    for k in range(16):
+        for w in range(3):
+            raw(12, 2 + k * 3 + w, 0xDB, k)       # a full block in each colour
+    put(14, 2, "The 256 characters of code page 437:", 7)
+    for code in range(256):
+        raw(15 + code // 32, 2 + code % 32, code, 15 if code >= 32 else 8)
+    return bytes(cells)
+
+
+def info_text(hub):
+    """What a page is told about the feed: whether an app has sent a screen, how many datagrams, how many were not understood."""
+    return f"real={1 if hub.real else 0};received={hub.received};bad={hub.bad}".encode()
+
+
 # ---- the cells ------------------------------------------------------------------------------------------------------------------
 
 def apply_delta(state, body):
@@ -95,9 +137,13 @@ class Hub:
 
     def __init__(self):
         self.lock = threading.Lock()
-        self.state = bytearray(BLANK)
+        self.state = bytearray(testcard())   # the test card, until an app sends its screen
         self.viewers = set()
         self.on_count = None  # called with the viewer count when it changes
+        self.on_real = None   # called once, when the first screen arrives from an app
+        self.real = False     # has an app sent a screen?
+        self.received = 0     # datagrams understood
+        self.bad = 0          # datagrams not understood
 
     def join(self):
         """A new viewer: its queue, already holding the whole screen. None when there are too many."""
@@ -106,6 +152,7 @@ class Hub:
                 return None
             q = queue.Queue(QUEUE_DEPTH)
             q.put(("full", bytes(self.state)))
+            q.put(("info", info_text(self)))
             self.viewers.add(q)
             n = len(self.viewers)
         if self.on_count:
@@ -121,14 +168,28 @@ class Hub:
 
     def feed(self, data):
         """A datagram from an app."""
+        first = False
         with self.lock:
-            kind = parse_datagram(self.state, data)
+            if self.real:
+                kind = parse_datagram(self.state, data)
+            else:   # the test card is still showing: a delta must land on a blank screen, not on the card
+                fresh = bytearray(BLANK)
+                kind = parse_datagram(fresh, data)
+                if kind is not None:
+                    self.state[:] = fresh
+                    kind = "full"
             if kind is None:
+                self.bad += 1
                 return
+            self.received += 1
+            if not self.real:
+                self.real, first = True, True
             event = ("full", bytes(self.state)) if kind == "full" else ("delta", bytes(data[1:]))
+            events = [event] + ([("info", info_text(self))] if first else [])
             for q in self.viewers:
                 try:
-                    q.put_nowait(event)
+                    for ev in events:
+                        q.put_nowait(ev)
                 except queue.Full:  # a page too slow to follow: drop what it has and give it the whole screen
                     while True:
                         try:
@@ -136,6 +197,9 @@ class Hub:
                         except queue.Empty:
                             break
                     q.put_nowait(("full", bytes(self.state)))
+                    q.put_nowait(("info", info_text(self)))
+        if first and self.on_real:
+            self.on_real()
 
 
 def make_handler(hub, token, page_path):
@@ -314,11 +378,12 @@ def serve(args):
 
     def info(viewers):
         try:
-            write_atomic(DIR / "info", f"url={url}\niface={iface}\naddress={addr}\nport={port}\nviewers={viewers}\npid={os.getpid()}\n")
+            write_atomic(DIR / "info", f"url={url}\niface={iface}\naddress={addr}\nport={port}\nviewers={viewers}\nfed={1 if hub.real else 0}\npid={os.getpid()}\n")
         except OSError:
             pass
 
     hub.on_count = info
+    hub.on_real = lambda: info(len(hub.viewers))   # the menu shows whether an app's screen has reached the daemon
     info(0)
     write_atomic(DIR / "on", f"{os.getpid()}\n")  # the flag apps look for: it comes last, when everything answers
     threading.Thread(target=httpd.serve_forever, daemon=True).start()

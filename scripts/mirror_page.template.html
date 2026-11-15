@@ -18,6 +18,9 @@
   body { display: flex; flex-direction: column; align-items: center; justify-content: center; font: 16px/1.4 monospace; }
   #screen { image-rendering: pixelated; width: 512px; height: 384px; max-width: 100vw; max-height: calc(100vh - 3em); }
   #state { min-height: 1.4em; padding: .3em 16px; color: var(--hint); }
+  #help { max-width: 560px; margin: 0 16px; padding: 0 0 2.2em; font-size: 14px; color: var(--fg); }
+  #help[hidden] { display: none; }
+  #help ul { margin: .3em 0 0; padding-left: 1.2em; }
   #credit { position: fixed; right: 8px; bottom: 4px; font-size: 11px; opacity: .7; }
   #credit a { color: inherit; }
 </style>
@@ -25,6 +28,16 @@
 <body>
 <canvas id="screen" width="512" height="384" role="img" aria-label="The unit's screen, shown as text"></canvas>
 <div id="state" role="status" aria-live="polite">Connecting…</div>
+<div id="help" hidden>
+  <strong>No screen has arrived from the unit.</strong> The picture above is the page's own test screen, so the page, its font and
+  the link are fine. Things to try:
+  <ul>
+    <li>Press any button on the unit: a still screen sends nothing until something on it changes.</li>
+    <li>On the unit, open Settings &gt; Screen mirror: it says whether the unit has sent a screen and any error.</li>
+    <li>An app built before the mirror existed does not send its screen: the menu does; rebuild the app to mirror it.</li>
+    <li>If it stays like this after a button press in the menu, stop and start the mirror on the unit, then reload this page.</li>
+  </ul>
+</div>
 <div id="credit">Font: IBM VGA 8x16 by <a href="https://int10h.org/oldschool-pc-fonts/">VileR</a>, CC BY-SA 4.0</div>
 <script>
 "use strict";
@@ -61,10 +74,25 @@ function delta(b) {                    // runs of (u16 start, u8 count, count x 
   }
 }
 
+var helpEl = document.getElementById("help"), real = false;
+function said(real_) {                 // the unit has, or has not, sent a screen yet: the test screen shows until it has
+  real = real_;
+  helpEl.hidden = real;
+  stateEl.textContent = real ? "" : "Test screen: the unit has sent no screen yet.";
+}
 var es = new EventSource("cells");     // reconnects by itself; the unit sends the whole screen again each time
-es.addEventListener("full", function (e) { full(b64(e.data)); stateEl.textContent = ""; });
+es.addEventListener("full", function (e) { full(b64(e.data)); });
 es.addEventListener("delta", function (e) { delta(b64(e.data)); });
-es.onerror = function () { stateEl.textContent = "Waiting for the unit…"; };
+es.addEventListener("info", function (e) {   // "real=0;received=0;bad=0", sent after the screen on joining and when the first one arrives
+  var m = /real=(\d)/.exec(atob(e.data)); said(!!m && m[1] === "1");
+  var bad = /bad=(\d+)/.exec(atob(e.data));
+  if (!real && bad && bad[1] !== "0") stateEl.textContent += " " + bad[1] + " datagram(s) from an app were not understood.";
+});
+es.onerror = function () {
+  stateEl.textContent = "Cannot reach the unit. Is it awake, on this network, and is the mirror still on? Open the address on the unit's Screen mirror page.";
+  helpEl.hidden = true;
+};
+window.onerror = function (msg) { stateEl.textContent = "The page failed: " + msg; };
 </script>
 </body>
 </html>

@@ -44,7 +44,7 @@ function M.status(sys)
   local pid = tonumber((sys.read(M.DIR .. "/on") or ""):match("%d+"))
   if not pid or not sys.alive(pid) then return { running = false } end
   local kv = keyvals(sys.read(M.DIR .. "/info"))
-  return { running = true, url = kv.url, iface = kv.iface, address = kv.address, viewers = tonumber(kv.viewers) or 0 }
+  return { running = true, url = kv.url, iface = kv.iface, address = kv.address, viewers = tonumber(kv.viewers) or 0, fed = kv.fed == "1" }
 end
 
 --- The links that could carry it: { { name, addr, kind } }, the ones with an IPv4 address.
@@ -76,10 +76,26 @@ function M.stop(sys)
   return ok
 end
 
+--- The tap's own count of what it sent from this app (theme/r3i6nos_mirror.lua), or nil when the theme has none.
+function M.tapStats()
+  local ok, tap = pcall(require, "r3i6nos_mirror")
+  return ok and type(tap) == "table" and tap.stats or nil
+end
+
+--- The two lines that say where a screen is lost: did this app send, did the daemon get one.
+function M.feedLines(st, tap)
+  local fed = st.fed and "yes" or "no"
+  local sent = tap and (tap.sent .. " sent" .. (tap.failed > 0 and (", " .. tap.failed .. " failed") or "")) or "not counted"
+  local lines = { "Menu: " .. sent .. ". Reached the page feed: " .. fed .. "." }
+  if tap and tap.last_error then lines[#lines + 1] = ("Error: " .. tap.last_error):sub(1, 58)
+  elseif not st.fed then lines[#lines + 1] = "Press a button; the page shows a test screen until then." end
+  return lines
+end
+
 --- What the screen says once it runs: lines.
-function M.addressLines(st)
+function M.addressLines(st, tap)
   local pages = (st.viewers or 0) == 1 and "1 page is watching." or ((st.viewers or 0) .. " pages are watching.")
-  return {
+  local lines = {
     "The screen is being mirrored. On a computer, monitor or",
     "TV on the same link, open this address in a browser:",
     "",
@@ -90,7 +106,10 @@ function M.addressLines(st)
     "",
     "The page only watches: it cannot press anything.",
     "Stop it here when you are done. A restart ends it too.",
+    "",
   }
+  for _, l in ipairs(M.feedLines(st, tap or M.tapStats())) do lines[#lines + 1] = l end
+  return lines
 end
 
 M.NO_LINK = {

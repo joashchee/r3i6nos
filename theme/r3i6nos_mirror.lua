@@ -68,9 +68,15 @@ M.sys = {
       M.udp = (ok and socket.udp and socket.udp()) or false
       if M.udp then M.udp:settimeout(0) end
     end
-    if M.udp then M.udp:sendto(data, "127.0.0.1", M.PORT) end
+    if not M.udp then error("no socket library in this LÖVE (require 'socket' failed)") end
+    local ok, err = M.udp:sendto(data, "127.0.0.1", M.PORT)
+    if not ok then error("sendto failed: " .. tostring(err)) end
   end,
 }
+
+--- What the tap did, for Settings > Screen mirror: how many datagrams it sent, how many failed and the last failure. Without it a mirror
+--- that shows nothing cannot say whether the app never sent or the daemon never got it.
+M.stats = { sent = 0, failed = 0, last_error = nil }
 
 local state = { on = false, checked = -math.huge, sent_full = false }
 
@@ -88,16 +94,24 @@ end
 
 --- Call when a screen has changed and is about to be remembered as `prev` (nil on an app's first screen). Sends the change when a mirror is on.
 function M.tap(scr, prev)
-  local ok = pcall(function()
+  local ok, err = pcall(function()
     if not mirrored() then return end
     local data
     if prev and state.sent_full then data = M.delta(scr, prev) else data = M.full(scr); state.sent_full = true end
-    if data then M.sys.send(data) end
+    if data then M.sys.send(data); M.stats.sent = M.stats.sent + 1 end
   end)
+  if not ok then
+    M.stats.failed = M.stats.failed + 1
+    M.stats.last_error = tostring(err):sub(1, 80)
+    state.sent_full = false   -- whatever failed, the next screen goes out whole
+  end
   return ok
 end
 
 --- For tests: forget what was learned.
-function M.reset() state.on, state.checked, state.sent_full = false, -math.huge, false end
+function M.reset()
+  state.on, state.checked, state.sent_full = false, -math.huge, false
+  M.stats.sent, M.stats.failed, M.stats.last_error = 0, 0, nil
+end
 
 return M

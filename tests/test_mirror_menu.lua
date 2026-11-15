@@ -61,4 +61,11 @@ local lines = mirror.addressLines(st)
 fits(lines, "address"); eq(lines[4], "  http://192.168.1.50:36363/abcd1234/"); eq(lines[7], "2 pages are watching.")
 eq(mirror.addressLines({ url = "u", viewers = 1 })[7], "1 page is watching.")
 
+-- where a screen is lost: the menu's own count and whether the daemon's feed got one
+local fl = mirror.feedLines({ fed = false }, { sent = 0, failed = 1, last_error = "no socket library in this LÖVE (require 'socket' failed)" })
+eq(fl[1], "Menu: 0 sent, 1 failed. Reached the page feed: no."); assert(fl[2]:find("^Error: no socket library"), fl[2])
+eq(mirror.feedLines({ fed = true }, { sent = 5, failed = 0 })[1], "Menu: 5 sent. Reached the page feed: yes.")
+eq(#mirror.feedLines({ fed = true }, { sent = 5, failed = 0 }), 1, "no hint once a screen has arrived")
+fits(mirror.addressLines(st, { sent = 0, failed = 1, last_error = string.rep("x", 80) }), "address with an error")
+
 print("ok: test_mirror_menu.lua")

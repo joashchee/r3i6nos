@@ -175,6 +175,9 @@ do -- an app must never be broken by the mirror
   M.sys.send = function() error("socket gone") end
   local a = T.screen()
   eq(pcall(M.tap, a, nil), true, "a failing send raises nothing in the app")
+  eq(M.stats.failed, 1, "but it is counted")
+  assert(tostring(M.stats.last_error):find("socket gone"), "and says why")
+  eq(M.stats.sent, 0)
 end
 
 print("ok: test_mirror.lua")

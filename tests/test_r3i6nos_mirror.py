@@ -87,6 +87,7 @@ class Cells(unittest.TestCase):
         q = hub.join()
         kind, data = q.get_nowait()
         self.assertEqual((kind, data[:2]), ("full", bytes([72, 0x0F])))
+        self.assertEqual(q.get_nowait()[0], "info")
         hub.feed(b"D" + run_len(1, [(73, 0x0F)]))
         self.assertEqual(q.get_nowait(), ("delta", run_len(1, [(73, 0x0F)])))
 
@@ -112,6 +113,28 @@ class Cells(unittest.TestCase):
         self.assertIsNone(hub.join())
         hub.leave(qs[0])
         self.assertIsNotNone(hub.join())
+
+
+class TestCard(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.m = load()
+
+    def test_it_is_a_whole_screen_with_text_colours_and_every_character(self):
+        card = self.m.testcard()
+        self.assertEqual(len(card), self.m.FRAME)
+        text = bytes(card[0::2])
+        self.assertIn(b"TEST SCREEN", text)
+        self.assertIn(b"press any button", text)
+        self.assertEqual({card[1::2][i] & 15 for i in range(self.m.CELLS) if card[2 * i] == 0xDB} >= set(range(16)), True, "all 16 colours")
+        self.assertEqual(set(range(32, 256)) - set(text), set(), "every printable code page 437 character is on it")
+
+    def test_a_real_screen_that_is_all_garbage_is_counted_not_shown(self):
+        hub = self.m.Hub()
+        hub.feed(b"Z")
+        hub.feed(b"D" + b"\x00")
+        self.assertEqual((hub.real, hub.received, hub.bad), (False, 0, 2))
+        self.assertEqual(bytes(hub.state), self.m.testcard())
 
 
 class Daemon(unittest.TestCase):
@@ -209,7 +232,14 @@ class Daemon(unittest.TestCase):
     def test_a_page_gets_the_screen_and_then_what_changes(self):
         s, buf = self.open_stream()
         name, data = self.event(s, buf)
-        self.assertEqual((name, data), ("full", bytes([32, 0x07]) * CELLS))
+        self.assertEqual((name, data), ("full", load().testcard()), "until an app sends one, a page shows the test card")
+        self.assertEqual(self.event(s, buf), ("info", b"real=0;received=0;bad=0"))
+        self.send(b"D" + run_len(3, [(72, 0x1F), (105, 0x1F)]))
+        name, data = self.event(s, buf)   # the first real datagram replaces the card: the page gets a whole (blank + this) screen
+        blank = bytearray(load().BLANK)
+        blank[6:10] = bytes([72, 0x1F, 105, 0x1F])
+        self.assertEqual((name, data), ("full", bytes(blank)))
+        self.assertEqual(self.event(s, buf), ("info", b"real=1;received=1;bad=0"))
         self.send(b"D" + run_len(3, [(72, 0x1F), (105, 0x1F)]))
         name, data = self.event(s, buf)
         self.assertEqual((name, data), ("delta", run_len(3, [(72, 0x1F), (105, 0x1F)])))
@@ -217,6 +247,16 @@ class Daemon(unittest.TestCase):
         self.send(b"F" + frame)
         self.assertEqual(self.event(s, buf), ("full", frame))
         s.close()
+
+    def test_the_info_file_says_when_an_apps_screen_has_arrived(self):
+        info = lambda: dict(l.split("=", 1) for l in (self.dir / "info").read_text().split())
+        self.assertEqual(info()["fed"], "0")
+        self.send(b"garbage")
+        self.send(b"F" + bytes([66, 0x4E]) * CELLS)
+        deadline = time.time() + 5
+        while time.time() < deadline and info()["fed"] != "1":
+            time.sleep(0.05)
+        self.assertEqual(info()["fed"], "1")
 
     def test_a_page_that_comes_late_gets_the_current_screen(self):
         self.send(b"D" + run_len(0, [(88, 0x0A)]))
