@@ -4,7 +4,11 @@
 # kernel has no readable config, so this builds the gadget and looks. Run as root over SSH, with a data cable from the OTG port to a
 # computer (unplug any USB adapter first: the one port is either host or device).
 #
-#   sudo r3i6nos-gadget-probe [--function ecm|ncm|rndis|eem] [--legacy ether|ncm] [--wait SECONDS] [--ip]
+#   sudo r3i6nos-gadget-probe [--function ecm|ncm|rndis|eem] [--legacy ether|ncm] [--wait SECONDS] [--ip] [--keep]
+#   sudo r3i6nos-gadget-probe --down
+#
+# --keep leaves the gadget up when the probe ends (until a reboot or --down), so a computer can be checked at leisure instead of inside the
+# wait; the wait still logs every UDC state change with its time. --down takes a kept gadget (or a kept g_ether/g_ncm) down again.
 #
 # --legacy loads the one-shot gadget module g_ether or g_ncm instead of building a gadget by configfs (the kernel's older route: no configfs
 # needed). It is also tried by itself, as g_ether, when the kernel has no configfs gadget.
@@ -29,6 +33,8 @@ FUNC=ecm
 WAIT=30
 WANT_IP=0
 LEGACY=
+KEEP=0
+DOWN=0
 NAME=r3i6nos_probe
 
 while [ $# -gt 0 ]; do
@@ -37,8 +43,10 @@ while [ $# -gt 0 ]; do
         --legacy) LEGACY=${2:-}; shift 2 ;;
         --wait) WAIT=${2:-}; shift 2 ;;
         --ip) WANT_IP=1; shift ;;
+        --keep) KEEP=1; shift ;;
+        --down) DOWN=1; shift ;;
         -h|--help) sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
-        *) echo "usage: r3i6nos-gadget-probe [--function ecm|ncm|rndis|eem] [--legacy ether|ncm] [--wait SECONDS] [--ip]" >&2; exit 2 ;;
+        *) echo "usage: r3i6nos-gadget-probe [--function ecm|ncm|rndis|eem] [--legacy ether|ncm] [--wait SECONDS] [--ip] [--keep] | --down" >&2; exit 2 ;;
     esac
 done
 case $FUNC in ecm|ncm|rndis|eem) ;; *) echo "unknown function: $FUNC" >&2; exit 2 ;; esac
@@ -84,11 +92,15 @@ teardown() {
     BOUND=0
 }
 finish() {
-    teardown
-    if [ -d "$G" ]; then
-        say FAIL "teardown: $G is still there (a busy gadget: unplug the cable and rmdir it by hand)"
+    if [ "$KEEP" = 1 ] && [ "$MADE" = 1 ]; then
+        say INFO "kept: the gadget stays up until a reboot or \`r3i6nos-gadget-probe --down\`; check the computer now (the state is in $SYS/class/udc)"
     else
-        say PASS "teardown: the gadget is gone"
+        teardown
+        if [ -d "$G" ]; then
+            say FAIL "teardown: $G is still there (a busy gadget: unplug the cable and rmdir it by hand)"
+        else
+            say PASS "teardown: the gadget is gone"
+        fi
     fi
     say INFO "summary: see the PASS/FAIL lines above"
     echo end
@@ -117,6 +129,36 @@ extcon_line() {
     printf '%s' "${o:- no extcon cables readable}"
 }
 
+down_run() { # take down what --keep left: the configfs gadget, or a legacy module
+    local m f any=0
+    if [ -d "$G" ]; then
+        any=1
+        echo "" > "$G/UDC" 2>/dev/null
+        for f in "$G"/configs/c.1/*; do [ -L "$f" ] && rm -f "$f"; done
+        rmdir "$G/configs/c.1/strings/0x409" 2>/dev/null
+        rmdir "$G/configs/c.1" 2>/dev/null
+        for f in "$G"/functions/*; do [ -d "$f" ] && rmdir "$f" 2>/dev/null; done
+        rmdir "$G/strings/0x409" 2>/dev/null
+        if [ "${R3I6NOS_GADGET_FAKE:-0}" = 1 ]; then rm -rf "$G"; else rmdir "$G" 2>/dev/null; fi
+        if [ -d "$G" ]; then say FAIL "down: $G is still there (a busy gadget: unplug the cable first)"; else say PASS "down: the configfs gadget is gone"; fi
+    fi
+    for m in g_ether g_ncm; do
+        if [ -d "$SYS/module/$m" ]; then
+            any=1
+            "$MODPROBE" -r "$m" 2>/dev/null
+            say INFO "down: $m unloaded"
+        fi
+    done
+    [ "$any" = 1 ] || say INFO "down: nothing of ours is up"
+}
+if [ "$DOWN" = 1 ]; then
+    down_run
+    say INFO "summary: see the lines above"
+    echo end
+    echo end >> "$OUT" 2>/dev/null
+    exit 0
+fi
+
 say INFO "probe: function $FUNC, wait ${WAIT}s, $(uname -sr 2>/dev/null)"
 say INFO "before udc: $(udc_state)"
 say INFO "before extcon:$(extcon_line)"
@@ -134,10 +176,15 @@ watch_host() { # needs UDC, IFACE (may be empty), WANT_IP, WAIT
     say INFO "waiting: plug a data cable from the OTG port into a computer now; looking for ${WAIT}s"
     SEEN=""
     t=0
+    last="?"
     while [ "$t" -lt "$WAIT" ]; do
         st=""
         if [ -n "$UDC" ]; then
             st=$(cat "$SYS/class/udc/$UDC/state" 2>/dev/null)
+        fi
+        if [ "$st" != "$last" ]; then
+            say INFO "udc state: ${st:-unreadable} (after ${t}s)"
+            last=$st
         fi
         if [ "$st" = configured ]; then
             SEEN=configured
@@ -192,6 +239,10 @@ legacy_run() {
     [ -e "$SYS/class/net/usb0" ] && IFACE=usb0
     [ -n "$IFACE" ] || say INFO "interface: no usb0 appeared yet (it can come only when a computer attaches)"
     watch_host
+    if [ "$KEEP" = 1 ]; then
+        say INFO "kept: $mod stays loaded until a reboot or \`r3i6nos-gadget-probe --down\`; check the computer now"
+        return 0
+    fi
     "$MODPROBE" -r "$mod" 2>/dev/null
     if [ -e "$SYS/class/net/usb0" ]; then
         say FAIL "teardown: $mod is still loaded (rmmod it by hand, or reboot)"
@@ -252,7 +303,7 @@ fi
 
 # 4. build one gadget
 if [ -d "$G" ]; then
-    say FAIL "gadget: $G is already there (an earlier probe was cut short): rmdir it or reboot"
+    say FAIL "gadget: $G is already there (kept, or an earlier probe was cut short): run \`r3i6nos-gadget-probe --down\`, or reboot"
     exit 1
 fi
 if ! mkdir "$G" 2>/dev/null; then

@@ -96,6 +96,41 @@ class GadgetProbe(unittest.TestCase):
         self.assertIn("FAIL legacy g_ncm: modprobe failed", r.stdout)
         self.assertEqual(r.stdout.strip().splitlines()[-1], "end")
 
+    def test_keep_leaves_the_gadget_up_and_down_takes_it_away(self):
+        g = self.t / "sys/kernel/config/usb_gadget/r3i6nos_probe"
+        r = self.run_probe("--keep", "--wait", "1")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("INFO kept: the gadget stays up", r.stdout)
+        self.assertNotIn("teardown", r.stdout)
+        self.assertTrue(g.exists(), "a kept gadget is still in configfs")
+        self.assertEqual(r.stdout.strip().splitlines()[-1], "end")
+        again = self.run_probe("--wait", "1")        # a second probe must say how to clear it, not stumble
+        self.assertIn("run `r3i6nos-gadget-probe --down`", again.stdout)
+        down = self.run_probe("--down")
+        self.assertIn("PASS down: the configfs gadget is gone", down.stdout)
+        self.assertFalse(g.exists())
+        self.assertEqual(down.stdout.strip().splitlines()[-1], "end")
+
+    def test_down_with_nothing_up_says_so(self):
+        r = self.run_probe("--down")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("INFO down: nothing of ours is up", r.stdout)
+
+    def test_the_wait_logs_each_udc_state_with_its_time(self):
+        r = self.run_probe("--wait", "2")
+        self.assertIn("INFO udc state: not attached (after 0s)", r.stdout)
+        self.assertEqual(r.stdout.count("INFO udc state:"), 1, "a state that does not change is logged once")
+
+    def test_keep_with_the_legacy_gadget_does_not_unload_it_and_down_does(self):
+        (self.t / "sys/class/udc/ff300000.usb/state").write_text("configured\n")
+        (self.t / "sys/module/g_ether").mkdir(parents=True)          # what a loaded module looks like
+        r = self.run_probe("--legacy", "ether", "--keep", "--wait", "2")
+        self.assertIn("INFO kept: g_ether stays loaded", r.stdout)
+        self.assertNotIn(f"modprobe -r g_ether", (self.t / "calls").read_text())
+        down = self.run_probe("--down")
+        self.assertIn("INFO down: g_ether unloaded", down.stdout)
+        self.assertIn(f"{self.t}/bin/modprobe -r g_ether", (self.t / "calls").read_text())
+
     def test_bad_arguments(self):
         self.assertEqual(self.run_probe("--legacy", "nope").returncode, 2)
         self.assertEqual(self.run_probe("--function", "nope").returncode, 2)
