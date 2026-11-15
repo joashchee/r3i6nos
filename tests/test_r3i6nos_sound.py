@@ -286,6 +286,11 @@ class Sound(unittest.TestCase):
         self.assertEqual(self.m.describe(c["Boost"]), "3 of 0-7, 42%, +6.0 dB")
         self.assertEqual(self.m.describe(c["Playback Path"]), "SPK (of OFF SPK HP)")
 
+    def test_a_value_above_the_limit_never_reads_over_100_percent(self):
+        c = {"name": "Playback", "caps": "", "items": [], "item": None, "value": 245, "min": 0, "max": 237,
+             "percent": "103", "db": "-6.80"}
+        self.assertEqual(self.m.describe(c), "245 of 0-237, 100% (above its maximum), -6.8 dB")
+
     def test_first_boot_makes_the_volumes_and_sets_safe_levels(self):
         (self.t / "mixer").write_text(self.MIXER)
         rc, _, _ = self.main("set")

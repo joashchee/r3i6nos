@@ -266,7 +266,11 @@ def describe(c):
         return c["caps"] or "?"
     text = f"{c['value']} of {c.get('min', 0)}-{c.get('max', '?')}"
     if c.get("percent"):
-        text += f", {c['percent']}%"
+        # amixer's percent follows the dB map and can pass 100 when the driver's value is above its own limit (the RK817's
+        # Playback read 245 of 0-237, 103%): show at most 100 and say the value is out of range
+        text += f", {min(int(c['percent']), 100)}%"
+        if c.get("max") is not None and c["value"] > c["max"]:
+            text += " (above its maximum)"
     if c.get("db"):
         text += f", {float(c['db']):+.1f} dB"
     return text

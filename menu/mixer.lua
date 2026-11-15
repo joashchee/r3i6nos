@@ -111,7 +111,8 @@ function M.valueText(c)
   if c.name == "Volume" and c.value == 0 then return "off" end   -- a softvol's step 0 is silence, whatever dB amixer reports
   if c.name == "Boost" and c.db then return c.value == 0 and "silent (step 0)" or ("%+.0f dB"):format(c.db) end
   local parts = {}
-  if c.percent then parts[#parts + 1] = ("%d%%"):format(c.percent) end
+  -- amixer's percent follows the dB map and can pass 100 when the driver's value is above its limit (245 of 0-237 read 103%)
+  if c.percent then parts[#parts + 1] = ("%d%%"):format(math.min(c.percent, 100)) end
   if c.db then parts[#parts + 1] = ("%+.0f dB"):format(c.db) end
   if #parts == 0 then parts[1] = ("%d of %d"):format(c.value, c.max) end
   return table.concat(parts, "  ")

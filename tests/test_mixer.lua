@@ -70,6 +70,7 @@ eq(table.concat(mixer.change(by.Volume, 1), " "), "amixer -c 0 -q sset Volume 17
 eq(table.concat(mixer.change(by.Volume, 10), " "), "amixer -c 0 -q sset Volume 20", "clamped to the top")
 eq(table.concat(mixer.change(by.Boost, -5), " "), "amixer -c 0 -q sset Boost 1", "Boost stops at step 1 (0 dB): step 0 is silence")
 eq(mixer.fraction({ name = "Boost", items = {}, value = 1, min = 0, max = 7 }), 0, "Boost's bar is empty at 0 dB")
+eq(mixer.valueText({ name = "Playback", items = {}, value = 245, min = 0, max = 237, percent = 103, db = -6.8 }), "100%  -7 dB", "never over 100%")
 eq(mixer.valueText({ name = "Boost", items = {}, value = 1, min = 0, max = 7, db = 0 }), "+0 dB")
 eq(mixer.valueText({ name = "Boost", items = {}, value = 0, min = 0, max = 7, db = -3 }), "silent (step 0)", "says so if it is ever there")
 eq(mixer.valueText({ name = "Volume", items = {}, value = 0, min = 0, max = 20, percent = 0, db = -40 }), "off", "step 0 is silence, not -40 dB")
