@@ -68,9 +68,9 @@ M.sys = {
       M.udp = (ok and socket.udp and socket.udp()) or false
       if M.udp then M.udp:settimeout(0) end
     end
-    if not M.udp then error("no socket library in this LÖVE (require 'socket' failed)") end
+    if not M.udp then error("no socket library in this LÖVE", 0) end   -- level 0: no file:line prefix, the menu shows only 58 characters
     local ok, err = M.udp:sendto(data, "127.0.0.1", M.PORT)
-    if not ok then error("sendto failed: " .. tostring(err)) end
+    if not ok then error("sendto: " .. tostring(err), 0) end
   end,
 }
 
