@@ -31,7 +31,14 @@ class Converter(unittest.TestCase):
 
     def test_pixels_match_pillow(self):
         try:
-            from PIL import Image
+            try:
+                from PIL import Image
+            except ImportError:
+                # scripts/check.sh runs the tests with `python3 -I`, which ignores the user's site-packages, where `pip install --user Pillow`
+                # puts it (this Mac); look there on purpose (a library of ours is never imported from it)
+                import site
+                sys.path.append(site.getusersitepackages())
+                from PIL import Image
         except ImportError:
             self.skipTest("Pillow is not installed (the converter's pixels were not compared with an independent decoder)")
         im = Image.open(mbl.PNG).convert("RGB")
