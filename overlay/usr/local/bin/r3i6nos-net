@@ -346,6 +346,44 @@ def v_wired(req):
     return Result(True, [f"Connected: {n}", ""] + summary(n))
 
 
+# What wpa_supplicant's log says about why a link ended (IEEE 802.11 reason codes it prints in CTRL-EVENT-DISCONNECT)
+REASONS = {"1": "unspecified", "2": "authentication expired", "3": "the access point let it go",
+           "4": "idle too long", "6": "frame from an unknown device", "7": "frame while not associated",
+           "8": "the device left", "15": "handshake timed out (wrong password?)",
+           "16": "group key handshake timed out", "17": "security settings refused",
+           "23": "needs a login (802.1X)", "34": "radio link too weak"}
+
+
+def wifi_why(n):
+    """The last reasons wpa_supplicant gave for a link not coming up or ending, from its log: up to two short lines, or []."""
+    try:
+        text = (SECRETS / f"wpa-{n}.log").read_text(errors="replace")
+    except OSError:
+        return []
+    lines = [l for l in text.splitlines() if any(k in l for k in ("CTRL-EVENT-DISCONNECT", "CTRL-EVENT-ASSOC-REJECT",
+             "CTRL-EVENT-SSID-TEMP-DISABLED", "4-way handshake failed", "CTRL-EVENT-AUTH-REJECT", "No suitable network"))]
+    out = []
+    for l in reversed(lines):
+        m = re.search(r"CTRL-EVENT-DISCONNECT .*reason=(\d+)(.*)", l)
+        if m:
+            who = "unit" if "locally_generated=1" in m.group(2) else "AP"     # who ended the link
+            out.append(f"Reason {m.group(1)} ({who}): {REASONS.get(m.group(1), 'an IEEE 802.11 reason code')}")
+        elif "SSID-TEMP-DISABLED" in l and "WRONG_KEY" in l:
+            out.append("The password was refused (WRONG_KEY).")
+        elif "ASSOC-REJECT" in l:
+            m = re.search(r"status_code=(\d+)", l)
+            out.append(f"The access point refused to join (status {m.group(1) if m else '?'}).")
+        elif "AUTH-REJECT" in l:
+            out.append("The access point refused to authenticate.")
+        elif "No suitable network" in l:
+            out.append("The network was not seen (out of range, or only on 5 GHz).")
+        elif "4-way handshake failed" in l:
+            out.append("The password handshake failed.")
+        if len(out) == 2:
+            break
+    return [clean(x, 60) for x in out]
+
+
 def stop_wifi(n):
     pidfile = SECRETS / f"wpa-{n}.pid"
     try:
@@ -380,16 +418,29 @@ def v_wifi(req):
         f.write("\n".join(block) + "\n")
     stop_wifi(n)
     run(["ip", "link", "set", n, "up"])
-    rc, out = run(["wpa_supplicant", "-B", "-i", n, "-c", str(conf), "-P", str(SECRETS / f"wpa-{n}.pid")], timeout=20)
+    try:
+        (SECRETS / f"wpa-{n}.log").unlink()          # this run's log only: wifi_why must not read an old failure
+    except OSError:
+        pass
+    rc, out = run(["wpa_supplicant", "-B", "-i", n, "-c", str(conf), "-P", str(SECRETS / f"wpa-{n}.pid"),
+                   "-f", str(SECRETS / f"wpa-{n}.log"), "-t"], timeout=20)
     if rc != 0:
         return Result(False, ["Could not start the Wi-Fi client.", clean(out.strip().splitlines()[-1] if out.strip() else "", 60)])
     if not wait_for(lambda: bool(wifi_link(n)[0]), 20):
+        why = wifi_why(n)
         stop_wifi(n)
-        return Result(False, [f"Could not join {ssid}.", "", "Wrong password, out of range, or the access point",
+        return Result(False, [f"Could not join {ssid}.", ""] + (why + [""] if why else []) + [
+                              "Wrong password, out of range, or the access point",
                               "refuses new devices. 5 GHz-only networks need a dual-band adapter."])
     ok, out = dhcp(n)
     if not ok:
-        return Result(False, [f"Joined {ssid} but got no address.", "", "The router's DHCP did not answer. Try again."])
+        return Result(False, [f"Joined {ssid} but got no address.", ""] + wifi_why(n) + ["The router's DHCP did not answer. Try again."])
+    nap(3)   # a link that is dropped at once (a refused key, a weak or flapping radio) shows within seconds: say so instead of "Connected"
+    if not wifi_link(n)[0]:
+        why = wifi_why(n)
+        stop_wifi(n)
+        return Result(False, [f"Joined {ssid}, then the link dropped.", ""] + (why + [""] if why else []) + [
+                              "A weak signal, the access point refusing the", "device, or the dongle losing power on the USB port."])
     STATE_DIR.mkdir(parents=True, exist_ok=True)
     fd = os.open(STATE_DIR / "wifi.json", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:

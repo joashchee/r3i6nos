@@ -29,6 +29,9 @@ Start opens Settings: **Network**, **SSH**, **Battery** (`docs/BATTERY.md`), **S
   `sudo r3i6nos-report`. Never passwordless: every game and app on the card runs as `loveos`, so a `NOPASSWD` rule would hand each of them root.
   A key-only login has no password and cannot `sudo`: set a password in Settings too. Root still cannot log in. **Needs an image built after this change** (the
   package and the rule are in the image); a card flashed before it has no `sudo`. Not run on the unit.
+- **Why a Wi-Fi link failed or dropped** (2026-11-15): `wpa_supplicant` logs to `/run/r3i6nos-net/private/wpa-<iface>.log` (root only, this join's run only), and the join result
+  shows its last reasons (`Reason 15 (unit): handshake timed out (wrong password?)`, WRONG_KEY, an association refusal, a network not seen). After the address is
+  got, the link is checked again 3 seconds later: a link that has dropped is reported, stopped and not saved, instead of "Connected".
 - The games card is only read (rule 7).
 
 ## How it works

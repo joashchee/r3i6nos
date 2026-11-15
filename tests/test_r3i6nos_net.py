@@ -266,6 +266,32 @@ class Net(unittest.TestCase):
         self.assertIn("Could not join Home", r.lines[0])
         self.assertFalse((self.t / "state/wifi.json").exists(), "a network that did not work must not be saved")
 
+    def test_a_link_that_drops_after_joining_is_reported_with_wpas_reason(self):
+        self.iface("wlan0", "wifi")
+        self.ip_up("wlan0")
+        up = "Connected to aa:bb\n\tSSID: Home\n\tsignal: -50 dBm\n"
+        answers = [(0, up), (1, "Not connected.\n")]    # joined (the wait), then gone (the check after DHCP)
+        self.f.table[("iw", "dev", "wlan0", "link")] = lambda cmd: answers.pop(0) if len(answers) > 1 else answers[0]
+        def start(cmd):
+            (self.t / "out/private").mkdir(parents=True, exist_ok=True)
+            (self.t / "out/private/wpa-wlan0.log").write_text(
+                "1: wlan0: CTRL-EVENT-CONNECTED - Connection to aa:bb completed\n"
+                "5: wlan0: CTRL-EVENT-DISCONNECT bssid=aa:bb reason=15 locally_generated=1\n")
+            return 0, ""
+        self.f.table[("wpa_supplicant",)] = start
+        r = self.ask(verb="wifi", ssid="Home", psk="correct horse")
+        self.assertFalse(r.ok)
+        self.assertIn("then the link dropped", r.lines[0])
+        self.assertTrue(any("Reason 15 (unit)" in l and "wrong password" in l for l in r.lines), r.lines)
+        self.assertFalse((self.t / "state/wifi.json").exists(), "a link that dropped must not be saved")
+
+    def test_why_reads_only_this_runs_log_and_knows_a_refused_key(self):
+        (self.t / "out/private").mkdir(parents=True, exist_ok=True)
+        (self.t / "out/private/wpa-wlan0.log").write_text(
+            "wlan0: CTRL-EVENT-SSID-TEMP-DISABLED id=0 ssid=\"Home\" auth_failures=1 duration=10 reason=WRONG_KEY\n")
+        self.assertEqual(self.m.wifi_why("wlan0"), ["The password was refused (WRONG_KEY)."])
+        self.assertEqual(self.m.wifi_why("wlan1"), [])
+
     def test_wifi_arguments_are_checked(self):
         self.iface("wlan0", "wifi")
         for bad in (dict(ssid="x" * 33, psk="12345678"), dict(ssid="a\x01b", psk="12345678"), dict(ssid="Home", psk="short"),
