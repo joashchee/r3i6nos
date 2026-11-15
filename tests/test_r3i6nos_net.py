@@ -216,6 +216,20 @@ class Net(unittest.TestCase):
         self.assertFalse(r.ok)
         self.assertIn("scan failed", r.lines[0])
 
+    def test_scan_on_an_interface_with_no_nl80211_says_so(self):
+        self.iface("wlan0", "wifi")
+        self.f.table[("iw", "dev", "wlan0", "scan")] = (237, "command failed: No such device (-19)\n")
+        r = self.ask(verb="scan")
+        self.assertFalse(r.ok)
+        self.assertIn("no nl80211", r.lines[0])
+
+    def test_scan_prefers_the_interface_with_a_phy_over_p2p0(self):
+        self.iface("p2p0", "wifi")
+        self.iface("wlan0", "wifi")
+        (self.t / "sys" / "wlan0" / "phy80211").mkdir()
+        self.f.table[("iw", "dev", "wlan0", "scan")] = (0, self.SCAN)
+        self.assertTrue(self.ask(verb="scan").ok)
+
     def test_wifi_writes_a_private_hashed_config_and_saves_the_network(self):
         self.iface("wlan0", "wifi")
         self.ip_up("wlan0")

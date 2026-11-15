@@ -155,6 +155,7 @@ grep -q '^PathExists=/run/loveos/net/request' "$R/etc/systemd/system/r3i6nos-net
 [ ! -e "$R/etc/systemd/system/multi-user.target.wants/ssh.service" ] || fail "ssh.service is enabled at boot"
 [ ! -e "$R/etc/systemd/system/sshd.service" ] || fail "the sshd alias is still there"
 [ ! -e "$R/etc/systemd/system/sockets.target.wants/ssh.socket" ] || fail "ssh.socket is still wired to start"
+grep -q '^blacklist r8188eu$' "$R/etc/modprobe.d/r3i6nos-wifi.conf" || fail "the staging r8188eu (wext only, no scan with iw) is not blacklisted"
 [ -z "$(ls "$R"/etc/ssh/ssh_host_* 2>/dev/null)" ] || fail "host keys from the build are in the image: every card would share them"
 [ -f "$R/etc/ssh/sshd_config" ] || fail "sshd_config was removed along with the host keys"
 [ -d "$R/etc/ssh/sshd_config.d" ] || fail "the sshd drop-in folder is missing"

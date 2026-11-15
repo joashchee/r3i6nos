@@ -1033,6 +1033,12 @@ def usb_ethernet(r, gadget):
         addr = (run(["ip", "-4", "-o", "addr", "show", name]) or "").split()
         ip = addr[addr.index("inet") + 1] if "inet" in addr else "no IPv4 address"
         r.line("INFO", f"network {name}", f"{what}; driver {drv or 'none'}; {oper}; carrier {carrier or '?'}; {sp}; mac {mac}; {ip}")
+        if wifi:
+            # the Wi-Fi scan says "No such device (-19)" when the interface has no nl80211 phy: say which it is, and what the kernel logged
+            phy = (SYS / "class/net" / name / "phy80211").exists()
+            iw_dev = " ".join((run(["iw", "dev", name, "info"]) or "iw gave no answer").split())[:120]
+            r.line("PASS" if phy else "FAIL", f"wifi {name} nl80211", ("has a phy" if phy else "no phy80211: only wireless extensions, so iw (the menu's scan) cannot use it; its driver needs cfg80211")
+                   + f"; driver {drv or 'none'}; iw: {iw_dev}")
         if not wifi and kind in ("gadget", "usb") and carrier == "1":
             r.line("PASS", f"wired link {name}", f"up ({what}, {sp}): the mirror can use this link")
             wired_up = True

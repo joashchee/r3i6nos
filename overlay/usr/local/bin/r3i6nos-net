@@ -173,6 +173,10 @@ def pick(kind, wanted=None):
         return wanted
     if not ifs:
         raise Refused("No wired network adapter found." if kind == "wired" else "No Wi-Fi adapter found.")
+    if kind == "wifi":
+        # Realtek's vendor drivers add a p2p0 beside wlan0, and a wireless-extensions-only driver has no phy80211: scan with
+        # the interface iw can talk to (one with a phy), not p2p0
+        ifs.sort(key=lambda n: (n.startswith("p2p"), not (SYS_NET / n / "phy80211").exists()))
     return ifs[0]
 
 
@@ -286,6 +290,15 @@ def v_scan(req):
     run(["ip", "link", "set", n, "up"])
     nap(1)
     rc, out = run(["iw", "dev", n, "scan"], timeout=30)
+    if rc != 0 and "No such device" in out:
+        # iw sees no nl80211 device behind an interface the kernel calls wireless: a driver that only speaks wireless
+        # extensions (an old vendor driver), or one whose firmware did not load; the device report's wifi lines say which
+        drv = ""
+        try:
+            drv = os.path.basename(os.readlink(SYS_NET / n / "device" / "driver"))
+        except OSError:
+            pass
+        raise Refused(f"{n} has no nl80211 support" + (f" (driver {drv})" if drv else "") + ": its driver cannot scan here")
     if rc != 0:
         raise Refused("The scan failed: " + clean(out.strip().splitlines()[-1] if out.strip() else "no answer", 60))
     best = {}
