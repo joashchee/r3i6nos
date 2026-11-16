@@ -42,8 +42,10 @@
 #include <unistd.h>
 
 #include "r3i6nos_ansiapps.h"
+#include "r3i6nos_themes.h"
 #include "r3i6nos_toast.h"
 #include "r3i6nos_report.h"
+#include "filekind.h"
 #include "formats.h"
 #include "ansiart.h"
 #include "player.h"
@@ -1060,13 +1062,13 @@ static void viewer_overlay(const Viewer *w, uint32_t *px) {
 
 /* ---- the application ---------------------------------------------------------------------------------------------------------- */
 
-enum { M_BROWSE, M_MENU, M_CONFIRM, M_INPUT, M_VIEW, M_JOB };
-enum { C_VIEW, C_COPY, C_MOVE, C_RENAME, C_MKDIR, C_DELETE, C_TAGALL, C_UNTAG, C_SORT, C_HIDDEN, C_SWAP, C_SAME, C_QUIT, C_COUNT };
+enum { M_BROWSE, M_MENU, M_CONFIRM, M_INPUT, M_VIEW, M_JOB, M_THEME };
+enum { C_VIEW, C_COPY, C_MOVE, C_RENAME, C_MKDIR, C_DELETE, C_TAGALL, C_UNTAG, C_SORT, C_HIDDEN, C_SWAP, C_SAME, C_THEME, C_FILECOLORS, C_QUIT, C_COUNT };
 
 static const struct { const char *label, *key; } MENU[C_COUNT] = {
     {"View", "F3"}, {"Copy", "F5"}, {"Move", "F6"}, {"Rename", "F2"}, {"Make directory", "F7"}, {"Delete", "F8"},
     {"Tag all", ""}, {"Untag all", ""}, {"Sort by", ""}, {"Hidden files", ""}, {"Swap panels", ""},
-    {"Other panel: this folder", ""}, {"Quit", "F10"},
+    {"Other panel: this folder", ""}, {"Colour theme", ""}, {"File colours", ""}, {"Quit", "F10"},
 };
 
 #define VIEW_DEPTH 4
@@ -1101,6 +1103,8 @@ typedef struct {
     int job_nsrcs;
     char job_dst[PATH_MAX];
     int select_held;
+    /* colour: the theme in use (an index into r3_themes), the one the picker is on, and whether files are coloured by kind (0: yes) */
+    int theme, theme_sel, no_file_colors;
 } App;
 
 static void say(App *a, int style, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
@@ -1110,6 +1114,49 @@ static void say(App *a, int style, const char *fmt, ...) {
     vsnprintf(a->reply, sizeof a->reply, fmt, ap);
     va_end(ap);
     a->reply_style = style;
+}
+
+/* ---- settings: the colour theme and the file colours, kept in <roms>/Commander/settings.conf (R3I6NOS_COMMANDER_CONF names another) ------------ */
+
+static void settings_path(char *out, size_t cap) {
+    const char *conf = getenv("R3I6NOS_COMMANDER_CONF");
+    if (conf && *conf) { copy_str(out, cap, conf); return; }
+    const char *roms = getenv("R3I6NOS_ROMS") && *getenv("R3I6NOS_ROMS") ? getenv("R3I6NOS_ROMS") : "/roms";
+    snprintf(out, cap, "%s/Commander/settings.conf", roms);
+}
+
+/* "theme=<name>" and "file_colours=on|off", one a line; anything else is ignored. Sets the palette. No file, or a name no theme has: the defaults. */
+static void load_settings(App *a) {
+    char path[PATH_MAX], line[256];
+    a->theme = 0;
+    a->no_file_colors = 0;
+    settings_path(path, sizeof path);
+    FILE *f = fopen(path, "r");
+    if (f) {
+        while (fgets(line, sizeof line, f)) {
+            line[strcspn(line, "\r\n")] = 0;
+            if (!strncmp(line, "theme=", 6)) { int t = r3_theme_find(line + 6); if (t >= 0) a->theme = t; }
+            else if (!strcmp(line, "file_colours=off")) a->no_file_colors = 1;
+        }
+        fclose(f);
+    }
+    r3_theme_apply(a->theme);
+}
+
+/* Written whole to a new file and renamed over the old, so a pulled card never leaves half a file. 0: saved. */
+static int save_settings(const App *a) {
+    char path[PATH_MAX], tmp[PATH_MAX + 8];
+    settings_path(path, sizeof path);
+    copy_str(tmp, sizeof tmp, path);
+    char *slash = strrchr(tmp, '/');
+    if (slash) { *slash = 0; if (mkdir(tmp, 0777) != 0 && errno != EEXIST) return -1; *slash = '/'; }
+    snprintf(tmp, sizeof tmp, "%s.tmp", path);
+    FILE *f = fopen(tmp, "w");
+    if (!f) return -1;
+    int ok = fprintf(f, "theme=%s\nfile_colours=%s\n", r3_themes[a->theme].name, a->no_file_colors ? "off" : "on") > 0;
+    ok = fclose(f) == 0 && ok;
+    if (!ok || rename(tmp, path) != 0) { unlink(tmp); return -1; }
+    return 0;
 }
 
 static Pane *cur(App *a) { return &a->p[a->act]; }
@@ -1436,6 +1483,15 @@ static void run_cmd(App *a, int cmd) {
     case C_MKDIR:
         open_input(a, cmd, "New folder name:", "New folder", NULL);
         break;
+    case C_THEME:
+        a->theme_sel = a->theme;
+        a->mode = M_THEME;
+        break;
+    case C_FILECOLORS:
+        a->no_file_colors = !a->no_file_colors;
+        if (save_settings(a) == 0) say(a, R3_ST_OK, "File colours %s", a->no_file_colors ? "off" : "on");
+        else say(a, R3_ST_WARN, "File colours %s (not saved: cannot write the settings)", a->no_file_colors ? "off" : "on");
+        break;
     case C_TAGALL:
         for (int i = 0; i < p->n; i++) p->e[i].tagged = strcmp(p->e[i].name, "..") != 0;
         say(a, R3_ST_HINT, "%d tagged", pane_tagged(p));
@@ -1582,6 +1638,8 @@ static void menu_values(const App *a, R3Item *items) {
     }
     copy_str(items[C_SORT].value, sizeof items[C_SORT].value, SORT_NAMES[a->opt.sort]);
     copy_str(items[C_HIDDEN].value, sizeof items[C_HIDDEN].value, a->opt.hidden ? "shown" : "hidden");
+    copy_str(items[C_THEME].value, sizeof items[C_THEME].value, r3_themes[a->theme].name);
+    copy_str(items[C_FILECOLORS].value, sizeof items[C_FILECOLORS].value, a->no_file_colors ? "off" : "on");
 }
 
 /* One action (a button or a key already mapped) in whatever mode the app is in. */
@@ -1594,6 +1652,18 @@ static void app_action(App *a, int action) {
         if (action == R3_BACK || action == R3_MORE) { a->mode = M_BROWSE; break; }
         if (action == R3_ACCEPT) { int c = a->menu_sel; a->mode = M_BROWSE; run_cmd(a, c); break; }
         a->menu_sel = r3_list_key(a->menu_sel, C_COUNT, r3_list_rows(C_COUNT + 2), action);
+        break;
+    case M_THEME:    /* the picker shows each theme as the cursor reaches it; A keeps it and saves, B puts the old one back */
+        if (action == R3_BACK) { r3_theme_apply(a->theme); a->mode = M_MENU; break; }
+        if (action == R3_ACCEPT) {
+            a->theme = a->theme_sel;
+            a->mode = M_BROWSE;
+            if (save_settings(a) == 0) say(a, R3_ST_OK, "Theme: %s", r3_themes[a->theme].name);
+            else say(a, R3_ST_WARN, "Theme: %s (not saved: cannot write the settings)", r3_themes[a->theme].name);
+            break;
+        }
+        a->theme_sel = r3_list_key(a->theme_sel, R3_THEME_COUNT, r3_list_rows(R3_THEME_COUNT + 2), action);
+        r3_theme_apply(a->theme_sel);
         break;
     case M_CONFIRM:
         if (action == R3_BACK) { a->mode = M_BROWSE; break; }
@@ -1736,11 +1806,16 @@ static void draw_pane(const App *a, R3Screen *s, int idx) {
         if (i == p->sel) st = active ? R3_ST_SELECT : R3_ST_DIM;
         else if (e->tagged) st = R3_ST_WARN;
         else if (e->is_dir) st = R3_ST_STRONG;
+        int ink = r3_styles[st][0];
+        if (st == R3_ST_BODY || st == R3_ST_STRONG) { /* an ordinary row takes its file kind's colour (a theme's own slot, same ground) */
+            int k = a->no_file_colors ? R3_FK_PLAIN : fk_of(e->name, e->is_dir, e->is_link);
+            if (k != R3_FK_PLAIN) ink = r3_fk_slot(k);
+        }
         r3_fill(s, x, y, PANE_W - 2, 1, 32, R3_ST(st));
         r3_put(s, x, y, e->tagged ? '*' : ' ', R3_ST(st));
         char label[300];
         snprintf(label, sizeof label, "%s%s", e->is_dir ? "/" : "", e->name);
-        r3_text_fit(s, x + 1, y, label, 21, R3_ST(st));
+        r3_text_fit(s, x + 1, y, label, 21, ink, r3_styles[st][1]);
         char size[24];
         if (!strcmp(e->name, "..")) copy_str(size, sizeof size, "UP--DIR");
         else if (e->is_dir) copy_str(size, sizeof size, "<DIR>");
@@ -1902,6 +1977,14 @@ static void app_compose(const App *a, R3Screen *s) {
         R3Item items[C_COUNT];
         menu_values(a, items);
         centered_list(s, "Commander", items, C_COUNT, a->menu_sel, "A Choose  B Close", 40);
+    } else if (a->mode == M_THEME) {
+        R3Item items[R3_THEME_COUNT];
+        memset(items, 0, sizeof items);
+        for (int i = 0; i < R3_THEME_COUNT; i++) {
+            copy_str(items[i].label, sizeof items[i].label, r3_themes[i].name);
+            snprintf(items[i].value, sizeof items[i].value, "%s%s", r3_themes[i].look, i == a->theme ? " *" : "");
+        }
+        centered_list(s, "Colour theme", items, R3_THEME_COUNT, a->theme_sel, "A Use  B Cancel", 34);
     } else if (a->mode == M_CONFIRM) {
         R3Item items[2];
         memset(items, 0, sizeof items);
@@ -2214,6 +2297,113 @@ static void test_files(const char *root) {
     free(big);
 }
 
+/* The true-colour themes and the colour of each kind of file (theme/r3i6nos_themes.h, filekind.h). */
+static void test_colour(const char *root) {
+    char dir[PATH_MAX], p[PATH_MAX], conf[PATH_MAX];
+    path_join(dir, sizeof dir, root, "colour");
+    CHECK(mkdir_p(dir) == 0, "mkdir colour");
+    static const struct { const char *name; int kind; } names[] = {
+        {"a.zip", R3_FK_ARCHIVE}, {"B.TAR.GZ", R3_FK_ARCHIVE}, {"pic.png", R3_FK_IMAGE}, {"art.ANS", R3_FK_IMAGE}, {"song.mp3", R3_FK_AUDIO},
+        {"tune.nsf", R3_FK_AUDIO}, {"clip.mp4", R3_FK_VIDEO}, {"demo.r3f", R3_FK_VIDEO}, {"notes.txt", R3_FK_DOC}, {"README.md", R3_FK_DOC},
+        {"main.c", R3_FK_CODE}, {"run.sh", R3_FK_CODE}, {"disk.iso", R3_FK_DISK}, {"pkg.deb", R3_FK_DISK}, {"setup.exe", R3_FK_EXEC},
+        {".profile", R3_FK_HIDDEN}, {"Makefile", R3_FK_PLAIN}, {"noext.", R3_FK_PLAIN}, {"weird.verylongextension", R3_FK_PLAIN}, {"x.unknown", R3_FK_PLAIN},
+    };
+    for (size_t i = 0; i < sizeof names / sizeof names[0]; i++)
+        CHECK(fk_of(names[i].name, 0, 0) == names[i].kind, "file kind of %s is %d, not %d", names[i].name, fk_of(names[i].name, 0, 0), names[i].kind);
+    CHECK(fk_of("dir.zip", 1, 0) == R3_FK_DIR && fk_of("l.zip", 0, 1) == R3_FK_LINK, "a folder or link is that kind whatever its name says");
+    for (size_t i = 0; i < sizeof names / sizeof names[0]; i++) {
+        path_join(p, sizeof p, dir, names[i].name);
+        if (names[i].name[0] != '.' || 1) write_file(p, "x", 1);
+    }
+    path_join(p, sizeof p, dir, "folder");
+    mkdir_p(p);
+
+    /* the themes: every pair on screen passes 4.5:1 in every mode, and the first is the VGA palette */
+    path_join(conf, sizeof conf, root, "colour-settings.conf");
+    unlink(conf);
+    setenv("R3I6NOS_COMMANDER_CONF", conf, 1);
+    CHECK(R3_THEME_COUNT >= 8, "a list of common themes (%d)", R3_THEME_COUNT);
+    CHECK(strcmp(r3_themes[0].name, "VGA Classic") == 0, "the first theme is VGA Classic");
+    for (int i = 0; i < 16; i++)
+        CHECK(r3_themes[0].vga[i] == ((uint32_t)r3_rgb[i][0] << 16 | (uint32_t)r3_rgb[i][1] << 8 | r3_rgb[i][2]), "VGA Classic slot %d is the VGA colour", i);
+    App a;
+    app_init(&a, dir, dir);
+    R3Screen s;
+    for (int t = 0; t < R3_THEME_COUNT; t++) {
+        r3_theme_apply(t);
+        for (int m = 0; m < 3; m++) {
+            a.mode = m == 0 ? M_BROWSE : (m == 1 ? M_MENU : M_THEME);
+            a.theme_sel = t;
+            app_compose(&a, &s);
+            int bad = 0;
+            for (int i = 0; i < R3_COLS * R3_ROWS; i++)
+                if (s.ch[i] != 32 && s.ch[i] != 0 && r3_contrast_pal(s.fg[i], s.bg[i]) < 4.5) bad++;
+            CHECK(bad == 0, "theme %s, mode %d: %d cells under 4.5:1", r3_themes[t].name, m, bad);
+        }
+        CHECK(r3_contrast_pal(R3_BLACK, R3_LIGHT_GREEN) >= 4.5 && r3_contrast_pal(R3_WHITE, R3_RED) >= 4.5, "theme %s: the toast's two grounds", r3_themes[t].name);
+        for (int k = 1; k < R3_FK_COUNT; k++)
+            CHECK(r3_contrast_pal(r3_fk_slot(k), R3_BLACK) >= 4.5, "theme %s: kind %d on the page", r3_themes[t].name, k);
+        CHECK(strcasecmp(r3_themes[t].name, r3_themes[(t + 1) % R3_THEME_COUNT].name) != 0, "names differ");
+        CHECK(r3_theme_find(r3_themes[t].name) == t, "theme %s is found by name", r3_themes[t].name);
+    }
+    CHECK(r3_theme_find("no such theme") < 0 && r3_theme_find("dracula") >= 0, "find: unknown is -1, case does not matter");
+    r3_theme_apply(0);
+    a.mode = M_BROWSE;
+
+    /* a row takes its kind's colour; with file colours off it does not */
+    unsigned g0 = r3_pal_gen;
+    app_compose(&a, &s);
+    int row = -1;
+    for (int r = 0; r < R3_DISPLAY_ROWS - 2; r++) {
+        unsigned char cells[40];
+        for (int c = 0; c < 20; c++) cells[c] = s.ch[(R3_DISPLAY_TOP + 1 + r) * R3_COLS + 1 + c];
+        if (!memcmp(cells + 1, "a.zip", 5)) { row = R3_DISPLAY_TOP + 1 + r; break; }
+    }
+    CHECK(row >= 0, "a.zip is in the panel");
+    if (row >= 0) {
+        int cell = row * R3_COLS + 2;
+        CHECK(s.fg[cell] == r3_fk_slot(R3_FK_ARCHIVE), "a.zip is in the archive colour (slot %d)", s.fg[cell]);
+        a.no_file_colors = 1;
+        app_compose(&a, &s);
+        CHECK(s.fg[cell] == R3_LIGHT_GRAY, "file colours off: the body colour");
+        a.no_file_colors = 0;
+    }
+    CHECK(g0 == r3_pal_gen, "drawing does not change the palette");
+
+    /* the menu: Colour theme opens the picker, which shows each theme as the cursor reaches it, B puts the old one back, A keeps and saves */
+    a.mode = M_MENU;
+    a.menu_sel = C_THEME;
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_THEME && a.theme_sel == 0, "the menu opens the theme picker on the theme in use");
+    app_action(&a, R3_DOWN);
+    CHECK(a.theme_sel == 1 && r3_pal[R3_BLACK] == (0xFF000000u | r3_themes[1].vga[R3_BLACK]), "moving shows the theme");
+    app_action(&a, R3_BACK);
+    CHECK(a.mode == M_MENU && a.theme == 0 && r3_pal[R3_BLACK] == 0xFF000000u && access(conf, F_OK) != 0, "B puts the old theme back and saves nothing");
+    run_cmd(&a, C_THEME);
+    app_action(&a, R3_DOWN);
+    app_action(&a, R3_DOWN);
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_BROWSE && a.theme == 2 && access(conf, F_OK) == 0, "A keeps the theme and saves it");
+    run_cmd(&a, C_FILECOLORS);
+    CHECK(a.no_file_colors == 1, "the menu turns file colours off");
+    App b;
+    app_init(&b, dir, dir);
+    r3_theme_apply(0);
+    load_settings(&b);
+    CHECK(b.theme == 2 && b.no_file_colors == 1 && r3_pal[R3_LIGHT_GRAY] == (0xFF000000u | r3_themes[2].vga[R3_LIGHT_GRAY]), "the next start loads the theme and the file colours");
+    FILE *f = fopen(conf, "w");
+    if (f) { fputs("theme=No Such Theme\nfile_colours=on\njunk\n", f); fclose(f); }
+    load_settings(&b);
+    CHECK(b.theme == 0 && b.no_file_colors == 0, "an unknown theme name in the file is the default");
+    unlink(conf);
+    load_settings(&b);
+    CHECK(b.theme == 0, "no file is the default");
+    app_free(&b);
+    app_free(&a);
+    unsetenv("R3I6NOS_COMMANDER_CONF");
+    r3_theme_apply(0);
+}
+
 static void test_ui(const char *root) {
     char p[PATH_MAX], err[256];
     const char *tree[] = {"ui/left/Zeta", "ui/left/alpha", "ui/right"};
@@ -2269,7 +2459,7 @@ static void test_ui(const char *root) {
 
     /* every cell with text passes 4.5:1 */
     for (int i = 0; i < R3_COLS * R3_ROWS; i++)
-        if (s.ch[i] != 32 && s.ch[i] != 0) CHECK(r3_contrast(s.fg[i], s.bg[i]) >= 4.5, "low contrast at cell %d (%d on %d)", i, s.fg[i], s.bg[i]);
+        if (s.ch[i] != 32 && s.ch[i] != 0) CHECK(r3_contrast_pal(s.fg[i], s.bg[i]) >= 4.5, "low contrast at cell %d (%d on %d)", i, s.fg[i], s.bg[i]);
 
     /* tagging and the status row */
     a.p[0].sel = pane_find(&a.p[0], "file00.txt");
@@ -3201,6 +3391,7 @@ static int selftest_logic(void) {
     test_theme();
     test_files(real ? real : root);
     test_ui(real ? real : root);
+    test_colour(real ? real : root);
     test_formats(real ? real : root);
     test_viewer_tabs(real ? real : root);
     test_archive_members(real ? real : root);
@@ -3212,9 +3403,12 @@ static int selftest_logic(void) {
 
 /* ---- main ----------------------------------------------------------------------------------------------------------------------- */
 
+static int g_theme_arg = -1; /* --theme NAME: the theme this run uses, whatever settings.conf says */
+
 static int save_screenshot(const char *path, const char *left, const char *right, const char *file, int tab, int page) {
     App a;
     app_init(&a, left, right);
+    if (g_theme_arg >= 0) { a.theme = g_theme_arg; r3_theme_apply(a.theme); }
     if (file && start_viewer(&a, file, tab, page) != 0) { app_free(&a); return 1; }
     R3Screen s;
     app_compose(&a, &s);
@@ -3387,8 +3581,17 @@ int main(int argc, char **argv) {
         else if (!strcmp(argv[i], "--view") && i + 1 < argc) view = argv[++i];
         else if (!strcmp(argv[i], "--tab") && i + 1 < argc) tab = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--page") && i + 1 < argc) page = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--theme") && i + 1 < argc) {
+            g_theme_arg = r3_theme_find(argv[++i]);
+            if (g_theme_arg < 0) {
+                fprintf(stderr, "commander: no theme called %s; the themes:", argv[i]);
+                for (int t = 0; t < R3_THEME_COUNT; t++) fprintf(stderr, "%s \"%s\"", t ? "," : "", r3_themes[t].name);
+                fputc('\n', stderr);
+                return 2;
+            }
+        }
         else {
-            fprintf(stderr, "usage: %s [--selftest | --report | --version | --info FILE | --content FILE | [--view FILE [--tab N] [--page N]] [--screenshot out.bmp]]\n", argv[0]);
+            fprintf(stderr, "usage: %s [--selftest | --report | --version | --info FILE | --content FILE | [--theme NAME] [--view FILE [--tab N] [--page N]] [--screenshot out.bmp]]\n", argv[0]);
             return 2;
         }
     }
@@ -3419,6 +3622,8 @@ int main(int argc, char **argv) {
 
     App app;
     app_init(&app, left, right);
+    if (!selftest) load_settings(&app);
+    if (g_theme_arg >= 0) { app.theme = g_theme_arg; r3_theme_apply(app.theme); }
     if (view && !selftest && start_viewer(&app, view, tab, page) != 0) { app_free(&app); SDL_Quit(); return 1; }
     R3Screen screen;
 

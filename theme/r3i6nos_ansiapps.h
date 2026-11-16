@@ -36,6 +36,44 @@ static const unsigned char r3_rgb[16][3] = {
     {0xFF, 0x55, 0x55}, {0xFF, 0x55, 0xFF}, {0xFF, 0xFF, 0x55}, {0xFF, 0xFF, 0xFF},
 };
 
+/* ---- the screen palette: 256 slots of 24-bit colour (true colour) -------------------------------------------------------
+ * A cell holds a SLOT, 0-255. Slots 0-15 are the 16 VGA colours by default, so every app that stays with them looks as it always
+ * did. An app may set any slot to any 24-bit colour (r3_pal_set) to theme the whole screen at once: the roles above (R3_BLACK is
+ * "the page", R3_LIGHT_GRAY "the text", and so on) then name what a slot is FOR, not what it looks like. Slots 16-255 are the app's
+ * own (Commander's file-kind colours). r3_pal_gen counts the changes, so a drawing loop knows to repaint. Every pair a theme uses
+ * must still pass 4.5:1 (r3_contrast_pal); theme/r3i6nos_themes.h and tests/test_themes.c do that for the bundled themes. */
+static uint32_t r3_pal[256];        /* ARGB, filled by r3_pal_reset */
+static unsigned char r3_near[256];  /* the nearest of the 16 VGA colours to each slot (the screen mirror sends 4 bits a colour) */
+static unsigned r3_pal_gen;         /* bumped by every change of the palette */
+static int r3_pal_ready;
+
+static inline unsigned char r3_nearest_vga(uint32_t rgb) {
+    int r = (int)(rgb >> 16 & 255), g = (int)(rgb >> 8 & 255), b = (int)(rgb & 255), best = 0;
+    long bd = -1;
+    for (int i = 0; i < 16; i++) {
+        long dr = r - r3_rgb[i][0], dg = g - r3_rgb[i][1], db = b - r3_rgb[i][2], d = dr * dr * 3 + dg * dg * 4 + db * db * 2;
+        if (bd < 0 || d < bd) { bd = d; best = i; }
+    }
+    return (unsigned char)best;
+}
+
+/* One slot to 0xRRGGBB. */
+static inline void r3_pal_set(int slot, uint32_t rgb) {
+    if (slot < 0 || slot > 255) return;
+    r3_pal[slot] = 0xFF000000u | (rgb & 0xFFFFFFu);
+    r3_near[slot] = r3_nearest_vga(rgb);
+    r3_pal_ready = 1;
+    r3_pal_gen++;
+}
+
+/* The VGA colours in slots 0-15 and light gray in the rest. */
+static inline void r3_pal_reset(void) {
+    for (int i = 0; i < 256; i++) {
+        int v = i < 16 ? i : R3_LIGHT_GRAY;
+        r3_pal_set(i, (uint32_t)r3_rgb[v][0] << 16 | (uint32_t)r3_rgb[v][1] << 8 | r3_rgb[v][2]);
+    }
+}
+
 /* The pairs the theme itself uses; every one passes 4.5:1 (r3_contrast). */
 enum { R3_ST_BAR, R3_ST_BODY, R3_ST_STRONG, R3_ST_SELECT, R3_ST_FRAME, R3_ST_HINT, R3_ST_OK, R3_ST_WARN, R3_ST_ERROR,
        R3_ST_DIM, R3_ST_COUNT };
@@ -52,20 +90,32 @@ static const unsigned char r3_styles[R3_ST_COUNT][2] = {
     {R3_BLACK, R3_LIGHT_GRAY},      /* dim: the selected row of a panel that is not active */
 };
 
-/* WCAG contrast ratio of two palette colours. */
-static inline double r3_contrast(int fg, int bg) {
+/* WCAG contrast ratio of two 24-bit colours (0xRRGGBB). */
+static inline double r3_contrast_rgb(uint32_t fg, uint32_t bg) {
     double lum[2];
-    int c[2] = {fg, bg};
+    uint32_t c[2] = {fg, bg};
     for (int k = 0; k < 2; k++) {
         double sum = 0, w[3] = {0.2126, 0.7152, 0.0722};
         for (int i = 0; i < 3; i++) {
-            double v = r3_rgb[c[k]][i] / 255.0;
+            double v = (double)(c[k] >> (16 - 8 * i) & 255) / 255.0;
             sum += w[i] * (v <= 0.03928 ? v / 12.92 : pow((v + 0.055) / 1.055, 2.4));
         }
         lum[k] = sum;
     }
     double a = lum[0] > lum[1] ? lum[0] : lum[1], b = lum[0] > lum[1] ? lum[1] : lum[0];
     return (a + 0.05) / (b + 0.05);
+}
+
+/* WCAG contrast ratio of two of the 16 VGA colours. */
+static inline double r3_contrast(int fg, int bg) {
+    return r3_contrast_rgb((uint32_t)r3_rgb[fg][0] << 16 | (uint32_t)r3_rgb[fg][1] << 8 | r3_rgb[fg][2],
+                           (uint32_t)r3_rgb[bg][0] << 16 | (uint32_t)r3_rgb[bg][1] << 8 | r3_rgb[bg][2]);
+}
+
+/* The same for two slots of the palette as it is now. */
+static inline double r3_contrast_pal(int fg, int bg) {
+    if (!r3_pal_ready) r3_pal_reset();
+    return r3_contrast_rgb(r3_pal[fg & 255], r3_pal[bg & 255]);
 }
 
 /* ---- code page 437 --------------------------------------------------------------------------------------------- */
@@ -432,6 +482,7 @@ typedef struct {
     R3Screen prev;
     int have_prev;
     int settle;                 /* presents still owed for the last change (r3_video_draw) */
+    unsigned pal_gen;           /* r3_pal_gen as last painted: a new palette repaints every cell */
 } R3Video;
 
 /* How many times a changed screen is presented. Once is not enough on the R36S (KMSDRM with the Mali blob): an app that presented
@@ -450,12 +501,12 @@ static inline int r3_video_due(R3Video *v, int changed) {
 
 /* Paint every cell into 640x480 ARGB pixels. */
 static inline void r3_render(const R3Screen *s, uint32_t *px) {
-    uint32_t pal[16];
-    for (int i = 0; i < 16; i++) pal[i] = 0xFF000000u | ((uint32_t)r3_rgb[i][0] << 16) | ((uint32_t)r3_rgb[i][1] << 8) | r3_rgb[i][2];
+    if (!r3_pal_ready) r3_pal_reset();
+    const uint32_t *pal = r3_pal;
     for (int row = 0; row < R3_ROWS; row++)
         for (int col = 0; col < R3_COLS; col++) {
             int i = row * R3_COLS + col, ch = s->ch[i];
-            uint32_t fg = pal[s->fg[i] & 15], bg = pal[s->bg[i] & 15];
+            uint32_t fg = pal[s->fg[i]], bg = pal[s->bg[i]];
             for (int y = 0; y < R3_CELL_H; y++) {
                 uint32_t *line = px + (size_t)(row * R3_CELL_H + y) * R3_W + (size_t)col * R3_CELL_W;
                 for (int x = 0; x < R3_CELL_W; x++) line[x] = r3_glyph_bit(ch, x, y) ? fg : bg;
@@ -477,13 +528,15 @@ static inline int r3_video_init(R3Video *v, SDL_Renderer *r) {
 /* Draw the screen; the pixels are rebuilt only when a cell changed (or force is set, after an expose). Call it every pass of the main
  * loop, not only after input: a change is presented over the next R3_VIDEO_SETTLE calls (keep the loop short while v->settle > 0). */
 static inline void r3_video_draw(R3Video *v, SDL_Renderer *r, const R3Screen *s, int force) {
-    int changed = force || !v->have_prev || memcmp(&v->prev, s, sizeof *s) != 0;
+    int changed = force || !v->have_prev || v->pal_gen != r3_pal_gen || memcmp(&v->prev, s, sizeof *s) != 0;
     if (changed) {
-        r3_mirror_tap(s, v->have_prev ? &v->prev : NULL); /* a mirror, when one is on, gets the cells that changed */
+        /* a mirror, when one is on, gets the cells that changed (all of them after a new palette) */
+        r3_mirror_tap(s, v->have_prev && v->pal_gen == r3_pal_gen ? &v->prev : NULL);
         r3_render(s, v->px);
         SDL_UpdateTexture(v->tex, NULL, v->px, R3_W * (int)sizeof(uint32_t));
         v->prev = *s;
         v->have_prev = 1;
+        v->pal_gen = r3_pal_gen;
     }
     if (r3_video_due(v, changed)) {
         SDL_SetRenderDrawColor(r, 0, 0, 0, 255);

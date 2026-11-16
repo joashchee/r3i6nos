@@ -1,0 +1,104 @@
+/* r3i6nos true-colour themes for native apps (C): docs/R3I6NOS-ANSIAPPS-THEME.md, "True colour". MIT, like the rest of theme/.
+ *
+ * A theme is 16 colours for slots 0-15 and 11 colours for the file kinds (slots 16-26), all 0xRRGGBB. Slots 0-15 keep their ROLES from the
+ * VGA table in r3i6nos_ansiapps.h, whatever they look like: R3_BLACK is the page, R3_LIGHT_GRAY the text, R3_WHITE the strong text, R3_BLUE
+ * the top bar, R3_CYAN the selected row (the page colour's text on it), R3_LIGHT_CYAN the hint, R3_LIGHT_GREEN ok, R3_YELLOW warn,
+ * R3_LIGHT_RED error; R3_RED is the toast's error ground and R3_LIGHT_GREEN its ok ground. So every app that draws with the theme's styles
+ * is themed by r3_theme_apply and needs no other change. EVERY pair a theme uses passes 4.5:1 (WCAG AA): tests/test_themes.c checks all of
+ * them for every theme here. "VGA Classic" is the 16 DOS colours exactly (r3_pal_reset's), the default.
+ * Solarized, Nord, Gruvbox and Dracula are the well-known palettes' look, with colours adjusted until each pair passes 4.5:1; the rest are
+ * this project's own. Needs r3i6nos_ansiapps.h first. */
+#ifndef R3I6NOS_THEMES_H
+#define R3I6NOS_THEMES_H
+
+#include <stdint.h>
+#include <string.h>
+#include <strings.h>
+
+/* The kinds of file a panel colours (an app's own list; Commander's filekind.h decides which a name is). */
+enum { R3_FK_PLAIN, R3_FK_DIR, R3_FK_LINK, R3_FK_EXEC, R3_FK_ARCHIVE, R3_FK_IMAGE, R3_FK_AUDIO, R3_FK_VIDEO, R3_FK_DOC, R3_FK_CODE,
+       R3_FK_DISK, R3_FK_HIDDEN, R3_FK_COUNT };
+#define R3_FK_SLOT0 16 /* the palette slot of kind 1 (R3_FK_DIR); kind 0, plain, is the body text (R3_LIGHT_GRAY) */
+
+static inline int r3_fk_slot(int kind) { return kind <= 0 || kind >= R3_FK_COUNT ? R3_LIGHT_GRAY : R3_FK_SLOT0 + kind - 1; }
+
+typedef struct {
+    const char *name;
+    const char *look;               /* "dark", "light" or "mono": what the list says */
+    uint32_t vga[16];               /* slots 0-15, in the order of the VGA table */
+    uint32_t fk[R3_FK_COUNT - 1];   /* the kinds 1.. */
+} R3Theme;
+
+static const R3Theme r3_themes[] = {
+    {"VGA Classic", "dark",
+     {0x000000, 0x0000AA, 0x00AA00, 0x00AAAA, 0xAA0000, 0xAA00AA, 0xAA5500, 0xAAAAAA,
+      0x555555, 0x5555FF, 0x55FF55, 0x55FFFF, 0xFF5555, 0xFF55FF, 0xFFFF55, 0xFFFFFF},
+     {0xFFFFFF, 0x55FFFF, 0x55FF55, 0xFF5555, 0xFF55FF, 0x00AA00, 0x00AAAA, 0xAAAAAA, 0xAAAAAA, 0xFFFF55, 0xAAAAAA}},
+    {"Dark", "dark",
+     {0x1E1E1E, 0x264F78, 0x4EC9B0, 0x7FB8D6, 0xA1260D, 0xC586C0, 0xCE9178, 0xD4D4D4,
+      0x808080, 0x569CD6, 0x7EC27A, 0x9CDCFE, 0xF48771, 0xD7BA7D, 0xE5C07B, 0xFFFFFF},
+     {0x7FB8F0, 0x56D6D6, 0x7FD97F, 0xF08A6A, 0xE091D9, 0x5CC8B0, 0xC8A0FF, 0xD4D4D4, 0xB5CEA8, 0xE5C07B, 0x9A9A9A}},
+    {"Light", "light",
+     {0xFAFAFA, 0xBFD9F2, 0x1B7A3A, 0x2B6B8F, 0xF4B6B0, 0x8E3A8E, 0x8A5A00, 0x2B2B2B,
+      0x777777, 0x0B5CAD, 0x136A2E, 0x0B5C8A, 0xB3261E, 0x7A2E8C, 0x7A5200, 0x000000},
+     {0x0B4F9E, 0x0A6F6F, 0x136A2E, 0xA23A1A, 0x8E2E8E, 0x00695C, 0x5B3AA8, 0x2B2B2B, 0x4D6B1F, 0x8A5000, 0x6B6B6B}},
+    {"High Contrast", "dark",
+     {0x000000, 0x0000C8, 0x00C800, 0x00FFFF, 0xC80000, 0xFF00FF, 0xFF8000, 0xFFFFFF,
+      0xA0A0A0, 0x6EA8FF, 0x00FF00, 0x00FFFF, 0xFF6060, 0xFF80FF, 0xFFFF00, 0xFFFFFF},
+     {0xFFFFFF, 0x00FFFF, 0x00FF00, 0xFF8080, 0xFF80FF, 0x40E0D0, 0x80A0FF, 0xFFFFFF, 0xB0FF80, 0xFFC040, 0xC0C0C0}},
+    {"Solarized Dark", "dark",
+     {0x002B36, 0x073642, 0x859900, 0x2AA198, 0xA82420, 0xD33682, 0xB58900, 0x93A1A1,
+      0x586E75, 0x268BD2, 0x859900, 0x2AA198, 0xFF7B72, 0xD33682, 0xB58900, 0xEEE8D5},
+     {0x4FA3E0, 0x2AA198, 0x9AB300, 0xF0605D, 0xE86AA8, 0x2AA198, 0xA08CE0, 0x93A1A1, 0x9AB300, 0xEB7B26, 0x8A9DA0}},
+    {"Solarized Light", "light",
+     {0xFDF6E3, 0xCFE3D8, 0x859900, 0x1F6F78, 0xE8A39F, 0xD33682, 0xB58900, 0x45595F,
+      0x93A1A1, 0x1E6FA8, 0x5E6E00, 0x0F6F68, 0xB3201D, 0x9E2A63, 0x806000, 0x002B36},
+     {0x1E6FA8, 0x0F6F68, 0x5E6E00, 0xB3201D, 0x9E2A63, 0x0F6F68, 0x5B4FA8, 0x45595F, 0x5E6E00, 0x8A3A0F, 0x5E6E73}},
+    {"Nord", "dark",
+     {0x2E3440, 0x434C5E, 0xA3BE8C, 0x88C0D0, 0x9C3F49, 0xB48EAD, 0xD08770, 0xD8DEE9,
+      0x4C566A, 0x81A1C1, 0xA3BE8C, 0x8FBCBB, 0xE08A92, 0xB48EAD, 0xEBCB8B, 0xECEFF4},
+     {0x88C0D0, 0x8FBCBB, 0xA3BE8C, 0xE09A82, 0xC9A2C2, 0x8FBCBB, 0x81A1C1, 0xD8DEE9, 0xA3BE8C, 0xEBCB8B, 0x929CB0}},
+    {"Gruvbox Dark", "dark",
+     {0x282828, 0x504945, 0xB8BB26, 0x83A598, 0xCC241D, 0xD3869B, 0xFE8019, 0xEBDBB2,
+      0x928374, 0x83A598, 0xB8BB26, 0x8EC07C, 0xFF6B58, 0xD3869B, 0xFABD2F, 0xFBF1C7},
+     {0xFABD2F, 0x8EC07C, 0xB8BB26, 0xFE8019, 0xD3869B, 0x8EC07C, 0x83A598, 0xEBDBB2, 0xB8BB26, 0xFABD2F, 0xA89984}},
+    {"Dracula", "dark",
+     {0x282A36, 0x44475A, 0x50FA7B, 0x8BE9FD, 0xB5303F, 0xBD93F9, 0xFFB86C, 0xF8F8F2,
+      0x6272A4, 0xBD93F9, 0x50FA7B, 0x8BE9FD, 0xFF7979, 0xFF79C6, 0xF1FA8C, 0xFFFFFF},
+     {0xBD93F9, 0x8BE9FD, 0x50FA7B, 0xFFB86C, 0xFF79C6, 0x8BE9FD, 0xBD93F9, 0xF8F8F2, 0x50FA7B, 0xF1FA8C, 0x8E9BC4}},
+    {"Mono White", "mono",
+     {0x000000, 0x303030, 0xC8C8C8, 0xD0D0D0, 0x606060, 0xC8C8C8, 0xC8C8C8, 0xC8C8C8,
+      0x909090, 0xC8C8C8, 0xFFFFFF, 0xC8C8C8, 0xFFFFFF, 0xC8C8C8, 0xFFFFFF, 0xFFFFFF},
+     {0xFFFFFF, 0xC8C8C8, 0xFFFFFF, 0xC8C8C8, 0xC8C8C8, 0xC8C8C8, 0xC8C8C8, 0xC8C8C8, 0xC8C8C8, 0xC8C8C8, 0x909090}},
+    {"Mono Green", "mono",
+     {0x001400, 0x003A00, 0x2BD92B, 0x33FF33, 0x006000, 0x2BD92B, 0x2BD92B, 0x2BD92B,
+      0x1FA01F, 0x2BD92B, 0x7DFF7D, 0x2BD92B, 0x7DFF7D, 0x2BD92B, 0x7DFF7D, 0x7DFF7D},
+     {0x7DFF7D, 0x2BD92B, 0x7DFF7D, 0x2BD92B, 0x2BD92B, 0x2BD92B, 0x2BD92B, 0x2BD92B, 0x2BD92B, 0x2BD92B, 0x1FA01F}},
+    {"Mono Amber", "mono",
+     {0x140C00, 0x3A2400, 0xE69D00, 0xFFB000, 0x6A4200, 0xE69D00, 0xE69D00, 0xE69D00,
+      0xB07800, 0xE69D00, 0xFFD060, 0xE69D00, 0xFFD060, 0xE69D00, 0xFFD060, 0xFFD060},
+     {0xFFD060, 0xE69D00, 0xFFD060, 0xE69D00, 0xE69D00, 0xE69D00, 0xE69D00, 0xE69D00, 0xE69D00, 0xE69D00, 0xB07800}},
+    {"Mono Paper", "mono",
+     {0xFFFFFF, 0xD8D8D8, 0x202020, 0x303030, 0x9A9A9A, 0x202020, 0x202020, 0x202020,
+      0x5A5A5A, 0x202020, 0x000000, 0x202020, 0x000000, 0x202020, 0x000000, 0x000000},
+     {0x000000, 0x202020, 0x000000, 0x202020, 0x202020, 0x202020, 0x202020, 0x202020, 0x202020, 0x202020, 0x5A5A5A}},
+};
+enum { R3_THEME_COUNT = (int)(sizeof r3_themes / sizeof r3_themes[0]) };
+
+/* Put theme i (any other index is the first, VGA Classic) into the palette. */
+static inline void r3_theme_apply(int i) {
+    if (i < 0 || i >= R3_THEME_COUNT) i = 0;
+    const R3Theme *t = &r3_themes[i];
+    for (int s = 0; s < 16; s++) r3_pal_set(s, t->vga[s]);
+    for (int k = 1; k < R3_FK_COUNT; k++) r3_pal_set(R3_FK_SLOT0 + k - 1, t->fk[k - 1]);
+}
+
+/* The theme with this name (case does not matter), or -1. */
+static inline int r3_theme_find(const char *name) {
+    if (!name) return -1;
+    for (int i = 0; i < R3_THEME_COUNT; i++)
+        if (strcasecmp(r3_themes[i].name, name) == 0) return i;
+    return -1;
+}
+
+#endif /* R3I6NOS_THEMES_H */

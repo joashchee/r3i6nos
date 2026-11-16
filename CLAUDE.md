@@ -59,7 +59,8 @@ is blocked and on what.
 8. **Every app made for r3i6nos starts from the r3i6nos-ansiapps theme** (`theme/`, `docs/R3I6NOS-ANSIAPPS-THEME.md`): the IBM VGA
    8x16 font scaled to 10x20, **64 columns by 24 rows** on the 640x480 screen, row 0 the reserved top bar, rows 1-20 the display view, rows 21-23
    the three-row command line (reply, prompt, status), list dialogs and their button rules as KlamANSI does them, only the 16 VGA colours in
-   pairs that pass 4.5:1, nothing scrolls. New apps, LÖVE or native, copy the menu's structure; an app that cannot follow it says why in its README.
+   pairs that pass 4.5:1 (**a native app may offer true-colour themes instead, opt-in, as Commander does since 2026-11-16: slots 0-15 keep
+   their roles, every pair of every theme still passes 4.5:1, VGA Classic stays the default; `docs/R3I6NOS-ANSIAPPS-THEME.md`, "True colour"**), nothing scrolls. New apps, LÖVE or native, copy the menu's structure; an app that cannot follow it says why in its README.
    The font is CC BY-SA 4.0: keep `NOTICE`, `theme/font/` (licence, credit, changes) and the headers of the generated font files intact.
 9. **Every R36S port has a device report** (`docs/DEVICE-REPORTS.md`): one action on the unit (an app's Start menu item
    **Device report** and a `--report` flag; a command-line tool's `<command>-report`, which Settings > Device reports starts)

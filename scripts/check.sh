@@ -122,6 +122,16 @@ if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     rm -f "$tv_bin"
 else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
 
+step "true-colour themes (theme/r3i6nos_themes.h): every pair passes 4.5:1"
+if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
+    th_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-th.XXXXXX")"
+    # shellcheck disable=SC2046,SC2086  # sdl2-config prints separate flags; $werror is empty or one flag
+    if cc -std=c11 -Wall -Wextra $werror -O2 -I theme $(sdl2-config --cflags) -o "$th_bin" tests/test_themes.c $(sdl2-config --libs) -lm; then
+        SDL_VIDEODRIVER=dummy "$th_bin" || fail=1
+    else echo "FAIL: tests/test_themes.c does not compile"; fail=1; fi
+    rm -f "$th_bin"
+else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
+
 step "device report helper (theme/r3i6nos_report.h)"
 if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     report_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-report.XXXXXX")"

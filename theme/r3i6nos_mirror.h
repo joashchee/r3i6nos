@@ -34,7 +34,10 @@ typedef struct {
 
 static R3Mirror r3_mirror_st = { -1, 0, 0, 0, 0, NULL, NULL, NULL };
 
-static inline unsigned char r3_mirror_attr(const R3Screen *s, int i) { return (unsigned char)((s->fg[i] & 15) | ((s->bg[i] & 15) << 4)); }
+static inline unsigned char r3_mirror_attr(const R3Screen *s, int i) {
+    if (!r3_pal_ready) r3_pal_reset();   /* the mirror sends 4 bits a colour: the nearest VGA colour to each slot */
+    return (unsigned char)(r3_near[s->fg[i]] | (r3_near[s->bg[i]] << 4));
+}
 
 /* The whole screen into out (R3_MIRROR_FULL bytes). */
 static inline size_t r3_mirror_full(const R3Screen *s, unsigned char *out) {

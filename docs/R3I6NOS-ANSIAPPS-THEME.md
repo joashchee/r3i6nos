@@ -42,6 +42,27 @@ Only the 16 VGA colours (`theme.RGB`). The theme's own pairs are `theme.STYLE`, 
 use them only as a frame or fill, never for words. Colour is never the only cue: errors say so in words, the selection is also a bar.
 Nothing on screen changes more than twice a second.
 
+### True colour (a native C app's choice, from 2026-11-16; Commander uses it)
+
+The 16 VGA colours stay the default and the reference. A native app (C, `theme/r3i6nos_ansiapps.h`) may instead let the person pick a
+**colour theme** of 24-bit colours:
+
+- A cell holds a **palette slot** (0-255), not a colour. `r3_pal` is the palette (ARGB); `r3_pal_set(slot, 0xRRGGBB)` changes one slot and
+  `r3_pal_reset()` puts the VGA colours back. Slots 0-15 are the VGA names (`R3_BLACK`...`R3_WHITE`) and keep their **roles** in the styles,
+  whatever colour they hold: `R3_BLACK` is the page, `R3_LIGHT_GRAY` the text, `R3_WHITE` strong text, `R3_BLUE` the top bar, `R3_CYAN` the
+  selected row, `R3_LIGHT_CYAN` hints, `R3_LIGHT_GREEN` good news (and the toast's ok ground), `R3_YELLOW` caution, `R3_LIGHT_RED` mistakes
+  (`R3_RED` is the toast's error ground). So changing the palette themes the whole screen, the toast and the dialogs, and code that draws with
+  `R3_ST(...)` needs no change. Slots 16 and up are the app's own (Commander's file kinds, `R3_FK_SLOT0`).
+- `theme/r3i6nos_themes.h` has the **bundled themes** (`r3_themes[]`, `r3_theme_apply(i)`, `r3_theme_find(name)`): VGA Classic (the default,
+  exactly the 16 DOS colours), Dark, Light, High Contrast, Solarized Dark, Solarized Light, Nord, Gruvbox Dark, Dracula, and the monochrome Mono
+  White, Mono Green, Mono Amber and Mono Paper. Each is 16 colours and 11 file-kind colours.
+- **The 4.5:1 rule is unchanged and applies to every theme:** every style pair, the toast's two grounds and each file kind on the page.
+  `tests/test_themes.c` (a `scripts/check.sh` step) and Commander's self-test check all of them, in every theme, on the drawn screens too.
+  A new theme is not added until it passes. Colour is still never the only cue (folders keep their `/`, tagged rows their `*`; the monochrome
+  themes tell kinds apart by shade only, which is why the cues stay).
+- The screen mirror sends 4 bits a colour, so it shows the **nearest VGA colour** to each slot (`r3_near`).
+- LÖVE apps and the menu stay on the 16 VGA colours (the Lua theme has no palette); an app that wants themes says so in its README.
+
 ## List dialogs (as in KlamANSI)
 
 The standard list: a double-line box, the title and `Page x/y` in the top edge, one row an item (label at the left, value at the right),
