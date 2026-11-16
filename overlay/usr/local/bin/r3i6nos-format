@@ -58,7 +58,7 @@ MIN_SECTORS = START + 2 * 2048     # a card smaller than about 6 MB is not a car
 MAX_LBA = 0xFFFFFFFF               # an MBR's last sector: about 2 TiB
 WIPE_TAIL = 2048                   # the last 1 MiB is cleared too (a GPT's backup table)
 BLKRRPART = 0x125F
-LABEL = "R3I6NOS-DATA"
+LABEL = "R3I6NOSDATA"                # at most 11 characters: exfatprogs 1.2.0 refuses a longer one ("input string is too long"), and FAT allows 11
 FOLDERS = ("Love 11.5", "Love 12.0", "native_deb")
 FS = {"exfat": {"type": 0x07, "name": "exFAT", "mkfs": ["mkfs.exfat", "-L", LABEL], "mount": "rw,noatime,uid=1000,gid=1000,umask=022"},
       "ext4": {"type": 0x83, "name": "ext4", "mkfs": ["mkfs.ext4", "-F", "-q", "-L", LABEL, "-E", "root_owner=1000:1000"], "mount": "rw,noatime"}}

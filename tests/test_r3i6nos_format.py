@@ -127,7 +127,7 @@ class Format(unittest.TestCase):
         self.assertLess(self.names().index("mkfs.exfat"), self.names().index("cards-bin"))
         mk = next(c for c in self.cmds if c[0] == "mkfs.exfat")
         self.assertEqual(mk[-1], str(self.t / "dev/mmcblk1p1"))
-        self.assertIn("R3I6NOS-DATA", mk)
+        self.assertIn("R3I6NOSDATA", mk)
         # the table: one partition, type 07, starting 4 MiB in and running to the end; the old data is gone
         disk = (self.t / "dev/mmcblk1").read_bytes()
         self.assertEqual(disk[510:512], b"\x55\xaa")
@@ -137,6 +137,9 @@ class Format(unittest.TestCase):
         self.assertEqual(disk[512:8192 * 512], bytes(8192 * 512 - 512), "the old start of the card is cleared")
         self.assertEqual(disk[-1024 * 1024:], bytes(1024 * 1024), "and its end (a GPT backup)")
         self.assertEqual(disk[440:444].hex(), (self.t / "dev/mmcblk1").read_bytes()[440:444].hex())
+
+    def test_the_label_fits_every_filesystem(self):
+        self.assertLessEqual(len(self.m.LABEL), 11, "exfatprogs 1.2.0 refuses a longer label: 'input string is too long' (found on the unit 2026-11-16)")
 
     def test_ext4_uses_its_own_tool_and_type(self):
         head, lines = self.ask("id=a2\nverb=format\nfs=ext4\n")
