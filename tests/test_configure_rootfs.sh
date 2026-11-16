@@ -81,6 +81,10 @@ grep -q '^Before=loveos.service' "$R/etc/systemd/system/r3i6nos-sound.service" |
 [ -L "$R/etc/systemd/system/timers.target.wants/r3i6nos-bootstate.timer" ] || fail "the boot state is not written for the report"
 [ -L "$R/etc/systemd/system/multi-user.target.wants/r3i6nos-clock-set.path" ] || fail "the menu's Date and time requests are not watched"
 [ -f "$R/opt/loveos/menu/clock.lua" ]           || fail "the menu's Date and time dialog is missing"
+[ -x "$R/usr/local/bin/r3i6nos-format" ]        || fail "r3i6nos-format not installed executable"
+[ -L "$R/etc/systemd/system/multi-user.target.wants/r3i6nos-format.path" ] || fail "the menu's Data card format requests are not watched"
+[ -f "$R/opt/loveos/menu/datacard.lua" ]        || fail "the menu's Data card dialog is missing"
+grep -q '^ExecStartPre=-/usr/local/bin/r3i6nos-format finish' "$R/etc/systemd/system/r3i6nos-cards.service" || fail "a format that needed a restart is not finished before the cards are mounted"
 ! grep -q 'roms.mount' "$R/etc/systemd/system/loveos.service" || fail "the session still waits for a roms.mount that no longer exists"
 [ -d "$R/roms" ]                                || fail "mount point /roms missing"
 [ -d "$R/roms2" ]                               || fail "mount point /roms2 missing"
@@ -262,6 +266,26 @@ R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_SYSTEMCTL="$T/systemctl" overlay/usr/local/bin
 rm -f "$T/ctl"
 R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_SYSTEMCTL="$T/systemctl" overlay/usr/local/bin/r3i6nos-poweroff
 [ ! -e "$T/ctl" ] || fail "powered off without the flag"
+# Settings > Data card can ask for a restart: "system<TAB>reboot" leaves the reboot flag (and not the poweroff one), and r3i6nos-poweroff reboots on it.
+cat > "$T/menu_reboot" <<EOF3
+#!/bin/bash
+printf 'system\treboot\n' > "\$R3I6NOS_NEXT"
+EOF3
+chmod +x "$T/menu_reboot"
+rm -f "$T/got" "$T/run/poweroff" "$T/run/reboot" "$T/bat" "$T/ctl"
+env R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_MENU_LOVE="$T/menu_reboot" R3I6NOS_BATTERY="$T/battery" \
+R3I6NOS_RUN_APP="$T/run_app" R3I6NOS_WATCHER="$T/watcher" overlay/usr/local/bin/loveos-session &
+sess=$!
+( sleep 10; kill "$sess" 2>/dev/null ) &
+wd=$!
+wait "$sess" || fail "session did not exit 0 on a reboot request"
+kill "$wd" 2>/dev/null
+[ -e "$T/run/reboot" ] || fail "no reboot flag left"
+[ ! -e "$T/run/poweroff" ] || fail "a reboot request left the poweroff flag"
+[ ! -e "$T/got" ] || fail "a reboot request ran an app"
+R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_SYSTEMCTL="$T/systemctl" overlay/usr/local/bin/r3i6nos-poweroff
+[ "$(cat "$T/ctl")" = "--no-block reboot" ] || fail "reboot ran: $(cat "$T/ctl" 2>/dev/null)"
+[ ! -e "$T/run/reboot" ] || fail "reboot flag not consumed"
 grep -q '^ExecStopPost=+/usr/local/bin/r3i6nos-poweroff' overlay/etc/systemd/system/loveos.service || fail "unit lacks ExecStopPost"
 grep -q '^StateDirectory=r3i6nos-battery' overlay/etc/systemd/system/loveos.service || fail "unit has no state folder for the battery history"
 grep -q '^Restart=on-failure' overlay/etc/systemd/system/loveos.service || fail "unit would restart after a clean shutdown exit"

@@ -47,7 +47,7 @@ function M.parse(text)
       if ssid then r.nets[#r.nets + 1] = { ssid = ssid, signal = signal, security = sec } end
     else
       local k, v = line:match("^(%w+)=(.*)$")
-      if k == "id" then r.id = v elseif k == "ok" then r.ok = (v == "1") end
+      if k == "id" then r.id = v elseif k == "ok" then r.ok = (v == "1") elseif k == "reboot" then r.reboot = (v == "1") end
     end
   end
   return r

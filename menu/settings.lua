@@ -12,6 +12,7 @@ local about = require("about")
 local clock = require("clock")
 local mixer = require("mixer")
 local mirror = require("mirror")
+local datacard = require("datacard")
 
 local settings = {}
 
@@ -20,9 +21,10 @@ settings.TIMEOUT = { default = 30, scan = 45, wifi = 75, wired = 60, test = 60, 
 
 --- A closed dialog. io is the helper's client (menu/netclient.lua); bat the battery module (menu/battery.lua); rep the device reports
 --- (menu/reports.lua); ab Settings > About (menu/about.lua); clk the Date and time dialog (menu/clock.lua); mx the Sound mixer
---- (menu/mixer.lua); dm Settings > Rec demos (menu/demos.lua); mr Settings > Screen mirror (menu/mirror.lua). Tests pass fakes.
-function settings.new(io, bat, rep, ab, clk, mx, dm, mr)
-  return { stack = {}, io = io, bat = bat or battery, rep = rep or reports, ab = ab or about, clk = clk or clock, mx = mx or mixer, dm = dm or demos, mr = mr or mirror }
+--- (menu/mixer.lua); dm Settings > Rec demos (menu/demos.lua); mr Settings > Screen mirror (menu/mirror.lua); dc Settings > Data card
+--- (menu/datacard.lua). Tests pass fakes.
+function settings.new(io, bat, rep, ab, clk, mx, dm, mr, dc)
+  return { stack = {}, io = io, bat = bat or battery, rep = rep or reports, ab = ab or about, clk = clk or clock, mx = mx or mixer, dm = dm or demos, mr = mr or mirror, dc = dc or datacard }
 end
 
 local function top(s) return s.stack[#s.stack] end
@@ -320,6 +322,42 @@ mirrorMenu = function(s)
   push(s, menu("Screen mirror", items, 48))
 end
 
+-- Data card (docs/STORAGE.md): format the card in the second slot, then it is mounted for use. Only a person choosing it, after a
+-- confirmation, ever starts this. If the unit must restart to see the new partition, a dialog says so and restarts on confirmation.
+local function formatCard(s, f)
+  local dc = s.dc
+  local title = "Formatting the data card"
+  local id, err = dc.client.request("format", { fs = f.fs })
+  if not id then return show(s, title, { "Could not ask for it:", tostring(err) }, false) end
+  push(s, {
+    kind = "busy", title = title, id = id, elapsed = 0, timeout = dc.WAIT, waiting = "Formatting the card, please wait...",
+    poll = function(b) return dc.client.poll(b.id) end,
+    lost = { "No answer from the format helper.", "", "It may still be working. Look at Status in a", "few minutes, or restart the unit." },
+    on_result = function(sx, res)
+      if res.ok then sx.rescan = true end -- the card's old games are gone: the menu's list is read again
+      show(sx, "Data card", res.lines, res.ok)
+      if res.reboot then
+        confirm(sx, "Restart now?", "Yes, restart", "The unit restarts to finish the data card", function() return "reboot" end)
+      end
+    end,
+  })
+end
+
+local function dataCardMenu(s)
+  local dc = s.dc
+  local items = {
+    { label = "Status", hint = "The card in the second slot and where it is open", run = function(sx) show(sx, "Data card", dc.statusLines()) end },
+  }
+  for _, f in ipairs(dc.FORMATS) do
+    items[#items + 1] = { label = "Format as " .. f.label, hint = f.hint, run = function(sx)
+      confirm(sx, "Erase the data card?", "Yes, erase it", "EVERYTHING on the card in the second slot is lost", function(sy) formatCard(sy, f) end)
+    end }
+  end
+  items[#items + 1] = { label = "What this does", hint = "Format, folders, mount: and the system card is safe", run = function(sx) show(sx, "Data card", dc.ABOUT) end }
+  items[#items + 1] = { label = "Back", hint = "Return to Settings", run = function(sx) pop(sx) end }
+  push(s, menu("Data card", items, 48))
+end
+
 -- About: this build and unit, the update check (the only network use here, and only when chosen), the licences.
 local function aboutMenu(s)
   local ab = s.ab
@@ -374,6 +412,7 @@ local function root(s)
     { label = "Device reports", hint = "Check this unit for an app's maker (a file for Claude)", run = reportsMenu },
     { label = "Rec demos", hint = "Screenshots and a video of an app, for its store page", run = demosMenu },
     { label = "Screen mirror", hint = "Show this screen on a computer, monitor or TV", run = mirrorMenu },
+    { label = "Data card", hint = "Format the card in the second slot for r3i6nos and open it", run = dataCardMenu },
     { label = "About", hint = "Version, updates, this unit and licences", run = aboutMenu },
     { label = "Shutdown", hint = "Power the device off", run = function(sx)
         confirm(sx, "Shut down the device?", "Yes, shut down", "Powers the device off", function() return "poweroff" end)
@@ -396,7 +435,7 @@ end
 -- ---- input -------------------------------------------------------------------------------------------------------------------
 
 --- Feed one action: up down left right pageup pagedown home end accept back more x y select.
---- Returns "poweroff" when the user confirmed a shutdown, else nil.
+--- Returns "poweroff" when the user confirmed a shutdown, "reboot" when they confirmed a restart, else nil.
 function settings.press(s, action)
   local n = top(s)
   if not n then return nil end
@@ -428,7 +467,7 @@ function settings.press(s, action)
       pop(s)
       if n.sel == 1 then
         local r = n.on_yes(s)
-        if r == "poweroff" then s.stack = {}; return "poweroff" end
+        if r == "poweroff" or r == "reboot" then s.stack = {}; return r end
       end
     end
   elseif n.kind == "osk" then

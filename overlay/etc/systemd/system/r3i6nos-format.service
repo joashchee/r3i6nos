@@ -1,0 +1,11 @@
+[Unit]
+Description=Format the card in the second slot as the data card, as a person chose in the menu
+Documentation=file:/usr/local/bin/r3i6nos-format
+# Started by r3i6nos-format.path; never wanted by a target. Deletes the request, checks it, formats only the card that is not the boot
+# card, mounts it and writes /run/r3i6nos-format/result.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/r3i6nos-format apply
+# A big card's format takes a while; the menu waits for the answer.
+TimeoutStartSec=1500

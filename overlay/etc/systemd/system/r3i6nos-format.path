@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch for the menu's Format data card request
+# Only WATCHES a file: a person choosing Settings > Data card > Format (docs/STORAGE.md). Nothing is formatted otherwise.
+
+[Path]
+PathExists=/run/loveos/format/request
+Unit=r3i6nos-format.service
+
+[Install]
+WantedBy=multi-user.target

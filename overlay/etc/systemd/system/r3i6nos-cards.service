@@ -8,9 +8,11 @@ Before=loveos.service
 [Service]
 Type=oneshot
 RemainAfterExit=yes
+# A format that needed a restart to see the new partition is finished first (r3i6nos-format; a no-op without its marker; never fails the boot).
+ExecStartPre=-/usr/local/bin/r3i6nos-format finish
 ExecStart=/usr/local/bin/r3i6nos-cards mount
 # A slow card must not hold the menu back for long: the program waits at most a second for the second slot.
-TimeoutStartSec=60
+TimeoutStartSec=1200
 
 [Install]
 WantedBy=multi-user.target

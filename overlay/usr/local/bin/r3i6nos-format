@@ -1,0 +1,377 @@
+#!/usr/bin/env python3
+"""r3i6nos-format - make the card in the second slot the DATA card: partition, format, mount (docs/STORAGE.md, "Format the data card").
+
+    r3i6nos-format apply    a person chose Settings > Data card > Format (r3i6nos-format.path, from the menu's request): erase the
+                            card in the second slot, make one partition, format it (exFAT or ext4), make the folders, mount it
+    r3i6nos-format finish   at boot (before r3i6nos-cards mount): finish a format that needed a restart to see the new partition
+
+CLAUDE.md rule 7's second exception (2026-11-16): this is the only place r3i6nos formats a card the person did not just set up, and
+only because a person chose it, after the menu's confirmation. It can never touch the system card: the target is every mmc disk but
+the one the root filesystem is on, and with no such disk, or no way to tell which disk is the root one, it refuses. Nothing here
+runs by itself except `finish`, which acts only on a marker this helper wrote and only on an empty partition it made.
+
+The request comes from /run/loveos/format (the menu's user owns it) and is treated as hostile, as r3i6nos-clock treats its own: opened
+without following links, a small regular file, every field checked against a short list. The answer goes to /run/r3i6nos-format/result,
+which only root writes.
+Request: id=, verb=format, fs=exfat|ext4.
+Result:  id=, ok=1|0, reboot=1 when a restart is needed to finish, then L<TAB>text lines.
+
+When the kernel cannot re-read the card's partition table at once, the new table is written and a marker (format-pending) is left in the
+state folder; the menu asks for a restart, and `finish` formats the empty partition before the cards are mounted. If the format has
+worked but the card could not be opened, the answer says to restart (the cards are mounted by role at every boot).
+
+Standard library only. It calls blkid, mkfs.exfat, mkfs.ext4, mount, umount and r3i6nos-cards. Overrides, for tests: R3I6NOS_FORMAT_DIR
+(/run/loveos/format), R3I6NOS_FORMAT_OUT (/run/r3i6nos-format), R3I6NOS_STATE (/var/lib/r3i6nos), R3I6NOS_SYS, R3I6NOS_DEV, R3I6NOS_PROC,
+R3I6NOS_ROOT_DEV ("MAJ:MIN" of the root filesystem, else stat /), R3I6NOS_ROMS, R3I6NOS_ROMS2, R3I6NOS_CARDS_STATE, R3I6NOS_SETUP_SOURCE,
+R3I6NOS_RUN (/run/r3i6nos), R3I6NOS_CARDS_BIN (/usr/local/bin/r3i6nos-cards).
+"""
+import errno
+import fcntl
+import os
+import re
+import secrets
+import stat
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ENV = os.environ.get
+REQ_DIR = Path(ENV("R3I6NOS_FORMAT_DIR", "/run/loveos/format"))
+OUT_DIR = Path(ENV("R3I6NOS_FORMAT_OUT", "/run/r3i6nos-format"))
+STATE = Path(ENV("R3I6NOS_STATE", "/var/lib/r3i6nos"))
+SYS = Path(ENV("R3I6NOS_SYS", "/sys"))
+DEV = Path(ENV("R3I6NOS_DEV", "/dev"))
+PROC = Path(ENV("R3I6NOS_PROC", "/proc"))
+ROMS = ENV("R3I6NOS_ROMS", "/roms")
+ROMS2 = ENV("R3I6NOS_ROMS2", "/roms2")
+CARDS_STATE = Path(ENV("R3I6NOS_CARDS_STATE", "/run/r3i6nos/cards"))
+SETUP_SOURCE = Path(ENV("R3I6NOS_SETUP_SOURCE", "/run/r3i6nos/setup-source"))
+RUN = Path(ENV("R3I6NOS_RUN", "/run/r3i6nos"))
+CARDS_BIN = ENV("R3I6NOS_CARDS_BIN", "/usr/local/bin/r3i6nos-cards")
+ROOT_DEV = ENV("R3I6NOS_ROOT_DEV")
+PENDING = STATE / "format-pending"
+MAX_REQUEST = 4096
+SECTOR = 512
+START = 8192                       # the partition starts 4 MiB in, clear of the card's erase blocks
+MIN_SECTORS = START + 2 * 2048     # a card smaller than about 6 MB is not a card to format
+MAX_LBA = 0xFFFFFFFF               # an MBR's last sector: about 2 TiB
+WIPE_TAIL = 2048                   # the last 1 MiB is cleared too (a GPT's backup table)
+BLKRRPART = 0x125F
+LABEL = "R3I6NOS-DATA"
+FOLDERS = ("Love 11.5", "Love 12.0", "native_deb")
+FS = {"exfat": {"type": 0x07, "name": "exFAT", "mkfs": ["mkfs.exfat", "-L", LABEL], "mount": "rw,noatime,uid=1000,gid=1000,umask=022"},
+      "ext4": {"type": 0x83, "name": "ext4", "mkfs": ["mkfs.ext4", "-F", "-q", "-L", LABEL, "-E", "root_owner=1000:1000"], "mount": "rw,noatime"}}
+
+
+class Refused(Exception):
+    pass
+
+
+# ---- plumbing (tests replace run, reread and sleep) --------------------------------------------------------------------------
+
+def run(cmd, timeout=60):
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.SubprocessError) as e:
+        return subprocess.CompletedProcess(cmd, 127, "", str(e))
+
+
+def reread(dev):
+    """Ask the kernel to read the disk's partition table again. True when it did."""
+    fd = os.open(dev, os.O_RDONLY)
+    try:
+        fcntl.ioctl(fd, BLKRRPART)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
+
+
+def sleep(s):
+    time.sleep(s)
+
+
+def read(path):
+    try:
+        return Path(path).read_text(errors="replace").strip()
+    except OSError:
+        return ""
+
+
+def write_atomic(path, text, mode=0o644):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}")
+    with open(tmp, "w") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+
+
+# ---- which card ------------------------------------------------------------------------------------------------------------
+
+def boot_disk():
+    """The disk the root filesystem is on (mmcblk0), or None when that cannot be told: then nothing is formatted."""
+    try:
+        num = ROOT_DEV or f"{os.major(os.stat('/').st_dev)}:{os.minor(os.stat('/').st_dev)}"
+        real = Path(os.path.realpath(SYS / "dev" / "block" / num))
+    except OSError:
+        return None
+    if not real.exists():
+        return None
+    return real.parent.name if (real / "partition").exists() else real.name
+
+
+def disk_sectors(disk):
+    s = read(SYS / "block" / disk / "size")
+    return int(s) if s.isdigit() else 0
+
+
+def data_disk():
+    """The one card that is not the boot card. Refuses unless it is certain."""
+    boot = boot_disk()
+    if not boot or not re.fullmatch(r"mmcblk\d+", boot):
+        raise Refused("Cannot tell which card is the system card, so nothing was formatted.")
+    skip = read(SETUP_SOURCE)
+    try:
+        names = sorted(p.name for p in (SYS / "block").iterdir())
+    except OSError:
+        names = []
+    disks = [n for n in names if re.fullmatch(r"mmcblk\d+", n) and n != boot and n != skip and disk_sectors(n) > 0]
+    if not disks:
+        raise Refused("There is no card in the second slot (TF2).")
+    if len(disks) > 1:
+        raise Refused("More than one card besides the system card was found, so nothing was formatted.")
+    return disks[0]
+
+
+def part_dev(disk, n):
+    return DEV / f"{disk}p{n}"
+
+
+def mounts_of(disk):
+    """[(device, mount point)] of everything mounted from this disk or its partitions."""
+    out = []
+    for line in read(PROC / "mounts").splitlines():
+        p = line.split()
+        if len(p) >= 2 and re.fullmatch(re.escape(str(DEV / disk)) + r"(p\d+)?", p[0]):
+            out.append((p[0], p[1].replace("\\040", " ")))
+    return out
+
+
+def unmount_all(disk):
+    run(["sync"], 120)
+    for dev, at in reversed(mounts_of(disk)):
+        r = run(["umount", at], 120)
+        if r.returncode != 0:
+            raise Refused(f"The card is in use ({(r.stderr or r.stdout).strip() or at}), so nothing was formatted. Nothing was changed.")
+    if mounts_of(disk):
+        raise Refused("The card is still in use, so nothing was formatted. Nothing was changed.")
+
+
+# ---- the work --------------------------------------------------------------------------------------------------------------
+
+def mbr_for(total, fstype, sig):
+    size = min(total, MAX_LBA) - START
+    entry = b"\x00" + b"\xfe\xff\xff" + bytes([fstype]) + b"\xfe\xff\xff" + START.to_bytes(4, "little") + size.to_bytes(4, "little")
+    return bytes(440) + sig + b"\x00\x00" + entry + bytes(48) + b"\x55\xaa", size
+
+
+def write_table(disk, fs, say):
+    """Erase the ends of the card and write one partition. Returns (signature bytes, partition sectors)."""
+    dev = DEV / disk
+    total = disk_sectors(disk)
+    if total < MIN_SECTORS:
+        raise Refused("The card is too small to format.")
+    sig = secrets.token_bytes(4)
+    mbr, size = mbr_for(total, FS[fs]["type"], sig)
+    say("clearing the card")
+    fd = os.open(dev, os.O_WRONLY)
+    try:
+        os.pwrite(fd, bytes(START * SECTOR), 0)                           # the old table and the old filesystem's start
+        os.pwrite(fd, bytes(WIPE_TAIL * SECTOR), (total - WIPE_TAIL) * SECTOR)
+        os.pwrite(fd, mbr, 0)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    return sig, size
+
+
+def wait_partition(disk, start, size, tries=50):
+    """True when the kernel shows partition 1 with exactly the geometry just written (an old partition 1 is not enough)."""
+    base = SYS / "block" / disk / f"{disk}p1"
+    for _ in range(tries):
+        if part_dev(disk, 1).exists() and read(base / "start") == str(start) and read(base / "size") == str(size):
+            return True
+        sleep(0.1)
+    return False
+
+
+def make_filesystem(disk, fs):
+    """Format partition 1, and make the folders on it (a temporary mount). Raises Refused with the reason."""
+    p, info = part_dev(disk, 1), FS[fs]
+    r = run(info["mkfs"] + [str(p)], 900)
+    if r.returncode != 0:
+        raise Refused(f"Could not format the card: {(r.stderr or r.stdout).strip()[:120] or 'the format tool failed'}")
+    run(["blkid", "-g"], 30)
+    mnt = RUN / "format" / "mnt"
+    mnt.mkdir(parents=True, exist_ok=True)
+    r = run(["mount", "-t", "exfat" if fs == "exfat" else "ext4", "-o", info["mount"], str(p), str(mnt)], 60)
+    if r.returncode != 0:
+        raise Refused(f"The card was formatted but could not be opened: {(r.stderr or r.stdout).strip()[:100]}")
+    try:
+        for f in FOLDERS:
+            d = mnt / f
+            d.mkdir(exist_ok=True)
+            if fs == "ext4":
+                os.chown(d, 1000, 1000)
+        os.sync()
+    finally:
+        run(["umount", str(mnt)], 120)
+
+
+def mount_now(disk):
+    """Mount by role, as at boot. Returns where the data card is, or None when it did not open."""
+    run([CARDS_BIN, "mount"], 120)
+    state = dict(l.split("=", 1) for l in read(CARDS_STATE).splitlines() if "=" in l)
+    at = state.get("DATA_AT", "none")
+    if at == "none":
+        return None
+    return at if any(len(l.split()) >= 2 and l.split()[1] == at and l.split()[0].startswith(str(DEV / disk)) for l in read(PROC / "mounts").splitlines()) else None
+
+
+def gigabytes(sectors):
+    return f"{sectors * SECTOR / 1e9:.1f} GB"
+
+
+def handle(req):
+    """(ok, reboot, lines) for one request."""
+    try:
+        if req.get("verb") != "format":
+            raise Refused("Unknown request.")
+        fs = req.get("fs", "")
+        if fs not in FS:
+            raise Refused("Choose exFAT or ext4.")
+        disk = data_disk()
+        steps = []
+        unmount_all(disk)
+        sig, size = write_table(disk, fs, steps.append)
+        try:
+            PENDING.unlink()
+        except OSError:
+            pass
+        reread(DEV / disk)
+        if not wait_partition(disk, START, size):
+            # The kernel still holds the old table: leave a marker, and `finish` formats the partition at the next boot.
+            write_atomic(PENDING, f"disk={disk}\nsig={sig.hex()}\nfs={fs}\n")
+            return True, True, ["The card is erased and its new partition is written,", "but the system cannot see it until it restarts.",
+                                "On restart the card is formatted and opened."]
+        make_filesystem(disk, fs)
+        at = mount_now(disk)
+        name, big = FS[fs]["name"], gigabytes(size)
+        if at is None:
+            return True, True, [f"The card is formatted ({name}, {big}) but could not be opened now.", "Restart to use it as the data card."]
+        return True, False, [f"The data card is formatted ({name}, {big}) and open at {at}.", "Folders made: " + ", ".join(FOLDERS) + "."]
+    except Refused as e:
+        return False, False, [str(e)]
+    except OSError as e:
+        return False, False, ["The card could not be formatted:", str(e)]
+
+
+def finish():
+    """At boot: format the empty partition a restart was needed to see. Acts only on its own marker."""
+    text = read(PENDING)
+    if not text:
+        return 0
+    try:
+        PENDING.unlink()                                  # first: one try only, never a loop
+    except OSError:
+        pass
+    info = dict(l.split("=", 1) for l in text.splitlines() if "=" in l)
+    disk, fs, sig = info.get("disk", ""), info.get("fs", ""), info.get("sig", "")
+    try:
+        if fs not in FS or not re.fullmatch(r"mmcblk\d+", disk) or not re.fullmatch(r"[0-9a-f]{8}", sig):
+            raise Refused("the marker is not valid")
+        if disk == boot_disk() or disk_sectors(disk) == 0:
+            raise Refused("that is not the data card")
+        head = DEV / disk
+        with open(head, "rb") as f:
+            mbr = f.read(SECTOR)
+        if mbr[510:512] != b"\x55\xaa" or mbr[440:444].hex() != sig or mbr[446 + 4] != FS[fs]["type"]:
+            raise Refused("the card is not the one that was erased")
+        start, size = int.from_bytes(mbr[446 + 8:446 + 12], "little"), int.from_bytes(mbr[446 + 12:446 + 16], "little")
+        if not wait_partition(disk, start, size, 20):
+            raise Refused("the new partition is not there")
+        if run(["blkid", "-p", "-o", "value", "-s", "TYPE", str(part_dev(disk, 1))], 30).stdout.strip():
+            raise Refused("the partition already has a filesystem")
+        make_filesystem(disk, fs)
+        print(f"r3i6nos-format: formatted {disk}p1 as {fs}", file=sys.stderr)
+    except (Refused, OSError) as e:
+        print(f"r3i6nos-format: left alone: {e}", file=sys.stderr)
+    return 0
+
+
+# ---- the request -----------------------------------------------------------------------------------------------------------
+
+def parse_request(text):
+    req = {}
+    for line in text.splitlines():
+        k, sep, v = line.partition("=")
+        if sep and re.fullmatch(r"[a-z]+", k):
+            req[k] = v.strip()
+    return req
+
+
+def read_request():
+    """The request text, or None. Never follows a link or waits on a pipe; a small regular file only."""
+    try:
+        fd = os.open(REQ_DIR / "request", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as e:
+        return "" if e.errno == errno.ELOOP else None     # a link is refused, but answered and deleted
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_REQUEST:
+            return ""
+        return os.read(fd, MAX_REQUEST).decode("utf-8", "replace")
+    finally:
+        os.close(fd)
+
+
+def write_result(rid, ok, reboot, lines):
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(OUT_DIR, 0o755)
+    tmp = OUT_DIR / f"result.{os.getpid()}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    with os.fdopen(fd, "w") as f:
+        f.write(f"id={rid}\nok={1 if ok else 0}\nreboot={1 if reboot else 0}\n" + "".join(f"L\t{line}\n" for line in lines))
+    os.replace(tmp, OUT_DIR / "result")
+
+
+def apply():
+    text = read_request()
+    if text is None:
+        return 0
+    try:
+        (REQ_DIR / "request").unlink()                    # first: a failure below must not make the path unit loop
+    except OSError:
+        pass
+    req = parse_request(text)
+    rid = re.sub(r"[^0-9A-Za-z._-]", "", req.get("id", "0"))[:40] or "0"
+    ok, reboot, lines = handle(req)
+    write_result(rid, ok, reboot, lines)
+    return 0
+
+
+def main(argv):
+    verbs = {"apply": apply, "finish": finish}
+    if len(argv) != 2 or argv[1] not in verbs:
+        print("\n".join(__doc__.strip().splitlines()[2:5]), file=sys.stderr)
+        return 2
+    return verbs[argv[1]]()
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

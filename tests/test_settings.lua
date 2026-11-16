@@ -41,7 +41,7 @@ end
 local s = new()
 eq(title(s), "Settings"); eq(settings.node(s).items[1].label, "Network"); eq(settings.node(s).items[2].label, "SSH")
 eq(settings.node(s).items[3].label, "Battery"); eq(settings.node(s).items[4].label, "Sound mixer"); eq(settings.node(s).items[5].label, "Date and time")
-eq(settings.node(s).items[6].label, "Device reports"); eq(settings.node(s).items[7].label, "Rec demos"); eq(settings.node(s).items[8].label, "Screen mirror"); eq(settings.node(s).items[9].label, "About"); eq(settings.node(s).items[10].label, "Shutdown")
+eq(settings.node(s).items[6].label, "Device reports"); eq(settings.node(s).items[7].label, "Rec demos"); eq(settings.node(s).items[8].label, "Screen mirror"); eq(settings.node(s).items[9].label, "Data card"); eq(settings.node(s).items[10].label, "About"); eq(settings.node(s).items[11].label, "Shutdown")
 choose(s, "Shutdown")
 eq(kind(s), "confirm"); eq(settings.node(s).sel, 2, "the confirmation starts on No")
 assert(settings.press(s, "accept") == nil and kind(s) == "menu", "accepting the default (No) must not power off")
@@ -413,4 +413,47 @@ do
   choose(d, "Screen mirror"); eq(settings.node(d).items[1].label, "No link is up")
   choose(d, "No link is up"); assert(settings.node(d).bad); eq(settings.node(d).pages[1][1], "no link")
   print("settings screen mirror: ok")
+end
+
+-- ---- Settings > Data card: format the card in the second slot (docs/STORAGE.md) ----
+do
+  local sent, answers = {}, {}
+  local fakedc = {
+    FORMATS = { { fs = "exfat", label = "exFAT", hint = "h1" }, { fs = "ext4", label = "ext4", hint = "h2" } },
+    WAIT = 100, ABOUT = { "about" },
+    statusLines = function() return { "status" } end,
+  }
+  fakedc.client = {
+    request = function(verb, args) sent[#sent + 1] = { verb = verb, args = args }; return "f" .. #sent end,
+    poll = function(id) return answers[id] end,
+  }
+  local d = settings.new(fake(), nil, nil, nil, nil, nil, nil, nil, fakedc); settings.open(d)
+  choose(d, "Data card"); eq(title(d), "Data card")
+  eq(settings.node(d).items[1].label, "Status"); eq(settings.node(d).items[2].label, "Format as exFAT"); eq(settings.node(d).items[3].label, "Format as ext4")
+  choose(d, "Status"); eq(settings.node(d).pages[1][1], "status"); settings.press(d, "back")
+  -- nothing is asked until the confirmation says yes, and it starts on No
+  choose(d, "Format as ext4"); eq(kind(d), "confirm"); eq(settings.node(d).sel, 2); eq(#sent, 0)
+  settings.press(d, "accept"); eq(#sent, 0, "No asks nothing"); eq(title(d), "Data card")
+  choose(d, "Format as ext4"); settings.press(d, "up"); eq(settings.node(d).sel, 1); settings.press(d, "accept")
+  eq(#sent, 1); eq(sent[1].verb, "format"); eq(sent[1].args.fs, "ext4"); eq(kind(d), "busy")
+  settings.tick(d, 1); eq(kind(d), "busy", "still waiting")
+  answers.f1 = { ok = true, lines = { "The data card is formatted (ext4, 31.9 GB) and open at /roms2." } }
+  settings.tick(d, 1); eq(kind(d), "pages"); assert(not settings.node(d).bad); assert(d.rescan, "the list is read again")
+  settings.press(d, "back"); eq(title(d), "Data card")
+  -- a refusal is shown as a failure and the list is left alone
+  d.rescan = nil
+  choose(d, "Format as exFAT"); settings.press(d, "up"); settings.press(d, "accept"); eq(sent[2].args.fs, "exfat")
+  answers.f2 = { ok = false, lines = { "There is no card in the second slot (TF2)." } }
+  settings.tick(d, 1); assert(settings.node(d).bad); assert(not d.rescan)
+  settings.press(d, "back")
+  -- a restart is needed: a dialog says so, No keeps the unit on, Yes asks for the restart
+  choose(d, "Format as exFAT"); settings.press(d, "up"); settings.press(d, "accept")
+  answers.f3 = { ok = true, reboot = true, lines = { "The card is erased and its new partition is written,", "but the system cannot see it until it restarts." } }
+  settings.tick(d, 1); eq(kind(d), "confirm"); eq(title(d), "Restart now?"); eq(settings.node(d).sel, 2)
+  settings.press(d, "accept"); eq(kind(d), "pages", "No: the explanation stays"); eq(settings.node(d).pages[1][1], "The card is erased and its new partition is written,")
+  settings.press(d, "back")
+  choose(d, "Format as exFAT"); settings.press(d, "up"); settings.press(d, "accept")
+  answers.f4 = answers.f3; settings.tick(d, 1)
+  settings.press(d, "up"); eq(settings.press(d, "accept"), "reboot"); assert(not settings.isOpen(d))
+  print("settings data card: ok")
 end

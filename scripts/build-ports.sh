@@ -4,7 +4,7 @@
 # Refreshes the local builds of every R36S port, one command, on this computer (CLAUDE.md rule 10 gives each port a build script that takes no
 # arguments; this runs them all, so the next flash-macos.sh copies fresh files):
 #
-#   the ports beside this repo (scripts/ports.conf: KlamANSI, Neumetik, Composer, Painter, Animator, Crunchy, Chordica, TinyNTT, Hydrolik, NoCoGaMa),
+#   the ports beside this repo (scripts/ports.conf: KlamANSI, Neumetik, Composer, Painter, Animator, Crunchy, Chordica, TinyNTT, Hydrolik, FM1-NTT, FM1-NTT Firmware Pack, NoCoGaMa),
 #   each with its own `r36s/build-deb.sh` (or `scripts/build.sh`) run in its repo; and this repo's own apps:
 #   Commander and the IO Checker (native, `scripts/build-native-local.sh`; LÖVE, `scripts/build_love_app.sh`).
 #

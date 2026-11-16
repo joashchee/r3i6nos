@@ -45,7 +45,7 @@ if [ -d "$GPU_DIR" ]; then
     export LOVE_GRAPHICS_USE_OPENGLES=1
 fi
 
-mkdir -p "$NEXT_DIR" "$NEXT_DIR/net" "$NEXT_DIR/clock"   # net, clock: where Settings leaves its requests for the root helpers
+mkdir -p "$NEXT_DIR" "$NEXT_DIR/net" "$NEXT_DIR/clock" "$NEXT_DIR/format"   # net, clock, format: where Settings leaves its requests for the root helpers
 
 battery_sample session
 
@@ -61,9 +61,10 @@ while true; do
         if [ "$type" = system ]; then
             # Settings > Shutdown. This user cannot power off; leave a flag and exit cleanly, and
             # loveos.service's ExecStopPost (root) runs r3i6nos-poweroff, which acts on it.
-            if [ "$target" = poweroff ]; then
+            # Settings > Data card can also ask for a restart ("reboot"): the same way, another flag.
+            if [ "$target" = poweroff ] || [ "$target" = reboot ]; then
                 battery_sample shutdown
-                : > "$NEXT_DIR/poweroff"
+                : > "$NEXT_DIR/$target"
                 exit 0
             fi
             echo "loveos-session: unknown system request: $target" >&2

@@ -12,7 +12,26 @@ The R36S has two microSD slots. r3i6nos gives each card one job, so the boot car
 Everything a person adds from day to day goes on the data card, or over SSH (`docs/NETWORK.md`). Both cards have the same folders:
 `Love 11.5/`, `Love 12.0/`, `native_deb/`, and one `<App>/` folder per app for its data.
 
-Rule 7 holds on both cards: r3i6nos never formats, repartitions or relabels either card, and boot only mounts them.
+Rule 7 holds on both cards: boot only mounts them, and r3i6nos never formats, repartitions or relabels either card **by itself**. The one way it formats the data card is a person choosing **Settings > Data card > Format** (below).
+
+## Format the data card (Settings > Data card, 2026-11-16)
+
+A card that is new, or in a filesystem the unit cannot open, can be made the data card from the unit, with no computer:
+
+- **Status** shows what `r3i6nos-cards` found (device, filesystem, where it is open).
+- **Format as exFAT** (recommended: a Mac, Windows or Linux computer reads it) or **Format as ext4** (Linux only). Each asks "Erase the data card?" first, and the answer starts on **No**.
+- FAT32 is not offered: the image has no `mkfs.fat` (`dosfstools`). A card a computer formatted as FAT32 is still opened as before.
+
+How it works (`overlay/usr/local/bin/r3i6nos-format`, the same two-file protocol as `r3i6nos-clock`: the menu writes `/run/loveos/format/request`, `r3i6nos-format.path` starts the root service, the answer is `/run/r3i6nos-format/result` with `ok=` and `reboot=`):
+
+1. **Which card:** every mmc disk except the one the root filesystem is on (and except a setup boot's original card). It refuses when it cannot tell which disk is the root one, when no other card is in, or when more than one is. The system card is never a target, and a test checks that nothing is written to it.
+2. **Unmount** everything of that card (`/roms2`, or `/roms` when the boot card has no partition 3). If a mount is busy it stops, writes nothing and says "Nothing was changed". There is no lazy or forced unmount.
+3. **Erase and partition:** the first 4 MiB and the last 1 MiB are zeroed (the old table, filesystem start and any GPT backup), then one MBR partition is written from 4 MiB to the end (type 07 for exFAT, 83 for ext4; at most about 2 TiB), with a new random disk signature.
+4. **Format** it (`mkfs.exfat` or `mkfs.ext4`, label `R3I6NOS-DATA`; ext4's root is owned by `loveos`, uid 1000), make `Love 11.5`, `Love 12.0` and `native_deb` through a temporary mount, then **mount by role** with `r3i6nos-cards mount`, which opens it at `/roms2`. The menu reads its game list again.
+
+**When a restart is needed.** After writing the table the helper asks the kernel to re-read it and checks that partition 1 has exactly the start and size just written (an old partition 1 is not taken for the new one). If the kernel keeps the old table, or the format worked but the card did not open, the answer carries `reboot=1`: a dialog explains it and asks **Restart now?** (starts on No, and the explanation stays on screen). Yes asks the session for `system<TAB>reboot`; the session leaves a `reboot` flag and exits, and `r3i6nos-poweroff` runs `systemctl --no-block reboot`, as Shutdown does `poweroff`. In the first case a marker `/var/lib/r3i6nos/format-pending` (disk, signature, filesystem) is left, and at the next boot `r3i6nos-format finish` (an `ExecStartPre` of `r3i6nos-cards.service`, never failing the boot) formats the partition **only if** the marker is valid, the disk is not the boot disk, the card's signature, partition type and geometry still match, and the partition has no filesystem. The marker is removed first: one try.
+
+**Untested on the unit.** What to find out with a real card in TF2: whether the kernel re-reads the table at once (then no restart is asked) or not (then the dialog shows), how long `mkfs` takes on a big card (the menu waits up to 25 minutes), and that the result mounts and a computer can read the exFAT card.
 
 ## Why not labels
 

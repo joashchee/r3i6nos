@@ -217,6 +217,9 @@ ln -sfn /etc/systemd/system/r3i6nos-clock-set.path \
 # Settings > Network and SSH: a path unit that only watches for the menu's request (the helper runs per request, never at boot).
 ln -sfn /etc/systemd/system/r3i6nos-net.path \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-net.path"
+# Settings > Data card: a path unit that only watches for the menu's Format request; the helper formats only the card that is not the boot card.
+ln -sfn /etc/systemd/system/r3i6nos-format.path \
+    "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-format.path"
 # SSH is off until a person starts it in Settings, and every card makes its own host keys then (not the build's, which every card would share).
 rm -f "$ROOTFS"/etc/systemd/system/multi-user.target.wants/{ssh,sshd}.service "$ROOTFS"/etc/systemd/system/sshd.service \
     "$ROOTFS"/etc/systemd/system/sockets.target.wants/ssh.socket "$ROOTFS"/etc/ssh/ssh_host_*

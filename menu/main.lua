@@ -114,6 +114,12 @@ end
 function love.update(dt)
   toast.poll(hotplug, love.timer.getTime())
   settings.tick(dialog, dt)
+  if dialog.rescan then -- the data card was formatted (Settings > Data card): what was on it is gone, so read the cards again
+    dialog.rescan = nil
+    entries = scan.entries(ROMS, LAUNCHERS, DEFAULTS, ROMS2)
+    selected = math.max(1, math.min(selected, #entries))
+    redraw.mark(rd)
+  end
   testSound()
   powerAge = powerAge + dt
   if powerAge >= POWER_EVERY then powerAge, power = 0, battery.read(); redraw.mark(rd) end
@@ -156,13 +162,16 @@ local function typing()
   return n and n.kind == "osk"
 end
 
--- Ask the session loop to power the device off: it runs "system<TAB>poweroff", then exits cleanly.
+-- Ask the session loop to power the device off: it runs "system<TAB>poweroff", then exits cleanly. "reboot" restarts it the same way
+-- (Settings > Data card, when a format needs a restart).
 local function poweroff() request("system\tpoweroff") end
+local function reboot() request("system\treboot") end
 
 -- One place for every input (a list dialog's actions: up, down, left, right, pageup, pagedown, home, end, accept, back, more).
 local function act(action)
   if settings.isOpen(dialog) then
-    if settings.press(dialog, action) == "poweroff" then poweroff() end
+    local r = settings.press(dialog, action)
+    if r == "poweroff" then poweroff() elseif r == "reboot" then reboot() end
     return
   end
   local new, event = theme.listKey(selected, #entries, view.PER_PAGE, action)
