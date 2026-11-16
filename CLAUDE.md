@@ -18,7 +18,7 @@ is blocked and on what.
 - `apps/`: the apps (each has an `app.conf`, native or LÖVE, and its own workflow, `.github/workflows/app-<name>.yml`; only `DEFAULT=1` apps enter the image). The default apps built into the image (`/opt/loveos/defaults`): the IO Checker (`docs/IO-CHECKER.md`: input, video, sound, files, USB and OTG, a device report) as LÖVE 11.5, LÖVE 12.0 and native ARM64, and Commander (a native ARM64 file manager whose viewer identifies and opens about 150 formats: pictures, ANSI art, archives, packages, disk images, documents, and plays Rec demo recordings, WAV and, with ffmpeg, video; `apps/README.md`). See `apps/README.md`.
 - `theme/`: the r3i6nos-ansiapps text-mode theme for LÖVE (`.lua`) and C/SDL2 (`.h`): font, screen, list dialogs; installed at `/opt/loveos/theme`. See `docs/R3I6NOS-ANSIAPPS-THEME.md`.
 - `tools/ffmpeg-min/`: the minimal GPL ffmpeg (one 5.3 MiB binary: the decoders Commander's Play tab and Diskette's audio and video lists need, WebP/TIFF/PSD stills, and Rec demo's H.264 + AAC encode; `scripts/build-ffmpeg-min.sh` builds and checks it; `configure_rootfs.sh` installs it at `/usr/bin/ffmpeg` with its GPL terms; ROADMAP section 20).
-- `/usr/bin/nttplay` (built by `scripts/build-nttplay.sh` from the Neumetik repository, installed by `configure_rootfs.sh`, always in the image; ROADMAP section 27): Neumetik's players as a command-line tool, `nttplay probe FILE` and `nttplay decode FILE` (16-bit stereo PCM on stdout, like ffmpeg's pipe), for Commander and Hydrolik. **nttplay is the only decoder of the ansiapps formats:** an app that plays them (Commander, Hydrolik) calls it and never carries a reader of its own, so the supported formats cannot drift; a format that is missing or sounds wrong is fixed in Neumetik, and the image gets it when nttplay is rebuilt.
+- `/usr/bin/nttplay` (built by `scripts/build-nttplay.sh` from the Neumetik repository, installed by `configure_rootfs.sh`, always in the image; ROADMAP section 27): Neumetik's players as a command-line tool, `nttplay probe FILE` and `nttplay decode FILE` (16-bit stereo PCM on stdout, like ffmpeg's pipe), for Commander and Hydrolik. **nttplay is the only decoder of the ansiapps formats, and there is one copy of it (rule 15).**
 - `tools/qjs-node/`: the shims and builder that turn a Node-style CLI into one QuickJS executable (`docs/QJS-CLI-PORTS.md`); an app's folder is only ever read, never copied in.
 - `corpus/`: the test corpus, one file of each format the apps read (Commander's ~130 and the other apps'), sorted into sub-folders (music, audio, images, art, video, documents, text, data, archives, disks, programs, fonts, models, apps; `corpus/README.md`), installed at `/opt/loveos/test-files` and copied to EASYROMS by `flash-macos.sh`; `scripts/build_corpus.sh` remakes it.
 - `scripts/`: host-side tools. `check.sh` runs everything CI runs.
@@ -104,6 +104,15 @@ is blocked and on what.
    unit. **A new port is not done until its power section exists and is tested**; say untested what has not run on a unit, and repeat on a
    unit at 100%, 50% and 20% charge before trusting a small difference. When a report comes back, fix what it flags and put the new figures
    in the port's roadmap (the menu's 60% idle, found by it on 2026-11-12, is the example).
+
+15. **One nttplay, one installed copy per platform.** nttplay (Neumetik's players as a command-line tool) is the only decoder of the ansiapps formats, so
+   what they support cannot drift between apps. **Every app that plays them is a frontend that runs it and nothing else decodes:** Commander is the file
+   browser frontend, Hydrolik the music player frontend, and the next ones follow. **No frontend, package or card file carries, bundles or builds in its own
+   copy of nttplay, or links Neumetik's readers.** The platform installs it once and every frontend finds that copy (on r3i6nos the image's
+   `/usr/bin/nttplay`, from `scripts/build-nttplay.sh`; on another platform its one installed location, found on the `PATH` or named by `$NTTPLAY` or the app's
+   own variable such as `R3I6NOS_NTTPLAY`); a frontend that cannot find it says so on screen. A format that is missing, or a sound that is wrong, is fixed in
+   Neumetik, and every frontend gets the fix when that one copy is rebuilt. A test or development run may build a copy to decode with, but it is never packed.
+   A port's build script fails if its package contains nttplay (Hydrolik's does).
 
 ## Check before committing
 
