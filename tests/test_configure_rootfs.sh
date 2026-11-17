@@ -152,7 +152,8 @@ rm -rf "$b"
 [ ! -e "$R/usr/share/man" ]                     || fail "man not trimmed"
 
 # Running it twice must give the same tree (no nested menu/menu or love/11.5/11.5).
-R3I6NOS_LOVE_BUILD="$T/love" scripts/configure_rootfs.sh "$R" >/dev/null
+# The same fake builds as the first run (not the repository's build/, which CI does not have: a missing nttplay is an error).
+R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/native" R3I6NOS_LOVE_APPS_BUILD="$T/loveapps" R3I6NOS_FFMPEG_BUILD="$T/ffmpeg" R3I6NOS_NTTPLAY_BUILD="$T/nttplay" scripts/configure_rootfs.sh "$R" >/dev/null
 [ ! -e "$R/opt/love/11.5/11.5" ] || fail "second run nested the runtime"
 [ ! -e "$R/opt/loveos/menu/menu" ] || fail "second run nested the menu"
 
