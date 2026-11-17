@@ -138,6 +138,39 @@ class Format(unittest.TestCase):
         self.assertEqual(disk[-1024 * 1024:], bytes(1024 * 1024), "and its end (a GPT backup)")
         self.assertEqual(disk[440:444].hex(), (self.t / "dev/mmcblk1").read_bytes()[440:444].hex())
 
+    def test_a_new_card_gets_an_id_the_app_data_engine_reads(self):
+        import json
+        self.ask("id=m1\nverb=format\nfs=exfat\n")
+        mark = self.t / "run/format/mnt/.r3i6nos-card"
+        data = json.loads(mark.read_text())
+        self.assertRegex(data["id"], r"^[0-9a-f]{16}$")
+        self.assertRegex(data["made"], r"^\d{4}-\d\d-\d\d$")
+        self.assertEqual(mark.stat().st_mode & 0o777, 0o644)
+        # the engine takes it as the card's own id, and does not make another
+        loader = importlib.machinery.SourceFileLoader("r3i6nos_appdata", str(SRC.with_name("r3i6nos-appdata")))
+        spec = importlib.util.spec_from_loader("r3i6nos_appdata", loader)
+        eng = importlib.util.module_from_spec(spec)
+        loader.exec_module(eng)
+        self.assertEqual(eng.card_id(mark.parent), data["id"])
+        self.assertEqual(eng.card_id(mark.parent, create=True), data["id"])
+
+    def test_two_formats_make_two_ids(self):
+        import json
+        ids = []
+        for n in ("a", "b"):
+            self.ask(f"id={n}\nverb=format\nfs=exfat\n")
+            ids.append(json.loads((self.t / "run/format/mnt/.r3i6nos-card").read_text())["id"])
+            (self.t / "run/format/mnt/.r3i6nos-card").unlink()
+        self.assertNotEqual(*ids)
+
+    def test_the_marker_is_made_by_the_restart_path_too(self):
+        self.kernel_sees = False
+        self.ask("id=r1\nverb=format\nfs=exfat\n")
+        self.assertFalse((self.t / "run/format/mnt/.r3i6nos-card").exists(), "nothing is formatted yet, so no id yet")
+        self.show_partition()                           # after the restart the kernel shows it
+        self.m.finish()
+        self.assertTrue((self.t / "run/format/mnt/.r3i6nos-card").is_file())
+
     def test_the_label_fits_every_filesystem(self):
         self.assertLessEqual(len(self.m.LABEL), 11, "exfatprogs 1.2.0 refuses a longer label: 'input string is too long' (found on the unit 2026-11-16)")
 

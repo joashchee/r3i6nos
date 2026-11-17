@@ -27,6 +27,8 @@ R3I6NOS_RUN (/run/r3i6nos), R3I6NOS_CARDS_BIN (/usr/local/bin/r3i6nos-cards).
 """
 import errno
 import fcntl
+import hashlib
+import json
 import os
 import re
 import secrets
@@ -60,6 +62,7 @@ WIPE_TAIL = 2048                   # the last 1 MiB is cleared too (a GPT's back
 BLKRRPART = 0x125F
 LABEL = "R3I6NOSDATA"                # at most 11 characters: exfatprogs 1.2.0 refuses a longer one ("input string is too long"), and FAT allows 11
 FOLDERS = ("Love 11.5", "Love 12.0", "native_deb")
+CARD_MARK = ".r3i6nos-card"        # the card's identity (docs/APP-DATA.md): r3i6nos-appdata keeps "don't ask again" choices against its id
 FS = {"exfat": {"type": 0x07, "name": "exFAT", "mkfs": ["mkfs.exfat", "-L", LABEL], "mount": "rw,noatime,uid=1000,gid=1000,umask=022"},
       "ext4": {"type": 0x83, "name": "ext4", "mkfs": ["mkfs.ext4", "-F", "-q", "-L", LABEL, "-E", "root_owner=1000:1000"], "mount": "rw,noatime"}}
 
@@ -228,6 +231,12 @@ def make_filesystem(disk, fs):
             d.mkdir(exist_ok=True)
             if fs == "ext4":
                 os.chown(d, 1000, 1000)
+        # a new card has an id from the start (the engine used to make it only at the first move); same file, same fields as r3i6nos-appdata's
+        mark = mnt / CARD_MARK
+        mark.write_text(json.dumps({"id": hashlib.sha256(os.urandom(32)).hexdigest()[:16], "made": time.strftime("%Y-%m-%d")}))
+        os.chmod(mark, 0o644)
+        if fs == "ext4":
+            os.chown(mark, 1000, 1000)
         os.sync()
     finally:
         run(["umount", str(mnt)], 120)
