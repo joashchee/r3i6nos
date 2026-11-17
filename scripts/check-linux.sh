@@ -1,6 +1,6 @@
 #!/bin/bash
 # Runs scripts/check.sh inside Debian 12 (what CI runs) so that nothing is skipped for being on a Mac: GCC, shellcheck, luajit, Node, alsa-utils
-# (the ALSA tests), Pillow (the font check), and, as root in a privileged container, the image test that needs loop devices.
+# (the ALSA tests), procps (pgrep, for the tool demo test), Pillow (the font check), and, as root in a privileged container, the image test that needs loop devices.
 # Needs Docker (on this Mac: Colima, `colima start`, CLAUDE.md memory "Local tools"). The first run builds the image (a few minutes); later runs reuse it.
 #
 #   scripts/check-linux.sh            the whole check
@@ -10,7 +10,7 @@
 set -eu
 cd "$(dirname "$0")/.."
 
-IMAGE="${R3I6NOS_CHECK_IMAGE:-r3i6nos-check:bookworm-2}"      # bump the tag when the package list below changes
+IMAGE="${R3I6NOS_CHECK_IMAGE:-r3i6nos-check:bookworm-3}"      # bump the tag when the package list below changes
 command -v docker >/dev/null || { echo "check-linux: needs docker (colima start)" >&2; exit 2; }
 docker info >/dev/null 2>&1 || { echo "check-linux: docker is not running (colima start)" >&2; exit 2; }
 
@@ -22,7 +22,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update && apt-get install -y --no-install-recommends \
         ca-certificates git gcc make pkg-config libc6-dev libsdl2-dev python3 python3-pil \
         shellcheck luajit lua5.4 alsa-utils xz-utils zstd patch ffmpeg \
-        dosfstools mtools e2fsprogs fdisk util-linux squashfs-tools dpkg curl file \
+        dosfstools mtools e2fsprogs fdisk util-linux squashfs-tools dpkg curl file procps \
     && rm -rf /var/lib/apt/lists/*
 # Node 22 (Debian 12's is 18, which cannot import the QuickJS shims' CommonJS files by name; the Mac's and CI's are newer)
 RUN arch="$(dpkg --print-architecture)"; case "$arch" in amd64) arch=x64 ;; esac; \
