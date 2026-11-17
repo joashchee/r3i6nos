@@ -31,6 +31,8 @@ is blocked and on what.
 - `docs/DEMO-RECORDINGS.md`: Rec demo, the screenshots and video every R36S port records to a `Demo` folder (rule 11).
 - `docs/TWO-SLOT-SETUP.md`: the console prepares its own card from the original (`overlay/usr/local/bin/r3i6nos-setup`, a no-op on every normal boot; the web guide at r3i6nos.ansiapps.com/bootdisk is in the ansiapps-site repo); trials T1-T10 are untested on a unit.
 - `docs/STORAGE.md`: the two card slots: the system card (TF1, `/roms`) and the data card (TF2, `/roms2`), mounted by role by `r3i6nos-cards`.
+- `docs/APP-DATA.md`: where an app keeps its data (rule 16): the data card first, the move and merge offers, the one engine `r3i6nos-appdata`.
+- `docs/PACKAGES-OTA.md`: adding and upgrading `.deb` bundles over the network or SSH with no card out (proposal; ROADMAP section 29).
 - `docs/BRAND.md`: the logo (the butterfly "3i6", grey "r" and "n", no "os"); the boot logo is `docs/brand/boot-logo.png`, made into the BMP by `scripts/make_boot_logo.py` and put on BOOT by `inject-boot.sh`. The art is the maintainer's: never redraw it.
 - `docs/hardware-findings.md`: what the stock card showed (kernel 4.4.189, no panfrost, boot flow). Read it before touching boot or graphics.
 
@@ -55,7 +57,7 @@ is blocked and on what.
 6. **No telemetry, no network at boot, no accounts.** Settings > Network and SSH (`docs/NETWORK.md`) and About's Check for updates (`docs/ABOUT.md`) only act when a person chooses them; SSH is off and has no shared host keys in the image.
 7. **Keep the user's data safe:** the games card (`EASYROMS`) is theirs. Boot
    scripts only read it; never format, repartition or delete from it. **One exception (2026-11-11, `docs/TWO-SLOT-SETUP.md`):** the setup service may add and
-   format the games partition on the card it is setting up, only when that card has no partition 3 and the space after ROOTFS is empty; never on any other card. **Second exception (2026-11-16, `docs/STORAGE.md`, "Format the data card"):** Settings > Data card may erase, partition and format the card in the second slot, only when a person chose it and confirmed (the dialog starts on No); the root helper `r3i6nos-format` never touches the boot card and refuses when it cannot tell which card that is.
+   format the games partition on the card it is setting up, only when that card has no partition 3 and the space after ROOTFS is empty; never on any other card. **Second exception (2026-11-16, `docs/STORAGE.md`, "Format the data card"):** Settings > Data card may erase, partition and format the card in the second slot, only when a person chose it and confirmed (the dialog starts on No); the root helper `r3i6nos-format` never touches the boot card and refuses when it cannot tell which card that is. **Third exception (2026-11-17, `docs/APP-DATA.md`):** `r3i6nos-appdata` may delete files from `<App>/` on the system card, only after a person chose Move all or Merge in the app's dialog and only after each file's copy is verified on the data card; never anything outside `<App>/`.
 8. **Every app made for r3i6nos starts from the r3i6nos-ansiapps theme** (`theme/`, `docs/R3I6NOS-ANSIAPPS-THEME.md`): the IBM VGA
    8x16 font scaled to 10x20, **64 columns by 24 rows** on the 640x480 screen, row 0 the reserved top bar, rows 1-20 the display view, rows 21-23
    the three-row command line (reply, prompt, status), list dialogs and their button rules as KlamANSI does them, only the 16 VGA colours in
@@ -66,7 +68,7 @@ is blocked and on what.
    **Device report** and a `--report` flag; a command-line tool's `<command>-report`, which Settings > Device reports starts)
    that checks and measures what only the R36S can answer (the system, the pad's GUID, sound, the games card and its filesystem,
    speed against the app's goal, peak memory, every "untested on the unit" item a program can answer) and writes
-   **`/roms/<App>/r36s-report.txt`** for Claude to read: `STATUS key: value` lines (PASS, FAIL, INFO, SKIP), sections, a summary,
+   **`<App data folder>/r36s-report.txt`** (`$R3I6NOS_APP_DATA`, rule 16; `/roms/<App>/` or `/roms2/<App>/`) for Claude to read: `STATUS key: value` lines (PASS, FAIL, INFO, SKIP), sections, a summary,
    and `end` last. **A report that needs a setup (a charger out, an adapter or a cable in, headphones) lists it first on a screen and waits for a keypress** (A runs, B cancels; `docs/DEVICE-REPORTS.md`, "Setup the report needs"). **One that must be run several times counts them ("run 2 of 3": a `# RUNS: n` header, a file for each run, never one replacing another)**. Native ports use `theme/r3i6nos_report.h`; tools get `tools/qjs-node/report.py` from `package-tool.sh`. A new port
    is not done until its report exists and is tested; when a report comes back, update the port and both roadmaps from it.
 10. **Every R36S port has a local build script** that makes its card file on this Mac with one command and no arguments: a native or
@@ -79,7 +81,7 @@ is blocked and on what.
    **Device report** (and a `--rec-demo` flag; a command-line tool's `<command>-demo`, which Settings > Rec demos starts). It first opens a
    **checklist of the hero features** (all ticked) so the person picks which ones the demo shows; then it runs the real app through a scripted
    tour of the ticked ones on a **pre-generated demo file** (original, made by a script in the port, using every hero feature in the port's README
-   hero list) and saves, in **`/roms/<App>/Demo/`**: numbered PNG screenshots of the running app, **`demo-<timestamp>.mp4`**
+   hero list) and saves, in **`$R3I6NOS_APP_DATA/Demo/`** (rule 16): numbered PNG screenshots of the running app, **`demo-<timestamp>.mp4`**
    (30-90 s, with the app's own audio; the timestamp is `YYYYMMDD-HHMMSS`), a copy of the demo file and `rec-demo.txt` (the log, in the report
    grammar, `end` last). **The video always opens on the app's splash screen (rule 12) with a clear version line: the version, the git commit and the
    date**, so a video says which build made it. **While it runs, everything else is locked out:** no input but a cancel, the menu's and other
@@ -114,6 +116,19 @@ is blocked and on what.
    own variable such as `R3I6NOS_NTTPLAY`); a frontend that cannot find it says so on screen. A format that is missing, or a sound that is wrong, is fixed in
    Neumetik, and every frontend gets the fix when that one copy is rebuilt. A test or development run may build a copy to decode with, but it is never packed.
    A port's build script fails if its package contains nttplay (Hydrolik's does).
+
+16. **Every app made for r3i6nos (native or LÖVE) keeps its data on the data card when a valid one is in, and in one place only** (`docs/APP-DATA.md`). **On every launch,
+   after its splash (rule 12) and before heavy work,** an app calls `r3_appdata_init("<App>")` (`theme/r3i6nos_appdata.h`; LÖVE: `appdata.init("<App>")` from `theme/r3i6nos_appdata.lua`, user data through `io.open`, not `love.filesystem`; the engine is
+   `r3i6nos-appdata`, written once) and uses the folder it returns, `$R3I6NOS_APP_DATA`, for every write and every read of user data; it never builds
+   `/roms/<App>` or `/roms2/<App>` itself. The check looks at **both** cards' `<App>/` folders: **(a)** a valid data card (mounted by role, writable,
+   64 MiB free) and data only on the system card: **offer to move all of the app's data to the data card** (default Not now; Keep is remembered
+   against the card's id); **(b)** data on both: **offer to merge into one card** (data card recommended; same path with different content keeps the
+   newer and puts the other in `.merge-conflicts/`, never deleted); **(c)** no valid data card: use the system card, no question; the data card was
+   used before and is now out: say "Needs the data card", never crash. **Copy, verify (size and SHA-256), then delete the source file; a journal
+   resumes a power-cut; only `<App>/` is touched; free space and battery are checked first** (rule 7's third exception). Unattended runs (`--report`,
+   `--rec-demo`) never ask and never move: they use the resolved folder. A new port is not done until it calls `r3_appdata_init` / `appdata.init`, names its folder (`DATA_DIR` in `app.conf`), its report
+   and Rec demo write to `$R3I6NOS_APP_DATA`, its README lists what is app data, and its self-test covers the card-out case; say untested what has not
+   run on the unit. A third-party game in `Love 11.5/` or `Love 12.0/` is not an r3i6nos app and is exempt.
 
 ## Check before committing
 
