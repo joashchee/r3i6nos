@@ -151,10 +151,14 @@ jobs:
       # no nttplay and the build now fails (it used to warn, and 0.2.0's first image went out without it). NOT RUN YET: never through GitHub.
       - name: Fetch nttplay (Neumetik's newest build on main)
         env:
-          GH_TOKEN: ${{ github.token }}
+          # github.token only reaches this repository, so Neumetik's (private) artifacts came back 404 and the step found "none" (0.2.0's first image had no
+          # nttplay). NEUMETIK_TOKEN is a fine-grained token with read access to Neumetik's Actions and contents (the maintainer's secret).
+          GH_TOKEN: ${{ secrets.NEUMETIK_TOKEN }}
         run: |
+          if [ -z "$GH_TOKEN" ]; then echo "::error::the NEUMETIK_TOKEN secret is not set: it lets this workflow read Neumetik's nttplay-arm64 artifact (Settings > Secrets and variables > Actions)"; exit 1; fi
+          # No `|| true`: a 404 or an auth failure must show its own message, not look like "no artifact".
           id="$(gh api "repos/joashchee/neumetik/actions/artifacts?name=nttplay-arm64&per_page=30" \
-            --jq '[.artifacts[] | select((.expired | not) and .workflow_run.head_branch == "main")][0].workflow_run.id // empty' || true)"
+            --jq '[.artifacts[] | select((.expired | not) and .workflow_run.head_branch == "main")][0].workflow_run.id // empty')"
           if [ -z "$id" ]; then echo "::error::no nttplay-arm64 artifact from Neumetik's main: re-run Neumetik's r36s.yml (artifacts expire after 90 days). An image must carry nttplay"; exit 1; fi
           echo "Neumetik workflow run $id"
           if gh run download "$id" -R joashchee/neumetik -n nttplay-arm64 -D . && [ -f nttplay.tar ]; then
