@@ -1,6 +1,6 @@
 # Where an app keeps its data: the data card first, and one place only
 
-Status: **rule and design, 2026-11-17** (maintainer's request; CLAUDE.md rule 16). Nothing here is built. Roadmap: section 30. It finishes storage step 2 (`docs/STORAGE.md`: `R3I6NOS_APP_DATA`).
+Status: **rule and design, 2026-11-17** (maintainer's request; CLAUDE.md rule 16). **The engine `r3i6nos-appdata` is built (2026-11-17, below); the C and Lua frontends, the apps' calls and the menu's part are not.** Nothing has run on a unit. Roadmap: section 30. It finishes storage step 2 (`docs/STORAGE.md`: `R3I6NOS_APP_DATA`).
 
 ## Why
 
@@ -43,7 +43,7 @@ A list dialog in the theme, default **Not now** (the safest button, as the forma
 > **Move all** · Keep on the system card · Not now
 
 - **Move all:** copy, verify, then delete from S (below). The app waits behind a progress bar (step, bar, time, rule 11's bar) and only starts its work when it is done.
-- **Keep on the system card:** the choice is stored (`/var/lib/r3i6nos/appdata/<App>.json`, with the data card's id) and not asked again until the data card's id changes or the person asks from Settings > Storage.
+- **Keep on the system card:** the choice is stored (`~/.local/state/r3i6nos/appdata/<App>.json` of the login user, with the data card's id; a reflash forgets it and the question comes back) and not asked again until the data card's id changes or the person asks from Settings > Storage.
 - **Not now:** use S this time, ask again at the next launch.
 
 ### Offer to merge (data in both)
@@ -75,7 +75,9 @@ The logic is written once, in `overlay/usr/local/bin/r3i6nos-appdata`:
 - `state <App>`: prints `key=value` lines (`card=valid|none|readonly|full|…`, `where_s`, `where_d`, bytes and counts for each, `conflicts=n`, `choice=…`, `action=none|offer-move|offer-merge|needs-card|resume`) and the folder to use.
 - `path <App>`: the folder to use, no question, no change (for tools, reports, Rec demo). Warns on stderr when both have data.
 - `move <App>` and `merge <App> data|system`: stream `STEP`, `PROGRESS n/total` and `DONE` or `FAIL reason` lines.
-- `choice <App> keep|reset`: store or clear the "keep" choice.
+- `choice <App> keep|reset`: store or clear the "keep" choice (for a merge it also stores both folders' fingerprints, so a change on either side asks again).
+- `used <App> data|system`: the frontend says where the app is now using its data; that is how `needs-card` knows the app's data is on a card that is out.
+- `path <App> [--create]`: the folder to use, no question, a warning on stderr when both cards have data.
 
 The frontends only draw it: **`theme/r3i6nos_appdata.h`** (C: `r3_appdata_init(app)` runs `state`, shows the list dialog and the progress bar with the existing theme pieces, calls `move` or `merge`, sets `R3I6NOS_APP_DATA`, returns the path) and **`theme/r3i6nos_appdata.lua`** for LÖVE apps. A native app calls `r3_appdata_init` once, after the splash. **LÖVE apps follow the same rule** (decided 2026-11-17): every app made for r3i6nos (rule 8: the theme's, so the IO Checker's LÖVE builds, KlamANSI, NoCoGaMa, the tools' reports, and the menu's own `r3i6nos/` report folder) calls `appdata.init("<App>")` from `theme/r3i6nos_appdata.lua` after its splash, gets the folder, and writes user data there. LÖVE's `love.filesystem` writes only to its save directory (in the root filesystem, which a reflash replaces and which is not on a card), so **user data goes through `io.open` on the returned folder** (`love.filesystem.mount` can read it with LÖVE's API); the save directory holds only what can be lost (caches, a setting that is rebuilt). `appdata.init` runs the same dialogs (`theme/r3i6nos_ansiapps.lua` list dialogs and the bar) over the same engine. **A third-party LÖVE game from `Love 11.5/` or `Love 12.0/` is not an r3i6nos app**: it knows nothing of this, keeps its own save directory, and is only listed. The app's `app.conf` names its folder with `DATA_DIR=<App>` (a package's `package.json` has `data_dir`), which is how the menu and Settings > Storage find what to show and move.
 
@@ -91,3 +93,11 @@ A test fakes both cards (temp folders, `R3I6NOS_*` overrides, as `r3i6nos-cards`
 ## Untested on the unit
 
 All of it. To find out: a data card in TF2 with an app's folder only on the system card (the move), then the same folder on both (the merge), then each card out; plus how long copying 1 GB takes on the two cards (exFAT, ext4), and whether the data card's write after a hot-pull leaves a journal that resumes.
+
+## Built: the engine (2026-11-17)
+
+`overlay/usr/local/bin/r3i6nos-appdata` (Python stdlib, the login user, no root) and `tests/test_r3i6nos_appdata.py` (41 tests: every row of the table; read-only, unsupported, full and absent data cards; keep and its reset; needs-card; the app-name rules; move, merge in both directions, conflicts with the newer file winning and the older kept, equal times; links and special files left alone; names a FAT-like target cannot hold, including names that differ only by case; a target with no room; a low battery; a failed verification; an app folder that is a link; **an interruption after every possible number of files, then a rerun, compared with an uninterrupted run**; a stale half copy; the FAIL grammar). Two deliberate breakages of the engine (delete the original before verifying; skip the verification) were each caught by the tests. Run on a Mac and in Debian 12 arm64.
+
+What it does beyond the design above: an empty folder in the source is kept (made in the target before its files); the target's free space is checked against only what has to be copied; `.r3i6nos-card` (the card's id) is made by the first `move`, `merge`, `choice keep` or `used data`, **not yet by Settings > Data card > Format** (the format helper should write it, so a freshly formatted card has an id from the start); the `needs-card` memory is the login user's `used.json`.
+
+Not built: the C and Lua frontends (`theme/r3i6nos_appdata.h`, `.lua`: the dialogs and the progress bar), `DATA_DIR` in `app.conf`, the menu greying an app whose card is out, Settings > Storage, and every app's call. **Untested on the unit**, including whether the cards file is what this reads at that moment and how long 1 GB takes on each card.

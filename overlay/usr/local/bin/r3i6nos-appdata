@@ -1,0 +1,556 @@
+#!/usr/bin/env python3
+"""r3i6nos-appdata - where an app keeps its data: the data card first, one place only (CLAUDE.md rule 16, docs/APP-DATA.md).
+
+    r3i6nos-appdata state APP            key=value lines: the cards, what is where, `action=` and `use=` (the folder to use)
+    r3i6nos-appdata path APP [--create]  only the folder to use, no question and no change (reports, Rec demo, tools)
+    r3i6nos-appdata used APP data|system remember where the app is using its data (for "Needs the data card" when the card is out)
+    r3i6nos-appdata move APP             copy all of APP's data from the system card to the data card, verify, delete the originals
+    r3i6nos-appdata merge APP data|system   merge both cards' APP folders into that card's
+    r3i6nos-appdata choice APP keep|reset   keep the data where it is and stop asking (until the card or the data changes), or ask again
+
+D is <data card>/APP/ and S is <system card>/APP/. `action=` is one of: none, offer-move (valid data card, data only in S), offer-merge
+(data in both), needs-card (the app's data is on a data card that is not in), resume (a move or merge was interrupted). The frontends
+(theme/r3i6nos_appdata.h and .lua) ask the person and call move or merge; this tool never asks.
+
+Safety, in this order: only APP/ on either card is touched (a name that could leave it is refused); the plan checks names the target
+filesystem cannot hold, free space (5% to spare) and the battery first; each file is copied to NAME.r3i6nos-part, synced, compared by
+size and SHA-256, renamed into place, and only then is the original deleted; the same path with different content keeps the newer file
+and puts the other in APP/.merge-conflicts/<time>/, never deleted; a journal (APP/.r3i6nos-merge.json) says an operation is under way,
+so the next run finishes it; SIGTERM or SIGINT stops between files. Symbolic links and special files are never copied or deleted: they
+stay, and are counted as skipped.
+
+move and merge print one line each: STEP text, PROGRESS done/total, then DONE copied=.. deleted=.. conflicts=.. skipped=.. or
+FAIL reason (and exit 1). Standard library only; no root (the cards are mounted for the login user).
+Overrides, for tests: R3I6NOS_CARDS_FILE (/run/r3i6nos/cards), R3I6NOS_APPDATA_STATE (~/.local/state/r3i6nos/appdata),
+R3I6NOS_POWER_SUPPLY (/sys/class/power_supply), R3I6NOS_APPDATA_MIN_FREE_MB (64).
+"""
+import hashlib
+import json
+import os
+import re
+import shutil
+import signal
+import sys
+import time
+from pathlib import Path
+
+ENV = os.environ.get
+APP_OK = re.compile(r"[A-Za-z0-9][A-Za-z0-9 ._+-]{0,63}")
+CARD_MARK = ".r3i6nos-card"
+PROBE = ".r3i6nos-probe"
+JOURNAL = ".r3i6nos-merge.json"
+PART = ".r3i6nos-part"
+CONFLICTS = ".merge-conflicts"
+OWN = {JOURNAL, CONFLICTS}             # a folder holding only these has no data of the app's
+FS_OK = {"exfat", "vfat", "ext4"}
+FAT_LIKE = {"exfat", "vfat"}
+BAD_FAT_CHARS = set('<>:"|?*\\') | {chr(c) for c in range(32)}
+CHUNK = 1 << 20
+SPARE = 0.05                            # keep 5% of the target's free space
+LOW_BATTERY = 20
+
+
+class Fail(Exception):
+    pass
+
+
+stop = False
+
+
+def on_signal(_signo, _frame):
+    global stop
+    stop = True
+
+
+# ---- where things are ---------------------------------------------------------------------------------------------------------
+
+def cards():
+    st = {}
+    try:
+        for line in Path(ENV("R3I6NOS_CARDS_FILE", "/run/r3i6nos/cards")).read_text().splitlines():
+            k, _, v = line.partition("=")
+            st[k.strip()] = v.strip()
+    except OSError:
+        pass
+    return st
+
+
+def state_dir():
+    return Path(ENV("R3I6NOS_APPDATA_STATE") or Path.home() / ".local/state/r3i6nos/appdata")
+
+
+def check_app(app):
+    if not APP_OK.fullmatch(app or "") or app.endswith(" ") or ".." in app:
+        raise Fail(f"'{app}' is not an app folder name (letters, digits, space and . _ + -; not starting with a dot)")
+    return app
+
+
+def roots():
+    """(system root or None, data root or None, data filesystem): only cards that are mounted, and a data card at /roms is the data card."""
+    st = cards()
+    def at(key):
+        v = st.get(key, "none")
+        return Path(v) if v not in ("", "none") and Path(v).is_dir() else None
+    return at("SYSTEM_AT"), at("DATA_AT"), st.get("DATA_FS", "none"), st.get("SYSTEM_FS", "none")
+
+
+def read_json(path):
+    try:
+        v = json.loads(Path(path).read_text())
+        return v if isinstance(v, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_json(path, obj):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.{os.getpid()}")
+    with open(tmp, "w") as f:
+        json.dump(obj, f)
+        f.flush()
+        os.fsync(f.fileno())
+    os.replace(tmp, path)
+
+
+# ---- the data card ----------------------------------------------------------------------------------------------------------------
+
+def card_state(root, fs):
+    """('valid' | 'none' | 'unsupported' | 'readonly' | 'full', why in words)."""
+    if root is None:
+        return "none", "No data card is in."
+    if fs not in FS_OK:
+        return "unsupported", f"The data card's filesystem ({fs}) is not one r3i6nos opens."
+    probe = root / PROBE
+    try:
+        with open(probe, "wb") as f:
+            f.write(b"r3i6nos")
+            f.flush()
+            os.fsync(f.fileno())
+        probe.unlink()
+    except OSError as err:
+        return "readonly", f"The data card cannot be written ({err.strerror})."
+    free = shutil.disk_usage(root).free
+    need = int(ENV("R3I6NOS_APPDATA_MIN_FREE_MB", "64")) * 1024 * 1024
+    if free < need:
+        return "full", f"The data card has only {free // 1048576} MB free."
+    return "valid", ""
+
+
+def card_id(root, create=False):
+    mark = root / CARD_MARK
+    got = read_json(mark).get("id")
+    if got or not create:
+        return got
+    new = {"id": hashlib.sha256(os.urandom(32)).hexdigest()[:16], "made": time.strftime("%Y-%m-%d")}
+    write_json(mark, new)
+    return new["id"]
+
+
+# ---- looking at an app folder ---------------------------------------------------------------------------------------------------
+
+def scan(folder):
+    """(files, bytes, newest mtime, fingerprint) of the data in folder: everything but the tool's own journal and conflict folder."""
+    files = size = 0
+    newest = 0.0
+    if not folder.is_dir() or folder.is_symlink():
+        return 0, 0, 0.0
+    for dirpath, dirnames, filenames in os.walk(folder):
+        if Path(dirpath) == folder:
+            dirnames[:] = [d for d in dirnames if d not in OWN]
+        for name in filenames:
+            if (Path(dirpath) == folder and name in OWN) or name.endswith(PART):
+                continue
+            try:
+                st = os.lstat(os.path.join(dirpath, name))
+            except OSError:
+                continue
+            files += 1
+            size += st.st_size
+            newest = max(newest, st.st_mtime)
+    return files, size, newest
+
+
+def fingerprint(folder):
+    f, b, m = scan(folder)
+    return f"{f}:{b}:{int(m)}"
+
+
+def human(n):
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+
+
+# ---- state --------------------------------------------------------------------------------------------------------------------------
+
+def decide(app):
+    check_app(app)
+    s_root, d_root, d_fs, _s_fs = roots()
+    s_dir = s_root / app if s_root else None
+    d_dir = d_root / app if d_root else None
+    card, why = card_state(d_root, d_fs)
+    valid = card == "valid"
+    s_files, s_bytes, _ = scan(s_dir) if s_dir else (0, 0, 0)
+    d_files, d_bytes, _ = scan(d_dir) if (d_dir and valid) else (0, 0, 0)
+    cid = card_id(d_root) if valid else None
+    kept = read_json(state_dir() / f"{app}.json")
+    used = read_json(state_dir() / "used.json").get(app)
+    r = {"card": card, "card_id": cid or "", "s_at": str(s_dir) if s_dir else "", "d_at": str(d_dir) if d_dir and valid else "",
+         "s_files": s_files, "s_bytes": s_bytes, "d_files": d_files, "d_bytes": d_bytes, "reason": why, "action": "none"}
+    journal = read_json(d_dir / JOURNAL) if d_dir and valid else {}
+    journal = journal or (read_json(s_dir / JOURNAL) if s_dir else {})
+    if valid and journal:
+        r["action"], r["use"] = "resume", str(d_dir)
+    elif not valid:
+        if used and used.get("where") == "data":
+            r["action"] = "needs-card"
+        r["use"] = str(s_dir) if s_dir else ""
+    elif s_files and not d_files:
+        if kept.get("mode") == "keep" and kept.get("card") == cid:
+            r["use"] = str(s_dir)
+        else:
+            r["action"], r["use"] = "offer-move", str(s_dir)        # until it is moved, the data is where it is
+    elif s_files and d_files:
+        keep = kept.get("mode") == "keep" and kept.get("card") == cid and kept.get("fp") == f"{fingerprint(s_dir)}|{fingerprint(d_dir)}"
+        r["use"] = str(d_dir)
+        if not keep:
+            r["action"] = "offer-merge"
+            r["conflicts"] = len(conflicting(s_dir, d_dir))
+    else:
+        r["use"] = str(d_dir)
+    if not r.get("use") and (s_dir or d_dir):
+        r["use"] = str(s_dir or d_dir)
+    return r
+
+
+def conflicting(src, dst):
+    """Relative paths that are files on both sides with different content."""
+    out = []
+    for dirpath, dirnames, filenames in os.walk(src):
+        if Path(dirpath) == src:
+            dirnames[:] = [d for d in dirnames if d not in OWN]
+        for name in filenames:
+            if name.endswith(PART) or (Path(dirpath) == src and name in OWN):
+                continue
+            rel = Path(dirpath, name).relative_to(src)
+            other = dst / rel
+            if other.is_file() and not other.is_symlink() and not same_content(Path(dirpath, name), other):
+                out.append(str(rel))
+    return out
+
+
+def same_content(a, b):
+    try:
+        if a.stat().st_size != b.stat().st_size:
+            return False
+        return digest(a) == digest(b)
+    except OSError:
+        return False
+
+
+def digest(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(CHUNK)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+# ---- move and merge -----------------------------------------------------------------------------------------------------------
+
+def say(*parts):
+    print(*parts, flush=True)
+
+
+def battery_ok():
+    """Refuse below LOW_BATTERY % when discharging. A unit with no battery files (a test, a laptop) is fine."""
+    base = Path(ENV("R3I6NOS_POWER_SUPPLY", "/sys/class/power_supply"))
+    try:
+        for d in sorted(base.iterdir()):
+            try:
+                pct = int((d / "capacity").read_text().strip())
+                status = (d / "status").read_text().strip()
+            except (OSError, ValueError):
+                continue
+            if status == "Discharging" and pct < LOW_BATTERY:
+                return f"The battery is at {pct}% and not charging; plug in power first (moving data needs at least {LOW_BATTERY}%)."
+            return None
+    except OSError:
+        return None
+    return None
+
+
+def name_problem(name, dst_fs, siblings):
+    """Why the target filesystem cannot hold this name, or None."""
+    if len(name.encode("utf-8", "surrogateescape")) > 255:
+        return "name over 255 bytes"
+    if dst_fs in FAT_LIKE:
+        if any(c in BAD_FAT_CHARS for c in name):
+            return "a character the target filesystem cannot hold"
+        if name.endswith((" ", ".")):
+            return "ends in a space or a dot"
+        low = name.lower()
+        if any(o != name and o.lower() == low for o in siblings):
+            return "differs only by case from another name (the target ignores case)"
+    return None
+
+
+def plan(src, dst, dst_fs):
+    """([(relative path, size)] files to deal with, [skipped: (path, why)])."""
+    files, skipped, dirs = [], [], []
+    for dirpath, dirnames, filenames in os.walk(src):
+        here = Path(dirpath)
+        if here == src:
+            dirnames[:] = [d for d in dirnames if d not in OWN]
+        rel_dir = here.relative_to(src)
+        bad_dirs = set()
+        for d in list(dirnames):
+            full = here / d
+            why = "a link or special file" if full.is_symlink() else name_problem(d, dst_fs, [x for x in dirnames if x != d])
+            if why:
+                skipped.append((str(rel_dir / d), why))
+                bad_dirs.add(d)
+        dirnames[:] = sorted(d for d in dirnames if d not in bad_dirs)
+        dirs.extend(rel_dir / d for d in dirnames)
+        for name in sorted(filenames):
+            if name.endswith(PART) or (here == src and name in OWN):
+                continue
+            full = here / name
+            rel = rel_dir / name
+            st = os.lstat(full)
+            if not (st.st_mode & 0o170000) == 0o100000:               # not a regular file
+                skipped.append((str(rel), "a link or special file"))
+                continue
+            existing = os.listdir(dst / rel_dir) if (dst / rel_dir).is_dir() else []
+            why = name_problem(name, dst_fs, [x for x in filenames if x != name] + existing)
+            if why:
+                skipped.append((str(rel), why))
+                continue
+            files.append((rel, st.st_size))
+    return files, skipped, dirs
+
+
+def copy_verified(src, dst, size):
+    part = dst.with_name(dst.name + PART)
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    for attempt in (1, 2):
+        h, n = hashlib.sha256(), 0
+        with open(src, "rb") as f, open(part, "wb") as out:
+            while True:
+                chunk = f.read(CHUNK)
+                if not chunk:
+                    break
+                h.update(chunk)
+                n += len(chunk)
+                out.write(chunk)
+            out.flush()
+            os.fsync(out.fileno())
+        if n == size and n == part.stat().st_size and digest(part) == h.hexdigest():
+            st = os.stat(src)
+            os.utime(part, (st.st_atime, st.st_mtime))
+            os.replace(part, dst)
+            return True
+    part.unlink(missing_ok=True)
+    return False
+
+
+def prune(folder):
+    """Remove empty folders under folder (not folder itself)."""
+    for dirpath, _dirs, _files in os.walk(folder, topdown=False):
+        if Path(dirpath) != folder:
+            try:
+                os.rmdir(dirpath)
+            except OSError:
+                pass
+
+
+def transfer(app, src_root, dst_root, dst_fs, mode, cid):
+    src, dst = src_root / app, dst_root / app
+    for p, root in ((src, src_root), (dst, dst_root)):
+        if p.is_symlink() or (p.exists() and Path(os.path.realpath(p)).parent != Path(os.path.realpath(root))):
+            raise Fail(f"{p} is not a plain folder on its card; nothing was touched")
+    if not src.is_dir():
+        raise Fail(f"there is no {app} folder to move on the card it is leaving")
+    bat = battery_ok()
+    if bat:
+        raise Fail(bat)
+    dst.mkdir(exist_ok=True)
+    journal_path = dst / JOURNAL
+    journal = read_json(journal_path)
+    if not journal:
+        journal = {"from": str(src), "to": str(dst), "mode": mode, "started": time.strftime("%Y%m%d-%H%M%S")}
+        write_json(journal_path, journal)
+    for stale in dst.rglob(f"*{PART}"):                                  # a copy a power-cut interrupted is never a real file
+        stale.unlink(missing_ok=True)
+    say("STEP Planning")
+    files, skipped, dirs = plan(src, dst, dst_fs)
+    need = sum(size for rel, size in files if not (dst / rel).is_file())
+    free = shutil.disk_usage(dst_root).free
+    if need + int(need * SPARE) > free:
+        raise Fail(f"The target card has {human(free)} free and this needs {human(need)} (and 5% to spare).")
+    for d in dirs:                                                        # an empty folder is data too
+        (dst / d).mkdir(parents=True, exist_ok=True)
+    total = len(files)
+    copied = deleted = conflicts = failed = 0
+    conflict_dir = dst / CONFLICTS / journal["started"]
+    for n, (rel, size) in enumerate(files, 1):
+        if stop:
+            say(f"STEP Stopped; run it again to finish ({n - 1} of {total} done)")
+            raise Fail("stopped; what is done stays done and the next run finishes it")
+        say(f"PROGRESS {n - 1}/{total}")
+        s, d = src / rel, dst / rel
+        try:
+            if d.is_file() and not d.is_symlink():
+                if same_content(s, d):
+                    s.unlink()
+                    deleted += 1
+                    continue
+                keep_src = s.stat().st_mtime > d.stat().st_mtime       # the newer file wins; the other is kept, never deleted
+                loser = d if keep_src else s
+                kept_at = conflict_dir / rel
+                kept_at.parent.mkdir(parents=True, exist_ok=True)
+                if keep_src:
+                    os.replace(loser, kept_at)
+                elif not copy_verified(s, kept_at, size):
+                    failed += 1
+                    continue
+                conflicts += 1
+                if not keep_src:
+                    s.unlink()
+                    deleted += 1
+                    continue
+            if copy_verified(s, d, size):
+                copied += 1
+                s.unlink()
+                deleted += 1
+            else:
+                failed += 1
+                say(f"STEP Could not verify {rel}; it stays where it was")
+        except OSError as err:
+            failed += 1
+            say(f"STEP {rel}: {err.strerror or err}; it stays where it was")
+    say(f"PROGRESS {total}/{total}")
+    prune(src)
+    journal_path.unlink(missing_ok=True)
+    try:
+        src.rmdir()                  # only when nothing is left in it: a skipped link or a file that failed stays, and so does its folder
+    except OSError:
+        pass
+    for path, why in skipped:
+        say(f"STEP Left in place: {path} ({why})")
+    return copied, deleted, conflicts, len(skipped) + failed
+
+
+def cmd_move_merge(args, verb):
+    if not args:
+        raise Fail(f"usage: r3i6nos-appdata {verb} APP" + (" data|system" if verb == "merge" else ""))
+    app = check_app(args[0])
+    s_root, d_root, d_fs, s_fs = roots()
+    target = "data"
+    if verb == "merge":
+        if len(args) < 2 or args[1] not in ("data", "system"):
+            raise Fail("merge into data or system")
+        target = args[1]
+    if s_root is None or d_root is None:
+        raise Fail("both cards must be in")
+    card, why = card_state(d_root, d_fs)
+    if card != "valid":
+        raise Fail(why)
+    cid = card_id(d_root, create=True)
+    resume = read_json(d_root / app / JOURNAL) or read_json(s_root / app / JOURNAL)
+    if verb == "move" and not resume and scan(d_root / app)[0]:
+        raise Fail(f"{app} already has data on the data card; merge them instead")
+    src_root, dst_root, dst_fs = (s_root, d_root, d_fs) if target == "data" else (d_root, s_root, s_fs)
+    if resume and resume.get("from") and resume.get("to"):      # finish what was started, the way it was started
+        if Path(resume["from"]).parent == s_root:
+            src_root, dst_root, dst_fs, target = s_root, d_root, d_fs, "data"
+        else:
+            src_root, dst_root, dst_fs, target = d_root, s_root, s_fs, "system"
+    copied, deleted, conflicts, skipped = transfer(app, src_root, dst_root, dst_fs, verb, cid)
+    record_used(app, "data" if target == "data" else "system", cid)
+    (state_dir() / f"{app}.json").unlink(missing_ok=True)
+    say(f"DONE copied={copied} deleted={deleted} conflicts={conflicts} skipped={skipped}")
+    return 0
+
+
+def record_used(app, where, cid=None):
+    path = state_dir() / "used.json"
+    cur = read_json(path)
+    cur[app] = {"where": where, "card": cid or ""}
+    write_json(path, cur)
+
+
+def cmd_state(args):
+    r = decide(args[0] if args else "")
+    for k, v in r.items():
+        say(f"{k}={v}")
+    return 0
+
+
+def cmd_path(args):
+    if not args:
+        raise Fail("usage: r3i6nos-appdata path APP [--create]")
+    r = decide(args[0])
+    use = r.get("use")
+    if not use:
+        raise Fail("no card is mounted")
+    if r["action"] in ("offer-merge", "resume"):
+        print(f"r3i6nos-appdata: {args[0]} has data on both cards; using {use} (merge it from the app)", file=sys.stderr)
+    if "--create" in args[1:]:
+        Path(use).mkdir(parents=True, exist_ok=True)
+    say(use)
+    return 0
+
+
+def cmd_used(args):
+    if len(args) != 2 or args[1] not in ("data", "system"):
+        raise Fail("usage: r3i6nos-appdata used APP data|system")
+    app = check_app(args[0])
+    _s, d_root, d_fs, _f = roots()
+    valid = card_state(d_root, d_fs)[0] == "valid"
+    record_used(app, args[1], card_id(d_root, create=True) if (args[1] == "data" and valid) else None)
+    return 0
+
+
+def cmd_choice(args):
+    if len(args) != 2 or args[1] not in ("keep", "reset"):
+        raise Fail("usage: r3i6nos-appdata choice APP keep|reset")
+    app = check_app(args[0])
+    path = state_dir() / f"{app}.json"
+    if args[1] == "reset":
+        path.unlink(missing_ok=True)
+        return 0
+    s_root, d_root, d_fs, _f = roots()
+    if card_state(d_root, d_fs)[0] != "valid" or s_root is None:
+        raise Fail("both cards must be in to keep the data where it is")
+    cid = card_id(d_root, create=True)
+    write_json(path, {"mode": "keep", "card": cid, "fp": f"{fingerprint(s_root / app)}|{fingerprint(d_root / app)}"})
+    return 0
+
+
+def main(argv):
+    verbs = {"state": cmd_state, "path": cmd_path, "used": cmd_used, "choice": cmd_choice,
+             "move": lambda a: cmd_move_merge(a, "move"), "merge": lambda a: cmd_move_merge(a, "merge")}
+    if not argv or argv[0] in ("-h", "--help") or argv[0] not in verbs:
+        print((__doc__ or "").split("\n\n")[0], file=sys.stderr)
+        return 0 if argv and argv[0] in ("-h", "--help") else 2
+    signal.signal(signal.SIGTERM, on_signal)
+    signal.signal(signal.SIGINT, on_signal)
+    streaming = argv[0] in ("move", "merge")      # these answer on stdout in the FAIL/DONE grammar the frontends read
+    try:
+        return verbs[argv[0]](argv[1:])
+    except (Fail, OSError) as err:
+        why = err if isinstance(err, Fail) else (err.strerror or err)
+        if streaming:
+            print(f"FAIL {why}", flush=True)
+        else:
+            print(f"r3i6nos-appdata: {why}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))
