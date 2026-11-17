@@ -37,9 +37,9 @@ any page, or to leave from the list. A keyboard works too (arrows, Enter, Esc; H
 
 ## The device report
 
-`EASYROMS/IO_Checker/r36s-report-<build>.txt`: `r36s-report-11.5.txt`, `r36s-report-12.0.txt` or `r36s-report-native.txt`, one a build
+`<app data folder>/r36s-report-<build>.txt` (rule 16, `docs/APP-DATA.md`: `IO_Checker/` on the data card when a valid one is in, else `EASYROMS/IO_Checker/`; the **native** build asks to move its data at the first start after a data card is put in; the LÖVE builds still write to the games card until they call `appdata.init`): `r36s-report-11.5.txt`, `r36s-report-12.0.txt` or `r36s-report-native.txt`, one a build
 so they never overwrite each other. The grammar is `docs/DEVICE-REPORTS.md`'s. The native build also writes it without a window,
-`io-checker-native --report`, for SSH (nothing pressed, shown or played, so those lines are SKIP).
+`io-checker-native --report`, for SSH (nothing pressed, shown or played, so those lines are SKIP, and no question is ever asked). **App data** (rule 16) is only the report; the Files checks make their own `IO_Checker` folder on each card they test and leave nothing.
 
 | Section | Checks (PASS or FAIL) | Facts (INFO) and SKIPs |
 |---|---|---|

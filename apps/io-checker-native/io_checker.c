@@ -3,7 +3,8 @@
  * The same app as the LÖVE build (apps/io-checker-love/), with the same pages, words and report, so the two can be compared on a unit:
  * what goes in (every raw button, both sticks, the D-pad, the power and volume keys: presses, chatter, axis ranges, an event log) and
  * what comes out (the screen with full-screen test patterns and a measured frame rate, sound with test tones you mark heard or silent,
- * files on both cards), the system, and a device report (docs/DEVICE-REPORTS.md) at EASYROMS/IO_Checker/r36s-report-native.txt.
+ * files on both cards), the system, and a device report (docs/DEVICE-REPORTS.md) at $R3I6NOS_APP_DATA/r36s-report-native.txt: the
+ * data card's IO_Checker folder when a valid one is in, else the games card's (CLAUDE.md rule 16, docs/APP-DATA.md).
  * Button numbers on screen count from 1, as LÖVE does (SDL's own index is one less).
  *
  *   io-checker-native                         run it
@@ -11,7 +12,7 @@
  *   io-checker-native --selftest              check the logic and the screens, draw one frame, print one R3I6NOS_SMOKE line (CI, qemu)
  *   io-checker-native --screenshot out.bmp [page]   draw a page (home, input, video, sound, files, system) to a file
  *
- * Overrides, for tests: R3I6NOS_ROMS (/roms), R3I6NOS_ROMS2 (/roms2), R3I6NOS_SOUND (r3i6nos-sound), R3I6NOS_IO_MB (8).
+ * Overrides, for tests: R3I6NOS_APP_DATA (the app's data folder), R3I6NOS_ROMS (/roms), R3I6NOS_ROMS2 (/roms2), R3I6NOS_SOUND (r3i6nos-sound), R3I6NOS_IO_MB (8).
  * Build: scripts/build_native_apps.sh (cross-compiles for arm64 and packs the .deb). */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -28,6 +29,7 @@
 #include "r3i6nos_ansiapps.h"
 #include "r3i6nos_report.h"
 #include "r3i6nos_toast.h"
+#include "r3i6nos_appdata.h"
 #include "usb_io.h"
 
 #ifndef M_PI
@@ -71,7 +73,7 @@ static const char *HOME_ABOUT[H_COUNT][4] = {
      "USB storage, Ethernet, a keyboard, a mouse and game", "controllers. Plug one in and watch it appear."},
     {"The r3i6nos build, kernel, board, CPU, memory, battery,", "backlight, the pad's name and GUID, and the video and", "sound drivers.", NULL},
     {"Runs the checks again and writes everything, with your", "heard / silent answers and the buttons you pressed, to",
-     "EASYROMS/IO_Checker/ on the games card, for Claude.", NULL},
+     "IO_Checker/ on the data card (else the games card).", NULL},
     {"Back to the r3i6nos menu.", NULL, NULL, NULL},
 };
 
@@ -742,10 +744,24 @@ static void report_input(App *a, R3Report *r) {
 static void power_windows(App *a, R3Report *r);
 static void report_usb(App *a, R3Report *r);
 
+/* The app's data folder (rule 16): where r3_appdata_init settled, $R3I6NOS_APP_DATA. A run that did not settle one (--selftest,
+ * --screenshot) keeps the old place under the games card. The per-card checks (card_check) make their own IO_Checker folder on every card
+ * on purpose: they test the card, they are not the app's data. */
+static void app_data_dir(char *out, size_t cap) {
+    const char *d = getenv("R3I6NOS_APP_DATA");
+    if (d && *d) snprintf(out, cap, "%s", d);
+    else snprintf(out, cap, "%s/IO_Checker", env_or("R3I6NOS_ROMS", "/roms"));
+}
+
+/* Which card the report went to, in words for the reply line. */
+static const char *report_card(void) {
+    const char *d = getenv("R3I6NOS_APP_DATA"), *c = getenv("R3I6NOS_DATA_CARD");
+    return d && c && *c && !strncmp(d, c, strlen(c)) ? "Data card" : "EASYROMS";
+}
+
 static void write_report(App *a, const char *how) {
-    const char *roms = env_or("R3I6NOS_ROMS", "/roms");
     char dir[PATH_MAX];
-    snprintf(dir, sizeof dir, "%s/IO_Checker", roms);
+    app_data_dir(dir, sizeof dir);
     R3Report r;
     memset(&r, 0, sizeof r);
     r.quiet = 1;
@@ -813,7 +829,7 @@ static void write_report(App *a, const char *how) {
     power_windows(a, &r);
     int pass = r.pass, fail = r.fail, skip = r.skip;
     if (r3_report_close(&r) == 0) {
-        snprintf(a->report_file, sizeof a->report_file, "EASYROMS/IO_Checker/r36s-report-native.txt");
+        snprintf(a->report_file, sizeof a->report_file, "%s/IO_Checker/r36s-report-native.txt", report_card());
         a->report_written = 1;
         say(a, fail ? R3_ST_WARN : R3_ST_OK, "Written: %s (PASS %d FAIL %d SKIP %d)", a->report_file, pass, fail, skip);
     } else {
@@ -2590,6 +2606,27 @@ static int selftest_logic(void) {
         }
         if (fp) fclose(fp);
         CHECK(!strcmp(last, "end\n") && sections >= 6, "report has its sections and ends with end");
+        /* rule 16: with an app data folder settled, the report is written there and not in the games card's folder */
+        char adir[PATH_MAX + 16], apath[PATH_MAX + 64];
+        snprintf(adir, sizeof adir, "%s/datacard/IO_Checker", root);
+        setenv("R3I6NOS_APP_DATA", adir, 1);
+        setenv("R3I6NOS_DATA_CARD", "", 1);
+        snprintf(path, sizeof path, "%s/IO_Checker/r36s-report-native.txt", root);
+        unlink(path);
+        a->js = NULL;
+        write_report(a, "selftest");
+        snprintf(apath, sizeof apath, "%s/r36s-report-native.txt", adir);
+        CHECK(access(apath, F_OK) == 0, "the report is written in $R3I6NOS_APP_DATA");
+        CHECK(access(path, F_OK) != 0, "and not in the games card's IO_Checker folder");
+        CHECK(!strncmp(a->report_file, "EASYROMS/", 9), "the reply names the games card when no data card is in");
+        setenv("R3I6NOS_DATA_CARD", root, 1);
+        snprintf(adir, sizeof adir, "%s/IO_Checker", root);
+        setenv("R3I6NOS_APP_DATA", adir, 1);
+        write_report(a, "selftest");
+        CHECK(!strncmp(a->report_file, "Data card/", 10), "the reply names the data card when the report went there");
+        a->js = fake;
+        unsetenv("R3I6NOS_APP_DATA");
+        unsetenv("R3I6NOS_DATA_CARD");
         char cmd[PATH_MAX + 32];
         snprintf(cmd, sizeof cmd, "rm -rf '%s'", root);
         if (system(cmd) != 0) fprintf(stderr, "io-checker selftest: could not remove %s\n", root);
@@ -2711,6 +2748,8 @@ static int headless_report(void) {
     App *a = calloc(1, sizeof(App));
     if (!a) return 1;
     app_init(a);
+    R3AppData data;
+    r3_appdata_quiet(&data, "IO_Checker");                 /* unattended: never asks, never moves */
     if (SDL_NumJoysticks() > 0) open_pad(a, 0);
     video_info(a, NULL, NULL);
     write_report(a, "io-checker-native --report (no window: nothing was pressed, shown or played)");
@@ -2757,6 +2796,19 @@ int main(int argc, char **argv) {
     r3_toast_init(&a->toast);
     a->idle_since = SDL_GetTicks();
     if (SDL_NumJoysticks() > 0) open_pad(a, 0);
+
+    /* the splash first (rule 12), then where the data lives (rule 16): a question may be asked (the pad is open for it) */
+    R3AppData data;
+    memset(&data, 0, sizeof data);
+    if (!selftest) {
+        R3Screen splash;
+        r3_splash(&splash, "IO Checker", VERSION, NULL, "Input and output checks", "Looking for your data", 50);
+        for (int i = 0; i < R3_VIDEO_SETTLE; i++) r3_video_draw(&video, r, &splash, i == 0);
+        R3AppDataUI adui = { r, &video, &a->toast, NULL, NULL, NULL };
+        r3_appdata_init(&data, "IO_Checker", &adui);
+        if (data.quit) { r3_video_free(&video); SDL_DestroyRenderer(r); SDL_DestroyWindow(win); close_pad(a); free(a); SDL_Quit(); return 0; }
+        if (data.notice[0]) say(a, R3_ST_WARN, "%s", data.notice);
+    }
     video_info(a, win, r);
     sound_status(a);
     R3Screen screen;
