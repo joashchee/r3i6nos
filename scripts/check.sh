@@ -43,6 +43,7 @@ if command -v luajit >/dev/null; then
     luajit tests/test_toast.lua || fail=1
     luajit tests/test_mirror.lua || fail=1
     luajit tests/test_mirror_menu.lua || fail=1
+    luajit tests/test_pkgflag.lua || fail=1
     luajit tests/test_redraw.lua || fail=1
     luajit tests/test_menu_conf.lua || fail=1
     luajit tests/test_about.lua || fail=1
@@ -199,6 +200,7 @@ bash tests/test_configure_rootfs.sh || fail=1
 bash tests/test_flash_macos.sh || fail=1
 bash tests/test_build_port.sh || fail=1
 bash tests/test_build_ports.sh || fail=1
+bash tests/test_push_packages.sh || fail=1
 bash tests/test_image.sh || fail=1
 
 step "shell syntax"

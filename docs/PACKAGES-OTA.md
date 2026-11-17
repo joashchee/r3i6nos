@@ -1,6 +1,6 @@
 # Packages over the network: adding and upgrading native `.deb` bundles without taking a card out
 
-Status: **proposal, 2026-11-17** (maintainer's request). Nothing here is built. It rests on what works on the unit as of today (the maintainer, 2026-11-17: Wi-Fi and wired network, the data-card format, the text-mode screen mirror and SSH all work). Whatever behaviour on the unit this document describes is untested until a report says otherwise (CLAUDE.md rule 1). Roadmap: section 29.
+Status: **phases 1 and 2 are built (2026-11-17, below, "Built"); the catalog, Settings > Packages and system packages are still a proposal.** None of it has run on a unit. It rests on what works on the unit as of today (the maintainer, 2026-11-17: Wi-Fi and wired network, the data-card format, the text-mode screen mirror and SSH all work). Whatever behaviour on the unit this document describes is untested until a report says otherwise (CLAUDE.md rule 1). Roadmap: section 29.
 
 ## The goal
 
@@ -8,15 +8,18 @@ After the first flash, **nothing a person does day to day needs a reflash or a c
 
 ## The one idea: a package is a `.deb` in `native_deb/`
 
-Today the card's `native_deb/` folder **is** the list of installed packages: `deb_watcher.py` extracts each `.deb` into `/opt/native_apps/<name>/`, writes a launcher or tool wrappers, and removes what's gone. It runs only at session start and reads only `/roms/native_deb`. That model stays. **Every channel below does the same two things: get a checked `.deb` into a card's `native_deb/`, then ask the root helper to apply.** A computer that copies a file onto the card (the old way) and the unit downloading one end in the same state, so they never disagree.
+Today the card's `native_deb/` folder **is** the list of installed packages: `deb_watcher.py` extracts each `.deb` into `/opt/native_apps/<name>/`, writes a launcher or tool wrappers, and removes what's gone. It runs only at session start and reads only `/roms/native_deb`. That model stays. **Every channel below does the same two things: get a checked `.deb` into a card's `native_deb/`, then run the watcher's code at once.** A computer that copies a file onto the card (the old way) and the unit downloading one end in the same state, so they never disagree.
 
-Changes the watcher needs (they are also storage steps 2 and 4, `docs/STORAGE.md`):
+**No root for app packages (found 2026-11-17).** `loveos-session` runs as `loveos` and runs the watcher before every menu start, and `/opt/native_apps`, `/opt/launchers` and `/opt/loveos/bin` belong to `loveos` (`build_rootfs.sh`); the cards are mounted for `loveos` too. So installing an app is something the login user already does, and **`r3i6nos-pkg` is a login-user tool: no sudo, no path unit, no request protocol, no root helper.** The menu's Settings > Packages (phase 4) will run it as `loveos` directly. A root helper exists only for system packages (phase 5), which touch root-owned files.
 
-1. **Becomes a root helper with a request protocol**, `r3i6nos-pkg` (Python stdlib, as `r3i6nos-net` and `r3i6nos-format`: the menu writes `/run/loveos/pkg/request`, `r3i6nos-pkg.path` starts a oneshot root service, the answer is a root-owned `/run/r3i6nos-pkg/result`). Verbs from an allowlist: `list`, `apply`, `install FILE`, `remove NAME`, `rollback NAME`, `move NAME card`, `fetch ID`. `deb_watcher.py` stays as the boot-time `apply`, so a boot with nothing new costs what it does now.
-2. **Reads both cards.** `native_deb/` on `/roms` and on `/roms2`; the data card's wins on the same name when its version is newer, else the higher version wins. The card's identity comes from `/run/r3i6nos/cards`, so "card out" is never mistaken for "package removed" (the existing rule: a package is removed only when its card's folder is there to say so; that now means the card's mount **and** its `.r3i6nos-card` marker, `docs/APP-DATA.md`).
-3. **Applies at once, no restart.** It writes the launcher; the menu's list already re-reads when the launcher folder changes (it does for the card's games). A tool's wrappers are live as soon as they're written.
-4. **Hardened extraction.** `dpkg-deb -x` into `<name>.new`, then: reject absolute paths and `..`, drop setuid and setgid bits, chown everything to `loveos`, refuse a package that would not fit (free space on ROOTFS, minus a reserve). Then swap by rename and keep the previous tree as `<name>.old` until the next update (one **Roll back**). The extraction runs as root and the file came from anywhere, so the folder is treated as hostile, as `docs/NETWORK.md` treats the net helper's.
+What changed in the watcher, now one engine for the session and for `r3i6nos-pkg` (also storage steps 2 and 4, `docs/STORAGE.md`):
+
+1. **Both cards.** `native_deb/` on `/roms` and on `/roms2`, and the built-ins. A package found in more than one place is installed from **the highest Debian version** (the later folder when a version cannot be read, so a card still replaces a built-in of the same version; a stale card copy never shadows a newer built-in after a reflash). The comparison is Debian's own (`vercmp`, checked against `dpkg --compare-versions` on 484 pairs).
+2. **Where it came from is written beside it** (`.r3i6nos-src`), and a package is removed only when **that** folder is there to say it is gone: a card that is out never uninstalls anything, whichever card it was.
+3. **Refuses what does not fit, before extracting.** Installed-Size (or three times the file when unreadable) against the root filesystem's free space (counting the old copy it replaces), keeping back the larger of 200 MB or 10% (`R3I6NOS_PKG_RESERVE_MB`, `_PCT`). The reason names the numbers and the squashfs phase; the installed version stays as it was.
+4. **Extracts into `<name>.new` and swaps by rename**; a leftover `.new` from a power-cut is cleared at the next pass. `dpkg-deb -x` runs as the login user, so what an archive can do is limited to what `loveos` can already do (a setuid bit means nothing for a file `loveos` owns). Not separately attacked in a test.
 5. **App data is not in the tree** (`docs/APP-DATA.md`), so an update, a roll back or a removal never touches a person's saves.
+6. **The menu sees a change within a second:** `r3i6nos-pkg` leaves `/run/loveos/pkg-changed`; `menu/pkgflag.lua` looks for it about once a second (one failed `open`) and reads the cards again.
 
 Package metadata, one file in the `.deb` (like today's `usr/share/r3i6nos/tool` marker, which it replaces without breaking): `usr/share/r3i6nos/package.json`: `kind` (`app`, `tool`, `system`), `data_dir` (the `<App>` folder name, rule 16), `min_system` (the lowest `VERSION` of the base it runs on), `size_installed`. The Debian `Version` field is the version.
 
@@ -26,9 +29,15 @@ All three are chosen by a person (rule 6: no telemetry, no network at boot, no b
 
 ### A. Push from a computer over SSH (first to build; no new menu)
 
-`scripts/push-packages.sh [unit] [file.deb ...]` on the Mac: with no files it takes the newest build of every port (`scripts/ports.conf`, the same list `flash-macos.sh` uses), `scp`s each into the unit's inbox (`~loveos/inbox/`), then runs `ssh -t unit sudo r3i6nos-pkg install --inbox` (the password prompt is the existing sudo one, `docs/NETWORK.md`). It replaces `flash-macos.sh`'s copying of ports for a card already in service, and `build-ports.sh` plus this is the whole development loop. **Everything an app needs to be developed needs no card out.**
+`scripts/push-packages.sh UNIT [file.deb ...]` on the Mac: with no files it takes the newest build of every port (`scripts/ports.conf`, the same list `flash-macos.sh` uses) and of this repo's Commander and IO Checker (`build/native`), shows what it will send and asks once. It then clears `~/inbox` on the unit, `scp`s each file there and runs `ssh unit r3i6nos-pkg install --inbox --yes`. The SSH login is the one Settings > SSH sets up; **there is no `sudo`**. `--list`, `--remove NAME`, `--card data|system` and `-n` (say what would be sent) exist. It replaces `flash-macos.sh`'s copying of ports for a card already in service, and `scripts/build-ports.sh` plus this is the whole development loop.
 
-Because any program on the card runs as `loveos` and can write the inbox, the unit **asks on its screen** before it installs anything from the inbox that is not from the catalog: "Install Commander 0.9.3 (4.2 MB, sha256 3f9a…) from the inbox? Not in the r3i6nos catalog." (A installs, B discards; it starts on B.) That prompt is for the person, not a defence against a malicious app, which already runs as `loveos` (the same stated limit as `docs/NETWORK.md`); what the helper does defend is root: see "Trust" below.
+`r3i6nos-pkg install` checks each file in a private copy it made (what is checked is what is installed): a Debian archive (`dpkg-deb` reads it), architecture arm64 or all, a package file name of letters, digits and `._+-`, **no `nttplay` inside** (rule 15), room on the card (with 5%), and room in the root filesystem for the extracted package. It puts the file in the data card's `native_deb/` (or the system card's when no data card is in; or the card the package is already on, so there is one copy), applies at once, and keeps the old `.deb` as `<name>.deb.prev` until the next update (for the later Roll back); if the new one does not install, or a newer version from elsewhere would stay in use, the old one is put back. Run by hand it asks first (name, version, size, sha256) and **refuses when it has no terminal to ask on unless `--yes`**. A file it refuses stays in the inbox and is named with the reason. A link in the inbox is never followed.
+
+**The on-screen prompt of the first draft is dropped for this route:** the person who ran the push has already said yes at a terminal, and a program running as `loveos` can write the inbox but can also write `native_deb/` and `/opt/native_apps` directly, so a screen prompt defended nothing here. The prompt that matters is for root, in phase 5: a system package is never installed from the inbox at all.
+
+### Built (2026-11-17)
+
+`overlay/usr/local/bin/deb_watcher.py` (the engine), `overlay/usr/local/bin/r3i6nos-pkg` (`install`, `remove`, `list`, `apply`), `menu/pkgflag.lua`, `scripts/push-packages.sh`. Tests: `tests/test_deb_watcher.py` (24, the new ones cover both cards, versions, provenance, size and `.new`), `tests/test_r3i6nos_pkg.py` (29: fake cards and a **real `.deb` built with `dpkg-deb` and really extracted**, which found that two builds of one size in the same second looked identical to the watcher: `r3i6nos-pkg` now drops the old stamp itself), `tests/test_pkgflag.lua`, `tests/test_push_packages.sh` (fake `ssh` and `scp`, under bash 3.2). The real-`.deb` tests need `dpkg-deb` (CI and Debian have it; they were run in Debian 12 arm64 under Docker; a Mac skips them).
 
 ### B. Pull on the unit: Settings > Packages
 
@@ -37,7 +46,7 @@ New in the menu, the pad only, never scrolling (rule 5), whole pages:
 - **Installed:** name, version, which card, size; **Update** (if the last check found one), **Roll back**, **Move to the other card** (`docs/STORAGE.md` step 5), **Remove** (confirmation starting on No; app data kept, and the dialog says where it is).
 - **Check for updates:** downloads the signed catalog (below), compares versions, marks what's newer. The only network use in Settings > Packages, only on that press, sending nothing about the unit (User-Agent `r3i6nos-pkg`, as About's check).
 - **Available:** the catalog's packages not installed, with size and a one-line description; **Install** asks for the card only when both are in (the data card is the default, rule 16's reason), with free space shown.
-- **Inbox:** what method A or a person left, with the same prompt.
+- **Inbox:** what method A left and refused, with the reason.
 
 A download goes to `<card>/native_deb/<name>.deb.part` (resumable with a `Range` request), is checked against the catalog's `sha256` and size, then renamed to `<name>.deb` and applied. A power-cut leaves a `.part` that the next try resumes and a half-written `.deb` never exists under its real name. It refuses while the battery is under 20% and not charging (a system update: under 30%), and shows a progress bar with the step, bytes and time left.
 
@@ -81,11 +90,11 @@ A new Debian package the image lacks (the FAT32 format needs `mkfs.fat`, `dosfst
 
 ## Build order (ROADMAP section 29)
 
-1. `r3i6nos-pkg` with `apply`, `install`, `remove` and the hardened extraction, reading both cards, applying without a restart; tests with fakes.
-2. Method A: `scripts/push-packages.sh` and the inbox prompt.
+1. **Done 2026-11-17:** `r3i6nos-pkg` with `apply`, `install`, `remove`, `list`, reading both cards, applying without a restart; tests with fakes and a real `.deb`.
+2. **Done 2026-11-17:** method A, `scripts/push-packages.sh`.
 3. The catalog: `scripts/publish-packages.sh`, the signature tool, the public key in the image.
 4. Settings > Packages (Installed, Check, Available, Inbox) and its report section.
 5. System packages with rollback.
 6. Roll back and Move for apps; squashfs for big packages; method C, only if asked.
 
-Untested on the unit: all of it. The questions only a unit answers: whether `r3i6nos-pkg.path` starts under systemd 252 on kernel 4.4 as the net helper's does, how long the extraction of a large package takes on the SD card, and whether a download over the Realtek dongle holds for a 30 MB package.
+Untested on the unit: all of it. The questions only a unit answers: whether `r3i6nos-pkg` finds `python3`, `dpkg-deb` and the cards file on the unit's PATH over an SSH login, that the menu really lists a pushed app within a second, how long the extraction of a large package takes on the SD card, and whether a download over the Realtek dongle holds for a 30 MB package.

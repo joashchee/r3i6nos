@@ -1,0 +1,337 @@
+#!/usr/bin/env python3
+"""r3i6nos-pkg - add, list and remove native .deb packages while the unit is on (docs/PACKAGES-OTA.md).
+
+    r3i6nos-pkg list                          what is installed: version, the card it came from, size
+    r3i6nos-pkg install [--inbox] [--card data|system] [--yes] [FILE.deb ...]
+                                              put checked packages into a card's native_deb/ and apply them now; --inbox takes
+                                              every .deb in ~/inbox (what scripts/push-packages.sh copies there) and empties it
+    r3i6nos-pkg remove NAME [--yes]           delete NAME's .deb from its card and take the app away (its data folder is kept)
+    r3i6nos-pkg apply                         what the session does before the menu starts: install what the cards hold
+
+The card's native_deb/ folder is still the list of what is installed (deb_watcher.py reads it at every session start); this tool only
+gets a checked file into it and runs the same code at once, so a computer copying a file onto the card and this end in the same state.
+It runs as the login user (`loveos`), which owns /opt/native_apps and the launchers: no root, no sudo. (A system package, which does need
+root, is a later phase and only ever comes from the signed catalog.)
+
+install checks each file before it touches a card: a Debian archive with a Package name that is a safe file name, an arm64 or all
+Architecture, nothing that is nttplay (CLAUDE.md rule 15), and room: the data card (or the system card when no data card is in) for the
+file, and the root filesystem for the extracted package (a package too big for it is refused, not half-installed). The default card is
+the data card when one is mounted; a package already on the other card is replaced there, so there is one copy. A person is asked
+(name, version, size, sha256) unless --yes. The old .deb is kept beside the new one as <name>.deb.prev until the next update, for a
+later roll back; if the new one does not install, the old one is put back.
+
+The menu notices a change within a second: the tool leaves /run/loveos/pkg-changed (R3I6NOS_PKG_FLAG), which the menu reads and removes.
+
+Exit status: 0 done, 1 something was refused or failed, 2 a usage error.
+
+Overrides, for tests: R3I6NOS_WATCHER (deb_watcher.py), R3I6NOS_CARDS_FILE (/run/r3i6nos/cards), R3I6NOS_INBOX (~/inbox),
+R3I6NOS_PKG_FLAG, and everything deb_watcher.py reads (R3I6NOS_DEB_DIR, R3I6NOS_DEB_DIR2, R3I6NOS_APP_ROOT, ...).
+"""
+import hashlib
+import importlib.util
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+from pathlib import Path
+
+ENV = os.environ.get
+NAME_OK = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}")
+ARCHES = ("arm64", "all")
+MAX_DEB = 2 * 1024 ** 3          # a file over this is not a package for this unit
+CHUNK = 1 << 20
+FLAG = Path(ENV("R3I6NOS_PKG_FLAG", "/run/loveos/pkg-changed"))
+
+
+class Refused(Exception):
+    pass
+
+
+def load_watcher():
+    path = ENV("R3I6NOS_WATCHER") or str(Path(os.path.realpath(__file__)).with_name("deb_watcher.py"))
+    spec = importlib.util.spec_from_file_location("deb_watcher", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+W = load_watcher()
+
+
+# ---- cards ----------------------------------------------------------------------------------------------------------------------
+
+ROLES = {}      # folder -> "data card" or "system card", filled by cards()
+
+
+def cards():
+    """{'data': folder or None, 'system': folder or None}: each mounted card's native_deb folder, as deb_watcher.py reads it.
+
+    r3i6nos-cards (docs/STORAGE.md) says where each card is mounted; a card with no partition 3 is the data card mounted at /roms."""
+    state = {}
+    try:
+        for line in Path(ENV("R3I6NOS_CARDS_FILE", "/run/r3i6nos/cards")).read_text().splitlines():
+            k, _, v = line.partition("=")
+            state[k.strip()] = v.strip()
+    except OSError:
+        state = None
+    if state is None:       # an image or a test without r3i6nos-cards: go by what the folders say
+        out = {"data": W.DEB_DIR2 if W.DEB_DIR2.parent.is_dir() else None, "system": W.DEB_DIR if W.DEB_DIR.parent.is_dir() else None}
+    else:
+        out = {}
+        for role, key in (("data", "DATA_AT"), ("system", "SYSTEM_AT")):
+            at = state.get(key, "none")
+            folder = Path(at) / "native_deb" if at not in ("", "none") and Path(at).is_dir() else None
+            out[role] = folder if folder in (W.DEB_DIR, W.DEB_DIR2) else None      # only folders the watcher reads
+    ROLES.clear()
+    ROLES.update({f: f"{role} card" for role, f in out.items() if f is not None})
+    return out
+
+
+def card_name(folder):
+    return ROLES.get(folder) or ("data card" if folder == W.DEB_DIR2 else "system card")
+
+
+# ---- checking a file --------------------------------------------------------------------------------------------------------------
+
+def open_regular(path):
+    """Open a file for reading without following a link at the end, and only if it is a regular file."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    if not stat.S_ISREG(os.fstat(fd).st_mode):
+        os.close(fd)
+        raise Refused(f"{path} is not a regular file")
+    return fd
+
+
+def copy_checked(src, dest_part):
+    """Copy src to dest_part (a private copy: what is checked is what is installed), returning (size, sha256)."""
+    fd = open_regular(src)
+    h, size = hashlib.sha256(), 0
+    try:
+        with os.fdopen(fd, "rb") as f, open(dest_part, "wb") as out:
+            while True:
+                chunk = f.read(CHUNK)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > MAX_DEB:
+                    raise Refused(f"{Path(src).name} is over {MAX_DEB >> 30} GB")
+                h.update(chunk)
+                out.write(chunk)
+            out.flush()
+            os.fsync(out.fileno())
+    except BaseException:
+        Path(dest_part).unlink(missing_ok=True)
+        raise
+    return size, h.hexdigest()
+
+
+def file_list(deb):
+    """The paths a package would install (dpkg-deb -c)."""
+    try:
+        listing = subprocess.run(["dpkg-deb", "-c", str(deb)], check=True, capture_output=True, text=True, timeout=120).stdout
+    except (subprocess.SubprocessError, OSError):
+        raise Refused("its file list could not be read") from None
+    return [ln.split(None, 5)[-1].split(" -> ")[0].lstrip("./") for ln in listing.splitlines() if ln.strip()]
+
+
+def inspect(deb, wanted_stem):
+    """What a package says about itself, or Refused with a reason in words."""
+    ctl = lambda field: W.control(deb, field)  # noqa: E731
+    package, version, arch = ctl("Package"), ctl("Version"), ctl("Architecture")
+    if not package or not version:
+        raise Refused("not a Debian package (dpkg-deb could not read it)")
+    if arch not in ARCHES:
+        raise Refused(f"built for {arch or 'no architecture'}; this unit needs arm64")
+    if not NAME_OK.fullmatch(wanted_stem):
+        raise Refused(f"'{wanted_stem}' is not a usable package file name (letters, digits and . _ + - only)")
+    for path in file_list(deb):
+        if path.rstrip("/").rsplit("/", 1)[-1] == "nttplay":
+            raise Refused("it carries its own nttplay; there is one installed copy, in the image (CLAUDE.md rule 15)")
+    return {"package": package, "version": version, "size_kb": ctl("Installed-Size")}
+
+
+def human(n):
+    for unit in ("B", "KB", "MB", "GB"):
+        if n < 1024 or unit == "GB":
+            return f"{n:.0f} {unit}" if unit == "B" else f"{n:.1f} {unit}"
+        n /= 1024
+
+
+def confirm(question, yes):
+    if yes:
+        return True
+    if not sys.stdin.isatty():
+        raise Refused("it asks before it installs and there is no terminal to ask on; run it with --yes")
+    return input(f"{question} [y/N] ").strip().lower() in ("y", "yes")
+
+
+# ---- the verbs ----------------------------------------------------------------------------------------------------------------------
+
+def touch_flag():
+    try:
+        FLAG.parent.mkdir(parents=True, exist_ok=True)
+        FLAG.write_text("changed\n")
+    except OSError:
+        pass            # the menu then shows the change at its next start; nothing is lost
+
+
+def where_installed(stem, folders):
+    for role, folder in folders.items():
+        if folder is not None and (folder / f"{stem}.deb").is_file():
+            return folder
+    return None
+
+
+def forget_stamp(stem):
+    """The watcher tells a new deb by its size and second of modification; two builds can match on both, so a replaced file always counts as new."""
+    (W.APP_ROOT / stem / W.STAMP).unlink(missing_ok=True)
+
+
+def install_one(src, folders, want_card, yes):
+    src = Path(src)
+    stem = src.name[:-4] if src.name.endswith(".deb") else src.name
+    if not src.name.endswith(".deb"):
+        raise Refused("not a .deb")
+    # which card: the one it is already on (one copy), else the one asked for, else the data card when it is in, else the system card
+    target = where_installed(stem, folders) if want_card is None else folders.get(want_card)
+    if target is None and want_card is None:
+        target = folders.get("data") or folders.get("system")
+    if target is None:
+        raise Refused(f"the {want_card} card is not in" if want_card else "no card is mounted to put it on")
+    target.mkdir(parents=True, exist_ok=True)
+    part = target / f"{stem}.deb.part"
+    size, digest = copy_checked(src, part)
+    try:
+        info = inspect(part, stem)
+        free = shutil.disk_usage(target).free
+        if size + size // 20 > free:
+            raise Refused(f"the {card_name(target)} has {human(free)} free; it needs {human(size)}")
+        why = W.fits(part, W.APP_ROOT / stem)
+        if why:
+            raise Refused(why[0].upper() + why[1:])
+        replaced = (target / f"{stem}.deb").is_file()
+        if not confirm(f"Install {stem} {info['version']} ({human(size)}, sha256 {digest[:12]}...) on the {card_name(target)}"
+                       f"{' (replacing the installed one)' if replaced else ''}?", yes):
+            raise Refused("not installed (you said no)")
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
+    final, prev = target / f"{stem}.deb", target / f"{stem}.deb.prev"
+    if final.is_file():
+        os.replace(final, prev)
+    os.replace(part, final)
+    forget_stamp(stem)
+    W.process_debs()
+    status, message = W.LAST.get(stem, ("failed", "the package is not among the installed ones after applying"))
+    if status == "installed" and W.read_text(W.APP_ROOT / stem / W.SRC) != str(target):
+        status, message = "failed", f"a newer {stem} ({(W.installed_packages_by_name().get(stem) or '?')}) from elsewhere is the one in use"
+    if status != "installed":
+        final.unlink(missing_ok=True)           # the new one did not install: the old one comes back
+        if prev.is_file():
+            os.replace(prev, final)
+            forget_stamp(stem)
+            W.process_debs()
+        raise Refused(message or status)
+    return stem, info["version"], card_name(target), size
+
+
+def cmd_install(args):
+    inbox, yes, want, files = False, False, None, []
+    it = iter(args)
+    for a in it:
+        if a == "--inbox":
+            inbox = True
+        elif a == "--yes":
+            yes = True
+        elif a == "--card":
+            want = next(it, None)
+            if want not in ("data", "system"):
+                print("r3i6nos-pkg: --card takes data or system", file=sys.stderr)
+                return 2
+        elif a.startswith("-"):
+            print(f"r3i6nos-pkg: unknown option {a}", file=sys.stderr)
+            return 2
+        else:
+            files.append(a)
+    if inbox:
+        box = Path(ENV("R3I6NOS_INBOX") or Path.home() / "inbox")
+        files += sorted(str(p) for p in box.glob("*.deb")) if box.is_dir() else []
+    if not files:
+        print("r3i6nos-pkg: nothing to install" + (" (the inbox is empty)" if inbox else ""), file=sys.stderr)
+        return 2
+    folders = cards()
+    bad = 0
+    for f in files:
+        try:
+            stem, version, card, size = install_one(f, folders, want, yes)
+            print(f"installed {stem} {version} ({human(size)}) on the {card}")
+            if inbox:
+                Path(f).unlink(missing_ok=True)
+        except Refused as why:
+            bad += 1
+            print(f"REFUSED {Path(f).name}: {why}", file=sys.stderr)
+        except OSError as err:
+            bad += 1
+            print(f"FAILED {Path(f).name}: {err.strerror or err}", file=sys.stderr)
+    touch_flag()
+    return 1 if bad else 0
+
+
+def cmd_remove(args):
+    yes = "--yes" in args
+    names = [a for a in args if not a.startswith("-")]
+    if len(names) != 1:
+        print("usage: r3i6nos-pkg remove NAME [--yes]", file=sys.stderr)
+        return 2
+    stem, folders = names[0], cards()
+    folder = where_installed(stem, folders)
+    if folder is None:
+        builtin = (W.DEFAULT_DEB_DIR / f"{stem}.deb").is_file()
+        print(f"r3i6nos-pkg: {stem} is " + ("built into the image and cannot be removed" if builtin else "not on a card"), file=sys.stderr)
+        return 1
+    try:
+        if not confirm(f"Remove {stem} from the {card_name(folder)}? (Its data folder is kept.)", yes):
+            print("not removed")
+            return 1
+    except Refused as why:
+        print(f"REFUSED: {why}", file=sys.stderr)
+        return 1
+    (folder / f"{stem}.deb").unlink()
+    (folder / f"{stem}.deb.prev").unlink(missing_ok=True)
+    W.process_debs()
+    touch_flag()
+    print(f"removed {stem}")
+    return 0
+
+
+def cmd_list(_args):
+    rows = W.installed_packages()
+    for name, version, src, size in rows:
+        where = "built in" if Path(src) == W.DEFAULT_DEB_DIR else card_name(Path(src))
+        print(f"{name}\t{version}\t{where}\t{human(size)}")
+    if not rows:
+        print("nothing installed")
+    return 0
+
+
+def cmd_apply(_args):
+    W.process_debs()
+    for name, (status, why) in sorted(W.LAST.items()):
+        if status != "installed":
+            print(f"{status} {name}: {why}", file=sys.stderr)
+    touch_flag()
+    return 1 if any(s != "installed" for s, _ in W.LAST.values()) else 0
+
+
+def main(argv):
+    verbs = {"install": cmd_install, "remove": cmd_remove, "list": cmd_list, "apply": cmd_apply}
+    if not argv or argv[0] in ("-h", "--help") or argv[0] not in verbs:
+        print((__doc__ or "").split("\n\n")[0], file=sys.stderr)
+        return 0 if argv and argv[0] in ("-h", "--help") else 2
+    return verbs[argv[0]](argv[1:])
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

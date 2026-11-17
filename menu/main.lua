@@ -17,6 +17,8 @@ local hotplug = toast.new() -- the hot-plug toast over the top bar: headphones, 
 local view = require("view")
 local redraw = require("redraw")
 local rd = redraw.new() -- what needs drawing (menu/redraw.lua)
+local pkgflag = require("pkgflag") -- r3i6nos-pkg left a change (docs/PACKAGES-OTA.md): read the cards again
+local pkgs = pkgflag.new(os.getenv("R3I6NOS_PKG_FLAG") or "/run/loveos/pkg-changed")
 
 local ROMS = os.getenv("R3I6NOS_ROMS") or "/roms"
 local ROMS2 = os.getenv("R3I6NOS_ROMS2") or "/roms2" -- the data card (docs/STORAGE.md)
@@ -64,6 +66,7 @@ function love.load()
   screen = theme.screen()
   splash(0, 3, "Starting")
   splash(1, 3, "Looking for games and apps")
+  pkgflag.take(pkgs) -- a flag from before this start: the scan below sees what it announced
   entries = scan.entries(ROMS, LAUNCHERS, DEFAULTS, ROMS2)
   splash(2, 3, "Reading the battery")
   power = battery.read()
@@ -114,7 +117,8 @@ end
 function love.update(dt)
   toast.poll(hotplug, love.timer.getTime())
   settings.tick(dialog, dt)
-  if dialog.rescan then -- the data card was formatted (Settings > Data card): what was on it is gone, so read the cards again
+  if pkgflag.poll(pkgs, dt) then dialog.rescan = true end -- a package was added or removed over SSH
+  if dialog.rescan then -- the data card was formatted (Settings > Data card), or a package changed: read the cards again
     dialog.rescan = nil
     entries = scan.entries(ROMS, LAUNCHERS, DEFAULTS, ROMS2)
     selected = math.max(1, math.min(selected, #entries))
