@@ -148,14 +148,14 @@ jobs:
       # nttplay is built by the Neumetik repository's own workflow (r36s.yml, job `nttplay`: Debian 12 arm64, smoke-tested, kept as the artifact
       # nttplay-arm64 with its NOTICE and SOURCE); this takes the newest one from main, so r3i6nos needs no checkout of Neumetik and no secret. Artifacts
       # are kept 90 days and the workflow only runs when r36s/ changes: with none left (or Neumetik's repository not readable by this one) the image has
-      # no nttplay and configure_rootfs.sh says so. NOT RUN YET: never through GitHub.
+      # no nttplay and the build now fails (it used to warn, and 0.2.0's first image went out without it). NOT RUN YET: never through GitHub.
       - name: Fetch nttplay (Neumetik's newest build on main)
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           id="$(gh api "repos/joashchee/neumetik/actions/artifacts?name=nttplay-arm64&per_page=30" \
             --jq '[.artifacts[] | select((.expired | not) and .workflow_run.head_branch == "main")][0].workflow_run.id // empty' || true)"
-          if [ -z "$id" ]; then echo "::warning::no nttplay-arm64 artifact from Neumetik's main: the image will have no nttplay"; exit 0; fi
+          if [ -z "$id" ]; then echo "::error::no nttplay-arm64 artifact from Neumetik's main: re-run Neumetik's r36s.yml (artifacts expire after 90 days). An image must carry nttplay"; exit 1; fi
           echo "Neumetik workflow run $id"
           if gh run download "$id" -R joashchee/neumetik -n nttplay-arm64 -D . && [ -f nttplay.tar ]; then
             mkdir -p build
@@ -163,7 +163,7 @@ jobs:
             cat build/nttplay/SOURCE
             ls -l build/nttplay
           else
-            echo "::warning::could not download nttplay-arm64 from Neumetik's run $id: the image will have no nttplay"
+            echo "::error::could not download nttplay-arm64 from Neumetik's run $id: an image must carry nttplay"; exit 1
           fi
 
       - name: Unpack LÖVE

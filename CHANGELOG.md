@@ -5,6 +5,8 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **A build without nttplay is an error** (2026-11-17; found on the unit with the 0.2.0 candidate: Commander opened every MIDI, tracker and text-music file on Info only, because the image had no `/usr/bin/nttplay`; CLAUDE.md rule 15 says it is always there). `scripts/configure_rootfs.sh` stops when `build/nttplay/nttplay` is missing (`R3I6NOS_ALLOW_NO_NTTPLAY=1` for a test image), `scripts/check_image.sh` fails an image without `/usr/bin/nttplay` and its NOTICE, and the CI step that fetches Neumetik's artifact fails instead of warning. `tests/test_configure_rootfs.sh` covers the stop; `tests/test_image.sh` sets the escape hatch for its fake image.
+
 ## 0.2.0 (checkpoint 2026-11-17; includes the 0.1.2 work; the first with the signed catalog and system updates)
 
 - **Settings > Data card > Format writes the card's id** (2026-11-17, maintainer's request; `overlay/usr/local/bin/r3i6nos-format`, `tests/test_r3i6nos_format.py`, `docs/STORAGE.md`, `docs/APP-DATA.md`, ROADMAP section 30): a freshly formatted data card gets `.r3i6nos-card` (the same JSON `r3i6nos-appdata` writes: a random id and the date) in the same step that makes `Love 11.5`, `Love 12.0` and `native_deb`, also on the restart path; the engine reads it back as the card's id. Cards formatted before this get one at the first move, as before. **Untested on the unit.**

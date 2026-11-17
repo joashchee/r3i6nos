@@ -67,6 +67,11 @@ done
 for f in usr/local/bin/loveos-session usr/local/bin/run_app.sh usr/local/bin/r3i6nos-poweroff; do
     [ -x "$MNT/$f" ] || fail "not executable: /$f"
 done
+# nttplay is the only decoder of the ansiapps formats and is always in the image (CLAUDE.md rule 15); 0.2.0's first image went out without it.
+if [ "${R3I6NOS_ALLOW_NO_NTTPLAY:-0}" != 1 ]; then
+    [ -x "$MNT/usr/bin/nttplay" ] || fail "no /usr/bin/nttplay: Commander cannot play MIDI, tracker modules or music as text (R3I6NOS_ALLOW_NO_NTTPLAY=1 skips this for a test)"
+    [ -s "$MNT/usr/share/nttplay/NOTICE" ] || fail "no /usr/share/nttplay/NOTICE: nttplay's third-party licences must travel with it"
+fi
 [ -L "$MNT/etc/systemd/system/multi-user.target.wants/loveos.service" ] || fail "loveos.service not enabled"
 [ -L "$MNT/etc/systemd/system/multi-user.target.wants/r3i6nos-cards.service" ] || fail "r3i6nos-cards.service not enabled"
 [ -L "$MNT/etc/systemd/system/multi-user.target.wants/r3i6nos-setup.service" ] || fail "r3i6nos-setup.service not enabled"

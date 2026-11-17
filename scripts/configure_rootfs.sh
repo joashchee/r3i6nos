@@ -137,7 +137,14 @@ Third-party code ported into Neumetik, with its licences, is listed in /usr/shar
 EOF
     chmod 644 "$ROOTFS/usr/share/doc/nttplay/copyright"
 else
-    echo "[!] No nttplay in $NTTPLAY_BUILD: run scripts/build-nttplay.sh (the image will have no nttplay: Commander cannot play MIDI, tracker modules or music written as text)" >&2
+    # Always in the image (CLAUDE.md rule 15): an image without it cannot play MIDI, tracker modules or music as text in Commander (found on the unit
+    # 2026-11-17, 0.2.0), so this is an error. Only a test or a development image may go without: R3I6NOS_ALLOW_NO_NTTPLAY=1.
+    if [ "${R3I6NOS_ALLOW_NO_NTTPLAY:-0}" = 1 ]; then
+        echo "[!] No nttplay in $NTTPLAY_BUILD (R3I6NOS_ALLOW_NO_NTTPLAY=1): the image will have no nttplay: Commander cannot play MIDI, tracker modules or music written as text" >&2
+    else
+        echo "[x] No nttplay in $NTTPLAY_BUILD: run scripts/build-nttplay.sh. The image must carry /usr/bin/nttplay (without it Commander cannot play MIDI, tracker modules or music written as text); R3I6NOS_ALLOW_NO_NTTPLAY=1 builds without it for a test only." >&2
+        exit 1
+    fi
 fi
 
 # Mount points and places the boot scripts write to.

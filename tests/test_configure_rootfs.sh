@@ -117,12 +117,18 @@ done
 [ -f "$R/opt/loveos/defaults/native_deb/IO_Checker_Native.deb" ] || fail "default native deb not installed"
 [ "$(find "$R/opt/loveos/defaults" -type f ! -perm -444 | wc -l | tr -d ' ')" = 0 ] || fail "defaults must be world-readable"
 R2="$T/rootfs-no-native"; mkdir -p "$R2"
-R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/nothing-here" R3I6NOS_LOVE_APPS_BUILD="$T/nothing-here" R3I6NOS_FFMPEG_BUILD="$T/nothing-here" R3I6NOS_NTTPLAY_BUILD="$T/nothing-here" scripts/configure_rootfs.sh "$R2" >/dev/null 2>"$T/warn.txt" \
+R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/nothing-here" R3I6NOS_LOVE_APPS_BUILD="$T/nothing-here" R3I6NOS_FFMPEG_BUILD="$T/nothing-here" R3I6NOS_ALLOW_NO_NTTPLAY=1 R3I6NOS_NTTPLAY_BUILD="$T/nothing-here" scripts/configure_rootfs.sh "$R2" >/dev/null 2>"$T/warn.txt" \
     || fail "a missing native app must be a warning, not an error"
 grep -q 'No native default app' "$T/warn.txt" || fail "no warning when the native app is missing"
 grep -q 'No LÖVE default app' "$T/warn.txt" || fail "no warning when the LÖVE app is missing"
 grep -q 'No minimal ffmpeg' "$T/warn.txt"   || fail "no warning when ffmpeg is missing"
 grep -q 'No nttplay' "$T/warn.txt"          || fail "no warning when nttplay is missing"
+# Without the escape hatch a missing nttplay stops the build: an image that cannot play MIDI or tracker music must not be made by mistake (0.2.0 shipped one).
+R4="$T/rootfs-no-nttplay"; mkdir -p "$R4"
+if env -u R3I6NOS_ALLOW_NO_NTTPLAY R3I6NOS_LOVE_BUILD="$T/love" R3I6NOS_NATIVE_BUILD="$T/native" R3I6NOS_LOVE_APPS_BUILD="$T/loveapps" R3I6NOS_FFMPEG_BUILD="$T/ffmpeg" R3I6NOS_NTTPLAY_BUILD="$T/nothing-here" scripts/configure_rootfs.sh "$R4" >/dev/null 2>"$T/err4.txt"; then
+    fail "a missing nttplay must stop configure_rootfs.sh"
+fi
+grep -q 'No nttplay' "$T/err4.txt" || fail "the error does not say nttplay is missing"
 [ ! -e "$R2/usr/bin/nttplay" ] || fail "phantom nttplay without a binary"
 [ ! -e "$R2/usr/share/doc/nttplay" ] || fail "phantom nttplay copyright without a binary"
 [ ! -e "$R2/usr/share/nttplay" ] || fail "phantom nttplay NOTICE without a binary"
