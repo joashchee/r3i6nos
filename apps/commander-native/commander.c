@@ -27,7 +27,7 @@
  * `--selftest` checks the logic against a temporary folder and prints one R3I6NOS_SMOKE line; `--screenshot out.bmp` draws the
  * real screen once, without a window (`--view FILE [--tab N] [--page N]` first opens the viewer on FILE). `--info FILE` and
  * `--content FILE` print the viewer's Info and Content pages as text. `--report` opens the real window and writes the device report
- * (docs/DEVICE-REPORTS.md) to /roms/Commander/r36s-report.txt: system, card, memory and the power section (CLAUDE.md rule 14: the app
+ * (docs/DEVICE-REPORTS.md) to $R3I6NOS_APP_DATA/r36s-report.txt (CLAUDE.md rule 16: the data card's Commander folder, else the system card's): system, card, memory and the power section (CLAUDE.md rule 14: the app
  * idle, then identifying the test corpus). */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -44,6 +44,7 @@
 #include "r3i6nos_ansiapps.h"
 #include "r3i6nos_themes.h"
 #include "r3i6nos_toast.h"
+#include "r3i6nos_appdata.h"
 #include "r3i6nos_report.h"
 #include "filekind.h"
 #include "formats.h"
@@ -1116,13 +1117,25 @@ static void say(App *a, int style, const char *fmt, ...) {
     a->reply_style = style;
 }
 
-/* ---- settings: the colour theme and the file colours, kept in <roms>/Commander/settings.conf (R3I6NOS_COMMANDER_CONF names another) ------------ */
+/* ---- app data (CLAUDE.md rule 16, docs/APP-DATA.md): Commander's own files (settings.conf, r36s-report.txt, Demo/) live in the folder
+ * r3_appdata_init settled on at start, $R3I6NOS_APP_DATA: the data card's Commander folder when a valid data card is in, else the system card's.
+ * Never built from "/roms" here, except by a run that did not settle one (--screenshot, a test), which keeps the old place. */
+
+static void app_data_dir(char *out, size_t cap) {
+    const char *d = getenv("R3I6NOS_APP_DATA");
+    if (d && *d) { copy_str(out, cap, d); return; }
+    const char *roms = getenv("R3I6NOS_ROMS") && *getenv("R3I6NOS_ROMS") ? getenv("R3I6NOS_ROMS") : "/roms";
+    snprintf(out, cap, "%s/Commander", roms);
+}
+
+/* ---- settings: the colour theme and the file colours, kept in <app data>/settings.conf (R3I6NOS_COMMANDER_CONF names another) ------------ */
 
 static void settings_path(char *out, size_t cap) {
     const char *conf = getenv("R3I6NOS_COMMANDER_CONF");
     if (conf && *conf) { copy_str(out, cap, conf); return; }
-    const char *roms = getenv("R3I6NOS_ROMS") && *getenv("R3I6NOS_ROMS") ? getenv("R3I6NOS_ROMS") : "/roms";
-    snprintf(out, cap, "%s/Commander/settings.conf", roms);
+    char dir[PATH_MAX];
+    app_data_dir(dir, sizeof dir);
+    snprintf(out, cap, "%s/settings.conf", dir);
 }
 
 /* "theme=<name>" and "file_colours=on|off", one a line; anything else is ignored. Sets the palette. No file, or a name no theme has: the defaults. */
@@ -3506,9 +3519,8 @@ static int corpus_walk(const char *dir, int depth, char **out, int n, int cap) {
 #define REPORT_IDENTIFY_PER_S 20.0   /* files a second the viewer's identify and info may take: a first guess, set before any measurement */
 
 static int commander_report(App *app, SDL_Renderer *r, R3Video *video, R3Toast *toast, int quiet) {
-    const char *roms = getenv("R3I6NOS_ROMS") && *getenv("R3I6NOS_ROMS") ? getenv("R3I6NOS_ROMS") : "/roms";
     char dir[PATH_MAX];
-    snprintf(dir, sizeof dir, "%s/Commander", roms);
+    app_data_dir(dir, sizeof dir);
     R3Report rep;
     memset(&rep, 0, sizeof rep);
     rep.quiet = quiet;
@@ -3620,9 +3632,27 @@ int main(int argc, char **argv) {
     r3_toast_init(&toast);
     if (!r3_video_init(&video, r)) { fprintf(stderr, "commander: texture: %s\n", SDL_GetError()); SDL_Quit(); return 1; }
 
+    /* the splash first (rule 12), then where the data lives (rule 16): a question may be asked, and the settings are in that folder */
+    R3AppData data;
+    memset(&data, 0, sizeof data);
+    if (!selftest) {
+        R3Screen splash;
+        r3_splash(&splash, "Commander", VERSION, NULL, "Two-panel file manager", "Looking for your data", 50);
+        for (int i = 0; i < R3_VIDEO_SETTLE; i++) r3_video_draw(&video, r, &splash, i == 0);
+        open_pads();
+        if (report || view) {
+            r3_appdata_quiet(&data, "Commander");       /* unattended runs never ask and never move anything */
+        } else {
+            R3AppDataUI adui = { r, &video, &toast, NULL, NULL, NULL };
+            r3_appdata_init(&data, "Commander", &adui);
+            if (data.quit) { r3_video_free(&video); SDL_DestroyRenderer(r); SDL_DestroyWindow(win); SDL_Quit(); return 0; }
+        }
+    }
+
     App app;
     app_init(&app, left, right);
     if (!selftest) load_settings(&app);
+    if (data.notice[0]) say(&app, R3_ST_WARN, "%s", data.notice);
     if (g_theme_arg >= 0) { app.theme = g_theme_arg; r3_theme_apply(app.theme); }
     if (view && !selftest && start_viewer(&app, view, tab, page) != 0) { app_free(&app); SDL_Quit(); return 1; }
     R3Screen screen;
@@ -3640,7 +3670,9 @@ int main(int argc, char **argv) {
         char *tdir = mkdtemp(tmpl);
         int rbad = 1;
         if (tdir) {
-            setenv("R3I6NOS_ROMS", tdir, 1);
+            char adir[PATH_MAX + 16];
+            snprintf(adir, sizeof adir, "%s/Commander", tdir);
+            setenv("R3I6NOS_APP_DATA", adir, 1);
             setenv("R3I6NOS_REPORT_POWER_S", "0.2", 1);
             R3Toast ttoast;
             r3_toast_init(&ttoast);
@@ -3653,6 +3685,7 @@ int main(int argc, char **argv) {
                 if (f) fclose(f);
                 rbad = !(strstr(text, "== power ==") && strstr(text, "idle cpu: ") && strstr(text, "cut first: ") && strstr(text, "\nend\n"));
             }
+            unsetenv("R3I6NOS_APP_DATA");
             char cmd[PATH_MAX + 16];
             snprintf(cmd, sizeof cmd, "rm -rf '%s'", tdir);
             if (system(cmd) != 0) fprintf(stderr, "could not remove %s\n", tdir);

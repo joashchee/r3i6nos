@@ -143,6 +143,16 @@ if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     rm -f "$report_bin"
 else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
 
+step "App data frontend (theme/r3i6nos_appdata.h), against the real r3i6nos-appdata"
+if command -v cc >/dev/null && command -v sdl2-config >/dev/null && command -v python3 >/dev/null; then
+    ad_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-appdata.XXXXXX")"
+    # shellcheck disable=SC2046,SC2086  # sdl2-config prints separate flags; $werror is empty or one flag
+    if cc -std=c11 -Wall -Wextra $werror -O2 -I theme $(sdl2-config --cflags) -o "$ad_bin" tests/test_appdata.c $(sdl2-config --libs) -lm; then
+        SDL_VIDEODRIVER=dummy "$ad_bin" || fail=1
+    else echo "FAIL: tests/test_appdata.c does not compile"; fail=1; fi
+    rm -f "$ad_bin"
+else echo "NOT RUN: needs a C compiler, libsdl2-dev (sdl2-config) and python3"; fi
+
 step "Hot-plug toast (theme/r3i6nos_toast.h)"
 if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     toast_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-toast.XXXXXX")"
