@@ -5,13 +5,23 @@
     r3i6nos-pkg install [--inbox] [--card data|system] [--yes] [FILE.deb ...]
                                               put checked packages into a card's native_deb/ and apply them now; --inbox takes
                                               every .deb in ~/inbox (what scripts/push-packages.sh copies there) and empties it
+    r3i6nos-pkg install-love [--runtime 11.5|12.0] [--card data|system] [--yes] FILE.love ...
+                                              put a LÖVE app in a card's "Love 11.5" or "Love 12.0" folder (the runtime comes from the folder the
+                                              file is in, "Love 11.5/", or --runtime); also taken from ~/inbox/"Love 11.5"/ and ~/inbox/"Love 12.0"/
     r3i6nos-pkg remove NAME [--yes]           delete NAME's .deb from its card and take the app away (its data folder is kept)
     r3i6nos-pkg apply                         what the session does before the menu starts: install what the cards hold
 
+    r3i6nos-pkg check                         download the signed catalog (index.json and its signature), check it against the image's key, say
+                                              what is new and what has an update. The only network use, and only when it is run
+    r3i6nos-pkg available                     the checked catalog's packages (from the last check, checked again) that are not installed
+    r3i6nos-pkg get [--yes] [--card data|system] NAME ...   download from the catalog (resumable, size and SHA-256 checked) and install
+    r3i6nos-pkg update [--yes] [NAME ...]     get every installed package the catalog has a newer version of (or just these)
+
 The card's native_deb/ folder is still the list of what is installed (deb_watcher.py reads it at every session start); this tool only
 gets a checked file into it and runs the same code at once, so a computer copying a file onto the card and this end in the same state.
-It runs as the login user (`loveos`), which owns /opt/native_apps and the launchers: no root, no sudo. (A system package, which does need
-root, is a later phase and only ever comes from the signed catalog.)
+It runs as the login user (`loveos`), which owns /opt/native_apps and the launchers: no root, no sudo. (A SYSTEM package, which does need root,
+comes only from the signed catalog, through `get`: this tool stages it and r3i6nos-sysupdate, started by a path unit, checks the signature
+again as root and installs it, or refuses; a .deb that says it is a system package is refused everywhere else.)
 
 install checks each file before it touches a card: a Debian archive with a Package name that is a safe file name, an arm64 or all
 Architecture, nothing that is nttplay (CLAUDE.md rule 15), and room: the data card (or the system card when no data card is in) for the
@@ -24,17 +34,29 @@ The menu notices a change within a second: the tool leaves /run/loveos/pkg-chang
 
 Exit status: 0 done, 1 something was refused or failed, 2 a usage error.
 
-Overrides, for tests: R3I6NOS_WATCHER (deb_watcher.py), R3I6NOS_CARDS_FILE (/run/r3i6nos/cards), R3I6NOS_INBOX (~/inbox),
+The catalog is index.json and index.json.sig at R3I6NOS_CATALOG_URL (a GitHub release of this repository), signed with Ed25519; the
+public key is /etc/r3i6nos/packages.pub. It is checked (openssl pkeyutl -verify -rawin) every time it is read, from the cache or the net, so a
+changed cache is refused. A download needs the battery above 20% (30% for a system package) unless the unit is charging.
+
+Overrides, for tests: R3I6NOS_CATALOG_URL, R3I6NOS_PKG_ALLOW_HTTP (allow http:// and file:// URLs), R3I6NOS_PKG_CACHE (~/.cache/r3i6nos-pkg),
+R3I6NOS_PUBKEY, R3I6NOS_OPENSSL, R3I6NOS_STATE (/var/lib/r3i6nos), R3I6NOS_SYSUPDATE_DIR, R3I6NOS_SYSUPDATE_OUT, R3I6NOS_SYSUPDATE_WAIT (300 s),
+R3I6NOS_POWER_SUPPLY, R3I6NOS_RELEASE (/etc/r3i6nos-release), R3I6NOS_PKG_TIMEOUT (30 s), R3I6NOS_WATCHER (deb_watcher.py), R3I6NOS_CARDS_FILE (/run/r3i6nos/cards), R3I6NOS_INBOX (~/inbox),
 R3I6NOS_PKG_FLAG, and everything deb_watcher.py reads (R3I6NOS_DEB_DIR, R3I6NOS_DEB_DIR2, R3I6NOS_APP_ROOT, ...).
 """
 import hashlib
+import http.client
 import importlib.util
+import json
 import os
 import re
 import shutil
 import stat
 import subprocess
 import sys
+import time
+import urllib.error
+import urllib.request
+import zipfile
 from pathlib import Path
 
 ENV = os.environ.get
@@ -43,6 +65,21 @@ ARCHES = ("arm64", "all")
 MAX_DEB = 2 * 1024 ** 3          # a file over this is not a package for this unit
 CHUNK = 1 << 20
 FLAG = Path(ENV("R3I6NOS_PKG_FLAG", "/run/loveos/pkg-changed"))
+CATALOG_URL = ENV("R3I6NOS_CATALOG_URL", "https://github.com/joashchee/r3i6nos/releases/download/packages").rstrip("/")
+PUBKEY = Path(ENV("R3I6NOS_PUBKEY", "/etc/r3i6nos/packages.pub"))
+OPENSSL = ENV("R3I6NOS_OPENSSL", "openssl")
+STATE = Path(ENV("R3I6NOS_STATE", "/var/lib/r3i6nos"))
+SYSREQ = Path(ENV("R3I6NOS_SYSUPDATE_DIR", "/run/loveos/sysupdate"))
+SYSOUT = Path(ENV("R3I6NOS_SYSUPDATE_OUT", "/run/r3i6nos-sysupdate"))
+POWER = Path(ENV("R3I6NOS_POWER_SUPPLY", "/sys/class/power_supply"))
+RELEASE = Path(ENV("R3I6NOS_RELEASE", "/etc/r3i6nos-release"))
+TIMEOUT = float(ENV("R3I6NOS_PKG_TIMEOUT", "30"))
+SYSWAIT = float(ENV("R3I6NOS_SYSUPDATE_WAIT", "300"))
+MAX_INDEX = 1 << 20
+MAX_LOVE = 512 * 1024 ** 2
+FLOOR, SYSTEM_FLOOR = 20, 30       # battery percent below which a download or update will not start unless the unit is charging
+RUNTIMES = ("11.5", "12.0")
+KINDS = ("app", "tool", "system")
 
 
 class Refused(Exception):
@@ -203,8 +240,15 @@ def install_one(src, folders, want_card, yes):
     target.mkdir(parents=True, exist_ok=True)
     part = target / f"{stem}.deb.part"
     size, digest = copy_checked(src, part)
+    return install_prepared(part, stem, target, size, digest, yes)
+
+
+def install_prepared(part, stem, target, size, digest, yes):
+    """part is a private, whole copy on the card (copy_checked made it, or a download did and its hash was checked): check it, ask, swap it in, apply."""
     try:
         info = inspect(part, stem)
+        if W.control(part, "X-R3i6nos-Kind") == "system":
+            raise Refused("it is a system package; those are installed only from the signed catalog, by `r3i6nos-pkg get` (root checks the signature)")
         free = shutil.disk_usage(target).free
         if size + size // 20 > free:
             raise Refused(f"the {card_name(target)} has {human(free)} free; it needs {human(size)}")
@@ -257,7 +301,9 @@ def cmd_install(args):
             files.append(a)
     if inbox:
         box = Path(ENV("R3I6NOS_INBOX") or Path.home() / "inbox")
-        files += sorted(str(p) for p in box.glob("*.deb")) if box.is_dir() else []
+        if box.is_dir():
+            files += sorted(str(p) for p in box.glob("*.deb"))
+            files += sorted(str(p) for rt in RUNTIMES for p in (box / f"Love {rt}").glob("*.love"))
     if not files:
         print("r3i6nos-pkg: nothing to install" + (" (the inbox is empty)" if inbox else ""), file=sys.stderr)
         return 2
@@ -265,8 +311,12 @@ def cmd_install(args):
     bad = 0
     for f in files:
         try:
-            stem, version, card, size = install_one(f, folders, want, yes)
-            print(f"installed {stem} {version} ({human(size)}) on the {card}")
+            if f.endswith(".love"):
+                name, rt, card, size = install_love_one(f, folders, want, None, yes)
+                print(f"installed {name} (LÖVE {rt}, {human(size)}) on the {card}")
+            else:
+                stem, version, card, size = install_one(f, folders, want, yes)
+                print(f"installed {stem} {version} ({human(size)}) on the {card}")
             if inbox:
                 Path(f).unlink(missing_ok=True)
         except Refused as why:
@@ -275,6 +325,430 @@ def cmd_install(args):
         except OSError as err:
             bad += 1
             print(f"FAILED {Path(f).name}: {err.strerror or err}", file=sys.stderr)
+    touch_flag()
+    return 1 if bad else 0
+
+
+# ---- LÖVE apps ------------------------------------------------------------------------------------------------------------------------
+
+def card_roots(folders):
+    return {role: (f.parent if f is not None else None) for role, f in folders.items()}
+
+
+def install_love_one(src, folders, want_card, runtime, yes):
+    """Put a .love file in a card's "Love <runtime>" folder, where the menu lists LÖVE games. Returns (name, runtime, card name, size)."""
+    src = Path(src)
+    if not src.name.endswith(".love"):
+        raise Refused("not a .love")
+    stem = src.name[:-5]
+    if not NAME_OK.fullmatch(stem):
+        raise Refused(f"'{stem}' is not a usable app file name (letters, digits and . _ + - only)")
+    if runtime is None:
+        m = re.fullmatch(r"Love (11\.5|12\.0)", src.resolve().parent.name)
+        runtime = m.group(1) if m else None
+    if runtime not in RUNTIMES:
+        raise Refused("which LÖVE version? put the file in a folder called \"Love 11.5\" or \"Love 12.0\", or pass --runtime 11.5|12.0")
+    roots = card_roots(folders)
+    target_root = None
+    for role in ("data", "system"):                                         # one copy: the card that has it already
+        r = roots.get(role)
+        if want_card is None and r is not None and (r / f"Love {runtime}" / f"{stem}.love").is_file():
+            target_root = r
+    if target_root is None:
+        target_root = roots.get(want_card) if want_card else (roots.get("data") or roots.get("system"))
+    if target_root is None:
+        raise Refused(f"the {want_card} card is not in" if want_card else "no card is mounted to put it on")
+    folder = target_root / f"Love {runtime}"
+    folder.mkdir(parents=True, exist_ok=True)
+    part = folder / f"{stem}.love.part"
+    size, digest = copy_checked(src, part)
+    try:
+        if size > MAX_LOVE:
+            raise Refused(f"it is over {MAX_LOVE >> 20} MB")
+        if not zipfile.is_zipfile(part):
+            raise Refused("not a .love file (a zip archive)")
+        with zipfile.ZipFile(part) as z:
+            if z.testzip() is not None:
+                raise Refused("the zip archive is damaged")
+            if "main.lua" not in z.namelist():
+                raise Refused("there is no main.lua at the top of the archive; LÖVE would not start it")
+        free = shutil.disk_usage(folder).free
+        if size + size // 20 > free:
+            raise Refused(f"the {card_name(folder.parent / 'native_deb')} has {human(free)} free; it needs {human(size)}")
+        final = folder / f"{stem}.love"
+        if not confirm(f"Install {stem}.love for LÖVE {runtime} ({human(size)}, sha256 {digest[:12]}...) on the "
+                       f"{card_name(folder.parent / 'native_deb')}{' (replacing the installed one)' if final.is_file() else ''}?", yes):
+            raise Refused("not installed (you said no)")
+    except BaseException:
+        part.unlink(missing_ok=True)
+        raise
+    prev = folder / f"{stem}.love.prev"
+    if final.is_file():
+        os.replace(final, prev)
+    os.replace(part, final)
+    return stem, runtime, card_name(folder.parent / "native_deb"), size
+
+
+def cmd_install_love(args):
+    yes, want, runtime, files = False, None, None, []
+    it = iter(args)
+    for a in it:
+        if a == "--yes":
+            yes = True
+        elif a == "--card":
+            want = next(it, None)
+            if want not in ("data", "system"):
+                print("r3i6nos-pkg: --card takes data or system", file=sys.stderr)
+                return 2
+        elif a == "--runtime":
+            runtime = next(it, None)
+            if runtime not in RUNTIMES:
+                print("r3i6nos-pkg: --runtime takes 11.5 or 12.0", file=sys.stderr)
+                return 2
+        elif a.startswith("-"):
+            print(f"r3i6nos-pkg: unknown option {a}", file=sys.stderr)
+            return 2
+        else:
+            files.append(a)
+    if not files:
+        print("r3i6nos-pkg: nothing to install", file=sys.stderr)
+        return 2
+    folders, bad = cards(), 0
+    for f in files:
+        try:
+            name, rt, card, size = install_love_one(f, folders, want, runtime, yes)
+            print(f"installed {name} (LÖVE {rt}, {human(size)}) on the {card}")
+        except Refused as why:
+            bad += 1
+            print(f"REFUSED {Path(f).name}: {why}", file=sys.stderr)
+        except OSError as err:
+            bad += 1
+            print(f"FAILED {Path(f).name}: {err.strerror or err}", file=sys.stderr)
+    touch_flag()
+    return 1 if bad else 0
+
+
+# ---- the catalog ----------------------------------------------------------------------------------------------------------------------
+
+def verify_catalog(index, sig):
+    """Refused unless sig is a good Ed25519 signature of index under the image's public key."""
+    if not PUBKEY.is_file():
+        raise Refused("this image has no catalog public key (/etc/r3i6nos/packages.pub), so a catalog cannot be checked")
+    try:
+        r = subprocess.run([OPENSSL, "pkeyutl", "-verify", "-pubin", "-inkey", str(PUBKEY), "-rawin", "-in", str(index), "-sigfile", str(sig)],
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        raise Refused("openssl could not be run to check the catalog") from None
+    if r.returncode != 0:
+        raise Refused("the catalog's signature does not match the image's public key; it is not used")
+
+
+def http_ok(url):
+    return url.startswith("https://") or (ENV("R3I6NOS_PKG_ALLOW_HTTP") and url.startswith(("http://", "file://")))
+
+
+def fetch(url, dest, resume=False, show=None):
+    """Download url to dest. With resume, a partial dest is continued with a Range request (a server that ignores it sends the whole file again)."""
+    if not http_ok(url):
+        raise Refused(f"'{url}' is not an https:// address")
+    dest = Path(dest)
+    have = dest.stat().st_size if resume and dest.is_file() else 0
+    headers = {"User-Agent": "r3i6nos-pkg"}
+    if have:
+        headers["Range"] = f"bytes={have}-"
+    try:
+        resp = urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=TIMEOUT)
+    except urllib.error.HTTPError as e:
+        if e.code == 416 and have:                # asked for the bytes after the end: it was all there already
+            return have
+        raise Refused(f"the server answered {e.code} for {url.rsplit('/', 1)[-1]}") from None
+    except (urllib.error.URLError, OSError, ValueError) as e:
+        raise Refused(f"could not reach {url.split('/')[2] if '//' in url else url}: {getattr(e, 'reason', e)}") from None
+    code = getattr(resp, "status", 200)
+    mode = "ab" if have and code == 206 else "wb"
+    size = have if mode == "ab" else 0
+    last = size
+    try:
+        promised = int(resp.headers.get("Content-Length", "")) + size
+    except ValueError:
+        promised = None
+    try:
+        with resp, open(dest, mode) as out:
+            while True:
+                chunk = resp.read(1 << 16)
+                if not chunk:
+                    break
+                out.write(chunk)
+                size += len(chunk)
+                if show and size - last >= 1 << 20:
+                    last = size
+                    show(size)
+            out.flush()
+            os.fsync(out.fileno())
+    except (OSError, urllib.error.URLError, http.client.HTTPException) as e:
+        raise Refused(f"the download stopped at {human(size)}: {getattr(e, 'reason', e) or e}; run it again to resume") from None
+    if promised is not None and size < promised:
+        raise Refused(f"the download stopped at {human(size)} of {human(promised)}; run it again to resume")
+    return size
+
+
+def parse_catalog(index):
+    try:
+        data = json.loads(Path(index).read_text())
+        entries = data["packages"]
+    except (OSError, ValueError, KeyError, TypeError):
+        raise Refused("the catalog is signed but cannot be read") from None
+    out = []
+    for e in entries if isinstance(entries, list) else []:
+        try:
+            ok = (isinstance(e, dict) and NAME_OK.fullmatch(e["name"]) and e["kind"] in KINDS and isinstance(e["size"], int) and e["size"] > 0
+                  and re.fullmatch(r"[0-9a-f]{64}", e["sha256"]) and isinstance(e["version"], str) and e["version"] and isinstance(e["url"], str))
+        except (KeyError, TypeError):
+            ok = False
+        if ok:
+            out.append(e)
+    return out
+
+
+def cache_files():
+    return Path(ENV("R3I6NOS_PKG_CACHE") or Path.home() / ".cache/r3i6nos-pkg")
+
+
+def load_catalog(refresh):
+    """The checked catalog entries. With refresh, download it first (both files are checked before either replaces the cache)."""
+    cache = cache_files()
+    cache.mkdir(parents=True, exist_ok=True)
+    index, sig = cache / "index.json", cache / "index.json.sig"
+    if refresh:
+        for n in ("index.json", "index.json.sig"):
+            (cache / (n + ".part")).unlink(missing_ok=True)
+            fetch(f"{CATALOG_URL}/{n}", cache / (n + ".part"))
+        if (cache / "index.json.part").stat().st_size > MAX_INDEX:
+            (cache / "index.json.part").unlink()
+            raise Refused("the catalog is far larger than a catalog is")
+        try:
+            verify_catalog(cache / "index.json.part", cache / "index.json.sig.part")
+        except Refused:
+            (cache / "index.json.part").unlink(missing_ok=True)
+            (cache / "index.json.sig.part").unlink(missing_ok=True)
+            raise
+        os.replace(cache / "index.json.part", index)
+        os.replace(cache / "index.json.sig.part", sig)
+    elif not index.is_file() or not sig.is_file():
+        raise Refused("no catalog yet: run `r3i6nos-pkg check` first")
+    verify_catalog(index, sig)                       # every read: the cache is the login user's, so it proves nothing by being there
+    return parse_catalog(index)
+
+
+def system_record():
+    out = {}
+    try:
+        for line in (STATE / "system-packages").read_text().splitlines():
+            n, _, v = line.partition(" ")
+            if n and v.strip():
+                out[n] = v.strip()
+    except OSError:
+        pass
+    return out
+
+
+def installed_versions():
+    have = dict(W.installed_packages_by_name())
+    have.update(system_record())
+    return have
+
+
+def base_version():
+    try:
+        for line in RELEASE.read_text().splitlines():
+            if line.startswith("VERSION="):
+                return line.partition("=")[2].strip()
+    except OSError:
+        pass
+    return ""
+
+
+def status_of(entry, have):
+    if entry["name"] not in have:
+        return "new"
+    c = W.vercmp(entry["version"], have[entry["name"]])
+    return "update" if c > 0 else ("current" if c == 0 else "newer here")
+
+
+def cmd_check(_args):
+    entries = load_catalog(refresh=True)
+    have = installed_versions()
+    updates = 0
+    for e in entries:
+        st = status_of(e, have)
+        updates += st == "update"
+        print(f"{e['name']}\t{e['kind']}\t{have.get(e['name'], '-')}\t{e['version']}\t{st}\t{human(e['size'])}")
+    print(f"{len(entries)} package(s) in the catalog; {updates} update(s)")
+    return 0
+
+
+def cmd_available(_args):
+    entries = load_catalog(refresh=False)
+    have = installed_versions()
+    shown = [e for e in entries if e["name"] not in have]
+    for e in shown:
+        print(f"{e['name']}\t{e['kind']}\t{e['version']}\t{human(e['size'])}\t{e.get('description', '')}")
+    if not shown:
+        print("nothing new in the catalog")
+    return 0
+
+
+def battery_ok(floor):
+    """Refused when the battery is below floor percent and not charging. No battery found (a laptop, a test) is fine."""
+    try:
+        for d in sorted(POWER.iterdir()):
+            if (d / "type").read_text().strip() != "Battery":
+                continue
+            cap, status = int((d / "capacity").read_text().strip()), (d / "status").read_text().strip()
+            if cap < floor and status not in ("Charging", "Full"):
+                raise Refused(f"the battery is at {cap}% and not charging; it needs {floor}% (or the charger) before it downloads")
+            return
+    except (OSError, ValueError):
+        return
+
+
+def download_checked(entry, dest):
+    """Download entry's file to dest (resumable) and check its size and SHA-256. A bad file is deleted, never kept."""
+    show = (lambda n: print(f"  {entry['name']}: {human(n)} of {human(entry['size'])}", flush=True)) if sys.stdout.isatty() else None
+    for attempt in (1, 2):
+        size = fetch(entry["url"], dest, resume=attempt == 1, show=show)
+        h = hashlib.sha256()
+        with open(dest, "rb") as f:
+            for chunk in iter(lambda: f.read(CHUNK), b""):
+                h.update(chunk)
+        if size == entry["size"] and h.hexdigest() == entry["sha256"]:
+            return size, h.hexdigest()
+        dest.unlink(missing_ok=True)                  # a wrong resume or a damaged file: once more from the start, then give up
+    raise Refused(f"{entry['name']} did not arrive as the catalog says (size or SHA-256 differs); nothing was installed")
+
+
+def get_system(entry, yes):
+    name = entry["name"]
+    if not confirm(f"Install the system update {name} {entry['version']} ({human(entry['size'])})? The menu restarts; if the new one cannot start "
+                   f"in two boots the old files come back by themselves.", yes):
+        raise Refused("not installed (you said no)")
+    cache = cache_files()
+    cache.mkdir(parents=True, exist_ok=True)
+    part = cache / f"{name}.deb.part"
+    download_checked(entry, part)
+    try:
+        SYSREQ.mkdir(parents=True, exist_ok=True)
+        for n in ("index.json", "index.json.sig"):
+            shutil.copyfile(cache / n, SYSREQ / n)
+        shutil.copyfile(part, SYSREQ / f"{name}.deb")
+        rid = str(int(time.time() * 1000))
+        tmp = SYSREQ / "request.tmp"
+        tmp.write_text(f"id={rid}\nname={name}\n")
+        os.replace(tmp, SYSREQ / "request")           # last: the path unit fires on it, and everything it needs is already there
+        deadline = time.time() + SYSWAIT
+        while time.time() < deadline:
+            try:
+                text = (SYSOUT / "result").read_text()
+            except OSError:
+                text = ""
+            fields = dict(line.partition("=")[::2] for line in text.splitlines() if "=" in line and not line.startswith("L\t"))
+            if fields.get("id") == rid:
+                lines = [ln[2:] for ln in text.splitlines() if ln.startswith("L\t")]
+                if fields.get("ok") == "1":
+                    return lines
+                raise Refused("; ".join(lines) or "the system update was refused")
+            time.sleep(0.5)
+        raise Refused("no answer from the system update helper (is r3i6nos-sysupdate.path running? a root helper installs these)")
+    finally:
+        for n in ("index.json", "index.json.sig", f"{name}.deb", "request.tmp", "request"):
+            (SYSREQ / n).unlink(missing_ok=True)
+        part.unlink(missing_ok=True)
+
+
+def get_one(entry, folders, want, yes):
+    name = entry["name"]
+    need = entry.get("min_system") or ""
+    base = base_version()
+    if need and base and W.vercmp(base, need) < 0:
+        raise Refused(f"needs a base of {need} or newer; this is {base}, which a reflash brings")
+    battery_ok(SYSTEM_FLOOR if entry["kind"] == "system" else FLOOR)
+    if entry["kind"] == "system":
+        return get_system(entry, yes)
+    target = where_installed(name, folders) if want is None else folders.get(want)
+    if target is None and want is None:
+        target = folders.get("data") or folders.get("system")
+    if target is None:
+        raise Refused(f"the {want} card is not in" if want else "no card is mounted to put it on")
+    target.mkdir(parents=True, exist_ok=True)
+    free = shutil.disk_usage(target).free
+    part = target / f"{name}.deb.part"
+    have_part = part.stat().st_size if part.is_file() else 0
+    if entry["size"] - have_part + entry["size"] // 20 > free:
+        raise Refused(f"the {card_name(target)} has {human(free)} free; it needs {human(entry['size'])}")
+    try:
+        size, digest = download_checked(entry, part)
+        return install_prepared(part, name, target, size, digest, yes)
+    except BaseException as e:
+        if isinstance(e, Refused) and not str(e).startswith("the download stopped"):
+            part.unlink(missing_ok=True)              # refused for what it is: not kept. A stopped download keeps its .part to resume.
+        raise
+
+
+def cmd_get(args, update=False):
+    yes, want, names = False, None, []
+    it = iter(args)
+    for a in it:
+        if a == "--yes":
+            yes = True
+        elif a == "--card":
+            want = next(it, None)
+            if want not in ("data", "system"):
+                print("r3i6nos-pkg: --card takes data or system", file=sys.stderr)
+                return 2
+        elif a.startswith("-"):
+            print(f"r3i6nos-pkg: unknown option {a}", file=sys.stderr)
+            return 2
+        else:
+            names.append(a)
+    if not names and not update:
+        print("usage: r3i6nos-pkg get [--yes] [--card data|system] NAME ...", file=sys.stderr)
+        return 2
+    try:
+        entries = load_catalog(refresh=update)
+    except Refused as why:
+        print(f"REFUSED: {why}", file=sys.stderr)
+        return 1
+    have = installed_versions()
+    by_name = {e["name"]: e for e in entries}
+    if update:
+        picked = [e for e in entries if status_of(e, have) == "update" and (not names or e["name"] in names)]
+        missing = [n for n in names if n not in by_name]
+        if not picked and not missing:
+            print("everything is up to date")
+            return 0
+    else:
+        missing = [n for n in names if n not in by_name]
+        picked = [by_name[n] for n in names if n in by_name]
+    bad = 0
+    for n in missing:
+        bad += 1
+        print(f"REFUSED {n}: not in the catalog", file=sys.stderr)
+    folders = cards()
+    for e in picked:
+        try:
+            result = get_one(e, folders, want, yes)
+            if e["kind"] == "system":
+                for line in result:
+                    print(line)
+            else:
+                stem, version, card, size = result
+                print(f"installed {stem} {version} ({human(size)}) on the {card}")
+        except Refused as why:
+            bad += 1
+            print(f"REFUSED {e['name']}: {why}", file=sys.stderr)
+        except OSError as err:
+            bad += 1
+            print(f"FAILED {e['name']}: {err.strerror or err}", file=sys.stderr)
     touch_flag()
     return 1 if bad else 0
 
@@ -311,7 +785,9 @@ def cmd_list(_args):
     for name, version, src, size in rows:
         where = "built in" if Path(src) == W.DEFAULT_DEB_DIR else card_name(Path(src))
         print(f"{name}\t{version}\t{where}\t{human(size)}")
-    if not rows:
+    for name, version in sorted(system_record().items()):
+        print(f"{name}\t{version}\tsystem\t-")
+    if not rows and not system_record():
         print("nothing installed")
     return 0
 
@@ -326,11 +802,16 @@ def cmd_apply(_args):
 
 
 def main(argv):
-    verbs = {"install": cmd_install, "remove": cmd_remove, "list": cmd_list, "apply": cmd_apply}
+    verbs = {"install": cmd_install, "install-love": cmd_install_love, "remove": cmd_remove, "list": cmd_list, "apply": cmd_apply,
+             "check": cmd_check, "available": cmd_available, "get": cmd_get, "update": lambda a: cmd_get(a, update=True)}
     if not argv or argv[0] in ("-h", "--help") or argv[0] not in verbs:
         print((__doc__ or "").split("\n\n")[0], file=sys.stderr)
         return 0 if argv and argv[0] in ("-h", "--help") else 2
-    return verbs[argv[0]](argv[1:])
+    try:
+        return verbs[argv[0]](argv[1:])
+    except Refused as why:
+        print(f"REFUSED: {why}", file=sys.stderr)
+        return 1
 
 
 if __name__ == "__main__":

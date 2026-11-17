@@ -1,0 +1,13 @@
+[Unit]
+Description=Undo a system update the menu never confirmed (two boots), before the menu starts
+Documentation=file:/usr/local/bin/r3i6nos-sysupdate
+DefaultDependencies=no
+After=local-fs.target
+Before=loveos.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/r3i6nos-sysupdate boot
+
+[Install]
+WantedBy=multi-user.target

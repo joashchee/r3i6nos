@@ -22,7 +22,7 @@ echo "scp \$*" >> "$T/log"
 exit 0
 SH
 chmod +x "$T/ssh" "$T/scp"
-export R3I6NOS_SSH="$T/ssh" R3I6NOS_SCP="$T/scp" R3I6NOS_PORTS_ROOT="$T/ports" R3I6NOS_NATIVE_BUILD="$T/native"
+export R3I6NOS_SSH="$T/ssh" R3I6NOS_SCP="$T/scp" R3I6NOS_PORTS_ROOT="$T/ports" R3I6NOS_NATIVE_BUILD="$T/native" R3I6NOS_LOVE_BUILD="$T/love"
 unset R3I6NOS_UNIT
 mkdir -p "$T/ports/klamansi/r36s/build/pkg" "$T/ports/tinyntt/r36s/build/pkg" "$T/native"
 printf 'a' > "$T/ports/klamansi/r36s/build/pkg/KlamANSI.deb"
@@ -52,7 +52,7 @@ has "$out" "not pushed" "no answer means no"
 out="$(run --yes me@10.0.0.7 "$T/ports/tinyntt/r36s/build/pkg/TinyNTT.deb")"
 has "$out" "To me@10.0.0.7:" "a given user is kept"
 L="$(log)"
-has "$L" "mkdir -p ~/inbox && rm -f ~/inbox/*.deb" "the inbox is cleared first"
+has "$L" "rm -f ~/inbox/*.deb ~/inbox/love-11.5/*.love ~/inbox/love-12.0/*.love" "the inbox is cleared first"
 has "$L" "scp -o ConnectTimeout=10 -q $T/ports/tinyntt/r36s/build/pkg/TinyNTT.deb me@10.0.0.7:inbox/TinyNTT.deb" "the file is copied"
 has "$L" "r3i6nos-pkg install --inbox --yes" "the unit installs from the inbox"
 hasnt "$L" "--card" "no card unless asked"
@@ -65,6 +65,39 @@ L="$(log)"
 [ "$(grep -c '^scp' <<<"$L")" = 3 ] || fail "three builds, three copies: $L"
 has "$L" "loveos@10.1.1.1:inbox/Commander.deb" "the unit from R3I6NOS_UNIT"
 has "$L" "r3i6nos-pkg install --inbox --yes --card system" "the card is passed on"
+
+# LÖVE apps: the runtime from the folder, sent to its own inbox folder, installed with install-love per runtime
+mkdir -p "$T/love/Love 11.5" "$T/love/Love 12.0" "$T/ports/nocogama/build/Love 11.5" "$T/ports/nocogama/build/Love 12.0"
+printf 'l1' > "$T/love/Love 11.5/IO_Checker.love"
+printf 'l2' > "$T/love/Love 12.0/IO_Checker.love"
+printf 'n1' > "$T/ports/nocogama/build/Love 11.5/NoCoGaMa.love"
+out="$(run -n 10.1.1.1)"
+has "$out" "IO_Checker.love" "this repo's LÖVE build is found"
+has "$out" "NoCoGaMa.love" "a LÖVE port's build is found"
+has "$out" "(LÖVE 12.0)" "the runtime is shown"
+out="$(R3I6NOS_UNIT=10.1.1.1 run --yes)"
+L="$(log)"
+has "$L" "loveos@10.1.1.1:inbox/love-11.5/IO_Checker.love" "a 11.5 app goes to the 11.5 inbox"
+has "$L" "loveos@10.1.1.1:inbox/love-12.0/IO_Checker.love" "a 12.0 app goes to the 12.0 inbox"
+has "$L" "r3i6nos-pkg install-love --runtime 11.5 --yes ~/inbox/love-11.5/*.love" "installed per runtime"
+has "$L" "r3i6nos-pkg install-love --runtime 12.0 --yes ~/inbox/love-12.0/*.love" "installed for 12.0 too"
+[ "$(grep -c 'install-love' <<<"$L")" = 2 ] || fail "one install-love per runtime that has files: $L"
+# only the files named; the runtime from the folder, or from --runtime
+run --yes --card data 10.1.1.1 "$T/love/Love 12.0/IO_Checker.love" > /dev/null
+L="$(log)"
+[ "$(grep -c '^scp' <<<"$L")" = 1 ] || fail "one LÖVE file, one scp: $L"
+has "$L" "install-love --runtime 12.0 --yes --card data" "the card is passed on"
+hasnt "$L" "install --inbox" "no .deb, no .deb install"
+printf 'x' > "$T/Game.love"
+[ "$(status --yes 10.1.1.1 "$T/Game.love")" = 2 ] || fail "a .love with no runtime is a usage error"
+run --yes --runtime 11.5 10.1.1.1 "$T/Game.love" > /dev/null
+has "$(log)" "inbox/love-11.5/Game.love" "--runtime names it"
+[ "$(status 10.1.1.1 --runtime 13 "$T/Game.love")" = 2 ] || fail "a bad runtime is a usage error"
+# mixed: both kinds, both installs
+run --yes 10.1.1.1 "$T/native/Commander.deb" "$T/love/Love 11.5/IO_Checker.love" > /dev/null
+L="$(log)"
+has "$L" "r3i6nos-pkg install --inbox --yes" "the .deb install"
+has "$L" "install-love --runtime 11.5" "and the LÖVE install"
 
 # list and remove
 run 10.1.1.1 --list > /dev/null
@@ -88,7 +121,7 @@ out="$(run --yes 10.1.1.1 "$T/native/Commander.deb")"
 has "$out" "copying" "a failed copy stops before anything installs"
 hasnt "$(log)" "install --inbox" "nothing is installed after a failed copy"
 rm "$T/fail-scp"
-rm -rf "$T/ports" "$T/native"
+rm -rf "$T/ports" "$T/native" "$T/love"
 out="$(run --yes 10.1.1.1)"
 has "$out" "nothing to push" "no builds at all"
 

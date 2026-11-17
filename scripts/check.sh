@@ -41,6 +41,8 @@ if command -v luajit >/dev/null; then
     luajit tests/test_reports.lua || fail=1
     luajit tests/test_demos.lua || fail=1
     luajit tests/test_toast.lua || fail=1
+    luajit tests/test_sysconfirm.lua || fail=1
+    luajit tests/test_appdata_lua.lua || fail=1   # needs python3 (the real engine) and luajit's ffi
     luajit tests/test_mirror.lua || fail=1
     luajit tests/test_mirror_menu.lua || fail=1
     luajit tests/test_pkgflag.lua || fail=1
@@ -59,6 +61,7 @@ elif command -v lua >/dev/null; then
     lua tests/test_reports.lua || fail=1
     lua tests/test_demos.lua || fail=1
     lua tests/test_toast.lua || fail=1
+    lua tests/test_sysconfirm.lua || fail=1
     lua tests/test_mirror.lua || fail=1
     lua tests/test_mirror_menu.lua || fail=1
     lua tests/test_redraw.lua || fail=1

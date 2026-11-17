@@ -1,0 +1,571 @@
+#!/usr/bin/env python3
+"""r3i6nos-sysupdate - install a SYSTEM package (the menu, the theme, the helpers, the units) while the unit is on, and take it back if it is bad
+(docs/PACKAGES-OTA.md, "System updates"; ROADMAP section 29 phase 5).
+
+    r3i6nos-sysupdate apply      a person ran `r3i6nos-pkg get <system package>` (r3i6nos-sysupdate.path, from the request): install it
+    r3i6nos-sysupdate boot       at boot, before the menu: if the last update was never confirmed by the menu for two boots, undo it
+    r3i6nos-sysupdate rollback   undo the last update now (root only; what `boot` does)
+    r3i6nos-sysupdate status     the installed system package, what the last update replaced, and whether it is waiting to be confirmed
+
+This runs as ROOT, so it is the one place a program running as the login user could try to get root. It is closed by four things:
+
+  1. The package must carry a SIGNATURE: the catalog (index.json) must verify against the image's public key /etc/r3i6nos/packages.pub
+     (`openssl pkeyutl -verify -rawin`, Ed25519), the entry must say kind=system, and the .deb's size and SHA-256 must be the entry's. There is
+     no unsigned path: no inbox, no push, no prompt. Everything is copied out of the login user's staging folder into a root-only folder FIRST and
+     checked THERE, so the user cannot swap a file after it was checked.
+  2. Only these paths may be written: opt/loveos/menu, opt/loveos/theme, opt/loveos/defaults, usr/local/bin, etc/systemd/system, usr/share/r3i6nos,
+     etc/asound.conf, etc/r3i6nos-release. Anything else, any ".." or absolute name, any link, device or special file, refuses the WHOLE package
+     before the first byte is written. Modes are made 0644 (0755 when the archive says executable): no setuid, no setgid, no sticky bit. The
+     owner is root.
+  3. It only goes forward: the new Debian version must be higher than the installed one (the rollback is this tool's own).
+  4. Every file it replaces is copied to /var/lib/r3i6nos/rollback/<from>-<to>/ first, each new file is renamed into place (a power cut leaves
+     a whole old file or a whole new one, never half), etc/r3i6nos-release goes last, and any failure part way puts everything back.
+
+After a good update it restarts the menu (the session starts it again) and leaves a marker the MENU removes once it has drawn its first
+screen. `boot` counts the boots the marker survived; at the second the files come back from the rollback folder before the session starts, so a
+menu that cannot draw cannot leave a unit that needs a card out. (A menu that crashes in a loop without a reboot is not covered: that is
+loveos.service's own restart, and a power cycle then brings the count.)
+
+The request is /run/loveos/sysupdate/request (id=, name=); the staged files are index.json, index.json.sig and NAME.deb beside it. The answer is
+/run/r3i6nos-sysupdate/result (id=, ok=, then L<TAB>text lines). Standard library, openssl and dpkg-deb.
+
+Overrides, for tests: R3I6NOS_SYSUPDATE_DIR, R3I6NOS_SYSUPDATE_OUT, R3I6NOS_STATE (/var/lib/r3i6nos), R3I6NOS_PENDING_DIR, R3I6NOS_ROOT (/),
+R3I6NOS_PUBKEY (/etc/r3i6nos/packages.pub), R3I6NOS_USER (loveos), R3I6NOS_OPENSSL, R3I6NOS_SYSTEMCTL, R3I6NOS_PKILL, R3I6NOS_NO_RESTART,
+R3I6NOS_SYSUPDATE_MAX_MB (150), R3I6NOS_WATCHER.
+"""
+import errno
+import hashlib
+import importlib.util
+import json
+import os
+import pwd
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tarfile
+import time
+from pathlib import Path
+
+ENV = os.environ.get
+REQ_DIR = Path(ENV("R3I6NOS_SYSUPDATE_DIR", "/run/loveos/sysupdate"))
+OUT_DIR = Path(ENV("R3I6NOS_SYSUPDATE_OUT", "/run/r3i6nos-sysupdate"))
+STATE = Path(ENV("R3I6NOS_STATE", "/var/lib/r3i6nos"))
+PENDING_DIR = Path(ENV("R3I6NOS_PENDING_DIR", str(STATE / "pending")))
+ROOT = Path(ENV("R3I6NOS_ROOT", "/"))
+PUBKEY = Path(ENV("R3I6NOS_PUBKEY", "/etc/r3i6nos/packages.pub"))
+USER = ENV("R3I6NOS_USER", "loveos")
+OPENSSL = ENV("R3I6NOS_OPENSSL", "openssl")
+SYSTEMCTL = ENV("R3I6NOS_SYSTEMCTL", "systemctl")
+PKILL = ENV("R3I6NOS_PKILL", "pkill")
+MAX_MB = int(ENV("R3I6NOS_SYSUPDATE_MAX_MB", "150"))
+MAX_REQUEST = 4096
+MAX_INDEX = 1 << 20
+NAME_OK = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,63}")
+BOOTS_BEFORE_ROLLBACK = 2
+RELEASE = "etc/r3i6nos-release"
+TREES = ("opt/loveos/menu", "opt/loveos/theme", "opt/loveos/defaults", "usr/local/bin", "etc/systemd/system", "usr/share/r3i6nos")
+FILES = ("etc/asound.conf", RELEASE)
+PARENTS = {"opt", "opt/loveos", "usr", "usr/local", "usr/share", "etc", "etc/systemd"}      # directory entries that are only a way in
+RECORD = STATE / "system-packages"         # "name version" lines: what the system packages are at
+FILELIST = STATE / "system-files"          # every path a system package installed, so a later one can remove what it no longer has
+ROLLBACK = STATE / "rollback"
+WORK = STATE / "sysupdate-work"
+MARKER = "system-pending"
+
+
+class Refused(Exception):
+    pass
+
+
+def load_watcher():
+    path = ENV("R3I6NOS_WATCHER") or str(Path(os.path.realpath(__file__)).with_name("deb_watcher.py"))
+    spec = importlib.util.spec_from_file_location("deb_watcher", path)
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+W = load_watcher()
+
+
+def root_path(rel):
+    return ROOT / rel
+
+
+# ---- the request, and the staged files (all hostile) ------------------------------------------------------------------------------
+
+def open_small(path, limit):
+    """The bytes of a regular file, never following a link and never waiting on a pipe; Refused when it is not one or is over limit."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as e:
+        raise Refused(f"cannot open {Path(path).name}: {os.strerror(e.errno)}") from None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise Refused(f"{Path(path).name} is not a regular file")
+        if st.st_size > limit:
+            raise Refused(f"{Path(path).name} is over {limit >> 20} MB")
+        chunks, left = [], st.st_size
+        while left > 0:
+            b = os.read(fd, min(left, 1 << 20))
+            if not b:
+                break
+            chunks.append(b)
+            left -= len(b)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def copy_private(src, dest, limit):
+    """Copy a staged file to dest (root's own folder), returning (sha256, size). What is checked from here on is this copy."""
+    h, size = hashlib.sha256(), 0
+    try:
+        fd = os.open(src, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as e:
+        raise Refused(f"cannot open {Path(src).name}: {os.strerror(e.errno)}") from None
+    with os.fdopen(fd, "rb") as f:
+        if not stat.S_ISREG(os.fstat(f.fileno()).st_mode):
+            raise Refused(f"{Path(src).name} is not a regular file")
+        with open(dest, "wb") as out:
+            while True:
+                chunk = f.read(1 << 20)
+                if not chunk:
+                    break
+                size += len(chunk)
+                if size > limit:
+                    raise Refused(f"{Path(src).name} is over {limit >> 20} MB")
+                h.update(chunk)
+                out.write(chunk)
+            out.flush()
+            os.fsync(out.fileno())
+    return h.hexdigest(), size
+
+
+def parse_request(text):
+    out = {}
+    for line in text.splitlines():
+        k, sep, v = line.partition("=")
+        if sep and k in ("id", "name") and k not in out:
+            out[k] = v.strip()
+    return out
+
+
+# ---- the signature --------------------------------------------------------------------------------------------------------------------
+
+def verify_signature(index, sig):
+    if not PUBKEY.is_file():
+        raise Refused("this image has no catalog public key (/etc/r3i6nos/packages.pub): system packages cannot be checked, so none is installed")
+    try:
+        r = subprocess.run([OPENSSL, "pkeyutl", "-verify", "-pubin", "-inkey", str(PUBKEY), "-rawin", "-in", str(index), "-sigfile", str(sig)],
+                           capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        raise Refused("openssl could not be run to check the signature") from None
+    if r.returncode != 0:
+        raise Refused("the catalog's signature does not match the image's public key; nothing was installed")
+
+
+# ---- state ------------------------------------------------------------------------------------------------------------------------------
+
+def read_record():
+    out = {}
+    try:
+        for line in RECORD.read_text().splitlines():
+            n, _, v = line.partition(" ")
+            if n and v:
+                out[n] = v.strip()
+    except OSError:
+        pass
+    return out
+
+
+def write_atomic(path, text, mode=0o644):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(path.name + ".r3i6nos-new")
+    with open(tmp, "w") as f:
+        f.write(text)
+        f.flush()
+        os.fsync(f.fileno())
+    os.chmod(tmp, mode)
+    os.replace(tmp, path)
+
+
+def release_value(key):
+    try:
+        for line in (root_path(RELEASE)).read_text().splitlines():
+            k, _, v = line.partition("=")
+            if k == key:
+                return v.strip()
+    except OSError:
+        pass
+    return ""
+
+
+# ---- reading the archive: every entry judged before anything is written ---------------------------------------------------------------
+
+def clean_name(name):
+    n = name
+    while n.startswith("./"):
+        n = n[2:]
+    n = n.rstrip("/")
+    if n in ("", "."):
+        return ""
+    if n.startswith("/") or "\0" in n or "\\" in n or any(p in ("", ".", "..") for p in n.split("/")):
+        raise Refused(f"'{name}' is not a plain relative path")
+    return n
+
+
+def allowed(path):
+    return path in FILES or any(path == t or path.startswith(t + "/") for t in TREES)
+
+
+def read_archive(deb, dest_dir, limit_bytes):
+    """Judge every entry of the package, then write the files under dest_dir. Returns {path: executable_bool} of the files.
+
+    Refused (nothing written outside dest_dir, which is root's own and thrown away) for a path outside the allowlist, a link, a device or any
+    special file, or a package over the size limit."""
+    cmd = ["dpkg-deb", "--fsys-tarfile", str(deb)]
+    try:
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    except OSError:
+        raise Refused("dpkg-deb could not be run") from None
+    files, total = {}, 0
+    try:
+        with tarfile.open(fileobj=proc.stdout, mode="r|") as tar:
+            for m in tar:
+                name = clean_name(m.name)
+                if not name:
+                    continue
+                if m.isdir():
+                    if not (allowed(name) or name in PARENTS):
+                        raise Refused(f"'{name}' is outside what a system package may write")
+                    continue
+                if not m.isreg():
+                    raise Refused(f"'{name}' is a link or a special file; a system package carries plain files only")
+                if not allowed(name):
+                    raise Refused(f"'{name}' is outside what a system package may write")
+                total += m.size
+                if total > limit_bytes:
+                    raise Refused(f"it unpacks to more than {limit_bytes >> 20} MB")
+                target = dest_dir / name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                src = tar.extractfile(m)
+                with open(target, "wb") as out:
+                    shutil.copyfileobj(src, out)
+                    out.flush()
+                    os.fsync(out.fileno())
+                files[name] = bool(m.mode & 0o111)
+    except tarfile.TarError:
+        raise Refused("its file archive could not be read") from None
+    finally:
+        proc.stdout.close()
+        proc.wait()
+    if proc.returncode not in (0, None):
+        raise Refused("dpkg-deb could not read its file archive")
+    return files
+
+
+# ---- applying, and undoing -----------------------------------------------------------------------------------------------------------
+
+def put_file(src, target, executable):
+    target.parent.mkdir(parents=True, exist_ok=True)
+    tmp = target.with_name(target.name + ".r3i6nos-new")
+    shutil.copyfile(src, tmp)
+    os.chmod(tmp, 0o755 if executable else 0o644)
+    fd = os.open(tmp, os.O_RDONLY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    os.replace(tmp, target)
+
+
+def undo(manifest_dir, manifest):
+    """Put the replaced files back, remove the added ones: what rollback and a failed apply both do. Returns the number of files restored."""
+    n = 0
+    for rel in manifest.get("replaced", []) + manifest.get("removed", []):
+        src = manifest_dir / "files" / rel
+        if src.is_file():
+            put_file(src, root_path(rel), os.access(src, os.X_OK))
+            n += 1
+    for rel in manifest.get("added", []):
+        try:
+            root_path(rel).unlink()
+        except OSError:
+            pass
+    return n
+
+
+def chown_user(path):
+    try:
+        pw = pwd.getpwnam(USER)
+        os.chown(path, pw.pw_uid, pw.pw_gid)
+    except (KeyError, PermissionError, OSError):
+        pass
+
+
+def restart_menu():
+    if ENV("R3I6NOS_NO_RESTART"):
+        return
+    try:
+        subprocess.run([PKILL, "-TERM", "-f", "^/opt/love/[^ ]*/bin/love /opt/loveos/menu$"], capture_output=True, timeout=10)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def systemctl(*args):
+    try:
+        subprocess.run([SYSTEMCTL, *args], capture_output=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+def install_system(name):
+    """The whole of an update. Returns the result lines; raises Refused with the reason."""
+    if not NAME_OK.fullmatch(name or ""):
+        raise Refused("the request does not name a package")
+    shutil.rmtree(WORK, ignore_errors=True)
+    WORK.mkdir(parents=True, mode=0o700)
+    os.chmod(WORK, 0o700)
+    try:
+        index, sig, deb = WORK / "index.json", WORK / "index.json.sig", WORK / f"{name}.deb"
+        copy_private(REQ_DIR / "index.json", index, MAX_INDEX)
+        copy_private(REQ_DIR / "index.json.sig", sig, 4096)
+        verify_signature(index, sig)
+        try:
+            catalog = json.loads(index.read_text())
+            entries = [e for e in catalog["packages"] if isinstance(e, dict) and e.get("name") == name]
+        except (ValueError, KeyError, TypeError):
+            raise Refused("the catalog is signed but cannot be read") from None
+        if not entries:
+            raise Refused(f"the signed catalog has no package called {name}")
+        entry = entries[0]
+        if entry.get("kind") != "system":
+            raise Refused(f"{name} is not a system package in the signed catalog; it is installed as an app, not by root")
+        version = str(entry.get("version", ""))
+        digest, size = copy_private(REQ_DIR / f"{name}.deb", deb, MAX_MB << 20)
+        if digest != entry.get("sha256") or size != entry.get("size"):
+            raise Refused("the staged file is not the one the signed catalog lists (size or SHA-256 differs)")
+        ctl = lambda field: W.control(deb, field)  # noqa: E731
+        if ctl("Package") != name or ctl("Version") != version:
+            raise Refused("the package's own name or version is not what the signed catalog says")
+        if ctl("Architecture") not in ("arm64", "all"):
+            raise Refused("built for another architecture")
+        if ctl("X-R3i6nos-Kind") != "system":
+            raise Refused("the package does not say it is a system package")
+        base = release_value("VERSION")
+        need = str(entry.get("min_system", "") or "")
+        if need and base and W.vercmp(base, need) < 0:
+            raise Refused(f"needs a base of {need} or newer; this is {base}, which a reflash brings")
+        have = read_record().get(name)
+        if have and W.vercmp(version, have) == 0:
+            return [f"{name} {version} is already installed"]
+        if have and W.vercmp(version, have) < 0:
+            raise Refused(f"{version} is older than the installed {have}; a system package only goes forward")
+
+        new = WORK / "new"
+        new.mkdir()
+        free = shutil.disk_usage(str(ROOT)).free
+        files = read_archive(deb, new, min(MAX_MB << 20, max(0, free // 3)))
+        if not files:
+            raise Refused("the package has no files")
+
+        old_files = []
+        try:
+            old_files = FILELIST.read_text().split("\n")
+        except OSError:
+            pass
+        old_files = [p for p in old_files if p and allowed(p) and p not in files and root_path(p).is_file()]
+        tag = f"{have or 'image'}-{version}"
+        mdir = ROLLBACK / tag
+        shutil.rmtree(mdir, ignore_errors=True)
+        (mdir / "files").mkdir(parents=True)
+        manifest = {"name": name, "from": have or "image", "to": version, "replaced": [], "added": [], "removed": [],
+                    "record_before": RECORD.read_text() if RECORD.is_file() else "", "files_before": FILELIST.read_text() if FILELIST.is_file() else "",
+                    "release_before": (root_path(RELEASE).read_text() if root_path(RELEASE).is_file() else "")}
+        for rel in list(files) + old_files:                    # copy first, change second: the backup is whole before the first rename
+            tgt = root_path(rel)
+            if tgt.is_file() and not tgt.is_symlink():
+                (mdir / "files" / rel).parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(tgt, mdir / "files" / rel)
+                manifest["replaced" if rel in files else "removed"].append(rel)
+            elif rel in files:
+                manifest["added"].append(rel)
+        write_atomic(mdir / "manifest.json", json.dumps(manifest, indent=1))
+
+        order = sorted(p for p in files if p != RELEASE)
+        if RELEASE in files:
+            order.append(RELEASE)                              # last: About says the new version only when everything else is in
+        units = False
+        try:
+            for rel in order:
+                put_file(new / rel, root_path(rel), files[rel])
+                units = units or rel.startswith("etc/systemd/system/")
+            for rel in old_files:
+                try:
+                    root_path(rel).unlink()
+                except OSError:
+                    pass
+        except BaseException:
+            undo(mdir, manifest)                                # any failure part way: everything back as it was
+            raise
+        if units:
+            systemctl("daemon-reload")
+        rec = read_record()
+        rec[name] = version
+        write_atomic(RECORD, "".join(f"{k} {v}\n" for k, v in sorted(rec.items())))
+        kept = [p for p in (FILELIST.read_text().split("\n") if FILELIST.is_file() else []) if p and p not in old_files and p not in files]
+        write_atomic(FILELIST, "\n".join(sorted(set(kept) | set(files))) + "\n")
+        write_atomic(ROLLBACK / "current", tag + "\n")
+        write_atomic(ROLLBACK / "boots", "0\n")
+        for other in ROLLBACK.iterdir():                        # one level of undo: the last update's backup (space on a small card)
+            if other.is_dir() and other.name != tag:
+                shutil.rmtree(other, ignore_errors=True)
+        PENDING_DIR.mkdir(parents=True, exist_ok=True)
+        chown_user(PENDING_DIR)
+        marker = PENDING_DIR / MARKER
+        marker.write_text(f"{name} {have or 'image'} {version}\n")
+        chown_user(marker)
+        restart_menu()
+        return [f"installed {name} {version} (was {have or 'the image'}): {len(files)} files, {len(manifest['replaced'])} replaced",
+                "the menu restarts; if it cannot draw in two boots, the old files come back by themselves"]
+    finally:
+        shutil.rmtree(WORK, ignore_errors=True)
+
+
+# ---- the verbs ----------------------------------------------------------------------------------------------------------------------
+
+def read_request():
+    try:
+        fd = os.open(REQ_DIR / "request", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as e:
+        return "" if e.errno == errno.ELOOP else None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_REQUEST:
+            return ""
+        return os.read(fd, MAX_REQUEST).decode("utf-8", "replace")
+    finally:
+        os.close(fd)
+
+
+def write_result(rid, ok, lines):
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(OUT_DIR, 0o755)
+    tmp = OUT_DIR / f"result.{os.getpid()}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    with os.fdopen(fd, "w") as f:
+        f.write(f"id={rid}\nok={1 if ok else 0}\n" + "".join(f"L\t{line}\n" for line in lines))
+    os.replace(tmp, OUT_DIR / "result")
+
+
+def cmd_apply():
+    text = read_request()
+    if text is None:
+        return 0
+    try:
+        (REQ_DIR / "request").unlink()                          # first: a failure below must not make the path unit loop
+    except OSError:
+        pass
+    req = parse_request(text)
+    rid = re.sub(r"[^0-9A-Za-z._-]", "", req.get("id", "0"))[:40] or "0"
+    try:
+        lines = install_system(req.get("name", ""))
+        write_result(rid, True, lines)
+    except Refused as why:
+        write_result(rid, False, [str(why)])
+    except (OSError, subprocess.SubprocessError) as err:
+        write_result(rid, False, [f"failed: {getattr(err, 'strerror', None) or err}"])
+    return 0
+
+
+def do_rollback():
+    """Undo the last update from its rollback folder. Returns a line saying what happened."""
+    try:
+        tag = (ROLLBACK / "current").read_text().strip()
+        mdir = ROLLBACK / tag
+        manifest = json.loads((mdir / "manifest.json").read_text())
+    except (OSError, ValueError):
+        return None
+    release = RELEASE in manifest.get("replaced", [])
+    n = undo(mdir, manifest)
+    # the release file goes back last, like the update wrote it last (undo restores in the manifest's order; make it explicit)
+    if release:
+        put_file(mdir / "files" / RELEASE, root_path(RELEASE), False)
+    write_atomic(RECORD, manifest.get("record_before", ""))
+    if manifest.get("files_before"):
+        write_atomic(FILELIST, manifest["files_before"])
+    else:
+        FILELIST.unlink(missing_ok=True)
+    systemctl("daemon-reload")
+    (ROLLBACK / "current").unlink(missing_ok=True)
+    (PENDING_DIR / MARKER).unlink(missing_ok=True)
+    return f"rolled back {manifest.get('name')} {manifest.get('to')} to {manifest.get('from')} ({n} files restored)"
+
+
+def cmd_boot():
+    marker = PENDING_DIR / MARKER
+    boots = ROLLBACK / "boots"
+    if not os.path.lexists(marker):
+        boots.unlink(missing_ok=True)
+        return 0
+    try:
+        n = int(boots.read_text().strip() or 0) + 1
+    except (OSError, ValueError):
+        n = 1
+    if n < BOOTS_BEFORE_ROLLBACK:
+        write_atomic(boots, f"{n}\n")
+        print(f"r3i6nos-sysupdate: the last system update has not been confirmed by the menu (boot {n} of {BOOTS_BEFORE_ROLLBACK})")
+        return 0
+    line = do_rollback()
+    if line is None:
+        marker.unlink(missing_ok=True)
+        print("r3i6nos-sysupdate: an unconfirmed update, but nothing to roll back to; the marker is cleared")
+        return 1
+    boots.unlink(missing_ok=True)
+    print(f"r3i6nos-sysupdate: {line}")
+    try:
+        write_result("boot", False, [line + " (the menu did not draw in two boots)"])
+    except OSError:
+        pass
+    return 0
+
+
+def cmd_rollback():
+    line = do_rollback()
+    if line is None:
+        print("r3i6nos-sysupdate: nothing to roll back", file=sys.stderr)
+        return 1
+    print(line)
+    restart_menu()
+    return 0
+
+
+def cmd_status():
+    rec = read_record()
+    print("installed: " + (", ".join(f"{k} {v}" for k, v in sorted(rec.items())) or "none (the image's own files)"))
+    try:
+        tag = (ROLLBACK / "current").read_text().strip()
+        print(f"rollback: {tag}")
+    except OSError:
+        print("rollback: nothing kept")
+    print("pending: " + ("yes (waiting for the menu to confirm)" if os.path.lexists(PENDING_DIR / MARKER) else "no"))
+    return 0
+
+
+def main(argv):
+    verbs = {"apply": cmd_apply, "boot": cmd_boot, "rollback": cmd_rollback, "status": cmd_status}
+    if len(argv) != 1 or argv[0] not in verbs:
+        print((__doc__ or "").split("\n\n")[0], file=sys.stderr)
+        return 2
+    if argv[0] != "status" and os.geteuid() != 0 and not ENV("R3I6NOS_SYSUPDATE_TEST"):
+        print("r3i6nos-sysupdate: this runs as root (the path unit starts it)", file=sys.stderr)
+        return 1
+    return verbs[argv[0]]()
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

@@ -274,6 +274,11 @@ def process_debs() -> int:
         sig = signature(deb)
         if not (stamp.is_file() and stamp.read_text().strip() == sig):
             # New or replaced deb: extract fresh into <name>.new, then swap, never over an old tree.
+            if control(deb, "X-R3i6nos-Kind") == "system":      # root's to install, from the signed catalog only (r3i6nos-sysupdate)
+                why = "a system package is installed only by r3i6nos-sysupdate, from the signed catalog"
+                print(f"deb_watcher: {name}: {why}", file=sys.stderr)
+                LAST[name] = ("refused", why)
+                continue
             why = fits(deb, dest)
             if why:
                 print(f"deb_watcher: {name}: {why}", file=sys.stderr)

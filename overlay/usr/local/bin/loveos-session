@@ -45,7 +45,7 @@ if [ -d "$GPU_DIR" ]; then
     export LOVE_GRAPHICS_USE_OPENGLES=1
 fi
 
-mkdir -p "$NEXT_DIR" "$NEXT_DIR/net" "$NEXT_DIR/clock" "$NEXT_DIR/format"   # net, clock, format: where Settings leaves its requests for the root helpers
+mkdir -p "$NEXT_DIR" "$NEXT_DIR/net" "$NEXT_DIR/clock" "$NEXT_DIR/format" "$NEXT_DIR/sysupdate"   # net, clock, format, sysupdate: where Settings and r3i6nos-pkg leave requests for the root helpers
 
 battery_sample session
 

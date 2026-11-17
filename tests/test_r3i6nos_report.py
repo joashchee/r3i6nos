@@ -5,6 +5,7 @@ import gzip
 import io
 import os
 import re
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -211,8 +212,8 @@ class SystemReport(Fake):
         with mock.patch.object(m.Report, "step", watch), mock.patch.dict(os.environ, {"PATH": self.env["PATH"]}), mock.patch("sys.stdout", io.StringIO()):
             self.assertEqual(m.main(["--from-settings", "--quiet"]), 0)
         steps = [dict(l.split("=", 1) for l in text.splitlines()) for text in seen]
-        self.assertEqual([s["steps"] for s in steps], ["15"] * 16, "5 sections, 2 checks on each of the two cards, 2 in usb and 4 in power, then done")
-        self.assertEqual([s["step"] for s in steps], [str(i) for i in range(1, 16)] + ["15"])
+        self.assertEqual([s["steps"] for s in steps], ["16"] * 17, "5 sections, 2 checks on each of the two cards, packages, 2 in usb and 4 in power, then done")
+        self.assertEqual([s["step"] for s in steps], [str(i) for i in range(1, 17)] + ["16"])
         self.assertIn("speed", steps[6]["doing"])
         self.assertEqual(steps[-1]["doing"], "done")
         self.assertEqual(steps[-1]["file"], str(self.t / "sys2/r3i6nos/r36s-report.txt"))
@@ -387,6 +388,90 @@ class PowerSection(Fake):
     def test_the_power_section_is_in_the_progress_steps(self):
         self.report()
         self.assertIn("== power ==", self.text(self.t / "sys2/r3i6nos"))
+
+
+class PackagesSection(Fake):
+    """The packages section (docs/PACKAGES-OTA.md): fake r3i6nos-pkg and a fake openssl (a signature is the file's checksum, so a changed file fails)."""
+
+    def setUp(self):
+        super().setUp()
+        t = self.t
+        (t / "etc/r3i6nos").mkdir()
+        (t / "etc/r3i6nos/packages.pub").write_text("-----BEGIN PUBLIC KEY-----\nabc\n-----END PUBLIC KEY-----\n")
+        (t / "bin/r3i6nos-pkg").write_text("#!/bin/sh\nprintf 'Commander\\t1.0\\tbuilt in\\t2.0 MB\\nTinyNTT\\t2.1\\tdata card\\t800 KB\\n'\n")
+        self.fake_openssl()
+        (t / "var").mkdir()
+        (t / "apps").mkdir()
+        self.env.update({"R3I6NOS_PKG": str(t / "bin/r3i6nos-pkg"), "R3I6NOS_OPENSSL": str(t / "bin/openssl"), "R3I6NOS_SETUP_VAR": str(t / "var"),
+                         "R3I6NOS_APP_ROOT": str(t / "apps"), "R3I6NOS_PKG_RESERVE_MB": "0", "R3I6NOS_PKG_RESERVE_PCT": "0", "R3I6NOS_PKG_CACHE": str(t / "cache"), "R3I6NOS_SYSUPDATE_OUT": str(t / "run/sysout")})
+
+    def fake_openssl(self, verify_always_ok=False):
+        # genpkey -out K, pkey -in K -pubout -out P, pkeyutl -sign -inkey K -rawin -in F -out S, pkeyutl -verify -pubin -inkey P -rawin -in F -sigfile S
+        body = ("#!/bin/sh\ncase \"$1\" in\n  version) echo 'OpenSSL 3.0.22 fake' ;;\n  genpkey) while [ $# -gt 0 ]; do [ \"$1\" = -out ] && echo k > \"$2\"; shift; done ;;\n"
+                "  pkey) while [ $# -gt 0 ]; do [ \"$1\" = -out ] && echo p > \"$2\"; shift; done ;;\n"
+                "  pkeyutl) mode=$2; while [ $# -gt 0 ]; do case \"$1\" in -in) f=$2;; -out) o=$2;; -sigfile) s=$2;; esac; shift; done\n"
+                "    if [ \"$mode\" = -sign ]; then cksum < \"$f\" > \"$o\"; "
+                + ("else exit 0; fi ;;\n" if verify_always_ok else "else [ \"$(cksum < \"$f\")\" = \"$(cat \"$s\")\" ] || exit 1; fi ;;\n")
+                + "esac\n")
+        (self.t / "bin/openssl").write_text(body)
+        (self.t / "bin/openssl").chmod(0o755)
+        (self.t / "bin/r3i6nos-pkg").chmod(0o755)
+
+    def section(self, **env):
+        self.report(**env)
+        text = self.text(self.t / "sys2/r3i6nos")
+        a = text.index("== packages ==")
+        b = text.find("== ", a + 5)
+        return text[a:b if b > 0 else None]
+
+    def test_what_is_installed_the_key_and_a_working_signature_check(self):
+        p = self.section()
+        self.assertIn("INFO installed: 2 package(s)", p)
+        self.assertIn("INFO package Commander: 1.0 built in 2.0 MB", p)
+        self.assertIn("INFO package TinyNTT: 2.1 data card 800 KB", p)
+        self.assertIn("PASS catalog public key: present, sha256 ", p)
+        self.assertIn("PASS signature of a good file: passes", p)
+        self.assertIn("PASS signature of a changed file: fails, as it must", p)
+        self.assertIn("SKIP cached catalog: none yet", p)
+        self.assertIn("INFO system update waiting for the menu to confirm: no", p)
+
+    def test_no_public_key_is_a_failure(self):
+        (self.t / "etc/r3i6nos/packages.pub").unlink()
+        self.assertIn("FAIL catalog public key: none in this image", self.section())
+
+    def test_a_signature_check_that_passes_a_changed_file_is_a_failure(self):
+        self.fake_openssl(verify_always_ok=True)
+        self.assertIn("FAIL signature of a changed file: PASSES", self.section())
+
+    def test_no_openssl(self):
+        (self.t / "bin/openssl").unlink()
+        self.assertIn("FAIL signature check: could not run", self.section())
+
+    def test_a_system_update_the_menu_has_not_confirmed_is_said(self):
+        (self.t / "var/pending").mkdir()
+        (self.t / "var/pending/system-pending").write_text("x\n")
+        (self.t / "var/rollback").mkdir()
+        (self.t / "var/rollback/boots").write_text("1\n")
+        (self.t / "var/rollback/current").write_text("0.1.2.180-0.1.2.183\n")
+        (self.t / "var/system-packages").write_text("r3i6nos-system 0.1.2.183\n")
+        p = self.section()
+        self.assertIn("FAIL system update waiting for the menu to confirm: YES", p)
+        self.assertIn("boots counted: 1 of 2", p)
+        self.assertIn("INFO rollback kept: 0.1.2.180-0.1.2.183", p)
+        self.assertIn("INFO system packages: r3i6nos-system 0.1.2.183", p)
+
+    def test_a_cached_catalog_is_checked_against_the_images_key(self):
+        c = self.t / "cache"
+        c.mkdir()
+        (c / "index.json").write_text("{}\n")
+        (c / "index.json.sig").write_text(subprocess.run("cksum < " + str(c / "index.json"), shell=True, capture_output=True, text=True).stdout)
+        self.assertIn("PASS cached catalog: verifies with the image's key", self.section())
+        (c / "index.json").write_text("{\"changed\": 1}\n")
+        self.assertIn("FAIL cached catalog: DOES NOT VERIFY", self.section())
+
+    def test_the_section_is_in_the_report_even_with_nothing_installed(self):
+        (self.t / "bin/r3i6nos-pkg").unlink()
+        self.assertIn("SKIP r3i6nos-pkg: did not answer", self.section())
 
 
 class NeedsDialog(unittest.TestCase):

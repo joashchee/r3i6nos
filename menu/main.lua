@@ -19,6 +19,8 @@ local redraw = require("redraw")
 local rd = redraw.new() -- what needs drawing (menu/redraw.lua)
 local pkgflag = require("pkgflag") -- r3i6nos-pkg left a change (docs/PACKAGES-OTA.md): read the cards again
 local pkgs = pkgflag.new(os.getenv("R3I6NOS_PKG_FLAG") or "/run/loveos/pkg-changed")
+local sysconfirm = require("sysconfirm") -- after a system update: the first full screen tells the boot step it worked (docs/PACKAGES-OTA.md)
+local sysmark = sysconfirm.new()
 
 local ROMS = os.getenv("R3I6NOS_ROMS") or "/roms"
 local ROMS2 = os.getenv("R3I6NOS_ROMS2") or "/roms2" -- the data card (docs/STORAGE.md)
@@ -210,4 +212,5 @@ function love.draw()
   view.render(screen, { entries = entries, selected = selected, dialog = dialog, battery = power })
   toast.draw(hotplug, screen)
   theme.draw(screen)
+  sysconfirm.confirm(sysmark) -- the first frame is up: a system update is good (r3i6nos-sysupdate boot would otherwise undo it)
 end

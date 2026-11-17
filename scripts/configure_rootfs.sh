@@ -148,19 +148,14 @@ echo "[*] System settings..."
 # VERSION is the release this build belongs to; the commit says exactly what it was built from. R3I6NOS_COMMIT overrides
 # it for a tree without git; safe.directory lets root (CI's sudo) read a checkout another user owns. sudo drops GITHUB_ACTIONS,
 # so CI says who built it with R3I6NOS_BUILT_BY (build.yml); the first report from a unit showed a CI image as "local".
-git_() { git -c safe.directory="$REPO" -C "$REPO" "$@" 2>/dev/null; }
-commit="${R3I6NOS_COMMIT:-$(git_ rev-parse HEAD || echo unknown)}"
-modified=0
-if [ -z "${R3I6NOS_COMMIT:-}" ] && [ -n "$(git_ status --porcelain --untracked-files=no)" ]; then modified=1; fi
-cat > "$ROOTFS/etc/r3i6nos-release" <<EOF
-VERSION=$(tr -d '[:space:]' < "$REPO/VERSION")
-COMMIT=$commit
-COMMIT_DATE=$(git_ show -s --format=%cs "$commit" || echo unknown)
-MODIFIED=$modified
-BUILT=$(date -u +%Y-%m-%d)
-BUILT_BY=${R3I6NOS_BUILT_BY:-$([ -n "${GITHUB_ACTIONS:-}" ] && echo github || echo local)}
-REPO=joashchee/r3i6nos
-EOF
+"$REPO/scripts/release_file.sh" > "$ROOTFS/etc/r3i6nos-release"
+if [ ! -f "$ROOTFS/etc/r3i6nos/packages.pub" ]; then
+    echo "[!] No /etc/r3i6nos/packages.pub in the image: run scripts/publish-packages.sh keygen once and commit overlay/etc/r3i6nos/packages.pub. Until then this image can check no catalog and install no system update." >&2
+fi
+# What the system package "r3i6nos-system" is at: a later one is installed only if its version is higher (r3i6nos-sysupdate), so an old catalog
+# can never take a newer image backwards.
+mkdir -p "$ROOTFS/var/lib/r3i6nos"
+echo "r3i6nos-system $("$REPO/scripts/system_version.sh")" > "$ROOTFS/var/lib/r3i6nos/system-packages"
 echo "r3i6nos" > "$ROOTFS/etc/hostname"
 cat > "$ROOTFS/etc/hosts" <<'EOF'
 127.0.0.1 localhost
@@ -220,6 +215,12 @@ ln -sfn /etc/systemd/system/r3i6nos-net.path \
 # Settings > Data card: a path unit that only watches for the menu's Format request; the helper formats only the card that is not the boot card.
 ln -sfn /etc/systemd/system/r3i6nos-format.path \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-format.path"
+# System packages (docs/PACKAGES-OTA.md): a path unit that only watches for a staged package, and a boot step that undoes an update the menu never
+# confirmed. The helper installs nothing the catalog's key (/etc/r3i6nos/packages.pub) did not sign.
+ln -sfn /etc/systemd/system/r3i6nos-sysupdate.path \
+    "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-sysupdate.path"
+ln -sfn /etc/systemd/system/r3i6nos-sysboot.service \
+    "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-sysboot.service"
 # SSH is off until a person starts it in Settings, and every card makes its own host keys then (not the build's, which every card would share).
 rm -f "$ROOTFS"/etc/systemd/system/multi-user.target.wants/{ssh,sshd}.service "$ROOTFS"/etc/systemd/system/sshd.service \
     "$ROOTFS"/etc/systemd/system/sockets.target.wants/ssh.socket "$ROOTFS"/etc/ssh/ssh_host_*

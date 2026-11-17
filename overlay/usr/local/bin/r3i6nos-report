@@ -20,6 +20,8 @@ R3I6NOS_REPORT_SETUP=k/3, and each run writes r36s-report-run<k>.txt (r36s-repor
 Sections: system (the build, kernel, CPU, memory), setup (whether r3i6nos-setup made this card, docs/TWO-SLOT-SETUP.md), boot (units that failed, how long boot took), sound (the RK817's Playback
 Path, the headphone jack, the volume keys and the mixer, from r3i6nos-sound), clock (r3i6nos-clock status), storage (every mmc disk and slot, what
 r3i6nos-cards mounted, the kernel's filesystems, loop devices, and on each mounted card a write/rename/read/delete check and its speed),
+packages (what is installed and from where, the free room in ROOTFS, the catalog's public key and cache, whether this unit's OpenSSL checks an Ed25519 signature
+(a throwaway key signs a file: the good file passes and a changed one fails), and the state of the last system update; docs/PACKAGES-OTA.md),
 power (what the background work costs the battery: the hot-plug daemon, the menu, the periodic jobs; the idle draw in mW; docs/POWER.md),
 usb gadget and usb ethernet (whether the OTG port can act as a network card for a computer, or host a wired adapter: the answers the screen
 mirror needs, ROADMAP section 28, docs/SCREEN-MIRROR.md; read-only, from /proc and /sys).
@@ -29,10 +31,11 @@ R3I6NOS_CARDS_STATE (/run/r3i6nos/cards), R3I6NOS_REPORT_DIR (the folder to writ
 R3I6NOS_SETUP_VAR, R3I6NOS_SETUP_RUN, R3I6NOS_SETUP_BOOT (where r3i6nos-setup leaves its record, state and report),
 R3I6NOS_SOUND (r3i6nos-sound), R3I6NOS_HOTPLUG (r3i6nos-hotplug),
 R3I6NOS_CLOCK (r3i6nos-clock), and for the power section (docs/POWER.md): R3I6NOS_REPORT_POWER_S (30: seconds per measuring window),
-R3I6NOS_BATTERY (r3i6nos-battery), R3I6NOS_MODULES (/lib/modules), R3I6NOS_BOOTSTATE_CMD (r3i6nos-bootstate), R3I6NOS_MENU_MATCH (/opt/loveos/menu: how the menu's process
+R3I6NOS_BATTERY (r3i6nos-battery), R3I6NOS_PKG (r3i6nos-pkg), R3I6NOS_OPENSSL, R3I6NOS_PKG_CACHE, R3I6NOS_APP_ROOT (/opt/native_apps), R3I6NOS_MODULES (/lib/modules), R3I6NOS_BOOTSTATE_CMD (r3i6nos-bootstate), R3I6NOS_MENU_MATCH (/opt/loveos/menu: how the menu's process
 is told), R3I6NOS_POWER_AB (1: do the stop-and-compare even when not root, tests).
 """
 import gzip
+import hashlib
 import os
 import re
 import resource
@@ -66,6 +69,13 @@ POWER_S = float(ENV("R3I6NOS_REPORT_POWER_S", "30"))
 MODULES = Path(ENV("R3I6NOS_MODULES", "/lib/modules"))
 BATTERY_CMD = ENV("R3I6NOS_BATTERY", "/usr/local/bin/r3i6nos-battery")
 BOOTSTATE_CMD = ENV("R3I6NOS_BOOTSTATE_CMD", "/usr/local/bin/r3i6nos-bootstate")
+PKG = ENV("R3I6NOS_PKG", "/usr/local/bin/r3i6nos-pkg")
+OPENSSL = ENV("R3I6NOS_OPENSSL", "openssl")
+APP_ROOT = Path(ENV("R3I6NOS_APP_ROOT", "/opt/native_apps"))
+PKG_RESERVE_MB = int(ENV("R3I6NOS_PKG_RESERVE_MB", "200"))      # deb_watcher.py's own rule for what a package may leave free
+PKG_RESERVE_PCT = int(ENV("R3I6NOS_PKG_RESERVE_PCT", "10"))
+PKG_CACHE = Path(ENV("R3I6NOS_PKG_CACHE") or Path.home() / ".cache/r3i6nos-pkg")
+SYSUPDATE_OUT = Path(ENV("R3I6NOS_SYSUPDATE_OUT", "/run/r3i6nos-sysupdate"))
 MENU_MATCH = ENV("R3I6NOS_MENU_MATCH", "/opt/loveos/menu")
 # the goals the power section checks against (docs/POWER.md): a goal missed is a FAIL line, not a silent number
 GOAL_DAEMON_CPU = 1.0        # % of one core, the hot-plug daemon
@@ -331,6 +341,79 @@ def clock(r):
             r.line("PASS" if val != "no" else "FAIL", key, val if val != "no" else "no: set it in Settings > Date and time (the times here may be off)")
         elif key:
             r.line("INFO", key, val)
+
+
+def packages(r):
+    """== packages ==: what is installed, room for more, and whether the signed-catalog and system-update machinery can work on this unit (docs/PACKAGES-OTA.md).
+
+    Read-only and offline: it never downloads. A report that finds the catalog's key missing or the unit's OpenSSL unable to check a signature says so,
+    because then no system update can ever be installed here (and a reflash is the cure)."""
+    r.step("packages")
+    r.section("packages")
+    out = run([PKG, "list"]) if Path(PKG).exists() else None
+    if out is None:
+        r.line("SKIP", "r3i6nos-pkg", "did not answer")
+    else:
+        rows = [ln.split("\t") for ln in out.splitlines() if "\t" in ln]
+        r.line("INFO", "installed", f"{len(rows)} package(s)")
+        for row in rows[:20]:
+            r.line("INFO", f"package {row[0]}", " ".join(row[1:]))
+    try:
+        st = os.statvfs(str(APP_ROOT if APP_ROOT.exists() else "/"))
+        free, total = st.f_bavail * st.f_frsize, st.f_blocks * st.f_frsize
+        reserve = max(PKG_RESERVE_MB * 1024 ** 2, total * PKG_RESERVE_PCT // 100)
+        r.line("INFO", "root filesystem", f"{gb(free)} free of {gb(total)}; a package may not leave less than {gb(reserve)}")
+        r.line("PASS" if free > reserve + 50 * 1024 ** 2 else "FAIL", "room for a package", f"{gb(max(0, free - reserve))} usable")
+    except OSError as e:
+        r.line("SKIP", "root filesystem", f"unreadable: {e.strerror or e}")
+    key = ETC / "r3i6nos/packages.pub"
+    if key.is_file():
+        r.line("PASS", "catalog public key", f"present, sha256 {hashlib.sha256(key.read_bytes()).hexdigest()[:16]}")
+    else:
+        r.line("FAIL", "catalog public key", "none in this image (/etc/r3i6nos/packages.pub): no system update or catalog can be checked here")
+    # does this unit's OpenSSL check an Ed25519 signature? a throwaway key signs a file; the good file must pass and a changed one fail
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            ver = run([OPENSSL, "version"])
+            r.line("INFO", "openssl", ver or "not found")
+            if ver is None:
+                raise OSError("openssl not found")
+            subprocess.run([OPENSSL, "genpkey", "-algorithm", "ed25519", "-out", str(d / "k")], check=True, capture_output=True, timeout=30)
+            subprocess.run([OPENSSL, "pkey", "-in", str(d / "k"), "-pubout", "-out", str(d / "p")], check=True, capture_output=True, timeout=30)
+            (d / "f").write_text("a catalog\n")
+            subprocess.run([OPENSSL, "pkeyutl", "-sign", "-inkey", str(d / "k"), "-rawin", "-in", str(d / "f"), "-out", str(d / "s")], check=True, capture_output=True, timeout=30)
+            check = lambda: subprocess.run([OPENSSL, "pkeyutl", "-verify", "-pubin", "-inkey", str(d / "p"), "-rawin", "-in", str(d / "f"), "-sigfile", str(d / "s")],  # noqa: E731
+                                           capture_output=True, timeout=30).returncode
+            good = check() == 0
+            (d / "f").write_text("a changed catalog\n")
+            bad = check() != 0
+            r.line("PASS" if good else "FAIL", "signature of a good file", "passes" if good else "FAILS: no catalog can be trusted on this unit")
+            r.line("PASS" if bad else "FAIL", "signature of a changed file", "fails, as it must" if bad else "PASSES: the check does not check")
+    except (OSError, subprocess.SubprocessError) as e:
+        r.line("FAIL", "signature check", f"could not run: {getattr(e, 'strerror', None) or e}")
+    cache = PKG_CACHE
+    index = cache / "index.json"
+    if index.is_file() and key.is_file():
+        age = (time.time() - index.stat().st_mtime) / 86400
+        ok = subprocess.run([OPENSSL, "pkeyutl", "-verify", "-pubin", "-inkey", str(key), "-rawin", "-in", str(index), "-sigfile", str(cache / "index.json.sig")],
+                            capture_output=True).returncode == 0
+        r.line("PASS" if ok else "FAIL", "cached catalog", f"{'verifies' if ok else 'DOES NOT VERIFY'} with the image's key, {age:.1f} days old")
+    else:
+        r.line("SKIP", "cached catalog", "none yet: run `r3i6nos-pkg check` (the only network use, and only when run)")
+    flat = read(SETUP_VAR / "system-packages")
+    r.line("INFO", "system packages", flat.replace("\n", "; ") if flat else "none recorded")
+    pending = (SETUP_VAR / "pending/system-pending").exists()
+    cur = read(SETUP_VAR / "rollback/current")
+    boots = read(SETUP_VAR / "rollback/boots")
+    r.line("INFO" if not pending else "FAIL", "system update waiting for the menu to confirm",
+           "no" if not pending else f"YES: the menu has not confirmed it (boots counted: {(boots or '0').strip()} of 2; at 2 the old files come back)")
+    r.line("INFO", "rollback kept", (cur or "nothing").strip())
+    res = keyvals(SYSUPDATE_OUT / "result")
+    if res:
+        r.line("PASS" if res.get("ok") == "1" else "INFO", "last system update answer", f"ok={res.get('ok')} id={res.get('id')}")
+    for tool in ("dpkg-deb", "python3"):
+        r.line("PASS" if shutil.which(tool) else "FAIL", f"tool {tool}", shutil.which(tool) or "not on the PATH of this login (r3i6nos-pkg needs it)")
 
 
 def disks():
@@ -1092,11 +1175,11 @@ def main(argv):
     try:
         folder, card = where(cards)
         r = Report(folder, how, rel.get("VERSION", "?"), card, quiet)
-        r.steps = 11 + 2 * len(mounted_cards(cards))
+        r.steps = 12 + 2 * len(mounted_cards(cards))
     except OSError as e:
         print(f"r3i6nos-report: cannot write the report: {e}", file=sys.stderr)
         return 1
-    for part in (lambda: (system(r, rel), setup_section(r)), lambda: boot(r), lambda: sound(r), lambda: clock(r), lambda: storage(r, cards), lambda: usb_sections(r), lambda: power_section(r)):
+    for part in (lambda: (system(r, rel), setup_section(r)), lambda: boot(r), lambda: sound(r), lambda: clock(r), lambda: storage(r, cards), lambda: packages(r), lambda: usb_sections(r), lambda: power_section(r)):
         try:
             part()
         except Exception as e:  # a broken check is a line in the report, never a missing report

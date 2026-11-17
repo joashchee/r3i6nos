@@ -1,0 +1,10 @@
+[Unit]
+Description=Install a signed system package (the menu, the theme, the helpers), keeping what it replaces
+Documentation=file:/usr/local/bin/r3i6nos-sysupdate
+# Started by r3i6nos-sysupdate.path; never wanted by a target. Copies the staged files out of the login user's reach, checks the catalog's
+# signature and the package's hash, writes only the allowed paths, and answers in /run/r3i6nos-sysupdate/result.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/r3i6nos-sysupdate apply
+TimeoutStartSec=600
