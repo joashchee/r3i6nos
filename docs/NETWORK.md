@@ -10,6 +10,7 @@ Start opens Settings: **Network**, **SSH**, **Battery** (`docs/BATTERY.md`), **S
 - **Network:** Status (adapters, address, gateway, DNS, the joined Wi-Fi, MAC), Wired setup, Wi-Fi setup (scan, list by signal, pick, type the
   password on the on-screen keyboard, or *Other network...* for a name that is not listed), Wi-Fi: join saved, Forget saved Wi-Fi, Test connection,
   Disconnect, Instructions (what to plug in, wired, Wi-Fi, if it does not work).
+- **The top bar** (2026-11-18): left of the battery, `ë` when a wired link is up, `¥` and three cells (`█` reached, `░` not) when Wi-Fi is connected, nothing with no link (`menu/netstatus.lua`; the signal is `/proc/net/wireless`: -67 dBm or better is three cells, -80 two, else one). Untested on a unit.
 - **SSH:** Status, Set SSH password (typed twice), Start SSH, Stop SSH, Instructions.
 - **On-screen keyboard:** D-pad moves, A types, X deletes, Y changes layer (abc, ABC, symbols), Select shows or hides the text, Start is done, B cancels.
   A real keyboard types too.

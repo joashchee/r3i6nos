@@ -35,6 +35,7 @@ step "lua tests"
 if command -v luajit >/dev/null; then
     luajit tests/test_scan.lua || fail=1
     luajit tests/test_battery.lua || fail=1
+    luajit tests/test_netstatus.lua || fail=1
     luajit tests/test_settings.lua || fail=1
     luajit tests/test_clock.lua || fail=1
     luajit tests/test_mixer.lua || fail=1
@@ -56,6 +57,7 @@ if command -v luajit >/dev/null; then
 elif command -v lua >/dev/null; then
     lua tests/test_scan.lua || fail=1
     lua tests/test_battery.lua || fail=1
+    lua tests/test_netstatus.lua || fail=1
     lua tests/test_settings.lua || fail=1
     lua tests/test_clock.lua || fail=1
     lua tests/test_reports.lua || fail=1

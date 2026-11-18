@@ -33,6 +33,15 @@ has(scr:dump()[1], "CHG"); eq(scr.bg[64 - 3], theme.BLUE, "charging is not low")
 assert(theme.contrast(theme.LIGHT_GREEN, theme.BLUE) >= 4.5)
 view.render(scr, { entries = entries, selected = 1, dialog = dialog })
 assert(not scr:dump()[1]:find("BAT", 1, true), "no battery, no indicator")
+-- the network: wired "ë" (CP437 137), Wi-Fi "¥" (157) and three cells, left of the battery, never over it
+view.render(scr, { entries = entries, selected = 1, dialog = dialog, battery = { pct = 62, status = "Discharging" }, net = { wifi = true, cells = 2 } })
+rows = scr:dump()
+local pos = 51 -- "BAT █░░░░ 62%" is 13 cells ending at the second to last column, so it starts at cell 51 (1-based)
+local want = { 157, 219, 219, 176 } -- ¥ █ █ ░
+for i, ch in ipairs(want) do eq(scr.ch[pos - 6 + i], ch, "Wi-Fi mark and bars just before BAT, cell " .. i) end
+has(rows[1], "BAT")
+view.render(scr, { entries = entries, selected = 1, dialog = dialog, net = { wired = true } })
+assert(scr.ch[64 - 1] == 137, "no battery: the wired mark ends at the battery's place, got " .. tostring(scr.ch[63]))
 view.render(scr, { entries = entries, selected = 1, dialog = dialog })
 rows = scr:dump()
 -- the list: rows 1-20, 18 games a page, the page in the top edge (the dump shows non-ASCII as ?)

@@ -5,6 +5,7 @@ local theme = require("r3i6nos_ansiapps")
 local settings = require("settings")
 local osk = require("osk")
 local battery = require("battery")
+local netstatus = require("netstatus")
 
 local view = {}
 
@@ -199,6 +200,16 @@ function view.battery(scr, reading)
   scr:textRight(theme.COLS - 2, theme.TOP_ROW, text, fg, bg)
 end
 
+--- The network at the top, left of the battery: "ë" wired, "¥" and three cells of signal for Wi-Fi (state.net from netstatus.read(), nil or no link: nothing).
+function view.net(scr, net, reading)
+  local text = netstatus.indicator(net)
+  if not text then return end
+  local bat = battery.indicator(reading)
+  local right = theme.COLS - 2
+  if bat then right = right - theme.width(bat) - 1 end
+  scr:textRight(right, theme.TOP_ROW, text, theme.STYLE.bar.fg, theme.STYLE.bar.bg)
+end
+
 --- The start-up screen, drawn at once, before the card is scanned, so the panel is never black while the menu loads.
 --- done of total steps, and what the step is doing.
 function view.splash(scr, done, total, doing)
@@ -221,6 +232,7 @@ function view.render(scr, state)
   local n = #entries
   theme.topBar(scr, ("r3i6nos  %d %s"):format(n, n == 1 and "app" or "apps"))
   view.battery(scr, state.battery)
+  view.net(scr, state.net, state.battery)
 
   local items = {}
   for i, e in ipairs(entries) do items[i] = { label = e.title, value = typeLabel(e) } end

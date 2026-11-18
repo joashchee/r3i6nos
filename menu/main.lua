@@ -7,6 +7,7 @@ package.path = (os.getenv("R3I6NOS_THEME") or "/opt/loveos/theme") .. "/?.lua;" 
 
 local scan = require("scan")
 local battery = require("battery")
+local netstatus = require("netstatus")
 local netclient = require("netclient")
 local settings = require("settings")
 local about = require("about")
@@ -49,6 +50,7 @@ end
 local screen
 local power, powerAge = nil, 0 -- the battery reading for the top bar, re-read every few seconds
 local POWER_EVERY = 10
+local net = nil -- the link for the top bar, read with the battery
 
 -- The first screen goes up before anything slow runs (the card scan forks `ls` for every folder): a black panel for
 -- seconds feels like a hang. Shown twice, so both buffers of the display hold it.
@@ -72,6 +74,7 @@ function love.load()
   entries = scan.entries(ROMS, LAUNCHERS, DEFAULTS, ROMS2)
   splash(2, 3, "Reading the battery")
   power = battery.read()
+  net = netstatus.read()
   splash(3, 3, "Ready")
   if require("clock").needed() then settings.openClock(dialog) end -- the card's first boot: ask for the date and time (docs/CLOCK.md)
 end
@@ -128,7 +131,7 @@ function love.update(dt)
   end
   testSound()
   powerAge = powerAge + dt
-  if powerAge >= POWER_EVERY then powerAge, power = 0, battery.read(); redraw.mark(rd) end
+  if powerAge >= POWER_EVERY then powerAge, power, net = 0, battery.read(), netstatus.read(); redraw.mark(rd) end
 end
 
 -- LÖVE's own loop redraws at the display's rate (60 a second) even when nothing moves: 60% of a core on the unit's idle menu
@@ -209,7 +212,7 @@ function love.joystickpressed(_, button)
 end
 
 function love.draw()
-  view.render(screen, { entries = entries, selected = selected, dialog = dialog, battery = power })
+  view.render(screen, { entries = entries, selected = selected, dialog = dialog, battery = power, net = net })
   toast.draw(hotplug, screen)
   theme.draw(screen)
   sysconfirm.confirm(sysmark) -- the first frame is up: a system update is good (r3i6nos-sysupdate boot would otherwise undo it)
