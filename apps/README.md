@@ -2,8 +2,8 @@
 
 > New apps start from the r3i6nos-ansiapps theme (`docs/R3I6NOS-ANSIAPPS-THEME.md`). The IO Checker and Commander are on it.
 
-Built into every image (`/opt/loveos/defaults`), so the menu is never empty. Anything on the games card
-(`EASYROMS`) is listed beside them, and a file of the same name there replaces the built-in one.
+Built into every image (`/opt/loveos/defaults`), so the menu is never empty: **native `.deb` apps only** (Commander, the native IO Checker, and PortMaster for testing; since 2026-11-18 the
+LÖVE builds of the IO Checker are not in the image). Anything on the games card (`EASYROMS`) is listed beside them, and a file of the same name there replaces the built-in one.
 
 ## IO Checker
 

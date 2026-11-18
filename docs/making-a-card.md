@@ -23,18 +23,20 @@ One-off: `brew install mtools e2fsprogs`.
 
 ## Built-in apps
 
-Every image carries the **IO Checker** three ways (LÖVE 11.5, LÖVE 12.0, native ARM64; `apps/README.md`), so the menu
-is never empty and you can check the buttons, screen, sound and cards before adding any games. They live on the system partition, not on `EASYROMS`.
+Every image carries **Commander** (a file manager and viewer) and the **native IO Checker** (`apps/README.md`) as `.deb` apps, **PortMaster** for testing (`docs/PORTMASTER.md`), the LÖVE 11.5 and 12.0
+runtimes, `nttplay` and a minimal `ffmpeg`, so the menu is never empty and you can check the buttons, screen, sound and cards before adding any games. They live on the system partition,
+not on `EASYROMS`. (The LÖVE builds of the IO Checker were taken out of the image on 2026-11-18; they stay in `apps/io-checker-love/` and go on a card's `Love 11.5/` or `Love 12.0/` like any game.)
 
 ## The R36S ports go on too
 
 When `flash-macos.sh` makes `EASYROMS` (a full flash, or `--games-only`), it copies the R36S ports onto it from their **newest local
-builds**, each in its own repo beside this one (`R3I6NOS_PORTS_ROOT` overrides the folder):
+builds**, each in its own repo beside this one (`R3I6NOS_PORTS_ROOT` overrides the folder; the list is `scripts/ports.conf`, one command, `scripts/build-ports.sh`, refreshes them all):
 
 | Port | Its local build | Goes to | Built by (in its repo) |
 |---|---|---|---|
-| KlamANSI | `r36s/build/pkg/KlamANSI.deb` | `native_deb/` | `r36s/package/docker-package.sh` |
-| Neumetik, Composer, Painter, Animator | `r36s/build/pkg/Neumetik.deb`, `compose.deb`, `sprites.deb`, `animate.deb` | `native_deb/` | `r36s/build-deb.sh` |
+| KlamANSI | `r36s/build/pkg/KlamANSI.deb` | `native_deb/` | `r36s/build-deb.sh` |
+| Neumetik, Composer, Painter, Animator, Crunchy, Chordica, TinyNTT, Hydrolik | `r36s/build/pkg/<name>.deb` | `native_deb/` | `r36s/build-deb.sh` |
+| FM1-NTT, FM1-NTT Firmware Pack | `build/pkg/FM1-NTT.deb`, `build/pkg/FM1-NTT-firmware-pack.deb` | `native_deb/` | `r36s/build-deb.sh`, `./build-deb.sh` |
 | NoCoGaMa | `build/Love 11.5/*.love`, `build/Love 12.0/*.love` (the newest) | `Love 11.5/NoCoGaMa.love`, `Love 12.0/NoCoGaMa.love` | `scripts/build.sh` |
 
 The `.deb` files are installed by `deb_watcher` at the next boot. A port with no local build is listed as **MISSING** with the
