@@ -85,6 +85,20 @@ case "$TYPE" in
         fi
         export PATH="$PM_SHIM:$PATH"
         cd "$(dirname "$TARGET")" || exit 1
+        # A port normally quits through gptokeyb (Select+Start), which needs /dev/uinput; when that does not work a port that fails or ignores the pad cannot be left.
+        # So the port runs in its own process group and r3i6nos-portquit ends the group when Select+Start are held for 2 seconds (docs/PORTMASTER.md).
+        PORTQUIT="${R3I6NOS_PORTQUIT:-/usr/local/bin/r3i6nos-portquit}"
+        if command -v setsid >/dev/null 2>&1 && [ -x "$PORTQUIT" ]; then
+            setsid bash "$TARGET" <&0 &
+            port_pid=$!
+            "$PORTQUIT" "$port_pid" &
+            quit_pid=$!
+            wait "$port_pid"
+            port_rc=$?
+            kill "$quit_pid" 2>/dev/null
+            wait "$quit_pid" 2>/dev/null
+            exit "$port_rc"
+        fi
         bash "$TARGET"
         ;;
     *)

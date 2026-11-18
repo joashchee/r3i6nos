@@ -1,0 +1,143 @@
+#!/usr/bin/env python3
+"""r3i6nos-portquit PGID - an exit for a PortMaster port that does not depend on the port.
+
+Ports quit through gptokeyb (Select+Start), which needs /dev/uinput; when it is missing or not writable a port that fails, or
+that only listens to the keyboard it was going to be given, cannot be left (2026-11-18, the first test set on the unit). This
+watches the pad itself and, when Select and Start have been held together for HOLD seconds, ends the port's process group
+(SIGTERM, then SIGKILL after GRACE seconds) so run_app.sh returns and the menu comes back.
+
+It reads the pad's event device (found by name in /proc/bus/input/devices); the Select and Start codes are the 13th and 14th
+buttons in the order SDL counts them (codes from BTN_JOYSTICK up, then the lower ones), which is how the measured numbers in
+docs/hardware-findings.md arise. Exits when the group is gone. Never fails the launch: any problem is one line on stderr.
+
+Overrides, for tests: R3I6NOS_PORTQUIT_DEVICE (a file or FIFO of input_event records), R3I6NOS_PORTQUIT_CODES ("select,start" evdev
+codes), R3I6NOS_PORTQUIT_HOLD, R3I6NOS_PORTQUIT_GRACE.
+"""
+import os
+import re
+import select
+import signal
+import struct
+import sys
+import time
+
+HOLD = float(os.environ.get("R3I6NOS_PORTQUIT_HOLD", "2"))
+GRACE = float(os.environ.get("R3I6NOS_PORTQUIT_GRACE", "2"))
+SELECT_INDEX, START_INDEX = 12, 13           # SDL's 0-based button numbers, measured on the unit
+BTN_JOYSTICK = 0x120
+EVENT = struct.Struct("llHHi")               # struct input_event on a 64-bit kernel
+EV_KEY = 1
+
+
+def say(msg):
+    print("r3i6nos-portquit: " + msg, file=sys.stderr)
+
+
+def pad_event_device():
+    """(path, sysfs name) of the first pad: a device with a js handler, else one named like a gamepad."""
+    try:
+        text = open("/proc/bus/input/devices").read()
+    except OSError:
+        return None
+    for block in text.split("\n\n"):
+        name = re.search(r'N: Name="([^"]*)"', block)
+        handlers = re.search(r"H: Handlers=(.*)", block)
+        if not name or not handlers:
+            continue
+        event = re.search(r"\bevent(\d+)\b", handlers.group(1))
+        if event and (re.search(r"\bjs\d+\b", handlers.group(1)) or re.search(r"pad|joystick", name.group(1), re.I)):
+            return "/dev/input/event" + event.group(1), "event" + event.group(1)
+    return None
+
+
+def key_codes(sysname):
+    """The device's button codes in the order SDL numbers them."""
+    try:
+        words = open("/sys/class/input/%s/device/capabilities/key" % sysname).read().split()
+    except OSError:
+        return []
+    bits = 0
+    for w in words:                           # most significant word first
+        bits = (bits << (4 * len(w))) | int(w, 16)
+    codes = [i for i in range(bits.bit_length()) if bits >> i & 1]
+    return [c for c in codes if c >= BTN_JOYSTICK] + [c for c in codes if c < BTN_JOYSTICK]
+
+
+def group_alive(pgid):
+    try:
+        os.killpg(pgid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def end_group(pgid):
+    say("Select+Start held: ending the port")
+    for sig, wait in ((signal.SIGTERM, GRACE), (signal.SIGKILL, 1)):
+        try:
+            os.killpg(pgid, sig)
+        except ProcessLookupError:
+            return
+        end = time.time() + wait
+        while time.time() < end:
+            if not group_alive(pgid):
+                return
+            time.sleep(0.1)
+
+
+def main(argv):
+    if len(argv) != 2 or not argv[1].isdigit():
+        say("usage: r3i6nos-portquit PGID")
+        return 2
+    pgid = int(argv[1])
+    path = os.environ.get("R3I6NOS_PORTQUIT_DEVICE")
+    codes = os.environ.get("R3I6NOS_PORTQUIT_CODES")
+    if codes:
+        select_code, start_code = [int(c) for c in codes.split(",")]
+    else:
+        found = pad_event_device()
+        if not found:
+            say("no pad found; no exit combination for this port")
+            return 0
+        path = path or found[0]
+        order = key_codes(found[1])
+        if len(order) <= START_INDEX:
+            say("the pad has too few buttons; no exit combination for this port")
+            return 0
+        select_code, start_code = order[SELECT_INDEX], order[START_INDEX]
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK)
+    except OSError as e:
+        say("cannot read %s: %s; no exit combination for this port" % (path, e))
+        return 0
+    down = set()
+    since = None
+    while group_alive(pgid):
+        wait = 0.25 if since is None else max(0.0, since + HOLD - time.time())
+        ready, _, _ = select.select([fd], [], [], min(wait, 0.25))
+        if ready:
+            try:
+                data = os.read(fd, EVENT.size * 32)
+            except BlockingIOError:
+                data = b""
+            except OSError:
+                return 0
+            for off in range(0, len(data) - EVENT.size + 1, EVENT.size):
+                _s, _u, etype, code, value = EVENT.unpack_from(data, off)
+                if etype == EV_KEY and code in (select_code, start_code):
+                    (down.add if value else down.discard)(code)
+        both = {select_code, start_code} <= down
+        if both and since is None:
+            since = time.time()
+        elif not both:
+            since = None
+        if since is not None and time.time() - since >= HOLD:
+            end_group(pgid)
+            return 0
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

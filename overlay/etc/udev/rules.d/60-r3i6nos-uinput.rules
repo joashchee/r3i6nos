@@ -1,0 +1,2 @@
+# /dev/uinput for the login user (group input): PortMaster's gptokeyb makes keyboard keys from the pad through it (docs/PORTMASTER.md).
+KERNEL=="uinput", SUBSYSTEM=="misc", GROUP="input", MODE="0660", OPTIONS+="static_node=uinput"
