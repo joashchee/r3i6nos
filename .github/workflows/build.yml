@@ -59,6 +59,24 @@ jobs:
     with:
       app: ${{ matrix.app }}
 
+  portmaster:
+    # PortMaster (MIT, third-party), packed for testing (docs/PORTMASTER.md): the pinned release zip is fetched, checked against its sha256 and
+    # packed with the r3i6nos launcher and hooks as PortMaster.deb. The artifact is named native-*-arm64 so the rootfs job merges it with the other
+    # default debs. Nothing here runs PortMaster; it needs a unit (untested).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build PortMaster.deb
+        run: scripts/build-portmaster.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: native-portmaster-arm64
+          path: build/native/PortMaster.deb
+          retention-days: 7
+
   ffmpeg:
     # The minimal ffmpeg (tools/ffmpeg-min/README.md): Commander's Play and Picture tabs and Rec demo's encode. Built natively in a Debian 12 arm64
     # container, which also decodes and encodes with it and compares the bytes with Debian's own ffmpeg (tools/ffmpeg-min/build.sh). GPL-2.0-or-later.
@@ -98,7 +116,7 @@ jobs:
           retention-days: 7
 
   rootfs:
-    needs: [love, native, ffmpeg]
+    needs: [love, native, portmaster, ffmpeg]
     # Build the rootfs with whatever runtimes were built, so a failing 12.0 does
     # not hide the rest. The run is still red: the love job failed.
     if: ${{ !cancelled() }}

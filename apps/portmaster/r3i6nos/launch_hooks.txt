@@ -1,0 +1,24 @@
+#!/bin/bash
+#
+# The r3i6nos hooks for PortMaster's utils/pm_launch.txt (docs/PORTMASTER.md in the r3i6nos repository). Sourced as <controlfolder>/r3i6nos/launch_hooks.txt.
+# Each pm_hook_* replaces PortMaster's default for the platforms it knows; here there is no ES frontend, no tty hand-over and no hotkey daemon.
+
+## Debian's SDL2 is under the multiarch folder, not /usr/lib.
+pm_hook_gui_env() {
+  export PYSDL2_DLL_PATH="/usr/lib/aarch64-linux-gnu"
+}
+
+## No chmod on the tty (the login user cannot, and the menu owns the screen): only the files PortMaster runs.
+pm_hook_pre_launch() {
+  export TERM=linux
+  echo "Starting PortMaster."
+  chmod -R +x . 2>/dev/null
+}
+
+## PortMaster asks for a restart after updating itself; the loop in pm_launch.txt handles it.
+pm_hook_run_pugwash() {
+  ./pugwash $PORTMASTER_CMDS
+}
+
+pm_hook_post_launch() { :; }
+pm_hook_frontend_refresh() { :; }

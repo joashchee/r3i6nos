@@ -213,17 +213,18 @@ bash tests/test_configure_rootfs.sh || fail=1
 bash tests/test_flash_macos.sh || fail=1
 bash tests/test_build_port.sh || fail=1
 bash tests/test_build_ports.sh || fail=1
+bash tests/test_portmaster.sh || fail=1
 bash tests/test_push_packages.sh || fail=1
 bash tests/test_image.sh || fail=1
 
 step "shell syntax"
-for f in overlay/usr/local/bin/run_app.sh overlay/usr/local/bin/loveos-session scripts/*.sh tests/*.sh tools/qjs-node/*.sh; do
+for f in overlay/usr/local/bin/run_app.sh overlay/usr/local/bin/loveos-session apps/portmaster/portmaster apps/portmaster/shim/sudo scripts/*.sh tests/*.sh tools/qjs-node/*.sh; do
     bash -n "$f" || fail=1
 done
 
 step "shellcheck"
 if command -v shellcheck >/dev/null; then
-    shellcheck overlay/usr/local/bin/run_app.sh overlay/usr/local/bin/loveos-session overlay/etc/profile.d/*.sh scripts/*.sh tests/*.sh tools/qjs-node/*.sh || fail=1
+    shellcheck overlay/usr/local/bin/run_app.sh overlay/usr/local/bin/loveos-session apps/portmaster/portmaster apps/portmaster/shim/sudo overlay/etc/profile.d/*.sh scripts/*.sh tests/*.sh tools/qjs-node/*.sh || fail=1
 else echo "NOT RUN: shellcheck not installed"; fi
 
 exit $fail

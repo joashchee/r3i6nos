@@ -1,6 +1,6 @@
 #!/bin/bash
 # run_app.sh - launch a LÖVE game or a native app on the R36S.
-# Usage: run_app.sh [love115|love120|native] <path_to_game_or_binary>
+# Usage: run_app.sh [love115|love120|native|port] <path_to_game_or_binary_or_port_script>
 
 set -u
 
@@ -12,7 +12,7 @@ TYPE="${1:-}"
 TARGET="${2:-}"
 
 if [ -z "$TYPE" ] || [ -z "$TARGET" ]; then
-    echo "Usage: $0 [love115|love120|native] <path_to_target>" >&2
+    echo "Usage: $0 [love115|love120|native|port] <path_to_target>" >&2
     exit 1
 fi
 
@@ -71,6 +71,14 @@ case "$TYPE" in
             exit 1
         fi
         "$TARGET"
+        ;;
+    port)
+        # A port PortMaster installed (docs/PORTMASTER.md): its own bash script, run from its folder. PortMaster's scripts call sudo to find out whether they
+        # are root; the shim says no, so they run as this user (a password prompt nobody can answer would hang them).
+        PM_SHIM="${R3I6NOS_PORTMASTER_SHIM:-/opt/native_apps/r36s-portmaster/usr/share/portmaster/shim}"
+        [ -d "$PM_SHIM" ] && export PATH="$PM_SHIM:$PATH"
+        cd "$(dirname "$TARGET")" || exit 1
+        bash "$TARGET"
         ;;
     *)
         echo "run_app.sh: unknown application type: $TYPE" >&2

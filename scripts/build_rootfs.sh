@@ -25,6 +25,8 @@ PACKAGES=(
     systemd systemd-sysv udev kmod       # boot
     dpkg python3-minimal libpython3-stdlib  # deb_watcher.py (stdlib only; -minimal alone has no shutil)
     libsdl2-2.0-0                        # native apps and LÖVE
+    libsdl2-mixer-2.0-0 libsdl2-image-2.0-0 libsdl2-ttf-2.0-0 libsdl2-gfx-1.0-0  # PortMaster's GUI (pysdl2 loads all four; docs/PORTMASTER.md)
+    procps                               # pgrep and pkill: PortMaster and the ports it runs use them
     libdrm2 libgbm1 libegl1 libgles2     # SDL's KMS/DRM driver
     libgl1-mesa-dri                      # Mesa panfrost for the Mali-G31
     libasound2 alsa-utils                # audio

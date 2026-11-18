@@ -187,3 +187,8 @@ The 12.0 download has not been run end to end: artifacts expire after 90 days, a
 artifact's sha256 so it can be pinned in `fetch_love_mac.sh`. A Mac cannot run the native ARM64 `.deb`; build the C app
 with `cc ... $(sdl2-config --cflags --libs)` instead (see `scripts/check.sh`) and run `--screenshot out.bmp` for a demo frame.
 
+
+## PortMaster (`portmaster/`, third-party, for testing)
+
+Not an r3i6nos app and not on the theme: the pinned PortMaster release (MIT) packed as `PortMaster.deb` by `scripts/build-portmaster.sh`, a default app for now. What it is,
+how it is launched, what it needs and what is untested: `docs/PORTMASTER.md`.

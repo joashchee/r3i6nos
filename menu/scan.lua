@@ -49,6 +49,19 @@ function scan.entries(roms, launchers, defaults, roms2)
     end
     end
   end
+  -- Ports PortMaster installed (docs/PORTMASTER.md): <card>/ports/<Name>.sh, run by run_app.sh as type "port". PortMaster's own launcher
+  -- (PortMaster.sh) is the native app of the same name, so it is not listed twice. The same name on both cards shows once, from the system card.
+  local ported = {}
+  for _, base in ipairs({ roms, roms2 or false }) do
+    if base then
+      for _, name in ipairs(ls(base .. "/ports")) do
+        if name:match("%.sh$") and name ~= "PortMaster.sh" and not ported[name] then
+          ported[name] = true
+          list[#list + 1] = { title = title((name:gsub("%.sh$", ""))), type = "port", target = base .. "/ports/" .. name }
+        end
+      end
+    end
+  end
   for _, name in ipairs(ls(launchers)) do
     if name:match("%.sh$") then
       list[#list + 1] = {

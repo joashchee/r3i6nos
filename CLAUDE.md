@@ -34,6 +34,7 @@ is blocked and on what.
 - `docs/APP-DATA.md`: where an app keeps its data (rule 16): the data card first, the move and merge offers, the one engine `r3i6nos-appdata`.
 - `docs/PACKAGES-OTA.md`: adding and upgrading `.deb` bundles over the network or SSH with no card out: `r3i6nos-pkg` (install, install-love, check, get, update), `scripts/push-packages.sh`, the signed catalog (`scripts/publish-packages.sh`, `scripts/catalog.py`) and system packages with rollback (the root helper `r3i6nos-sysupdate`, `scripts/build-system-package.sh`) are built (ROADMAP section 29 phases 1, 2, 3 and 5; the signing key is the maintainer's, made once with `publish-packages.sh keygen`); Settings > Packages, Roll back and Move are still proposed.
 - `docs/BRAND.md`: the logo (the butterfly "3i6", grey "r" and "n", no "os"); the boot logo is `docs/brand/boot-logo.png`, made into the BMP by `scripts/make_boot_logo.py` and put on BOOT by `inject-boot.sh`. The art is the maintainer's: never redraw it.
+- `apps/portmaster/` and `docs/PORTMASTER.md`: PortMaster (third-party, MIT) packed as a default app for testing (`scripts/build-portmaster.sh`); it keeps itself and its ports on `/roms/ports`, runs as the login user, installed ports are menu entries of type `port`; rules 8-14 and 16 are for apps made for r3i6nos and do not apply to it; **untested on a unit**.
 - `docs/hardware-findings.md`: what the stock card showed (kernel 4.4.189, no panfrost, boot flow). Read it before touching boot or graphics.
 
 ## Rules

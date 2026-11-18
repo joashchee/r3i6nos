@@ -26,3 +26,12 @@ ffmpeg and x264 (tools/ffmpeg-min/; built by scripts/build-ffmpeg-min.sh; intend
   Licence: the built binary is GPL-2.0-or-later (FFmpeg with --enable-gpl --enable-libx264; x264 is GPL-2.0-or-later); chosen by the maintainer (2026-11-11).
   Source: those two tarballs and the configure flags in tools/ffmpeg-min/build.sh. Changed: nothing (no patches). Any image that ships the binary
   must carry the GPL text and this offer of the source.
+
+PortMaster (apps/portmaster/; fetched and packed by scripts/build-portmaster.sh into PortMaster.deb, in the firmware image for testing: docs/PORTMASTER.md)
+  PortMaster-GUI release 2026.11.17-0700 (https://github.com/PortsMaster/PortMaster-GUI/releases/download/2026.11.17-0700/PortMaster.zip,
+  SHA-256 d96a921ed3110f3c1b56b1f5b88d34539241723bd2fb003f29edbce5402a4fef), (c) 2023-2025 Jacob and contributors.
+  Licence: MIT (the files carry SPDX-License-Identifier: MIT); the zip's own licenses/ folder carries the notices of its third-party parts
+  (7-Zip, innoextract, xdelta3, astcenc, gptokeyb, pysdl2 and the Python libraries). Changed: the armhf and x86_64 files and other platforms' hook folders are
+  removed; nothing else is edited. r3i6nos adds a launcher, a hook file and a sudo shim (MIT, this repository). It ships no game files; ports it later
+  downloads at a person's choice keep their own licences (a licenses/ folder in each) and are never in the image or this repository.
+

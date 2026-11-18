@@ -1,0 +1,3 @@
+#!/bin/sh
+# r3i6nos: no sudo for PortMaster (docs/PORTMASTER.md): a password prompt nobody can answer would hang it, and it runs as the login user without.
+exit 1

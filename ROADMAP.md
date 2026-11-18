@@ -73,7 +73,7 @@ document that has the detail. **Apps have run on a real R36S since 2026-11-09** 
     time while off is still open (power off for an hour, boot, read the report before setting anything).
   - Seen so far: Animator's and Composer's first reports were stamped 2026-11-10 03:34 and 03:36 but ran on 2026-11-09 by 12:34 (the clock about 15 h fast);
     their second, 2026-11-09 22:30, were right. Which image and whether the time was set in the dialog were not recorded.
-- [x] **Image apps are native `.deb` only** (2026-11-18): Commander, the native IO Checker, nttplay and ffmpeg; the LÖVE IO Checker left the image (`DEFAULT=0`). PortMaster checked 2026-11-18 (tooling MIT, a curated catalog whose ports carry their own licences, game data is the user's or the developer-permitted RTR; stock firmware unsupported, installing needs a network, catalog may hold emulators): licence-wise shippable as an optional, user-initiated add-on, never in the image by default; not added, waiting for the maintainer's decision.
+- [x] **Image apps are native `.deb` only** (2026-11-18): Commander, the native IO Checker, nttplay and ffmpeg; the LÖVE IO Checker left the image (`DEFAULT=0`). **PortMaster was then added for testing: section 31.**
 - [x] **The IO Checker replaces the Input Checker** (2026-11-09, `docs/IO-CHECKER.md`): the same three builds (`apps/io-checker-love`,
   `apps/io-checker-native`), now on the r3i6nos-ansiapps theme, checking input (every button with presses and chatter, axis ranges and
   rest, the buttons never pressed, the power and volume keys), video (nine full-screen patterns, a measured frame rate), sound (left,
@@ -594,3 +594,21 @@ The goal: after the first flash, nothing day to day needs a reflash or a card ou
 - [ ] **Rule 7's third exception reviewed** with the maintainer before the first delete is shipped (the engine is the one place the unit removes files from the games card).
 - [ ] **On the unit:** a data card in with an app's folder only on the system card (move), on both (merge), card out; time to copy 1 GB to exFAT and ext4; a card pulled mid-copy resumes.
 
+## 31. PortMaster in the image, for testing (maintainer's request 2026-11-18; `docs/PORTMASTER.md`)
+Checked first (2026-11-18): the GUI and port repository are MIT, ports are curated and carry their own licences, game data is the user's own copy (or Ready to
+Run with the developer's permission), stock firmware is not officially supported, installing from inside it needs a network. Not in the image by default
+before this: it is an unsupported-firmware port of a third-party tool, so it is there to find out what works on a unit.
+- [x] **The package** (2026-11-18): `scripts/build-portmaster.sh` fetches the pinned release (`apps/portmaster/app.conf`: tag, URL, sha256), refuses a mismatch,
+  keeps only the arm64 files, adds the launcher, the r3i6nos hooks (`r3i6nos/launch_hooks.txt` for `pm_launch.txt`) and a `sudo` shim, writes the notice, licence and source
+  beside it and packs `build/native/PortMaster.deb` (30 MiB unpacked, 17 MiB packed). `tests/test_portmaster.sh` (fake zip: hash, trim, layout, launcher, no downgrade, read-only card, sudo shim).
+- [x] **The launcher** (`apps/portmaster/portmaster`): copies PortMaster to `/roms/ports/PortMaster` the first time and only for a newer package (PortMaster updates itself there),
+  adds the measured R36S pad to its controller database, runs it as the login user (no sudo), and says so when the card is not writable.
+- [x] **The system** (2026-11-18): `build_rootfs.sh` adds `libsdl2-mixer-2.0-0`, `libsdl2-image-2.0-0`, `libsdl2-ttf-2.0-0`, `libsdl2-gfx-1.0-0` and `procps`
+  (the GUI imports all four SDL libraries; found by running it in Debian 12 arm64: it reached its window code with them and stopped at the first missing one without);
+  `check_image.sh` fails an image without the package, the libraries or `pgrep`; `build.yml` has a `portmaster` job; the rootfs job merges its artifact.
+- [x] **Installed ports are in the menu** (2026-11-18): `menu/scan.lua` lists `<card>/ports/*.sh` (not `PortMaster.sh`) as type `port`, and `run_app.sh port <script>` runs it from its folder with the sudo shim (`tests/test_scan.lua`, `tests/test_portmaster.sh`).
+- [x] **Started in Debian 12 arm64** (2026-11-18, Docker, a login user, SDL dummy video): the launcher installs it, pugwash extracts its libraries, finds the device and creates its window; it stops at the SDL renderer ("Couldn't find matching render driver": the dummy driver has no accelerated one), which is the headless limit.
+- [ ] **On a real R36S** (all untested): the GUI draws and takes the pad (the two GUIDs added to its database); a network join from Settings > Network, then Install of one small open-source port; the port runs from the menu and returns to it;
+  `gptokeyb` without root (`/dev/uinput` access: it may need a udev rule for the `input` group); ports that need `libgl`/GLES from the Mali blob; memory on 1 GB; whether it fits root (30 MiB) and the card (runtimes are hundreds of MB, on `/roms`).
+- [ ] **Decide after the unit run:** keep (and move its data under rule 16's data-card rule: the folder is fixed to `/roms/ports` by PortMaster's scripts), or drop it from the image. Candidates for a rule-6 review: it checks for its own updates when its GUI opens.
+- [ ] **Not done:** Rec demo, splash, Device report and power section (rules 9, 11, 12, 14 are for apps made for r3i6nos; PortMaster is third-party and has none), hot-plug toast inside it (rule 13), the r3i6nos-ansiapps theme (rule 8).

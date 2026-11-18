@@ -72,6 +72,14 @@ if [ "${R3I6NOS_ALLOW_NO_NTTPLAY:-0}" != 1 ]; then
     [ -x "$MNT/usr/bin/nttplay" ] || fail "no /usr/bin/nttplay: Commander cannot play MIDI, tracker modules or music as text (R3I6NOS_ALLOW_NO_NTTPLAY=1 skips this for a test)"
     [ -s "$MNT/usr/share/nttplay/NOTICE" ] || fail "no /usr/share/nttplay/NOTICE: nttplay's third-party licences must travel with it"
 fi
+# PortMaster is in the image for testing (docs/PORTMASTER.md): its package, its licence notice, and the libraries its GUI loads.
+if [ "${R3I6NOS_ALLOW_NO_PORTMASTER:-0}" != 1 ]; then
+    [ -s "$MNT/opt/loveos/defaults/native_deb/PortMaster.deb" ] || fail "no PortMaster.deb in /opt/loveos/defaults/native_deb (R3I6NOS_ALLOW_NO_PORTMASTER=1 skips this for a test)"
+    for lib in libSDL2_mixer-2.0.so.0 libSDL2_image-2.0.so.0 libSDL2_ttf-2.0.so.0 libSDL2_gfx-1.0.so.0; do
+        [ -n "$(find "$MNT/usr/lib" -name "$lib" | head -1)" ] || fail "no $lib: PortMaster's GUI cannot start"
+    done
+    [ -x "$MNT/usr/bin/pgrep" ] || fail "no /usr/bin/pgrep (procps): PortMaster's ports need it"
+fi
 [ -L "$MNT/etc/systemd/system/multi-user.target.wants/loveos.service" ] || fail "loveos.service not enabled"
 [ -L "$MNT/etc/systemd/system/multi-user.target.wants/r3i6nos-cards.service" ] || fail "r3i6nos-cards.service not enabled"
 [ -L "$MNT/etc/systemd/system/multi-user.target.wants/r3i6nos-setup.service" ] || fail "r3i6nos-setup.service not enabled"

@@ -1,0 +1,59 @@
+#!/bin/bash
+# portmaster - the r3i6nos launcher for PortMaster (docs/PORTMASTER.md). Third-party app, not on the r3i6nos-ansiapps theme.
+#
+# PortMaster keeps itself, its runtimes and the ports it installs on the card, so this copies the packaged PortMaster to
+# <cards root>/ports/PortMaster (the folder its own scripts look in) the first time, and again only when the package is newer than what is there
+# (PortMaster updates itself from its GUI, and that copy must not be overwritten by an older package). The r3i6nos hooks, the sudo shim
+# and the pad mapping are refreshed on every start. Nothing here touches the network: PortMaster does that only when a person chooses it.
+#
+# Overrides, for tests: R3I6NOS_PORTMASTER_SRC (the packaged tree), R3I6NOS_ROMS (/roms), R3I6NOS_PORTMASTER_NO_RUN=1 (prepare, do not start).
+set -u
+
+HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
+SRC="${R3I6NOS_PORTMASTER_SRC:-$HERE/../share/portmaster}"
+ROMS="${R3I6NOS_ROMS:-/roms}"
+DEST="$ROMS/ports/PortMaster"
+
+say() { echo "portmaster: $*" >&2; }
+
+[ -d "$SRC/PortMaster" ] || { say "the package's files are missing ($SRC/PortMaster)"; exit 1; }
+if [ ! -d "$ROMS" ] || [ ! -w "$ROMS" ]; then
+    say "needs the system card writable at $ROMS"
+    exit 1
+fi
+command -v python3 >/dev/null 2>&1 || { say "python3 is missing"; exit 1; }
+
+pkg_ver="$(tr -d '\r\n' < "$SRC/PortMaster/version" 2>/dev/null)"
+have_ver=""; [ -f "$DEST/version" ] && have_ver="$(tr -d '\r\n' < "$DEST/version")"
+newest="$(printf '%s\n%s\n' "$pkg_ver" "$have_ver" | sort -V | tail -n 1)"
+mkdir -p "$ROMS/ports"
+if [ ! -d "$DEST" ] || [ -z "$have_ver" ] || { [ "$pkg_ver" != "$have_ver" ] && [ "$newest" = "$pkg_ver" ]; }; then
+    say "installing PortMaster ${pkg_ver:-?} to $DEST"
+    mkdir -p "$DEST"
+    cp -R "$SRC/PortMaster/." "$DEST/" || { say "could not copy PortMaster to $DEST"; exit 1; }
+fi
+
+# r3i6nos' own pieces, every start (the hook file is what pm_launch.txt sources for this platform).
+mkdir -p "$DEST/r3i6nos"
+cp "$SRC/r3i6nos/launch_hooks.txt" "$DEST/r3i6nos/launch_hooks.txt"
+
+# The R36S pad, measured (CLAUDE.md memory: R36S controller mapping; the same mapping run_app.sh gives SDL). PortMaster's control.txt does not know this
+# pad, so it falls back to its whole gamecontrollerdb.txt: the two lines are added once.
+db="$DEST/gamecontrollerdb.txt"
+pad="a:b1,b:b0,x:b2,y:b3,leftshoulder:b4,rightshoulder:b5,lefttrigger:b6,righttrigger:b7,dpup:b8,dpdown:b9,dpleft:b10,dpright:b11,back:b12,start:b13,leftstick:b14,rightstick:b15,guide:b16,leftx:a0,lefty:a1,rightx:a2,righty:a3,platform:Linux,"
+for guid in 1900bb3e4b4800000011000000010000 190000004b4800000011000000010000; do
+    grep -q "^$guid," "$db" 2>/dev/null || printf '%s,R36S GO-Super Gamepad,%s\n' "$guid" "$pad" >> "$db"
+done
+
+# No sudo: PortMaster then runs as this user (ESUDO empty). A sudo that waits for a password nobody can type would hang it.
+export PATH="$SRC/shim:$PATH"
+export controlfolder="$DEST"
+export PM_CUR_TTY=/dev/null
+export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
+export SDL_NOMOUSE=1
+
+[ "${R3I6NOS_PORTMASTER_NO_RUN:-}" = 1 ] && exit 0
+cd "$DEST" || exit 1
+set +u   # PortMaster's own scripts read unset variables
+# shellcheck source=/dev/null  # PortMaster's own launcher, in the copy just made
+source "$DEST/utils/pm_launch.txt" r3i6nos
