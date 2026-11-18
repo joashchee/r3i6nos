@@ -256,9 +256,9 @@ jobs:
           sudo test -x $R/usr/bin/mount -o -x $R/bin/mount
           # by number: the runner's own uid 1000 is "runner", so a name would be the host's, not the rootfs's
           test "$(sudo stat -c %u $R/opt/loveos/bin)" = 1000
-          # the built-in default apps (the IO Checker three ways)
-          sudo test -f "$R/opt/loveos/defaults/Love 11.5/IO_Checker.love"
-          sudo test -f "$R/opt/loveos/defaults/Love 12.0/IO_Checker.love"
+          # the built-in default apps: only native debs (Commander, the native IO Checker, PortMaster); no LÖVE app (the LÖVE runtimes are checked below)
+          sudo test -z "$(sudo find "$R/opt/loveos/defaults/Love 11.5" "$R/opt/loveos/defaults/Love 12.0" -type f)"
+          sudo test -f "$R/opt/loveos/defaults/native_deb/PortMaster.deb"
           sudo test -f "$R/opt/loveos/defaults/native_deb/IO_Checker_Native.deb"
           sudo test -f "$R/opt/loveos/defaults/native_deb/Commander.deb"
           sudo grep -q '^loveos:x:1000:' $R/etc/passwd
