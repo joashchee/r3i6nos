@@ -13,10 +13,10 @@ test patterns and a measured frame rate; test tones on each channel that you mar
 both cards), **what the OTG port brings** (USB devices, video out, MIDI in and out, storage, Ethernet, a keyboard, a mouse, game controllers: native build only so far), the system, and a **device report** at `EASYROMS/IO_Checker/r36s-report-<build>.txt`. It replaced the R36S Input
 Checker (2026-11-09), which measured the pad's layout.
 
-| App | Where it is built in | Source |
+| App | Where it goes | Source |
 |---|---|---|
-| LÖVE 11.5 | `Love 11.5/IO_Checker.love` | `io-checker-love/` |
-| LÖVE 12.0 | `Love 12.0/IO_Checker.love` | `io-checker-love/` (same code, packed twice; it says the runtime it runs on) |
+| LÖVE 11.5 (not in the image; a card's `Love 11.5/`) | `Love 11.5/IO_Checker.love` | `io-checker-love/` |
+| LÖVE 12.0 (not in the image) | `Love 12.0/IO_Checker.love` | `io-checker-love/` (same code, packed twice; it says the runtime it runs on) |
 | Native ARM64 | `native_deb/IO_Checker_Native.deb` | `io-checker-native/` (C and SDL2 on `theme/r3i6nos_ansiapps.h`) |
 
 - LÖVE: `scripts/configure_rootfs.sh` packs the folder with `scripts/pack_love.py` (same bytes every time). `model.lua` (logic, the

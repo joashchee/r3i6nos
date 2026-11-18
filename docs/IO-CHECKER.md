@@ -1,6 +1,6 @@
 # IO Checker
 
-The R36S's hardware check, built into every image three ways: **LÖVE 11.5** and **LÖVE 12.0** (`apps/io-checker-love/`, one app packed
+The R36S's hardware check, built three ways (**only the native build is in the image since 2026-11-18**; the LÖVE builds are for a card or a Mac): **LÖVE 11.5** and **LÖVE 12.0** (`apps/io-checker-love/`, one app packed
 twice) and **native ARM64** (`apps/io-checker-native/io_checker.c`, C and SDL2). It checks what goes in (every button, both sticks, the D-pad,
 the power and volume keys) and what comes out (the screen, the sound, the cards), **what the OTG port can bring (USB devices, video out, MIDI,
 storage, Ethernet, a keyboard, a mouse, game controllers: the native build only so far)**, shows the system, and writes a device report for Claude.

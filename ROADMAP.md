@@ -73,6 +73,7 @@ document that has the detail. **Apps have run on a real R36S since 2026-11-09** 
     time while off is still open (power off for an hour, boot, read the report before setting anything).
   - Seen so far: Animator's and Composer's first reports were stamped 2026-11-10 03:34 and 03:36 but ran on 2026-11-09 by 12:34 (the clock about 15 h fast);
     their second, 2026-11-09 22:30, were right. Which image and whether the time was set in the dialog were not recorded.
+- [x] **Image apps are native `.deb` only** (2026-11-18): Commander, the native IO Checker, nttplay and ffmpeg; the LÖVE IO Checker left the image (`DEFAULT=0`). PortMaster checked 2026-11-18 (tooling MIT, a curated catalog whose ports carry their own licences, game data is the user's or the developer-permitted RTR; stock firmware unsupported, installing needs a network, catalog may hold emulators): licence-wise shippable as an optional, user-initiated add-on, never in the image by default; not added, waiting for the maintainer's decision.
 - [x] **The IO Checker replaces the Input Checker** (2026-11-09, `docs/IO-CHECKER.md`): the same three builds (`apps/io-checker-love`,
   `apps/io-checker-native`), now on the r3i6nos-ansiapps theme, checking input (every button with presses and chatter, axis ranges and
   rest, the buttons never pressed, the power and volume keys), video (nine full-screen patterns, a measured frame rate), sound (left,

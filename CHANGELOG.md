@@ -5,6 +5,8 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **The image's built-in apps are native `.deb` only** (2026-11-18, maintainer's request): Commander and the native IO Checker, with `/usr/bin/nttplay` and `/usr/bin/ffmpeg`. The LÖVE IO Checker is no longer in the image: `apps/io-checker-love/app.conf` has `DEFAULT=0`, `build.yml` has no `loveapps` job, `scripts/configure_rootfs.sh` copies no `.love`, and `tests/test_configure_rootfs.sh` checks none is there. The app stays in the repo and `scripts/build_love_app.sh` still builds it. The sibling-repo ports in `scripts/ports.conf` were never in the image and are unchanged.
+
 - **A build without nttplay is an error** (2026-11-17; found on the unit with the 0.2.0 candidate: Commander opened every MIDI, tracker and text-music file on Info only, because the image had no `/usr/bin/nttplay`; CLAUDE.md rule 15 says it is always there). `scripts/configure_rootfs.sh` stops when `build/nttplay/nttplay` is missing (`R3I6NOS_ALLOW_NO_NTTPLAY=1` for a test image), `scripts/check_image.sh` fails an image without `/usr/bin/nttplay` and its NOTICE, and the CI step that fetches Neumetik's artifact fails instead of warning. `tests/test_configure_rootfs.sh` covers the stop; `tests/test_image.sh` sets the escape hatch for its fake image.
   The fetch step reads Neumetik's artifact with the `NEUMETIK_TOKEN` secret (`github.token` reaches only this repository, so the private artifact was probably never found) and shows the API's own error.
 
