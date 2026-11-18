@@ -75,8 +75,15 @@ case "$TYPE" in
     port)
         # A port PortMaster installed (docs/PORTMASTER.md): its own bash script, run from its folder. PortMaster's scripts call sudo to find out whether they
         # are root; the shim says no, so they run as this user (a password prompt nobody can answer would hang them).
-        PM_SHIM="${R3I6NOS_PORTMASTER_SHIM:-/opt/native_apps/r36s-portmaster/usr/share/portmaster/shim}"
-        [ -d "$PM_SHIM" ] && export PATH="$PM_SHIM:$PATH"
+        # The package is extracted under its file's name (/opt/native_apps/PortMaster); if the shim is not found there a failing sudo is made on the spot,
+        # so a port never reaches the real one and its password prompt.
+        PM_SHIM="${R3I6NOS_PORTMASTER_SHIM:-/opt/native_apps/PortMaster/usr/share/portmaster/shim}"
+        if [ ! -x "$PM_SHIM/sudo" ]; then
+            PM_SHIM="$(mktemp -d "${TMPDIR:-/tmp}/r3i6nos-sudo.XXXXXX")"
+            printf '#!/bin/sh\nexit 1\n' > "$PM_SHIM/sudo"
+            chmod 755 "$PM_SHIM/sudo"
+        fi
+        export PATH="$PM_SHIM:$PATH"
         cd "$(dirname "$TARGET")" || exit 1
         bash "$TARGET"
         ;;

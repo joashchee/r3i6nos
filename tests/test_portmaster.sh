@@ -90,4 +90,8 @@ IN
 R3I6NOS_PORTMASTER_SHIM="$S/usr/share/portmaster/shim" overlay/usr/local/bin/run_app.sh port "$T/ports/Game2.sh"
 [ "$(cat "$T/ports/sudo.out")" = no ] || fail "a port saw a working sudo"
 [ "$(cat "$T/ports/pwd.out")" = "$(cd "$T/ports" && pwd -P)" ] || [ "$(cat "$T/ports/pwd.out")" = "$T/ports" ] || fail "a port did not run from its folder"
+# no shim found (a wrong path): a failing sudo is still put first
+rm -f "$T/ports/sudo.out"
+R3I6NOS_PORTMASTER_SHIM="$T/no-such-shim" overlay/usr/local/bin/run_app.sh port "$T/ports/Game2.sh"
+[ "$(cat "$T/ports/sudo.out")" = no ] || fail "a port saw a working sudo when the shim was not found"
 echo "portmaster: ok"
