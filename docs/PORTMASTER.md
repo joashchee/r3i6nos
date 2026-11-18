@@ -36,6 +36,7 @@ It is third-party, so the theme (rule 8), the device report (9), Rec demo (11), 
 - Tested without a unit: `tests/test_portmaster.sh` (fake zip), `tests/test_scan.lua`; and a hand run in Debian 12 arm64 with the image's library set and a login user: the launcher installs it, pugwash extracts its libraries, finds the device and builds its window; it stops at the
   SDL renderer with the dummy video driver (no accelerated renderer), as expected headless. Without the four SDL libraries it stopped at the first import.
 - **Run on an R36S (2026-11-18, maintainer's report):** it starts, the menu works and the audio is heard. Its probe read: `debian gnu/linux` 12, kernel 4.4.189, 640x480, `mali`, aarch64, 1024 MB, glibc 2.36, no swap, no zram; with no network it runs offline.
+- **Found on the unit (2026-11-18):** Wi-Fi was detected and PortMaster began its OTA update, then crashed: `No space left on device` writing `images.zip` into `/tmp` (64 MB). Fixed in the launcher by `TMPDIR` on the card (`/roms/ports/PortMaster/.tmp`); not yet rerun.
 - **Untested on an R36S:** pad mapping in the GUI, joining a network and installing and running a port; `/dev/uinput` for `gptokeyb` without root; the Mali blob's GLES for ports; memory on 1 GB; whether the first start fits.
 - **To try first on a unit:** open PortMaster from the menu; read `/roms/ports/PortMaster/log.txt`; join Wi-Fi in Settings > Network; install one small open-source port; run it from the menu; bring the log back.
 

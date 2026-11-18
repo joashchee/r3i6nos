@@ -83,7 +83,7 @@ find "$STAGE/usr/share/portmaster/PortMaster" -type f -exec chmod u+rw,go+r {} +
 cp "$REPO/LICENSE" "$STAGE/usr/share/doc/portmaster/copyright"
 printf '%s\n%s\nsha256 %s\n' "$PM_VERSION" "$PM_URL" "$PM_SHA256" > "$STAGE/usr/share/doc/portmaster/SOURCE"
 
-deb_version="${PM_VERSION/-/.}-1"
+deb_version="${PM_VERSION/-/.}-2"   # -2: the TMPDIR fix (2026-11-18)
 size_kb="$(du -sk "$STAGE/usr" | cut -f1)"
 mkdir -p "$STAGE/DEBIAN"
 cat > "$STAGE/DEBIAN/control" <<CONTROL

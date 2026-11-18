@@ -48,6 +48,11 @@ done
 # No sudo: PortMaster then runs as this user (ESUDO empty). A sudo that waits for a password nobody can type would hang it.
 export PATH="$SRC/shim:$PATH"
 export controlfolder="$DEST"
+# /tmp is a 64 MB RAM disk and PortMaster downloads its image pack (and every port's zip) into a temp folder: use the card.
+# A leftover from a crash is cleared first. Python's tempfile, and so pugwash, honours TMPDIR.
+PM_TMP="$DEST/.tmp"
+rm -rf "$PM_TMP" 2>/dev/null
+mkdir -p "$PM_TMP" 2>/dev/null && export TMPDIR="$PM_TMP"
 export PM_CUR_TTY=/dev/null
 export SDL_VIDEODRIVER="${SDL_VIDEODRIVER:-kmsdrm}"
 export SDL_NOMOUSE=1
