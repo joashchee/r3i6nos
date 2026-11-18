@@ -20,7 +20,7 @@
  *   Text      the file itself as text (UTF-8, UTF-16 or code page 437), when it is text
  *   Hex       the bytes
  *
- * Safety: copy and move never overwrite (a name that exists is skipped and counted); delete asks, with No preselected; links are
+ * Safety: copy and move never overwrite unasked (a name that exists opens a dialog: Overwrite, Keep both as "name (2)", or Skip; B cancels all); delete asks, with No preselected; links are
  * never followed (a link is copied as a link and deleted as a link); a folder is never copied into itself; "/" is never moved or
  * deleted. Work runs in small slices from the main loop with a progress bar, and B cancels it.
  *
@@ -234,6 +234,8 @@ static int pane_tagged(const Pane *p) {
 
 enum { OP_MKDIR, OP_COPY, OP_LINK, OP_RMFILE, OP_RMDIR, OP_RENAME };
 enum { J_COPY, J_MOVE, J_DELETE };
+/* what to do with a top-level item whose name exists at the destination (Job.policy, one per item; 0 = skip, as before) */
+enum { POL_SKIP0, POL_OVERWRITE, POL_KEEP_BOTH, POL_SKIP };
 
 typedef struct {
     int type, item;
@@ -241,6 +243,7 @@ typedef struct {
     off_t size;
     mode_t mode;
     time_t mtime;
+    int over;                    /* the destination may exist: a file is truncated, a link replaced, a folder merged into */
 } Op;
 
 typedef struct {
@@ -258,6 +261,8 @@ typedef struct {
     int finished, cancelled;
     int force_copy;              /* tests: plan a move as copy + delete even on one filesystem */
     int depth_err;
+    const unsigned char *policy; /* per top-level item, or NULL: every name that exists is skipped */
+    int plan_over;               /* while planning: the item being planned overwrites */
 } Job;
 
 static void job_error(Job *j, const char *what, const char *why) {
@@ -284,6 +289,7 @@ static int job_add(Job *j, int type, int item, const char *src, const char *dst,
     op->size = size;
     op->mode = mode;
     op->mtime = mtime;
+    op->over = j->plan_over;
     j->nops++;
     return 0;
 }
@@ -360,6 +366,22 @@ static int is_inside(const char *src, const char *dst) {
     return strncmp(dst, src, n) == 0 && (dst[n] == '/' || dst[n] == 0);
 }
 
+/* "name (2).ext", "name (3).ext", ... : the first that does not exist in dir (a folder: "name (2)"). 0 on success. */
+static int unique_name(const char *dir, const char *base, int is_dir, char *out, size_t cap) {
+    const char *dot = is_dir ? NULL : strrchr(base, '.');
+    if (dot == base) dot = NULL;                      /* ".bashrc" has no extension */
+    size_t stem = dot ? (size_t)(dot - base) : strlen(base);
+    for (int k = 2; k < 1000; k++) {
+        char name[NAME_MAX + 1];
+        if (snprintf(name, sizeof name, "%.*s (%d)%s", (int)stem, base, k, dot ? dot : "") >= (int)sizeof name) return -1;
+        struct stat st;
+        char full[PATH_MAX];
+        if (path_join(full, sizeof full, dir, name)) return -1;
+        if (lstat(full, &st) != 0) { copy_str(out, cap, full); return 0; }
+    }
+    return -1;
+}
+
 /* Plan a job for the given absolute paths. dstdir is the target folder for copy and move (NULL for delete).
  * Returns 0 and a plan (possibly empty: see the counters), or -1 with err set. */
 static int job_plan(Job *j, int kind, char **srcs, int n, const char *dstdir, char *err, size_t errsz) {
@@ -382,19 +404,38 @@ static int job_plan(Job *j, int kind, char **srcs, int n, const char *dstdir, ch
         if (path_join(dst, sizeof dst, dstdir, base_name(src))) { job_error(j, base_name(src), "path too long"); j->failed[item] = 1; continue; }
         struct stat sst, dlst;
         if (lstat(src, &sst) != 0) { job_error(j, base_name(src), strerror(errno)); j->failed[item] = 1; continue; }
-        if (lstat(dst, &dlst) == 0) { j->skipped_exists++; j->failed[item] = 1; continue; }
+        j->plan_over = 0;
+        if (lstat(dst, &dlst) == 0) {
+            int pol = j->policy ? j->policy[item] : POL_SKIP0;
+            int same = dlst.st_dev == sst.st_dev && dlst.st_ino == sst.st_ino;
+            if (same || (pol != POL_OVERWRITE && pol != POL_KEEP_BOTH)) { j->skipped_exists++; j->failed[item] = 1; continue; }
+            if (pol == POL_KEEP_BOTH) {
+                if (unique_name(dstdir, base_name(src), S_ISDIR(sst.st_mode), dst, sizeof dst) != 0) {
+                    job_error(j, base_name(src), "no free name to keep both");
+                    j->failed[item] = 1;
+                    continue;
+                }
+            } else {
+                /* overwrite: a file over a file, a link over a link or file, a folder merged into a folder; never across kinds */
+                int sdir = S_ISDIR(sst.st_mode), ddir = S_ISDIR(dlst.st_mode);
+                if (sdir != ddir) { job_error(j, base_name(src), sdir ? "a file has that name" : "a folder has that name"); j->failed[item] = 1; continue; }
+                if (!sdir && !S_ISREG(dlst.st_mode) && !S_ISLNK(dlst.st_mode)) { job_error(j, base_name(src), "cannot overwrite that"); j->failed[item] = 1; continue; }
+                j->plan_over = 1;
+            }
+        }
         if (S_ISDIR(sst.st_mode) && is_inside(src, dst)) {
             job_error(j, base_name(src), "cannot go into itself");
             j->failed[item] = 1;
             continue;
         }
-        if (kind == J_MOVE && !j->force_copy && sst.st_dev == dst_st.st_dev) {
+        if (kind == J_MOVE && !j->force_copy && sst.st_dev == dst_st.st_dev && !(j->plan_over && S_ISDIR(sst.st_mode))) {
             if (job_add(j, OP_RENAME, item, src, dst, 0, 0, 0) != 0) { snprintf(err, errsz, "too many files"); return -1; }
             continue;
         }
         if (plan_copy_tree(j, item, src, dst, 0) != 0) { snprintf(err, errsz, "too many files"); return -1; }
         if (kind == J_MOVE && plan_delete_tree(j, item, src, 0) != 0) { snprintf(err, errsz, "too many files"); return -1; }
     }
+    j->plan_over = 0;
     return 0;
 }
 
@@ -426,13 +467,20 @@ static int job_step(Job *j, unsigned budget_ms) {
         } else {
             switch (op->type) {
             case OP_MKDIR:
-                if (mkdir(op->dst, (op->mode & 0777) | 0700) != 0) item_fail(j, op, strerror(errno));
+                if (mkdir(op->dst, (op->mode & 0777) | 0700) != 0) {
+                    struct stat ds;
+                    if (!(op->over && errno == EEXIST && lstat(op->dst, &ds) == 0 && S_ISDIR(ds.st_mode))) item_fail(j, op, strerror(errno));
+                }
                 break;
             case OP_LINK: {
                 char target[PATH_MAX];
                 ssize_t n = readlink(op->src, target, sizeof target - 1);
                 if (n < 0) { item_fail(j, op, strerror(errno)); break; }
                 target[n] = 0;
+                if (op->over) {
+                    struct stat ds;
+                    if (lstat(op->dst, &ds) == 0 && !S_ISDIR(ds.st_mode)) unlink(op->dst);
+                }
                 if (symlink(target, op->dst) != 0) item_fail(j, op, strerror(errno));
                 break;
             }
@@ -440,7 +488,17 @@ static int job_step(Job *j, unsigned budget_ms) {
                 if (j->fd_in < 0) {
                     j->fd_in = open(op->src, O_RDONLY);
                     if (j->fd_in < 0) { item_fail(j, op, strerror(errno)); break; }
-                    j->fd_out = open(op->dst, O_WRONLY | O_CREAT | O_EXCL, (op->mode & 0777) | 0600);
+                    int flags = O_WRONLY | O_CREAT | O_EXCL;
+                    if (op->over) {
+                        struct stat ds;
+                        if (lstat(op->dst, &ds) == 0) {
+                            /* only a plain file is written over; a link is replaced, never followed */
+                            if (S_ISLNK(ds.st_mode)) unlink(op->dst);
+                            else if (S_ISREG(ds.st_mode)) flags = O_WRONLY | O_CREAT | O_TRUNC;
+                            else { close(j->fd_in); j->fd_in = -1; item_fail(j, op, "cannot overwrite that"); break; }
+                        }
+                    }
+                    j->fd_out = open(op->dst, flags, (op->mode & 0777) | 0600);
                     if (j->fd_out < 0) { int e = errno; close(j->fd_in); j->fd_in = -1; item_fail(j, op, strerror(e)); break; }
                 }
                 for (;;) {
@@ -1063,7 +1121,7 @@ static void viewer_overlay(const Viewer *w, uint32_t *px) {
 
 /* ---- the application ---------------------------------------------------------------------------------------------------------- */
 
-enum { M_BROWSE, M_MENU, M_CONFIRM, M_INPUT, M_VIEW, M_JOB, M_THEME };
+enum { M_BROWSE, M_MENU, M_CONFIRM, M_INPUT, M_VIEW, M_JOB, M_THEME, M_CONFLICT };
 enum { C_VIEW, C_COPY, C_MOVE, C_RENAME, C_MKDIR, C_DELETE, C_TAGALL, C_UNTAG, C_SORT, C_HIDDEN, C_SWAP, C_SAME, C_THEME, C_FILECOLORS, C_QUIT, C_COUNT };
 
 static const struct { const char *label, *key; } MENU[C_COUNT] = {
@@ -1088,6 +1146,10 @@ typedef struct {
     int menu_sel;
     /* confirmation */
     int conf_sel, conf_cmd;
+    /* a name that exists at the destination: Overwrite, Keep both or Skip, asked for each */
+    char **cf_srcs;
+    unsigned char *cf_pol;
+    int cf_n, cf_i, cf_sel, cf_kind;
     char conf_title[128], conf_yes[192];
     /* a line being typed */
     char buf[256];
@@ -1391,13 +1453,27 @@ static void open_input(App *a, int cmd, const char *prompt, const char *initial,
     copy_str(a->in_old, sizeof a->in_old, old ? old : "");
 }
 
-/* Start the job that was confirmed (srcs is kept for the job's lifetime only to free it). */
-static void start_job(App *a, int kind) {
-    char **srcs;
-    int n = targets(a, &srcs);
-    if (n <= 0) { if (n == 0) free(srcs); say(a, R3_ST_WARN, "Nothing selected"); a->mode = M_BROWSE; return; }
+/* Does the name of src exist in the destination folder (and is not src itself)? */
+static int name_exists_there(const char *src, const char *dstdir) {
+    char dst[PATH_MAX];
+    struct stat ss, ds;
+    if (path_join(dst, sizeof dst, dstdir, base_name(src)) || lstat(dst, &ds) != 0) return 0;
+    return !(lstat(src, &ss) == 0 && ss.st_dev == ds.st_dev && ss.st_ino == ds.st_ino);
+}
+
+static void conflict_free(App *a) {
+    free_list(a->cf_srcs, a->cf_n);
+    free(a->cf_pol);
+    a->cf_srcs = NULL;
+    a->cf_pol = NULL;
+    a->cf_n = 0;
+}
+
+/* Plan and run the job; a->cf_pol (or NULL) says what to do with names that exist. Takes srcs (n of them). */
+static void launch_job(App *a, int kind, char **srcs, int n, const unsigned char *pol) {
     job_free(&a->job);
     a->job.fd_in = a->job.fd_out = -1;
+    a->job.policy = pol;
     char err[256] = "";
     const char *dst = kind == J_DELETE ? NULL : other(a)->path;
     if (job_plan(&a->job, kind, srcs, n, dst, err, sizeof err) != 0) {
@@ -1413,6 +1489,52 @@ static void start_job(App *a, int kind) {
     a->job_nsrcs = n;
     a->job_active = 1;
     a->mode = M_JOB;
+}
+
+/* The next item from `from` on whose name exists in the other panel's folder, or -1. */
+static int conflict_find(const App *a, int from) {
+    for (int i = from; i < a->cf_n; i++)
+        if (name_exists_there(a->cf_srcs[i], other((App *)a)->path)) return i;
+    return -1;
+}
+
+/* Start the job that was confirmed. A copy or move onto names that exist first asks, for each, what to do. */
+static void start_job(App *a, int kind) {
+    char **srcs;
+    int n = targets(a, &srcs);
+    if (n <= 0) { if (n == 0) free(srcs); say(a, R3_ST_WARN, "Nothing selected"); a->mode = M_BROWSE; return; }
+    if (kind != J_DELETE) {
+        conflict_free(a);
+        a->cf_srcs = srcs;
+        a->cf_n = n;
+        a->cf_pol = calloc((size_t)n, 1);
+        a->cf_kind = kind;
+        a->cf_i = a->cf_pol ? conflict_find(a, 0) : -1;
+        if (a->cf_i >= 0) { a->cf_sel = 0; a->mode = M_CONFLICT; return; }
+        /* nothing exists there: no questions; the job owns the list now */
+        free(a->cf_pol);
+        a->cf_srcs = NULL;
+        a->cf_pol = NULL;
+        a->cf_n = 0;
+    }
+    launch_job(a, kind, srcs, n, NULL);
+}
+
+/* The answer for the name being asked about; asks the next, or starts the job after the last. */
+static void conflict_answer(App *a, int pol) {
+    a->cf_pol[a->cf_i] = (unsigned char)pol;
+    a->cf_i = conflict_find(a, a->cf_i + 1);
+    a->cf_sel = 0;
+    if (a->cf_i >= 0) return;
+    char **srcs = a->cf_srcs;
+    int n = a->cf_n;
+    unsigned char *polv = a->cf_pol;
+    a->cf_srcs = NULL;
+    a->cf_pol = NULL;
+    a->cf_n = 0;
+    launch_job(a, a->cf_kind, srcs, n, polv);
+    a->job.policy = NULL;                   /* it was read while planning */
+    free(polv);
 }
 
 static void finish_job(App *a) {
@@ -1686,6 +1808,12 @@ static void app_action(App *a, int action) {
             break;
         }
         if (action == R3_UP || action == R3_DOWN) a->conf_sel = 1 - a->conf_sel;
+        break;
+    case M_CONFLICT:
+        if (action == R3_BACK) { conflict_free(a); a->mode = M_BROWSE; say(a, R3_ST_HINT, "Cancelled: nothing was copied"); break; }
+        if (action == R3_ACCEPT) { conflict_answer(a, a->cf_sel == 0 ? POL_OVERWRITE : (a->cf_sel == 1 ? POL_KEEP_BOTH : POL_SKIP)); break; }
+        if (action == R3_DOWN) a->cf_sel = (a->cf_sel + 1) % 3;
+        if (action == R3_UP) a->cf_sel = (a->cf_sel + 2) % 3;
         break;
     case M_INPUT:
         switch (action) {
@@ -1998,6 +2126,16 @@ static void app_compose(const App *a, R3Screen *s) {
             snprintf(items[i].value, sizeof items[i].value, "%s%s", r3_themes[i].look, i == a->theme ? " *" : "");
         }
         centered_list(s, "Colour theme", items, R3_THEME_COUNT, a->theme_sel, "A Use  B Cancel", 34);
+    } else if (a->mode == M_CONFLICT) {
+        R3Item items[3];
+        memset(items, 0, sizeof items);
+        copy_str(items[0].label, sizeof items[0].label, "Overwrite");
+        copy_str(items[1].label, sizeof items[1].label, "Keep both");
+        copy_str(items[2].label, sizeof items[2].label, "Skip");
+        char nm[64], title[128];
+        utf8_tail(base_name(a->cf_srcs[a->cf_i]), 30, nm, sizeof nm);
+        snprintf(title, sizeof title, "Exists: %s", nm);
+        centered_list(s, title, items, 3, a->cf_sel, "A Choose  B Cancel all", 44);
     } else if (a->mode == M_CONFIRM) {
         R3Item items[2];
         memset(items, 0, sizeof items);
@@ -2211,6 +2349,28 @@ static void test_files(const char *root) {
     CHECK(job_plan(&j, J_COPY, list, 1, dst, err, sizeof err) == 0, "plan again");
     CHECK(j.skipped_exists == 1 && j.nops == 0, "second copy skips (exists=%d ops=%d)", j.skipped_exists, j.nops);
     job_free(&j);
+
+    /* with a policy: overwrite replaces, keep both adds " (2)", skip skips */
+    {
+        unsigned char pol[1] = { POL_OVERWRITE };
+        memset(&j, 0, sizeof j);
+        j.policy = pol;
+        CHECK(job_plan(&j, J_COPY, list, 1, dst, err, sizeof err) == 0, "plan overwrite");
+        run_job_to_end(&j);
+        CHECK(j.errors == 0 && j.skipped_exists == 0 && j.nops > 0, "overwrite a folder merges into it (errors=%d %s)", j.errors, j.first_error);
+        job_free(&j);
+        pol[0] = POL_KEEP_BOTH;
+        memset(&j, 0, sizeof j);
+        j.policy = pol;
+        CHECK(job_plan(&j, J_COPY, list, 1, dst, err, sizeof err) == 0, "plan keep both");
+        run_job_to_end(&j);
+        path_join(p, sizeof p, root, "dst/src (2)/a.txt");
+        CHECK(j.errors == 0 && exists(p), "keep both copies a folder as 'src (2)' (%s)", j.first_error);
+        job_free(&j);
+        char un[PATH_MAX];
+        CHECK(unique_name(dst, "x.tar.gz", 0, un, sizeof un) == 0 && strstr(un, "x.tar (2).gz"), "unique name keeps the last extension: %s", un);
+        CHECK(unique_name(dst, ".hidden", 0, un, sizeof un) == 0 && strstr(un, ".hidden (2)"), "a dot file has no extension: %s", un);
+    }
 
     /* a folder cannot go into itself */
     memset(&j, 0, sizeof j);
@@ -2535,11 +2695,41 @@ static void test_ui(const char *root) {
     path_join(p, sizeof p, right, "file01.txt");
     CHECK(exists(p), "copied into the other panel");
     CHECK(pane_find(&a.p[1], "file01.txt") >= 0, "the other panel was refreshed");
-    /* again: skipped, shown as a warning */
+    /* again: the name exists, so a dialog asks; Skip is reported as a warning */
     run_cmd(&a, C_COPY);
     app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_CONFLICT && a.cf_sel == 0, "a name that exists asks, Overwrite first");
+    app_compose(&a, &s);
+    CHECK(dump_has(&s, "Exists: file01.txt") && dump_has(&s, "Overwrite") && dump_has(&s, "Keep both") && dump_has(&s, "Skip"), "conflict dialog text");
+    shot(&a, &s, "3b-conflict");
+    app_action(&a, R3_DOWN);
+    app_action(&a, R3_DOWN);
+    CHECK(a.cf_sel == 2, "down twice reaches Skip");
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_JOB, "the answer starts the job");
     for (int g = 0; g < 1000 && a.mode == M_JOB; g++) app_tick(&a, 50);
     CHECK(strstr(a.reply, "skipped") && a.reply_style == R3_ST_WARN, "second copy is reported as skipped: %s", a.reply);
+    /* B on the dialog cancels everything */
+    run_cmd(&a, C_COPY);
+    app_action(&a, R3_ACCEPT);
+    app_action(&a, R3_BACK);
+    CHECK(a.mode == M_BROWSE && a.cf_srcs == NULL, "B cancels the whole copy");
+    /* Keep both: the new copy is "file01 (2).txt", the old one is untouched */
+    run_cmd(&a, C_COPY);
+    app_action(&a, R3_ACCEPT);
+    app_action(&a, R3_DOWN);
+    app_action(&a, R3_ACCEPT);
+    for (int g = 0; g < 1000 && a.mode == M_JOB; g++) app_tick(&a, 50);
+    path_join(p, sizeof p, right, "file01 (2).txt");
+    CHECK(exists(p) && strstr(a.reply, "Copied 1 item"), "keep both makes 'file01 (2).txt': %s", a.reply);
+    /* Overwrite: different content in the destination is replaced */
+    path_join(p, sizeof p, right, "file01.txt");
+    { FILE *f = fopen(p, "w"); if (f) { fputs("old", f); fclose(f); } }
+    run_cmd(&a, C_COPY);
+    app_action(&a, R3_ACCEPT);
+    app_action(&a, R3_ACCEPT);
+    for (int g = 0; g < 1000 && a.mode == M_JOB; g++) app_tick(&a, 50);
+    { size_t ln = 0; char *got = slurp(p, &ln); CHECK(got && ln != 3, "overwrite replaced the old content (%zu bytes)", ln); free(got); }
 
     /* delete asks with No preselected: A alone deletes nothing */
     a.p[0].sel = pane_find(&a.p[0], "file02.txt");

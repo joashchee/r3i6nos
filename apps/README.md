@@ -126,8 +126,9 @@ one over 48 MiB say why they cannot be opened. A document in a ZIP (docx, odt, E
 ISO and 7-Zip list their members but cannot give them yet. Reopening the list after B reads the archive again, so a big
 `.tar.xz` takes the same few seconds on the way back as on the way in (on the unit: untested).
 
-**What it will and won't do:** copy and move go to the other panel's folder and **never overwrite**: a name that already exists is skipped and
-counted in the result. Delete asks first with **No** preselected, says when folders are included, and never follows a link (a link is
+**What it will and won't do:** copy and move go to the other panel's folder and **never overwrite unasked**: a name that already exists opens a dialog for it, **Overwrite**
+(a file is replaced, a link replaced, a folder merged into the existing one; never a file over a folder or the reverse), **Keep both** (the new one is
+`name (2).ext`, then `(3)`) or **Skip** (counted in the result); B cancels the whole copy before anything is written. Delete asks first with **No** preselected, says when folders are included, and never follows a link (a link is
 copied as a link and deleted as a link). A folder cannot be copied into itself, and `/` is never moved or deleted. Work runs in
 slices from the main loop with a progress bar, so B can cancel it (the half-written file is removed). A move on one filesystem is a rename; across
 filesystems it copies, then deletes each item only after that item copied without error. Tagged entries are what an action works on; with none
