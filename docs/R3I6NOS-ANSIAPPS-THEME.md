@@ -70,17 +70,26 @@ the selected row **black on cyan**, a foot of keys in the bottom edge (`theme.li
 Dialogs (Settings, Shut down?) are the same list in a smaller box centred in the display view. The rule every list follows
 (`theme.listKey`; KlamANSI's gesture table with the pad's buttons for the swipes):
 
+**Standardised 2026-11-19 on the input mapping (`docs/r3i6nos-mapping.md`); the code (`theme.listKey`, `T.PAD`, `r3_list_key`, `r3_pad_action`) still has the
+old keys until ROADMAP section 39 step 2.**
+
 | Action | R36S | Keyboard | Does |
 |---|---|---|---|
-| up / down | D-pad up / down (9 / 10) | arrows | select, wrapping |
-| left / right, pageup / pagedown | D-pad left / right (11 / 12), L1 / R1 (5 / 6) | arrows, PgUp / PgDn | turn a page |
-| home / end | L2 / R2 (7 / 8) | Home / End | top / bottom of the list |
-| accept | A (2) | Enter, Z | Enter |
-| back | B (1) | Esc, X | a step back; closes as Cancel |
-| more | Start (14) | Tab, F1, S | More... on the selection (the menu: Settings) |
+| up / down | D-pad or right stick up / down | arrows | select, wrapping; a stick steps at the mapping's rate (dead zone 0.35, at most 6 a second) |
+| pageup / pagedown | **R1 held** + up / down | PgUp / PgDn | a whole page (`Page n/m`) |
+| home / end | **R1 held** + left / right | Home / End | top / bottom of the list |
+| accept | A | Enter, Z | Enter |
+| back | B | Esc, X | a step back; closes as Cancel |
+| more | **Y** | Tab, F1, S | More... on the selection (the menu: its Settings) |
 
-A list that fits one page shows no `Page` number. An app with more than one list may use left/right to switch lists (Commander does; L1/R1 still
-turn pages), and X, Y and Select for its own commands (`theme.PAD` names them `x`, `y`, `select`).
+- **L1, R1, L2 and R2 do not page or jump on their own any more** (they are modifiers; L1 + R1 opens the main menu, L2 + R2 the contextual menu), and
+  **Start is not More** (the one-touch buttons are the app's). **Left and right alone are the app's** (a column, a tab, a second list), not paging: the
+  keyboard's PgUp, PgDn, Home and End do the paging.
+- The list's actions are the **defaults**; an app may bind the one-touch buttons otherwise for its function and says so in its README,
+  but never the modifiers or the system chords.
+
+A list that fits one page shows no `Page` number. An app with more than one list may use left/right to switch lists (Commander does), and X and Select
+for its own commands (`theme.PAD` names them `x`, `y`, `select`).
 
 Apps read the pad's **raw joystick buttons** (`theme.PAD`), not SDL's gamepad mapping, which does not match this pad
 (`docs/hardware-findings.md`). `theme.KEYS` is the keyboard for laptops.
@@ -109,6 +118,32 @@ cannot drift on the font: both hash all 256 scaled glyphs and the same number is
 The font data it builds on: `theme/r3i6nos_vga8x16.h` has the 256 glyphs (`r3i6nos_vga8x16[i][row]`, top bit leftmost) and the Unicode of each
 (`r3i6nos_cp437[i]`). Use the same 64x24 grid of 10x20 cells, the same row roles, colours and mapping from 8x16 to 10x20 as above.
 (The C header includes it; the app's `.deb` carries `NOTICE` and the font licence in its doc folder.)
+
+## The main menu (rule 17; **specified 2026-11-19, not built in either theme yet**)
+
+Every app made for r3i6nos has a main menu, opened by **L1 + R1** (keyboard: F10 is proposed), drawn as the standard list dialog above (a box centred in
+the display view, `Page x/y` when it needs it). The input map it belongs to is `docs/r3i6nos-mapping.md`.
+
+**The first items are fixed, in this order, and the app's own items follow them:**
+
+| Item | Does |
+|---|---|
+| **About** | The app's name, version, commit and date (the splash's version line), licence and credits. |
+| **Colour theme** | The theme choice: VGA Classic by default; the true-colour themes where the app offers them (above, "True colour"). A LÖVE app with only the 16 VGA colours shows the item with the one theme it has, not nothing. |
+| **Device report** | Runs the app's device report (rule 9). |
+| **Rec demo** | Runs the app's Rec demo (rule 11). |
+| **Benchmark** | Runs the app's benchmark and writes it to the app's data folder. **Hidden when the app has nothing to measure**; the other five never are. |
+| **Quit** | Leaves the app. **It is how an r3i6nos app is left: Select + Start no longer does.** |
+
+An app never renames, reorders or drops one of the five, or puts Quit anywhere but last of these six places (its own items come after Quit only if
+they are a separate group, which the theme draws below a rule; none is expected yet).
+
+**What the theme will provide** (to build, ROADMAP section 39 step 1b): one menu structure for LÖVE (`theme.mainMenu(app_items, hooks)`) and for C
+(`r3_main_menu`), taking the app's own items and the hooks for the five (About's text, the theme change, the report, the demo, the benchmark or `NULL`
+for none, quit). It owns the order, hides Benchmark when its hook is `NULL`, and has a self-test that an app calls from its own, so "the items are
+there and in this order" is checked once. Until then an app builds the list itself and the order above is a manual check.
+
+**The list keys the menu uses are the standardised ones above:** up and down, A to accept, B to back, Y for More, R1 held for Page up/down and Home/End.
 
 ## The splash (rule 12)
 

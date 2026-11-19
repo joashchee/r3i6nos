@@ -155,6 +155,10 @@ layers (abc, ABC, #+=), the text shown, optionally hidden. The map above drives 
 
 ## Where today's code differs
 
+- **The list dialog's keys** (`theme.listKey`, `T.PAD`, `r3_list_key`, `r3_pad_action`, every app's list) still page with L1 and R1, jump with L2 and R2 and use Start for
+  More. The theme doc's table ("List dialogs") is standardised on this map (R1 held for pages and home/end, Y for More); the code follows in ROADMAP section 39 step 2,
+  which needs the reader to know R1 is held.
+
 - **Select + Start leaves the app today** in the theme's apps, `run_app.sh` and every app's docs; it is to be removed from r3i6nos apps once each has
   Quit (third-party ports keep `r3i6nos-portquit`).
 - **No app has the six compulsory menu items yet.** The menu has About and Device reports in Settings, not as one list; MusiCue's L1 + R1 menu
@@ -170,7 +174,6 @@ layers (abc, ABC, #+=), the text shown, optionally hidden. The map above drives 
 
 1. **The numbers to try on a unit:** 6 steps a second, 120 px/s for the pointer and a factor of 3 for R1 are conservative guesses, not measured. They
    are meant to be raised if they feel slow (the dead zone stays 0.35).
-2. **The theme doc's section** for the main menu (the rule is in `CLAUDE.md`; the theme doc is not edited yet).
 
 Settled by the maintainer on 2026-11-19: R1 is "increase" (page up and down, home and end, a faster pointer); conservative top rates; the main menu's order (About, Colour theme, Device report, Rec demo, Benchmark, Quit) and that Benchmark is hidden when there is nothing to measure; the sticks' dead zone is FM1-NTT's; Select + Start no longer leaves; the one-touch buttons are per app; the virtual mouse and keyboard
 override Select and Start (and the D-pad and others for the keyboard); their availability is per app; Fn is only ever the panel key.
