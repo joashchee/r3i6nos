@@ -124,6 +124,15 @@ own terms.
 Third-party code ported into Neumetik, with its licences, is listed in /usr/share/nttplay/NOTICE.
 EOF
     chmod 644 "$ROOTFS/usr/share/doc/nttplay/copyright"
+    # Rules 9, 11 and 14 for a command-line tool (ROADMAP section 27): nttplay-report and nttplay-demo (the generic tool report and Rec demo, baked by
+    # scripts/build-nttplay-tools.sh with nttplay's commands.txt) sit beside it, and Settings > Device reports / Rec demos find them in the tools folder.
+    # They are made here, from this repo's own scripts, so CI (which only fetches nttplay) has them too. The font's CC BY-SA credit travels with them.
+    "$REPO/scripts/build-nttplay-tools.sh" "$NTTPLAY_BUILD" >/dev/null
+    install -m 755 "$NTTPLAY_BUILD/nttplay-report" "$NTTPLAY_BUILD/nttplay-demo" "$ROOTFS/usr/bin/"
+    install -m 644 "$NTTPLAY_BUILD/commands.txt" "$NTTPLAY_BUILD/NOTICE-font" "$ROOTFS/usr/share/nttplay/"
+    mkdir -p "$ROOTFS/opt/loveos/bin"
+    ln -sfn /usr/bin/nttplay-report "$ROOTFS/opt/loveos/bin/nttplay-report"
+    ln -sfn /usr/bin/nttplay-demo "$ROOTFS/opt/loveos/bin/nttplay-demo"
 else
     # Always in the image (CLAUDE.md rule 15): an image without it cannot play MIDI, tracker modules or music as text in Commander (found on the unit
     # 2026-11-17, 0.2.0), so this is an error. Only a test or a development image may go without: R3I6NOS_ALLOW_NO_NTTPLAY=1.

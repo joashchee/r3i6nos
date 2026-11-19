@@ -116,7 +116,7 @@ B to cancel): not built yet, ROADMAP section 28.
 
 - **Native (C and SDL2):** `theme/r3i6nos_report.h` (open, sections, lines, the system and card sections, peak memory, close with the summary; and the **power section**: `r3_report_power_section`, `r3_report_power_idle`, `r3_power_begin` / `r3_power_sample` / `r3_report_power_end`, `r3_report_power_advice`, `docs/POWER.md` "In a native port").
   Header-only, MIT, like the rest of `theme/`; its self-test is `tests/test_report.c` (run by `scripts/check.sh`).
-- **Command-line tools:** `tools/qjs-node/report.py` (Python 3 standard library), shipped by `package-tool.sh`.
+- **Command-line tools:** `tools/qjs-node/report.py` (Python 3 standard library), shipped by `package-tool.sh`. nttplay (in the image, not a package) gets the same script from `scripts/build-nttplay-tools.sh` (`nttplay-report`, commands in `tools/nttplay/commands.txt`).
 - **LÖVE:** no shared module yet (an app must work on an image whose `/opt/loveos/theme` predates one); follow this file's grammar.
 
 Its sibling, **Rec demo** (`docs/DEMO-RECORDINGS.md`, CLAUDE.md rule 11), sits right after Device report in each port's menu and records screenshots and a video to `/roms/<App>/Demo/`.

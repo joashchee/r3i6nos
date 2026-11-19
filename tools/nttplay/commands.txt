@@ -1,0 +1,58 @@
+# nttplay's command list: what `nttplay-report` times on the unit and `nttplay-demo` plays (tools/qjs-node/report.py, demo.py; docs/DEVICE-REPORTS.md).
+# The files are the test corpus the image carries at /opt/loveos/test-files. A command writes sound only to o/ (the demo mixes a .wav into its video).
+# The speed goal is the unit's 3.4x for MIDI (ROADMAP section 27): the decode lines below print their length, so the report's seconds are the cost.
+
+#@hero probe: Probe a file: its kind, format, title and length
+#@hero midi: Play a MIDI file through the synthesizer
+#@hero tracker: Play a tracker module (MOD, S3M, XM, IT and more)
+#@hero text: Play music written as text (MML, ABC, RTTTL)
+#@hero audio: Decode recorded audio (WAV, FLAC, Ogg Vorbis)
+
+#@feature probe
+#@say Says what a file is, with no decoding.
+probe /opt/loveos/test-files/music/midi/midi.mid
+#@say A module: channels, orders and its message.
+probe /opt/loveos/test-files/music/trackers/fasttracker2.xm
+#@say Many files, one process.
+probe /opt/loveos/test-files/music/midi/midi.mid /opt/loveos/test-files/music/trackers/protracker.mod /opt/loveos/test-files/audio/tone.flac
+#@feature -
+
+#@feature midi
+#@say General MIDI, rendered to a WAV.
+decode /opt/loveos/test-files/music/midi/midi.mid -t 12 -f wav -o o/midi.wav
+#@say A MIDI in a RIFF chunk.
+decode /opt/loveos/test-files/music/midi/midi-riff.rmi -t 6 -f wav -o o/rmid.wav
+#@feature -
+
+#@feature tracker
+#@say ProTracker.
+decode /opt/loveos/test-files/music/trackers/protracker.mod -t 10 -f wav -o o/mod.wav
+#@say FastTracker 2.
+decode /opt/loveos/test-files/music/trackers/fasttracker2.xm -t 8 -f wav -o o/xm.wav
+#@say Impulse Tracker.
+decode /opt/loveos/test-files/music/trackers/impulsetracker.it -t 8 -f wav -o o/it.wav
+#@say Scream Tracker 3.
+decode /opt/loveos/test-files/music/trackers/screamtracker.s3m -t 6 -f wav -o o/s3m.wav
+#@feature -
+
+#@feature text
+#@say Music as MML.
+decode /opt/loveos/test-files/music/mml/mml-generic.mml -t 10 -f wav -o o/mml.wav
+#@say ABC notation.
+decode /opt/loveos/test-files/music/notation/notation.abc -t 8 -f wav -o o/abc.wav
+#@say A ringtone.
+decode /opt/loveos/test-files/music/notation/notation.rtttl -t 4 -f wav -o o/rtttl.wav
+#@feature -
+
+#@feature audio
+#@say WAV, resampled to 44.1 kHz.
+decode /opt/loveos/test-files/audio/tone.wav -ar 44100 -f wav -o o/wav.wav
+#@say FLAC.
+decode /opt/loveos/test-files/audio/tone.flac -ar 44100 -f wav -o o/flac.wav
+#@say Ogg Vorbis, from the middle.
+decode /opt/loveos/test-files/audio/vorbis.ogg -ss 0.2 -ar 44100 -f wav -o o/ogg.wav
+#@feature -
+
+# what is outside the features: the exit statuses, and the stream a frontend reads
+decode /opt/loveos/test-files/music/midi/midi.mid -t 5 -ar 44100
+decode /opt/loveos/test-files/music/trackers/protracker.mod -t 5 -ar 44100 -loop

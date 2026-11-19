@@ -71,6 +71,9 @@ done
 if [ "${R3I6NOS_ALLOW_NO_NTTPLAY:-0}" != 1 ]; then
     [ -x "$MNT/usr/bin/nttplay" ] || fail "no /usr/bin/nttplay: Commander cannot play MIDI, tracker modules or music as text (R3I6NOS_ALLOW_NO_NTTPLAY=1 skips this for a test)"
     [ -s "$MNT/usr/share/nttplay/NOTICE" ] || fail "no /usr/share/nttplay/NOTICE: nttplay's third-party licences must travel with it"
+    for f in usr/bin/nttplay-report usr/bin/nttplay-demo; do [ -x "$MNT/$f" ] || fail "no /$f (rules 9 and 11 for nttplay)"; done
+    [ -s "$MNT/usr/share/nttplay/commands.txt" ] || fail "no /usr/share/nttplay/commands.txt: nttplay-report and nttplay-demo have nothing to run"
+    [ -s "$MNT/usr/share/nttplay/NOTICE-font" ] || fail "no /usr/share/nttplay/NOTICE-font: the demo draws with the CC BY-SA font, its credit must travel"
 fi
 # PortMaster is in the image for testing (docs/PORTMASTER.md): its package, its licence notice, and the libraries its GUI loads.
 if [ "${R3I6NOS_ALLOW_NO_PORTMASTER:-0}" != 1 ]; then

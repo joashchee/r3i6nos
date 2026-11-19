@@ -40,6 +40,13 @@ grep -q 'abc1234' "$R/usr/share/doc/nttplay/copyright" || fail "nttplay's copyri
 grep -q 'free of charge, the right to use this program on the R36S' "$R/usr/share/doc/nttplay/copyright" || fail "nttplay's copyright file does not carry the ansiapps R36S grant"
 grep -q 'source code stays proprietary' "$R/usr/share/doc/nttplay/copyright" || fail "nttplay's copyright file does not keep the source proprietary"
 [ -s "$R/usr/share/nttplay/NOTICE" ] || fail "nttplay's third-party NOTICE is not in the image"
+for f in nttplay-report nttplay-demo; do
+    [ -x "$R/usr/bin/$f" ]                        || fail "$f is not installed executable (rules 9 and 11)"
+    [ -L "$R/opt/loveos/bin/$f" ]                 || fail "$f is not linked into the tools folder, so Settings cannot list it"
+done
+[ -s "$R/usr/share/nttplay/commands.txt" ]        || fail "nttplay's commands.txt is not in the image"
+grep -q 'CC BY-SA' "$R/usr/share/nttplay/NOTICE-font" || fail "the font's credit does not travel with nttplay-demo"
+grep -q '^APP = "nttplay"' "$R/usr/bin/nttplay-demo" || fail "nttplay-demo has no baked app name (the menu reads it)"
 for f in NOTICE build.sh README.md; do [ -s "$R/usr/share/ffmpeg-min/$f" ] || fail "ffmpeg's $f (the source offer) is not in the image"; done
 grep -q 'f4fa066278f7a47feab316fef905f4db0d5e9b589451949740f83972b30901bd' "$R/usr/share/ffmpeg-min/NOTICE" || fail "NOTICE does not give the ffmpeg source's hash"
 if [ -f /usr/share/common-licenses/GPL-2 ]; then [ -s "$R/usr/share/ffmpeg-min/GPL-2" ] || fail "the GPL text is not in the image"; fi
