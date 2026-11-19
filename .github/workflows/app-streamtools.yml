@@ -1,0 +1,115 @@
+name: App - Stream tools
+
+# The three stream-tool packages (docs/STREAM-TOOLS.md): r3i6nos-ytdlp.deb (yt-dlp, QuickJS-ng, the YouTube challenge solver), r3i6nos-gallery-dl.deb and
+# r3i6nos-streamlink.deb. They are user-installed tool packages (a card's native_deb/, or scripts/push-packages.sh), not part of the firmware image.
+# Runs when they (or the ffmpeg-min they join streams with) change, by hand, or on a `streamtools-v*` tag, which also publishes a GitHub release with the
+# .deb files. Download them from the run's artifact `streamtools-arm64`.
+#
+# One job: build the minimal ffmpeg if its cache is cold (the same key as build.yml's `ffmpeg` job, so the two share it), build the packages (every source is
+# hash-pinned in tools/streamtools/pins.conf and lock/*.txt; a hash that does not match fails the build), then install them in a CLEAN Debian 12 arm64 container
+# through the real deb_watcher.py and run each tool against a local web server (tests/test_streamtools_docker.sh: DASH and HLS, AES-128, a pipe, the data
+# folder; nothing leaves the runner). Needs an arm64 runner (variable R3I6NOS_ARM_RUNNER overrides the label); on an x86 runner it runs under qemu, which works
+# but is much slower, hence the timeout. NOT RUN YET: this workflow has never been through GitHub.
+# yt-dlp breaks every few weeks: when a new release is out, `scripts/build-streamtools.sh --latest` prints the pin lines (docs/STREAM-TOOLS.md, "Updating").
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "tools/streamtools/**"
+      - "tools/ffmpeg-min/**"
+      - "scripts/build-streamtools.sh"
+      - "scripts/build-ffmpeg-min.sh"
+      - "tests/streamtools/**"
+      - "tests/test_streamtools_docker.sh"
+      - "overlay/usr/local/bin/deb_watcher.py"
+      - "LICENSE"
+      - ".github/workflows/app-streamtools.yml"
+    tags: ["streamtools-v*"]
+  pull_request:
+    paths:
+      - "tools/streamtools/**"
+      - "scripts/build-streamtools.sh"
+      - "tests/streamtools/**"
+      - "tests/test_streamtools_docker.sh"
+      - ".github/workflows/app-streamtools.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ${{ vars.R3I6NOS_ARM_RUNNER || 'ubuntu-24.04-arm' }}
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Emulation, only if this is not an arm64 runner
+        if: ${{ runner.arch != 'ARM64' }}
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y qemu-user-static binfmt-support
+
+      # The minimal ffmpeg the packages join streams with (and the test decodes with). The key is build.yml's, so a build there serves this job and the other way round.
+      - uses: actions/cache@v6
+        id: ffcache
+        with:
+          path: build/ffmpeg-min
+          key: ffmpeg-min-${{ hashFiles('tools/ffmpeg-min/**', 'scripts/build-ffmpeg-min.sh', 'theme/**', 'tests/test_demo.c', 'NOTICE') }}
+
+      - name: Build the minimal ffmpeg (arm64, Debian 12)
+        if: steps.ffcache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p build/ffmpeg-min
+          docker run --rm --platform linux/arm64 -v "$PWD":/src -e OUT=/src/build/ffmpeg-min -w /src debian:bookworm tools/ffmpeg-min/build.sh
+
+      # Cached on everything that goes into the packages, so only an edit or a new pin rebuilds them.
+      - uses: actions/cache@v6
+        id: cache
+        with:
+          path: build/streamtools
+          key: streamtools-${{ hashFiles('tools/streamtools/**', 'scripts/build-streamtools.sh', 'LICENSE') }}
+
+      - name: Build the three packages (arm64, Debian 12)
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: scripts/build-streamtools.sh
+
+      - name: The packages exist, are tool packages and are the size they should be
+        run: |
+          ls -l build/streamtools/*.deb
+          for p in ytdlp gallery-dl streamlink; do
+            f="build/streamtools/r3i6nos-$p.deb"
+            [ -s "$f" ] || { echo "missing $f"; exit 1; }
+            docker run --rm -v "$PWD/build/streamtools":/d:ro debian:bookworm sh -c "dpkg-deb -f /d/r3i6nos-$p.deb Package Architecture X-R3i6nos-Kind" | tee "/tmp/$p.control"
+            grep -qx "Architecture: arm64" "/tmp/$p.control" || { echo "$f is not arm64"; exit 1; }
+            grep -qx "X-R3i6nos-Kind: tool" "/tmp/$p.control" || { echo "$f is not a tool package"; exit 1; }
+          done
+
+      - name: Install them in a clean Debian 12 and run each tool (a local web server, no network)
+        run: tests/test_streamtools_docker.sh
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: streamtools-arm64
+          path: build/streamtools/*.deb
+          retention-days: 30
+
+  release:
+    needs: build
+    if: ${{ startsWith(github.ref, 'refs/tags/streamtools-v') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: streamtools-arm64
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum r3i6nos-*.deb | tee SHA256SUMS
+          gh release create "${{ github.ref_name }}" r3i6nos-*.deb SHA256SUMS \
+            --repo "${{ github.repository }}" --title "Stream tools ${{ github.ref_name }}" \
+            --notes "yt-dlp, gallery-dl and streamlink as arm64 tool packages for the R36S (docs/STREAM-TOOLS.md): put them in \`native_deb/\` on the card, or send them with \`scripts/push-packages.sh\`. Built from hash-pinned sources. Not run on a real R36S yet."

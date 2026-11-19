@@ -1,0 +1,25 @@
+name: Stream tools - is yt-dlp current?
+
+# yt-dlp breaks every few weeks when a site changes, so the package's pinned version goes stale (docs/STREAM-TOOLS.md, "Updating"). Every Monday this asks GitHub for
+# yt-dlp's latest release and FAILS when the pin in tools/streamtools/pins.conf is behind, which is how GitHub emails the maintainer. The log has the lines to put in
+# pins.conf (version, URL, the zipapp's sha256) and the commands to rebuild; nothing is changed, built or published here. By hand: the Run workflow button, or
+# scripts/check-streamtools-fresh.sh. NOT RUN YET: this workflow has never been through GitHub.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  fresh:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+      - name: Is the pinned yt-dlp the newest release?
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: scripts/check-streamtools-fresh.sh

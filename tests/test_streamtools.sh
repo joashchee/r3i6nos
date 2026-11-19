@@ -116,4 +116,43 @@ for needle in "usr/share/r3i6nos/tool" "--require-hashes" "is not an aarch64 ELF
 # ---- ffmpeg-min can join the streams yt-dlp downloads separately (mp4, matroska, webm) and checks that it can
 grep -q -- '--enable-muxer=rawvideo,pcm_s16le,mp4,matroska,webm,ipod' tools/ffmpeg-min/build.sh || fail "ffmpeg-min's muxers are not mp4, matroska, webm and ipod"
 grep -q 'mcase vp9-opus webm' tools/ffmpeg-min/build.sh || fail "ffmpeg-min's build does not check a WebM merge"
+# ---- the weekly "is yt-dlp current?" check (scripts/check-streamtools-fresh.sh), against a fake GitHub on localhost
+bash -n scripts/check-streamtools-fresh.sh || fail "syntax: scripts/check-streamtools-fresh.sh"
+(
+    srv="$T/gh"
+    mkdir -p "$srv/repos/yt-dlp/yt-dlp/releases"
+    port="$(python3 -I -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')"
+    python3 -I -m http.server "$port" --bind 127.0.0.1 --directory "$srv" >/dev/null 2>&1 &
+    srvpid=$!
+    trap 'kill "$srvpid" 2>/dev/null' EXIT
+    for _ in $(seq 1 50); do curl -fs -o /dev/null "http://127.0.0.1:$port/" && break; sleep 0.1; done
+    export R3I6NOS_GITHUB_API="http://127.0.0.1:$port" R3I6NOS_GITHUB_DL="http://127.0.0.1:$port"
+    # shellcheck disable=SC1091  # the pins
+    pin="$(. tools/streamtools/pins.conf; echo "$YTDLP_VERSION")"
+    release() {  # tag: what the fake GitHub says is the latest release, with its checksums file
+        printf '{"tag_name": "%s", "name": "%s"}' "$1" "$1" > "$srv/repos/yt-dlp/yt-dlp/releases/latest"
+        mkdir -p "$srv/yt-dlp/yt-dlp/releases/download/$1"
+        printf '%s  yt-dlp\n%s  yt-dlp_linux\n' "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" \
+            > "$srv/yt-dlp/yt-dlp/releases/download/$1/SHA2-256SUMS"
+    }
+    bump() { python3 -I -c 'import sys; p = sys.argv[1].split("."); p[-1] = str(int(p[-1]) + int(sys.argv[2])); print(".".join(p))' "$1" "$2"; }
+    check() { rc=0; out="$(scripts/check-streamtools-fresh.sh 2>&1)" || rc=$?; }
+
+    release "$pin"; check
+    [ "$rc" = 0 ] || fail "fresh check: the pin being the latest exited $rc"
+    has_text "$out" "is the latest" || fail "fresh check: the current pin does not say so: $out"
+    new="$(bump "$pin" 1)"; release "$new"; check
+    [ "$rc" = 1 ] || fail "fresh check: a newer release exited $rc, not 1"
+    has_text "$out" "YTDLP_VERSION=$new" || fail "fresh check: the new version is not printed: $out"
+    has_text "$out" "YTDLP_SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || fail "fresh check: the zipapp's sha256 (not yt-dlp_linux's) is not printed: $out"
+    has_text "$out" "scripts/build-streamtools.sh --relock" || fail "fresh check: the rebuild commands are not printed"
+    old="$(bump "$pin" -1)"; release "$old"; check
+    [ "$rc" = 0 ] || fail "fresh check: a release older than the pin exited $rc"
+    release "nightly"; check
+    [ "$rc" = 3 ] || fail "fresh check: a tag that is not a version exited $rc, not 3"
+    export R3I6NOS_GITHUB_API="http://127.0.0.1:1"
+    check
+    [ "$rc" = 3 ] || fail "fresh check: an unreachable GitHub exited $rc, not 3"
+) || exit 1
+
 echo "streamtools OK"

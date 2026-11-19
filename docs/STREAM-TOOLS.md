@@ -17,6 +17,7 @@ estimate from a faster CPU and is marked so.
 | The build, in Debian 12 arm64 under Docker | `scripts/build-streamtools.sh` (`--latest`, `--relock`, or tool names) runs `tools/streamtools/build.sh`; output `build/streamtools/r3i6nos-{ytdlp,gallery-dl,streamlink}.deb` |
 | Tests | `tests/test_streamtools.sh` (no Docker: pins, locks, the wrappers' arguments), `tests/test_streamtools_docker.sh` (Docker: the packages installed by the real `deb_watcher.py` in a clean Debian 12 and run) |
 | One real request, by hand | `R3I6NOS_LIVE=1 tests/test_streamtools_docker.sh` |
+| CI, and where to download the packages | `.github/workflows/app-streamtools.yml`: builds the three on an arm64 runner (sharing `ffmpeg-min`'s cache with `build.yml`), installs them in a clean Debian 12 through the real `deb_watcher.py`, runs each tool against a local web server, and uploads the `.deb` files as the artifact `streamtools-arm64`; a `streamtools-v*` tag also publishes them (with `SHA256SUMS`) as a GitHub release. Checked with `actionlint`; **never run on GitHub** |
 
 The packages are **not in the image** (like the runtimes, `docs/RUNTIMES.md`): put the `.deb` in a card's `native_deb/`, or `scripts/push-packages.sh UNIT build/streamtools/*.deb`, or publish them in the
 signed catalog (`scripts/publish-packages.sh build build/streamtools/*.deb`; the catalog reads them as `kind: tool`, checked).
@@ -83,7 +84,7 @@ Three limits a frontend must design for (all measured):
 
 ## Updating
 
-yt-dlp is the part that goes stale, so the build is arranged to make a new release cheap:
+yt-dlp is the part that goes stale, so the build is arranged to make a new release cheap, and a **weekly CI job tells you when one is out**: `.github/workflows/streamtools-fresh.yml` runs `scripts/check-streamtools-fresh.sh` every Monday and **fails when the pin in `pins.conf` is behind yt-dlp's latest release** (which is how GitHub emails the maintainer); the log has the lines to paste and the rebuild commands. It changes nothing. Tested against a fake GitHub (`tests/test_streamtools.sh`: current, newer, older, a bad tag, an unreachable API); run once against the real API on 2026-11-19, it said `2026.10.26` is the latest. **The workflow itself has never run on GitHub.**
 
 1. `scripts/build-streamtools.sh --latest` prints the newest yt-dlp release, its zipapp's sha256 (from the release's own `SHA2-256SUMS`) and the newest versions of the Python packages; nothing is changed.
 2. Edit `tools/streamtools/pins.conf` (the hash is checked, so read what changed first), run `scripts/build-streamtools.sh --relock` to rewrite `lock/*.txt`, then `scripts/build-streamtools.sh` and
