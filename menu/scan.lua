@@ -3,9 +3,21 @@
 
 local scan = {}
 
+-- What a game is, in each folder: LÖVE games need nothing but themselves. The game-engine runtimes (docs/RUNTIMES.md, ROADMAP section 33) are packages
+-- (r3i6nos-runtime-pyxel, -renpy, -solarus, installed from native_deb/ like any package) and a game for one is a folder, or an archive, in "Pyxel", "Renpy" or
+-- "Solarus" on a card; run_app.sh runs it with that runtime's command and says which package is missing when it is not installed.
 local ROOTS = {
   { dir = "Love 11.5", type = "love115" },
   { dir = "Love 12.0", type = "love120" },
+  { dir = "Pyxel", type = "pyxel", valid = function(path, name, isdir, exists, ls)
+      return (isdir and exists(path .. "/main.py")) or name:match("%.pyxapp$") ~= nil
+    end },
+  { dir = "Renpy", type = "renpy", valid = function(path, name, isdir, exists, ls)
+      return isdir and #ls(path .. "/game") > 0
+    end },
+  { dir = "Solarus", type = "solarus", valid = function(path, name, isdir, exists, ls)
+      return isdir and (exists(path .. "/data/quest.dat") or exists(path .. "/data.solarus") or exists(path .. "/data.solarus.zip"))
+    end },
 }
 
 local function ls(path)
@@ -24,7 +36,7 @@ local function exists(path)
 end
 
 local function title(name)
-  return (name:gsub("%.love$", ""):gsub("/$", ""):gsub("[_]+", " "))
+  return (name:gsub("%.love$", ""):gsub("%.pyxapp$", ""):gsub("/$", ""):gsub("[_]+", " "))
 end
 
 --- Returns a sorted list of { title, type, target }.
@@ -41,7 +53,10 @@ function scan.entries(roms, launchers, defaults, roms2)
         local path = base .. "/" .. root.dir .. "/" .. name:gsub("/$", "")
         local isdir = name:sub(-1) == "/"
         local key = root.type .. ":" .. name
-        if not have[key] and ((isdir and exists(path .. "/main.lua")) or name:match("%.love$")) then
+        local ok
+        if root.valid then ok = root.valid(path, name, isdir, exists, ls)
+        else ok = (isdir and exists(path .. "/main.lua")) or name:match("%.love$") end
+        if not have[key] and ok then
           have[key] = true
           list[#list + 1] = { title = title(name), type = root.type, target = path }
         end

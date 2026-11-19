@@ -32,6 +32,7 @@ PACKAGES=(
     libasound2 alsa-utils                # audio
     libopenal1 libfreetype6 libmpg123-0  # LÖVE runtime libraries (phase 3 may add more)
     libvorbisfile3 libtheora0 libmodplug1
+    libphysfs1                           # Solarus (tools/runtimes/solarus, docs/RUNTIMES.md): its runtime package links the system PhysFS
     libluajit-5.1-2                      # LÖVE is linked against the system LuaJIT
     libharfbuzz0b                        # LÖVE 12 text shaping
     libwayland-client0 libwayland-server0  # the stock Mali blob is the wayland-gbm build and links them

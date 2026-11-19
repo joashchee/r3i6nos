@@ -25,15 +25,16 @@ else
 fi
 echo "-- filesystems"; grep -E 'squashfs|fuse|overlay' /proc/filesystems
 echo "-- modules"; lsmod 2>/dev/null | grep -E 'uinput|loop|squashfs|fuse' || echo "none loaded (or lsmod missing)"
-ls "/lib/modules/$(uname -r)" 2>/dev/null | head -3 | sed 's/^/modules dir: /'
+find "/lib/modules/$(uname -r)" -maxdepth 1 2>/dev/null | head -3 | sed 's/^/modules dir: /'
 
 section "devices"
 ls -l /dev/uinput /dev/input/uinput /dev/loop-control /dev/loop0 /dev/tty0 /dev/dri/* /dev/fuse 2>&1
-ls -l /dev/input/ 2>&1 | head -20
+find /dev/input -maxdepth 1 -ls 2>&1 | head -20
 grep -E 'Name=|Handlers=' /proc/bus/input/devices 2>/dev/null | paste - - | head -12
 
 section "can a login user mount a runtime? (it should say must be superuser)"
-sq="$(ls "$PM"/libs/*.squashfs 2>/dev/null | head -1)"
+sq=""
+for f in "$PM"/libs/*.squashfs; do [ -e "$f" ] && { sq="$f"; break; }; done
 if [ -n "$sq" ]; then
     d="$(mktemp -d)"
     echo "file: $sq"
@@ -58,8 +59,8 @@ df -h /tmp /roms "$PM" 2>/dev/null
 ls -ld /tmp
 
 section "ports on the card"
-ls -la "$PORTS" 2>&1 | head -40
-ls "$PM/libs" 2>&1 | head -20
+find "$PORTS" -maxdepth 1 -ls 2>&1 | head -40
+find "$PM/libs" -maxdepth 1 2>&1 | head -20
 
 section "missing libraries in each port's binaries"
 for dir in "$PORTS"/*/; do

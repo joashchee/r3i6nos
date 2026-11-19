@@ -212,8 +212,8 @@ class SystemReport(Fake):
         with mock.patch.object(m.Report, "step", watch), mock.patch.dict(os.environ, {"PATH": self.env["PATH"]}), mock.patch("sys.stdout", io.StringIO()):
             self.assertEqual(m.main(["--from-settings", "--quiet"]), 0)
         steps = [dict(l.split("=", 1) for l in text.splitlines()) for text in seen]
-        self.assertEqual([s["steps"] for s in steps], ["16"] * 17, "5 sections, 2 checks on each of the two cards, packages, 2 in usb and 4 in power, then done")
-        self.assertEqual([s["step"] for s in steps], [str(i) for i in range(1, 17)] + ["16"])
+        self.assertEqual([s["steps"] for s in steps], ["17"] * 18, "5 sections, 2 checks on each of the two cards, packages, runtimes, 2 in usb and 4 in power, then done")
+        self.assertEqual([s["step"] for s in steps], [str(i) for i in range(1, 18)] + ["17"])
         self.assertIn("speed", steps[6]["doing"])
         self.assertEqual(steps[-1]["doing"], "done")
         self.assertEqual(steps[-1]["file"], str(self.t / "sys2/r3i6nos/r36s-report.txt"))
@@ -472,6 +472,93 @@ class PackagesSection(Fake):
     def test_the_section_is_in_the_report_even_with_nothing_installed(self):
         (self.t / "bin/r3i6nos-pkg").unlink()
         self.assertIn("SKIP r3i6nos-pkg: did not answer", self.section())
+
+
+class RuntimesSection(Fake):
+    """== runtimes ==: the game-engine runtime packages (docs/RUNTIMES.md) against a fake /opt/native_apps, ldd and engines."""
+
+    def setUp(self):
+        super().setUp()
+        t = self.t
+        (t / "apps").mkdir()
+        (t / "tools").mkdir()
+        (t / "bin/ldd").write_text("#!/bin/sh\nif [ -s \"$(dirname \"$0\")/missing\" ]; then echo \"\\t$(cat \"$(dirname \"$0\")/missing\") => not found\"; fi\necho \"\\tlibc.so.6 => /lib/libc.so.6 (0x1)\"\nexit 0\n")
+        (t / "bin/ldd").chmod(0o755)
+        (t / "bin/python3").write_text("#!/bin/sh\necho 2.2.8\n")
+        (t / "bin/python3").chmod(0o755)
+        self.env.update({"R3I6NOS_APP_ROOT": str(t / "apps"), "R3I6NOS_TOOLS_DIR": str(t / "tools"), "R3I6NOS_LDD": str(t / "bin/ldd")})
+
+    def package(self, name, files, cmd=True):
+        pkg = self.t / "apps" / f"r3i6nos-runtime-{name}"
+        rt = pkg / "usr/lib/r3i6nos-runtimes" / name
+        rt.mkdir(parents=True)
+        (pkg / "usr/bin").mkdir(parents=True)
+        (pkg / ".r3i6nos-meta").write_text('{"version": "9.9-r3i6nos1", "installed_kb": "10"}')
+        for rel, body in files.items():
+            f = rt / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_bytes(body)
+            if body.startswith(b"#!"):
+                f.chmod(0o755)
+        if cmd:
+            (pkg / f"usr/bin/r3i6nos-run-{name}").write_text("#!/bin/sh\n")
+            (self.t / "tools" / f"r3i6nos-run-{name}").write_text("#!/bin/sh\n")
+        return rt
+
+    def section(self, **env):
+        self.report(**env)
+        text = self.text(self.t / "sys2/r3i6nos")
+        a = text.index("== runtimes ==")
+        b = text.find("== ", a + 5)
+        return text[a:b if b > 0 else None]
+
+    def test_nothing_installed_is_a_skip_with_the_way_to_install(self):
+        s = self.section()
+        self.assertIn("SKIP runtime packages: none installed", s)
+        self.assertIn("native_deb/", s)
+
+    def test_the_kernel_config_is_read(self):
+        with gzip.open(self.t / "proc/config.gz", "wt") as f:
+            f.write("CONFIG_SQUASHFS_XZ=y\n# CONFIG_SQUASHFS_ZSTD is not set\nCONFIG_ARM64_VA_BITS_39=y\n")
+        s = self.section()
+        self.assertIn("INFO squashfs ZSTD: n (the runtimes are extracted, so not needed)", s)
+        self.assertIn("INFO squashfs XZ: y", s)
+        self.assertIn("39 bits (LuaJIT's 47-bit pointer limit is fine)", s)
+        with gzip.open(self.t / "proc/config.gz", "wt") as f:
+            f.write("CONFIG_ARM64_VA_BITS_48=y\n")
+        self.assertIn("48 bits (LuaJIT, so Solarus, may panic", self.section())
+
+    def test_no_config_is_a_skip(self):
+        self.assertIn("SKIP kernel config: no /proc/config.gz", self.section())
+
+    def test_a_good_pyxel_a_good_renpy_and_a_good_solarus(self):
+        elf = b"\x7fELF" + bytes(60)
+        self.package("pyxel", {"site-packages/pyxel/pyxel_wrapper.abi3.so": elf})
+        self.package("renpy", {"lib/py3-linux-aarch64/python": elf,
+                               "startRENPY": b"#!/bin/sh\nmkdir -p \"$1/game\"; [ \"$2\" = compile ] && echo ok > \"$1/game/script.rpyc\"\nexit 0\n"})
+        self.package("solarus", {"solarus-1.6.5": b"#!/bin/sh\necho 'Usage: solarus [options] [quest_path]'\n", "libsolarus.so.1": elf})
+        s = self.section()
+        for n in ("pyxel", "renpy", "solarus"):
+            self.assertIn(f"INFO {n} package: 9.9-r3i6nos1", s)
+            self.assertIn(f"PASS {n} command on the PATH", s)
+            self.assertRegex(s, rf"PASS {n} libraries: all \d+ ELF files link")
+            self.assertRegex(s, rf"PASS {n} runs without a window: ")
+        self.assertIn("imports, version 2.2.8", s)
+        self.assertIn("compiled a one-line script", s)
+        self.assertIn("answers -help", s)
+
+    def test_a_missing_library_is_a_fail_naming_it(self):
+        self.package("solarus", {"solarus-1.6.5": b"#!/bin/sh\necho 'Usage: x'\n", "libsolarus.so.1": b"\x7fELF" + bytes(60)})
+        (self.t / "bin/missing").write_text("libphysfs.so.1\n")
+        s = self.section()
+        self.assertIn("FAIL solarus libraries: 1 not found: libphysfs.so.1 (for libsolarus.so.1)", s)
+
+    def test_an_engine_that_does_not_run_is_a_fail_and_a_missing_command_too(self):
+        self.package("renpy", {"startRENPY": b"#!/bin/sh\necho 'no platform files' >&2\nexit 1\n"}, cmd=False)
+        self.package("solarus", {"solarus-1.6.5": b"#!/bin/sh\necho nothing\n"})
+        s = self.section()
+        self.assertIn("FAIL renpy installed: the runtime folder or the command is missing", s)
+        self.assertIn("FAIL solarus runs without a window: no answer", s)
 
 
 class NeedsDialog(unittest.TestCase):

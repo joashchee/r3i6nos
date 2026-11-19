@@ -48,6 +48,23 @@ end
 assert(seen["love120:Data Game"] == data .. "/Love 12.0/Data_Game", "a data card game is listed")
 assert(zetas == 1 and seen["love115:zeta"] == root .. "/Love 11.5/zeta.love", "the system card's copy wins until step 2")
 assert(#scan.entries(root, root .. "/launchers", defs, root .. "-no-such-card") > 0, "an absent data card is fine")
+-- game-engine runtimes (docs/RUNTIMES.md): a Pyxel folder with main.py or a .pyxapp, a Ren'Py folder with game/, a Solarus quest folder; anything else is not listed
+local rt = root .. "-rt"
+sh(('mkdir -p "%s/Pyxel/Jump_Game" "%s/Pyxel/Empty" "%s/Renpy/Story/game" "%s/Renpy/NoGame" "%s/Solarus/Quest_A/data" "%s/Solarus/Quest_B" "%s/Solarus/Bad" "%s/launchers"')
+  :format(rt, rt, rt, rt, rt, rt, rt, rt))
+sh(('touch "%s/Pyxel/Jump_Game/main.py" "%s/Pyxel/Shooter.pyxapp" "%s/Pyxel/notes.txt" "%s/Renpy/Story/game/script.rpy" "%s/Solarus/Quest_A/data/quest.dat" "%s/Solarus/Quest_B/data.solarus"')
+  :format(rt, rt, rt, rt, rt, rt))
+list = scan.entries(rt, rt .. "/launchers")
+local rts = {}
+for _, e in ipairs(list) do rts[#rts + 1] = e.type .. ":" .. e.title end
+table.sort(rts)
+local want_rt = { "pyxel:Jump Game", "pyxel:Shooter", "renpy:Story", "solarus:Quest A", "solarus:Quest B" }
+assert(table.concat(rts, ",") == table.concat(want_rt, ","), "runtime games: " .. table.concat(rts, ","))
+for _, e in ipairs(list) do
+  if e.type == "pyxel" and e.title == "Shooter" then assert(e.target == rt .. "/Pyxel/Shooter.pyxapp", "a .pyxapp is its own target") end
+  if e.type == "renpy" then assert(e.target == rt .. "/Renpy/Story", "a Ren'Py game's target is its folder") end
+end
+sh(('rm -rf "%s"'):format(rt))
 sh(('rm -rf "%s"'):format(data))
 sh(('rm -rf "%s" "%s"'):format(root, defs))
 print("scan: ok")

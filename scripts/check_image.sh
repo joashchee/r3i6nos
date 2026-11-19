@@ -80,6 +80,12 @@ if [ "${R3I6NOS_ALLOW_NO_PORTMASTER:-0}" != 1 ]; then
     done
     [ -x "$MNT/usr/bin/pgrep" ] || fail "no /usr/bin/pgrep (procps): PortMaster's ports need it"
 fi
+# The game-engine runtimes (docs/RUNTIMES.md) are packages, not part of the image, but they link what the image must carry: Solarus's PhysFS (the rest is SDL2, OpenAL, Vorbis, ModPlug, FreeType, which are here for LÖVE and PortMaster).
+if [ "${R3I6NOS_ALLOW_NO_RUNTIME_LIBS:-0}" != 1 ]; then
+    for lib in libphysfs.so.1 libopenal.so.1 libvorbisfile.so.3 libmodplug.so.1 libSDL2_image-2.0.so.0 libSDL2_ttf-2.0.so.0; do
+        [ -n "$(find "$MNT/usr/lib" -name "$lib" | head -1)" ] || fail "no $lib: the Solarus, Ren'Py and Pyxel runtime packages cannot start (R3I6NOS_ALLOW_NO_RUNTIME_LIBS=1 skips this for a test)"
+    done
+fi
 [ -L "$MNT/etc/systemd/system/multi-user.target.wants/loveos.service" ] || fail "loveos.service not enabled"
 [ -L "$MNT/etc/systemd/system/multi-user.target.wants/r3i6nos-cards.service" ] || fail "r3i6nos-cards.service not enabled"
 [ -L "$MNT/etc/systemd/system/multi-user.target.wants/r3i6nos-setup.service" ] || fail "r3i6nos-setup.service not enabled"

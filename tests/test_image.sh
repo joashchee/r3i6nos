@@ -24,6 +24,7 @@ mkdir -p "$R/etc" "$R/proc" "$R/sys" "$T/love/11.5/bin"
 printf 'loveos:x:1000:1000::/home/loveos:/usr/sbin/nologin\n' > "$R/etc/passwd"
 printf '#!/bin/sh\n' > "$T/love/11.5/bin/love"; chmod +x "$T/love/11.5/bin/love"
 export R3I6NOS_ALLOW_NO_PORTMASTER=1   # the fake image has no PortMaster either
+export R3I6NOS_ALLOW_NO_RUNTIME_LIBS=1 # nor the libraries the game-engine runtime packages link
 export R3I6NOS_ALLOW_NO_NTTPLAY=1   # the fake image has no nttplay; the real one must (configure_rootfs.sh, check_image.sh)
 R3I6NOS_LOVE_BUILD="$T/love" scripts/configure_rootfs.sh "$R" >/dev/null
 

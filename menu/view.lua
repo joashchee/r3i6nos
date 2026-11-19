@@ -9,7 +9,7 @@ local netstatus = require("netstatus")
 
 local view = {}
 
-local TYPE_LABEL = { love115 = "LÖVE 11.5", love120 = "LÖVE 12.0", native = "native" }
+local TYPE_LABEL = { love115 = "LÖVE 11.5", love120 = "LÖVE 12.0", native = "native", pyxel = "Pyxel", renpy = "Ren'Py", solarus = "Solarus" }
 
 --- Games shown on a page, and the list's place on the screen.
 view.LIST = { col = 0, row = theme.DISPLAY_TOP, w = theme.COLS, h = theme.DISPLAY_ROWS }

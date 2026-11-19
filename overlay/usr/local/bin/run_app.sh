@@ -1,6 +1,6 @@
 #!/bin/bash
 # run_app.sh - launch a LÖVE game or a native app on the R36S.
-# Usage: run_app.sh [love115|love120|native|port] <path_to_game_or_binary_or_port_script>
+# Usage: run_app.sh [love115|love120|native|port|pyxel|renpy|solarus] <path_to_game_or_binary_or_port_script>
 
 set -u
 
@@ -12,7 +12,7 @@ TYPE="${1:-}"
 TARGET="${2:-}"
 
 if [ -z "$TYPE" ] || [ -z "$TARGET" ]; then
-    echo "Usage: $0 [love115|love120|native|port] <path_to_target>" >&2
+    echo "Usage: $0 [love115|love120|native|port|pyxel|renpy|solarus] <path_to_target>" >&2
     exit 1
 fi
 
@@ -62,9 +62,36 @@ run_love() {
     "$bin" "$TARGET"
 }
 
+# A game for a game-engine runtime (docs/RUNTIMES.md, ROADMAP section 33): the runtime is a package (r3i6nos-runtime-<engine>) whose command is on PATH. The game runs in
+# its own process group, and r3i6nos-portquit ends it when Select+Start are held for 2 seconds, as for a PortMaster port: a Pyxel game has no menu and Ren'Py and
+# Solarus quit by their own screens, so a game that hangs or ignores the pad must still leave a way back to the menu.
+run_runtime() {
+    local cmd="$1" pkg="$2"
+    if ! command -v "$cmd" >/dev/null 2>&1; then
+        echo "run_app.sh: $cmd is not installed: put $pkg.deb in native_deb/ on the card (docs/RUNTIMES.md)" >&2
+        exit 1
+    fi
+    local quit="${R3I6NOS_PORTQUIT:-/usr/local/bin/r3i6nos-portquit}"
+    if command -v setsid >/dev/null 2>&1 && [ -x "$quit" ]; then
+        setsid "$cmd" "$TARGET" <&0 &
+        local game_pid=$!
+        "$quit" "$game_pid" &
+        local quit_pid=$!
+        wait "$game_pid"
+        local rc=$?
+        kill "$quit_pid" 2>/dev/null
+        wait "$quit_pid" 2>/dev/null
+        exit "$rc"
+    fi
+    "$cmd" "$TARGET"
+}
+
 case "$TYPE" in
     love115) run_love "${R3I6NOS_LOVE115:-/opt/love/11.5/bin/love}" ;;
     love120) run_love "${R3I6NOS_LOVE120:-/opt/love/12.0/bin/love}" ;;
+    pyxel) run_runtime r3i6nos-run-pyxel r3i6nos-runtime-pyxel ;;
+    renpy) run_runtime r3i6nos-run-renpy r3i6nos-runtime-renpy ;;
+    solarus) run_runtime r3i6nos-run-solarus r3i6nos-runtime-solarus ;;
     native)
         if [ ! -x "$TARGET" ]; then
             echo "run_app.sh: not executable: $TARGET" >&2

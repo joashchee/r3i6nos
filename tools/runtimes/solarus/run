@@ -1,0 +1,10 @@
+#!/bin/bash
+# r3i6nos-run-solarus <quest folder | data.solarus> [options]
+# Runs a Solarus quest with the runtime in this package (the engine, libsolarus and LuaJIT) and the image's SDL2, OpenAL and PhysFS. No root, no mount.
+HERE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+RT="$HERE/lib/r3i6nos-runtimes/solarus"
+[ -n "${1:-}" ] || { echo "usage: r3i6nos-run-solarus <quest folder | data.solarus> [options]" >&2; exit 2; }
+quest="$1"; shift
+[ -e "$quest" ] || { echo "r3i6nos-run-solarus: $quest does not exist" >&2; exit 2; }
+export LD_LIBRARY_PATH="$RT${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+exec "$RT/solarus-1.6.5" "$@" "$quest"

@@ -1,0 +1,20 @@
+#!/bin/bash
+# r3i6nos-run-pyxel <game.py | folder with main.py | app.pyxapp | art.pyxres> [args]
+# Runs a Pyxel game with the runtime in this package (the pyxel wheel) and the image's own Python 3.11. Needs no root and no mount.
+HERE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+RT="$HERE/lib/r3i6nos-runtimes/pyxel"
+[ -n "${1:-}" ] || { echo "usage: r3i6nos-run-pyxel <game.py | folder with main.py | app.pyxapp | art.pyxres> [args]" >&2; exit 2; }
+target="$1"; shift
+export PYTHONPATH="$RT/site-packages${PYTHONPATH:+:$PYTHONPATH}"
+PY="${R3I6NOS_PYTHON:-python3}"
+if [ -d "$target" ]; then
+    cd "$target" || exit 1
+    [ -f main.py ] || { echo "r3i6nos-run-pyxel: no main.py in $target" >&2; exit 2; }
+    exec "$PY" -s main.py "$@"
+fi
+[ -f "$target" ] || { echo "r3i6nos-run-pyxel: $target is not a file or folder" >&2; exit 2; }
+case "$target" in
+    *.pyxapp) exec "$PY" -s -m pyxel play "$target" "$@" ;;
+    *.pyxres) exec "$PY" -s -m pyxel edit "$target" "$@" ;;
+    *) cd "$(dirname "$target")" || exit 1; exec "$PY" -s "$(basename "$target")" "$@" ;;
+esac

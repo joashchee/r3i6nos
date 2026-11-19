@@ -31,11 +31,12 @@ R3I6NOS_CARDS_STATE (/run/r3i6nos/cards), R3I6NOS_REPORT_DIR (the folder to writ
 R3I6NOS_SETUP_VAR, R3I6NOS_SETUP_RUN, R3I6NOS_SETUP_BOOT (where r3i6nos-setup leaves its record, state and report),
 R3I6NOS_SOUND (r3i6nos-sound), R3I6NOS_HOTPLUG (r3i6nos-hotplug),
 R3I6NOS_CLOCK (r3i6nos-clock), and for the power section (docs/POWER.md): R3I6NOS_REPORT_POWER_S (30: seconds per measuring window),
-R3I6NOS_BATTERY (r3i6nos-battery), R3I6NOS_PKG (r3i6nos-pkg), R3I6NOS_OPENSSL, R3I6NOS_PKG_CACHE, R3I6NOS_APP_ROOT (/opt/native_apps), R3I6NOS_MODULES (/lib/modules), R3I6NOS_BOOTSTATE_CMD (r3i6nos-bootstate), R3I6NOS_MENU_MATCH (/opt/loveos/menu: how the menu's process
+R3I6NOS_BATTERY (r3i6nos-battery), R3I6NOS_PKG (r3i6nos-pkg), R3I6NOS_OPENSSL, R3I6NOS_PKG_CACHE, R3I6NOS_APP_ROOT (/opt/native_apps), R3I6NOS_TOOLS_DIR (/opt/loveos/bin), R3I6NOS_LDD (ldd), R3I6NOS_MODULES (/lib/modules), R3I6NOS_BOOTSTATE_CMD (r3i6nos-bootstate), R3I6NOS_MENU_MATCH (/opt/loveos/menu: how the menu's process
 is told), R3I6NOS_POWER_AB (1: do the stop-and-compare even when not root, tests).
 """
 import gzip
 import hashlib
+import json
 import os
 import re
 import resource
@@ -72,6 +73,8 @@ BOOTSTATE_CMD = ENV("R3I6NOS_BOOTSTATE_CMD", "/usr/local/bin/r3i6nos-bootstate")
 PKG = ENV("R3I6NOS_PKG", "/usr/local/bin/r3i6nos-pkg")
 OPENSSL = ENV("R3I6NOS_OPENSSL", "openssl")
 APP_ROOT = Path(ENV("R3I6NOS_APP_ROOT", "/opt/native_apps"))
+TOOLS = Path(ENV("R3I6NOS_TOOLS_DIR", "/opt/loveos/bin"))      # deb_watcher's wrappers for tool packages (the runtimes' r3i6nos-run-* commands)
+LDD = ENV("R3I6NOS_LDD", "ldd")
 PKG_RESERVE_MB = int(ENV("R3I6NOS_PKG_RESERVE_MB", "200"))      # deb_watcher.py's own rule for what a package may leave free
 PKG_RESERVE_PCT = int(ENV("R3I6NOS_PKG_RESERVE_PCT", "10"))
 PKG_CACHE = Path(ENV("R3I6NOS_PKG_CACHE") or Path.home() / ".cache/r3i6nos-pkg")
@@ -414,6 +417,104 @@ def packages(r):
         r.line("PASS" if res.get("ok") == "1" else "INFO", "last system update answer", f"ok={res.get('ok')} id={res.get('id')}")
     for tool in ("dpkg-deb", "python3"):
         r.line("PASS" if shutil.which(tool) else "FAIL", f"tool {tool}", shutil.which(tool) or "not on the PATH of this login (r3i6nos-pkg needs it)")
+
+
+def runtimes(r):
+    """== runtimes ==: the game-engine runtime packages (r3i6nos-runtime-pyxel, -renpy, -solarus; docs/RUNTIMES.md) and what the kernel says about them.
+
+    Offline and windowless (the menu owns the screen while a report runs): every ELF in a runtime is linked (ldd) and none may miss a library, and each
+    engine does one thing that needs no window (Pyxel imports, Ren'Py compiles a one-line script, Solarus answers -help), timed, with the peak memory of
+    the largest child. A game on the screen, the pad and the sound are tried from the menu with the sample games (docs/RUNTIMES.md, "On the unit")."""
+    r.step("the game-engine runtimes")
+    r.section("runtimes")
+    cfg = {}
+    try:
+        with gzip.open(PROC / "config.gz", "rt", errors="replace") as f:
+            for ln in f:
+                m = re.match(r"(CONFIG_\w+)=(.*)$", ln.strip())
+                if m:
+                    cfg[m.group(1)] = m.group(2)
+                m = re.match(r"# (CONFIG_\w+) is not set", ln.strip())
+                if m:
+                    cfg[m.group(1)] = "n"
+        have_cfg = True
+    except OSError:
+        have_cfg = False
+    if not have_cfg:
+        r.line("SKIP", "kernel config", "no /proc/config.gz on this kernel")
+    else:
+        for key, what in (("CONFIG_SQUASHFS_ZSTD", "squashfs ZSTD"), ("CONFIG_SQUASHFS_XZ", "squashfs XZ"), ("CONFIG_SQUASHFS_LZO", "squashfs LZO"),
+                          ("CONFIG_INPUT_UINPUT", "uinput (gptokeyb)"), ("CONFIG_ZRAM", "zram"), ("CONFIG_SWAP", "swap"), ("CONFIG_BLK_DEV_LOOP", "loop devices")):
+            r.line("INFO", what, (cfg.get(key, "n") if key in cfg else "not in the config") + (" (the runtimes are extracted, so not needed)" if key == "CONFIG_SQUASHFS_ZSTD" else ""))
+        va = [k for k in cfg if k.startswith("CONFIG_ARM64_VA_BITS_") and cfg[k] == "y"]
+        r.line("INFO", "user address space", (va[0].rsplit("_", 1)[1] + " bits" + (" (LuaJIT's 47-bit pointer limit is fine)" if va[0].endswith("_39") or va[0].endswith("_42") else " (LuaJIT, so Solarus, may panic with 'bad light userdata pointer')")) if va else "not in the config")
+    r.line("INFO" if (DEV / "uinput").exists() or (DEV / "input/uinput").exists() else "SKIP", "/dev/uinput", "present" if (DEV / "uinput").exists() or (DEV / "input/uinput").exists() else "absent")
+    pkgs = sorted(APP_ROOT.glob("r3i6nos-runtime-*")) if APP_ROOT.is_dir() else []
+    if not pkgs:
+        r.line("SKIP", "runtime packages", "none installed (r3i6nos-runtime-pyxel.deb, -renpy.deb, -solarus.deb into native_deb/ on a card, or scripts/push-packages.sh)")
+        return
+    for pkg in pkgs:
+        name = pkg.name[len("r3i6nos-runtime-"):]
+        rt = pkg / "usr/lib/r3i6nos-runtimes" / name
+        cmd = pkg / "usr/bin" / f"r3i6nos-run-{name}"
+        try:
+            ver = json.loads((pkg / ".r3i6nos-meta").read_text()).get("version", "?")
+        except (OSError, ValueError):
+            ver = "?"
+        r.line("INFO", f"{name} package", f"{ver}, {gb(sum(f.stat().st_size for f in rt.rglob('*') if f.is_file())) if rt.is_dir() else 'no runtime folder'}")
+        if not rt.is_dir() or not cmd.is_file():
+            r.line("FAIL", f"{name} installed", "the runtime folder or the command is missing from the package")
+            continue
+        wrapper = TOOLS / cmd.name
+        r.line("PASS" if wrapper.exists() else "FAIL", f"{name} command on the PATH", str(wrapper) if wrapper.exists() else f"no {cmd.name} in {TOOLS}")
+        elfs, libdirs = [], set()
+        for f in rt.rglob("*"):
+            try:
+                if f.is_file() and not f.is_symlink() and f.open("rb").read(4) == b"\x7fELF":
+                    elfs.append(f)
+                    if ".so" in f.name:
+                        libdirs.add(str(f.parent))
+            except OSError:
+                pass
+        env = dict(os.environ, LD_LIBRARY_PATH=":".join(sorted(libdirs)))
+        missing = {}
+        for f in elfs[:600]:
+            try:
+                out = subprocess.run([LDD, str(f)], capture_output=True, text=True, timeout=20, env=env).stdout
+            except (OSError, subprocess.SubprocessError):
+                continue
+            for m in re.finditer(r"^\s*(\S+) => not found", out, re.M):
+                missing.setdefault(m.group(1), f.name)
+        if missing:
+            r.line("FAIL", f"{name} libraries", f"{len(missing)} not found: " + ", ".join(f"{k} (for {v})" for k, v in sorted(missing.items())[:8]))
+        else:
+            r.line("PASS", f"{name} libraries", f"all {len(elfs)} ELF files link")
+        t0 = time.time()
+        ok, why = False, "not run"
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                e = dict(os.environ, SDL_VIDEODRIVER="dummy", SDL_AUDIODRIVER="dummy", HOME=d)
+                if name == "pyxel":
+                    e["PYTHONPATH"] = str(rt / "site-packages")
+                    p = subprocess.run(["python3", "-s", "-c", "import pyxel; print(pyxel.VERSION)"], capture_output=True, text=True, timeout=60, env=e)
+                    ok, why = p.returncode == 0 and bool(p.stdout.strip()), f"imports, version {p.stdout.strip()}" if p.returncode == 0 else (p.stderr.strip().splitlines() or ["failed"])[-1]
+                elif name == "renpy":
+                    os.makedirs(f"{d}/g/game")
+                    Path(f"{d}/g/game/script.rpy").write_text('label start:\n    "Hello"\n    return\n')
+                    p = subprocess.run([str(rt / "startRENPY"), f"{d}/g", "compile"], capture_output=True, text=True, timeout=240, env=e)
+                    ok, why = (Path(f"{d}/g/game/script.rpyc").is_file()), "compiled a one-line script" if Path(f"{d}/g/game/script.rpyc").is_file() else (p.stderr.strip().splitlines() or p.stdout.strip().splitlines() or ["no output"])[-1]
+                elif name == "solarus":
+                    e["LD_LIBRARY_PATH"] = str(rt)
+                    p = subprocess.run([str(rt / "solarus-1.6.5"), "-help"], capture_output=True, text=True, timeout=60, env=e)
+                    ok, why = "Usage" in p.stdout + p.stderr, "answers -help" if "Usage" in p.stdout + p.stderr else (p.stderr.strip().splitlines() or ["no answer"])[-1]
+                else:
+                    r.line("SKIP", f"{name} smoke test", "no test for this runtime yet")
+                    continue
+        except (OSError, subprocess.SubprocessError) as ex:
+            ok, why = False, f"could not run: {getattr(ex, 'strerror', None) or ex}"
+        peak = resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss / 1024
+        r.line("PASS" if ok else "FAIL", f"{name} runs without a window", f"{why}, {time.time() - t0:.1f} s, largest child so far {peak:.0f} MiB")
+    r.line("INFO", "next", "a game on the screen: copy the samples (docs/RUNTIMES.md) to the card and start each from the menu; note the pad, the sound and the time to the first frame")
 
 
 def disks():
@@ -1175,11 +1276,11 @@ def main(argv):
     try:
         folder, card = where(cards)
         r = Report(folder, how, rel.get("VERSION", "?"), card, quiet)
-        r.steps = 12 + 2 * len(mounted_cards(cards))
+        r.steps = 13 + 2 * len(mounted_cards(cards))
     except OSError as e:
         print(f"r3i6nos-report: cannot write the report: {e}", file=sys.stderr)
         return 1
-    for part in (lambda: (system(r, rel), setup_section(r)), lambda: boot(r), lambda: sound(r), lambda: clock(r), lambda: storage(r, cards), lambda: packages(r), lambda: usb_sections(r), lambda: power_section(r)):
+    for part in (lambda: (system(r, rel), setup_section(r)), lambda: boot(r), lambda: sound(r), lambda: clock(r), lambda: storage(r, cards), lambda: packages(r), lambda: runtimes(r), lambda: usb_sections(r), lambda: power_section(r)):
         try:
             part()
         except Exception as e:  # a broken check is a line in the report, never a missing report
