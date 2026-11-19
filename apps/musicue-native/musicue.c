@@ -9,7 +9,7 @@
  * else is cells: palette slots 32-255 hold gradients and shades made from the chosen theme (bars, marker colours, the fading cue list), every text cell
  * on a gradient takes black or white by contrast, so every pair passes 4.5:1 (--selftest checks all of them for every theme).
  *
- * `--selftest` runs the checks and prints one R3I6NOS_SMOKE line; `--screenshot out.bmp [--screen library|player|menu] [--theme NAME]` draws a screen
+ * `--selftest` runs the checks and prints one R3I6NOS_SMOKE line; `--screenshot out.bmp [--screen library|player|player:N|menu] [--theme NAME]` draws a screen
  * with a synthetic demo song and no files; `--make-demo DIR` writes that song and its cue files; `--version`.
  * The R36S's rules still open for this app (device report with a power section, Rec demo, hot-plug toast wiring in the sync job): ROADMAP section 36.
  * Nothing here has run on a real R36S. */
@@ -161,10 +161,18 @@ static int hue_of(const char *label) {
 
 typedef struct { char path[PATH_MAX]; char name[96]; char id[16]; int has_cues; int nmarkers; } Song;
 
-enum { M_LIBRARY, M_PLAYER, M_MENU, M_JOB, M_NOTE, M_ID };
+enum { M_LIBRARY, M_PLAYER, M_MENU, M_JOB, M_NOTE, M_ID, M_TEXT };
+
+/* The panels of rows 9-20: two show at a time, and Fn turns the carousel one place. */
+enum { P_MARKERS, P_CUES, P_META, P_SETLIST, P_LAST, P_TOP, P_COUNT };
+static const char *const PANEL_NAMES[P_COUNT] = {"Markers", "Cues", "Metadata", "Set List", "Last 10 cued", "Top 10 cued"};
+typedef struct { char id[16]; char title[96]; } SetItem;                       /* a Set List entry: the song's id and its name */
+typedef struct { char id[16]; char title[96]; long last; int count; } HistItem;   /* a song opened here: when last (a counter that only rises) and how many times */
+#define SETLIST_MAX 200
+#define HIST_MAX 200
 
 typedef struct { char label[48]; char value[40]; int id; } MItem;
-typedef struct { char title[40]; MItem it[14]; int n, sel; } Menu;
+typedef struct { char title[40]; MItem it[16]; int n, sel; } Menu;
 
 typedef struct {
     char data[PATH_MAX];                    /* <app data>: media/, cues/, inbox/, export/, settings.conf */
@@ -176,6 +184,14 @@ typedef struct {
     Track track; Engine eng; WavePeaks peaks; CueSet cues;
     double offset;                          /* seconds the audio runs after the cue data's time */
     int msel;                               /* the marker the cursor is on */
+    int csel;                               /* the cue the cursor is on (follows the cue playing unless the stick moved lately) */
+    int pan_first, pan_focus, psel[P_COUNT];   /* the carousel: panel pan_first on the left, the next on the right; which of the two the stick is in; each panel's selection */
+    double stick_idle_ms;                   /* since the right stick last moved a selection */
+    int stick_x, stick_y; double stick_rep_ms;   /* the right stick: -1, 0 or 1 on each axis, and the time to its next repeat */
+    int pad_l1, pad_r1, chord;              /* L1 and R1 held; both were: the menu opened, so neither steps a marker on release */
+    SetItem *sl; int nsl;                   /* the Set List (setlist.tsv) */
+    HistItem *hist; int nhist; long hist_clock;   /* songs opened here (history.tsv): Last 10 and Top 10 cued */
+    char tbuf[72]; int tlen, tpos, tmax, tfield; const char *talpha;   /* M_TEXT: a metadata field being typed */
     int loop_state; double loop_a, loop_b;  /* 0 none, 1 A set, 2 A and B (looping) */
     int next_label;
     int demo;                               /* the synthetic demo song (no files) */
@@ -287,6 +303,166 @@ static void save_settings(const App *a) {
     cue_write_file(p, buf, strlen(buf));
 }
 
+
+/* ---- the Set List and the songs opened here (both in the app's data folder, so they follow rule 16's card choice) ---------------------------------- */
+
+static void clean_title(char *dst, size_t cap, const char *src) {
+    size_t n = 0;
+    for (; *src && n + 1 < cap; src++) dst[n++] = (*src == '\t' || *src == '\n' || *src == '\r') ? ' ' : *src;
+    dst[n] = 0;
+}
+
+static void data_file(const App *a, const char *name, char *out, size_t cap) { snprintf(out, cap, "%s/%s", a->data, name); }
+
+static void setlist_save(const App *a) {
+    char p[PATH_MAX];
+    data_file(a, "setlist.tsv", p, sizeof p);
+    CueBuf b = {0};
+    char line[160];
+    for (int i = 0; i < a->nsl; i++) { snprintf(line, sizeof line, "%s\t%s\n", a->sl[i].id, a->sl[i].title); cb_str(&b, line); }
+    if (!b.bad) cue_write_file(p, b.p ? b.p : "", b.n);
+    free(b.p);
+}
+
+static void setlist_load(App *a) {
+    free(a->sl);
+    a->sl = (SetItem *)calloc(SETLIST_MAX, sizeof *a->sl);
+    a->nsl = 0;
+    char p[PATH_MAX];
+    data_file(a, "setlist.tsv", p, sizeof p);
+    char *t = cue_read_file(p, NULL);
+    if (!t || !a->sl) { free(t); return; }
+    for (char *line = strtok(t, "\n"); line && a->nsl < SETLIST_MAX; line = strtok(NULL, "\n")) {
+        char *tab = strchr(line, '\t');
+        if (!tab) continue;
+        *tab = 0;
+        if (!cue_videoid_ok(line) && strncmp(line, "local-", 6)) continue;
+        SetItem *it = &a->sl[a->nsl++];
+        snprintf(it->id, sizeof it->id, "%s", line);
+        clean_title(it->title, sizeof it->title, tab + 1);
+    }
+    free(t);
+}
+
+static int setlist_find(const App *a, const char *id) {
+    for (int i = 0; i < a->nsl; i++) if (!strcmp(a->sl[i].id, id)) return i;
+    return -1;
+}
+
+/* Cue's "Add to Set List": the song goes on the end, or its entry is updated if it is there. Returns 1 added, 0 updated, -1 no room. */
+static int setlist_add(App *a, const char *id, const char *title) {
+    int i = setlist_find(a, id);
+    if (i < 0) {
+        if (!a->sl || a->nsl >= SETLIST_MAX) return -1;
+        i = a->nsl++;
+        snprintf(a->sl[i].id, sizeof a->sl[i].id, "%s", id);
+        clean_title(a->sl[i].title, sizeof a->sl[i].title, title);
+        setlist_save(a);
+        return 1;
+    }
+    clean_title(a->sl[i].title, sizeof a->sl[i].title, title);
+    setlist_save(a);
+    return 0;
+}
+
+static void setlist_remove(App *a, int i) {
+    if (i < 0 || i >= a->nsl) return;
+    memmove(&a->sl[i], &a->sl[i + 1], (size_t)(a->nsl - i - 1) * sizeof *a->sl);
+    a->nsl--;
+    setlist_save(a);
+}
+
+static int setlist_move(App *a, int i, int dir) {                 /* the selected entry up or down one place; returns its new index */
+    int j = i + dir;
+    if (i < 0 || i >= a->nsl || j < 0 || j >= a->nsl) return i;
+    SetItem t = a->sl[i];
+    a->sl[i] = a->sl[j];
+    a->sl[j] = t;
+    setlist_save(a);
+    return j;
+}
+
+static void hist_save(const App *a) {
+    char p[PATH_MAX];
+    data_file(a, "history.tsv", p, sizeof p);
+    CueBuf b = {0};
+    char line[200];
+    for (int i = 0; i < a->nhist; i++) {
+        snprintf(line, sizeof line, "%s\t%ld\t%d\t%s\n", a->hist[i].id, a->hist[i].last, a->hist[i].count, a->hist[i].title);
+        cb_str(&b, line);
+    }
+    if (!b.bad) cue_write_file(p, b.p ? b.p : "", b.n);
+    free(b.p);
+}
+
+static void hist_load(App *a) {
+    free(a->hist);
+    a->hist = (HistItem *)calloc(HIST_MAX, sizeof *a->hist);
+    a->nhist = 0;
+    a->hist_clock = 0;
+    char p[PATH_MAX];
+    data_file(a, "history.tsv", p, sizeof p);
+    char *t = cue_read_file(p, NULL);
+    if (!t || !a->hist) { free(t); return; }
+    for (char *line = strtok(t, "\n"); line && a->nhist < HIST_MAX; line = strtok(NULL, "\n")) {
+        char *f2 = strchr(line, '\t'), *f3 = f2 ? strchr(f2 + 1, '\t') : NULL, *f4 = f3 ? strchr(f3 + 1, '\t') : NULL;
+        if (!f4) continue;
+        *f2 = *f3 = *f4 = 0;
+        if (!cue_videoid_ok(line) && strncmp(line, "local-", 6)) continue;
+        HistItem *h = &a->hist[a->nhist++];
+        snprintf(h->id, sizeof h->id, "%s", line);
+        h->last = atol(f2 + 1);
+        h->count = atoi(f3 + 1);
+        if (h->count < 1) h->count = 1;
+        clean_title(h->title, sizeof h->title, f4 + 1);
+        if (h->last > a->hist_clock) a->hist_clock = h->last;
+    }
+    free(t);
+}
+
+/* A song was opened: it is the newest, and counted once more. The clock only rises, so two openings in one second still have an order. */
+static void hist_touch(App *a, const char *id, const char *title) {
+    if (!a->hist) return;
+    int i = -1;
+    for (int k = 0; k < a->nhist; k++) if (!strcmp(a->hist[k].id, id)) { i = k; break; }
+    if (i < 0) {
+        if (a->nhist == HIST_MAX) {                                    /* full: the one opened longest ago goes */
+            int old = 0;
+            for (int k = 1; k < a->nhist; k++) if (a->hist[k].last < a->hist[old].last) old = k;
+            memmove(&a->hist[old], &a->hist[old + 1], (size_t)(a->nhist - old - 1) * sizeof *a->hist);
+            a->nhist--;
+        }
+        i = a->nhist++;
+        memset(&a->hist[i], 0, sizeof a->hist[i]);
+        snprintf(a->hist[i].id, sizeof a->hist[i].id, "%s", id);
+    }
+    clean_title(a->hist[i].title, sizeof a->hist[i].title, title);
+    a->hist[i].count++;
+    long now = (long)time(NULL);
+    a->hist_clock = now > a->hist_clock ? now : a->hist_clock + 1;
+    a->hist[i].last = a->hist_clock;
+    hist_save(a);
+}
+
+/* The indices of the songs opened here, newest first (Last 10) or most opened first (Top 10, the newer first among equals); returns how many (at most 10). */
+static int hist_rank(const App *a, int top, int *out) {
+    int n = 0, idx[HIST_MAX];
+    for (int i = 0; i < a->nhist; i++) idx[n++] = i;
+    for (int i = 1; i < n; i++) {                                      /* insertion sort: n is small */
+        int v = idx[i], j = i - 1;
+        for (; j >= 0; j--) {
+            const HistItem *x = &a->hist[idx[j]], *y = &a->hist[v];
+            int before = top ? (x->count > y->count || (x->count == y->count && x->last >= y->last)) : x->last >= y->last;
+            if (before) break;
+            idx[j + 1] = idx[j];
+        }
+        idx[j + 1] = v;
+    }
+    if (n > 10) n = 10;
+    memcpy(out, idx, (size_t)n * sizeof *out);
+    return n;
+}
+
 static void apply_theme(App *a) {
     r3_theme_apply(a->theme);
     app_palette(r3_themes[a->theme].look);
@@ -343,6 +519,98 @@ static void set_loop_engine(App *a) {
 
 static double dur_of(const App *a) { return a->track.pcm ? track_seconds(&a->track) : 0; }
 
+/* ---- Tempo, as Cue does it (its computeGapTempo, classifyTempoDot, computeSuggestedTempoCluster, maybeSuggestTempo) ------------------------------ */
+
+static int sig_valid(const char *sig) { return !strcmp(sig, "4/4") || !strcmp(sig, "6/8"); }
+static int sig_beats(const App *a) { return !strcmp(a->cues.meta.sig, "6/8") ? 8 : 16; }       /* beats in a cue: 16 in 4/4, 8 in 6/8; anything else counts as 4/4 */
+
+/* "" and "?" are a Tempo nobody has set: the suggestion fills it. Otherwise the number, or 0 when what is there is not a positive number. */
+static int tempo_unset(const App *a) { return !a->cues.meta.tempo[0] || !strcmp(a->cues.meta.tempo, "?"); }
+static double set_tempo(const App *a) {
+    char *end;
+    double t = strtod(a->cues.meta.tempo, &end);
+    return !tempo_unset(a) && end != a->cues.meta.tempo && isfinite(t) && t > 0 ? t : 0;
+}
+
+/* A cue's own tempo from its length (its start to the next cue's start): the length is 16 beats (4/4) or 8 (6/8), so BPM = 60 / (gap / beats). 0: none. */
+static double gap_tempo(const App *a, double gap) {
+    if (!(gap > 0)) return 0;
+    double bpm = 60.0 / (gap / sig_beats(a));
+    return isfinite(bpm) && bpm > 0 ? bpm : 0;
+}
+
+enum { DOT_NONE, DOT_GREEN, DOT_YELLOW, DOT_RED };
+static int classify_dot(double cue_tempo, double tempo) {          /* within 2 BPM green, within 5 yellow, else red */
+    if (cue_tempo <= 0 || !(tempo > 0)) return DOT_NONE;
+    double d = fabs(cue_tempo - tempo);
+    return d > 5 ? DOT_RED : d > 2 ? DOT_YELLOW : DOT_GREEN;
+}
+
+/* The suggestion: the most common tempo among the cues' own (the largest group within 2 BPM of one of them, the first found on a tie), averaged to at most 2 decimals;
+ * in[i] is set for the cues of that group (cue i measured against cue i+1). Returns 0 when there is nothing to go on (fewer than two cues). */
+static int suggest_cluster(const App *a, double *tempo, unsigned char *in) {
+    int n = a->cues.nc;
+    if (n < 2) return 0;
+    double *t = (double *)malloc((size_t)n * sizeof *t);
+    if (!t) return 0;
+    int m = 0, best = 0, best_at = -1;
+    for (int i = 0; i + 1 < n; i++) { t[i] = gap_tempo(a, a->cues.c[i + 1].start - a->cues.c[i].start); if (t[i] > 0) m++; }
+    if (!m) { free(t); return 0; }
+    for (int i = 0; i + 1 < n; i++) {
+        if (t[i] <= 0) continue;
+        int k = 0;
+        for (int j = 0; j + 1 < n; j++) if (t[j] > 0 && fabs(t[j] - t[i]) <= 2) k++;
+        if (k > best) { best = k; best_at = i; }
+    }
+    double sum = 0;
+    if (in) memset(in, 0, (size_t)n);
+    for (int j = 0; j + 1 < n; j++) if (t[j] > 0 && fabs(t[j] - t[best_at]) <= 2) { sum += t[j]; if (in) in[j] = 1; }
+    *tempo = floor(sum / best * 100 + 0.5) / 100;
+    free(t);
+    return 1;
+}
+
+static void fmt_tempo(double t, char *out, size_t cap) {          /* the shortest text of a number with at most 2 decimals, as JavaScript's String(number) */
+    snprintf(out, cap, "%.2f", t);
+    char *dot = strchr(out, '.');
+    if (dot) { char *e = out + strlen(out); while (e > dot && e[-1] == '0') *--e = 0; if (e == dot + 1) *dot = 0; }
+}
+
+/* Cue's maybeSuggestTempo: a Tempo that is blank or "?" is filled from the cues (never one a person typed). Returns 1 when it changed. */
+static int maybe_suggest_tempo(App *a) {
+    double t;
+    char v[16];
+    if (!tempo_unset(a) || !suggest_cluster(a, &t, NULL)) return 0;
+    fmt_tempo(t, v, sizeof v);
+    cue_meta_set(&a->cues, "tempo", v);
+    return 1;
+}
+
+/* The dot of cue i (the last has none): measured against the Tempo a person set, or, while it is unset, the suggestion (the cluster's cues green). */
+static int cue_dot(const App *a, int i, double tempo, const unsigned char *cluster, double suggested) {
+    if (i < 0 || i + 1 >= a->cues.nc) return DOT_NONE;
+    double ct = gap_tempo(a, a->cues.c[i + 1].start - a->cues.c[i].start);
+    if (ct <= 0) return DOT_NONE;
+    if (cluster) return cluster[i] ? DOT_GREEN : (fabs(ct - suggested) > 5 ? DOT_RED : DOT_YELLOW);
+    return classify_dot(ct, tempo);
+}
+
+/* The Assisted Cue entry's model: the average length of the green cues and the last cue's start; 0 when it is not available (Cue's computeAssistModel). */
+static int assist_model(const App *a, double *avg, double *anchor) {
+    double tempo = set_tempo(a), sum = 0;
+    int n = 0;
+    if (tempo <= 0 || a->cues.nc < 2) return 0;
+    for (int i = 1; i < a->cues.nc; i++) {
+        double gap = a->cues.c[i].start - a->cues.c[i - 1].start;
+        if (classify_dot(gap_tempo(a, gap), tempo) == DOT_GREEN) { sum += gap; n++; }
+    }
+    if (!n) return 0;
+    *avg = sum / n;
+    *anchor = a->cues.c[a->cues.nc - 1].start;
+    return 1;
+}
+
+
 /* Open song i: decode it, read its cue files. Returns 1, or 0 with the reason in the reply row. */
 static int open_song(App *a, int i) {
     close_song(a);
@@ -367,7 +635,8 @@ static int open_song(App *a, int i) {
         t = cue_read_file(path, &n);
         if (t) { cue_load_srt(&a->cues, t, n, e2); free(t); }
     }
-    a->cues.dirty = 0;
+    a->cues.dirty = maybe_suggest_tempo(a);                  /* Cue fills an unset Tempo when cues load; saved with the cues when the song closes */
+    hist_touch(a, s->id, s->name);
     a->offset = 0;
     cue_path(a, s->id, "offset", path, sizeof path);
     if ((t = cue_read_file(path, NULL))) { a->offset = atof(t); free(t); if (fabs(a->offset) > 30) a->offset = 0; }
@@ -376,8 +645,10 @@ static int open_song(App *a, int i) {
     a->loop_state = 0;
     a->next_label = 0;
     engine_open(&a->eng, &a->track);
+    a->csel = 0;
     if (a->track.truncated) say(a, R3_ST_WARN, "Only the first %d minutes are loaded.", TRACK_MAX_SECONDS / 60);
-    else if (!a->cues.nm && !a->cues.nc) say(a, R3_ST_HINT, "No cues for this song yet: Select marks the playhead.");
+    else if (a->cues.meta.sig[0] && !sig_valid(a->cues.meta.sig)) say(a, R3_ST_WARN, "Sig %s is not 4/4 or 6/8: counted as 4/4 (Metadata > Sig).", a->cues.meta.sig);
+    else if (!a->cues.nm && !a->cues.nc) say(a, R3_ST_HINT, "No cues for this song yet: D-pad Down stamps one.");
     else say(a, R3_ST_HINT, "%d markers, %d cues. A plays, X jumps, L1/R1 step.", a->cues.nm, a->cues.nc);
     a->mode = M_PLAYER;
     return 1;
@@ -550,7 +821,7 @@ static void compose_library(App *a, R3Screen *s) {
         int per = 11, page, pages;
         r3_list_window(a->nsongs, a->lsel, per, &page, &pages);
         if (pages > 1) snprintf(right, sizeof right, "Page %d/%d", page, pages);
-        R3Box b = {1, "Songs", right[0] ? right : NULL, "A open   Start menu   B quit", 0};
+        R3Box b = {1, "Songs", right[0] ? right : NULL, "A open   L1+R1 menu   B quit", 0};
         r3_box(s, 0, 4, R3_COLS, 13, &b);
         int first = (page - 1) * per;
         for (int i = first; i < a->nsongs && i < first + per; i++) {
@@ -566,23 +837,23 @@ static void compose_library(App *a, R3Screen *s) {
             if (mw) gtext(s, R3_COLS - 2 - mw, y, mark, mw, i == a->lsel ? -1 : R3_LIGHT_GREEN);
         }
     } else {
-        R3Box b = {1, "Songs", NULL, "Start menu   B quit", 0};
+        R3Box b = {1, "Songs", NULL, "L1+R1 menu   B quit", 0};
         r3_box(s, 0, 4, R3_COLS, 13, &b);
         r3_text_fit(s, 2, 6, "No songs yet.", 58, R3_ST(R3_ST_STRONG));
         r3_text_fit(s, 2, 8, "Put audio files in MusiCue/media/ on the card (m4a, mp3,", 58, R3_ST(R3_ST_BODY));
         r3_text_fit(s, 2, 9, "ogg, opus, flac, wav), and Cue's .cuebundle files in", 58, R3_ST(R3_ST_BODY));
-        r3_text_fit(s, 2, 10, "MusiCue/inbox/. Start > Import reads them.", 58, R3_ST(R3_ST_BODY));
-        r3_text_fit(s, 2, 12, "Start > Demo song plays a built-in one.", 58, R3_ST(R3_ST_HINT));
+        r3_text_fit(s, 2, 10, "MusiCue/inbox/. L1+R1 > Import reads them.", 58, R3_ST(R3_ST_BODY));
+        r3_text_fit(s, 2, 12, "L1+R1 > Demo song plays a built-in one.", 58, R3_ST(R3_ST_HINT));
     }
     r3_fill(s, 0, 17, R3_COLS, 4, 32, R3_LIGHT_GRAY, R3_BLACK);
     r3_text_fit(s, 1, 18, a->nsongs ? "A song is decoded into memory when opened: jumps and loops are instant." : "", 62, R3_ST(R3_ST_BODY));
-    R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, a->nsongs ? "Songs: media/ on the data card" : "Nothing in media/", "Start: menu", R3_ST_HINT};
+    R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, a->nsongs ? "Songs: media/ on the data card" : "Nothing in media/", "L1+R1: menu", R3_ST_HINT};
     r3_command_line(s, &cmd);
 }
 
 static void menu_clear(Menu *m, const char *title) { memset(m, 0, sizeof *m); snprintf(m->title, sizeof m->title, "%s", title); }
 static void menu_add(Menu *m, int id, const char *label, const char *value) {
-    if (m->n >= 14) return;
+    if (m->n >= 16) return;
     snprintf(m->it[m->n].label, sizeof m->it[m->n].label, "%s", label);
     snprintf(m->it[m->n].value, sizeof m->it[m->n].value, "%s", value ? value : "");
     m->it[m->n++].id = id;
@@ -615,41 +886,11 @@ static int active_caption(const App *a, double vt) {
     return -1;
 }
 
-static double set_tempo(const App *a) {
-    char *end;
-    double t = strtod(a->cues.meta.tempo, &end);
-    return a->cues.meta.tempo[0] && end != a->cues.meta.tempo && isfinite(t) && t > 0 ? t : 0;
-}
-
-static int sig_beats(const App *a) { return !strcmp(a->cues.meta.sig, "6/8") ? 8 : 16; }          /* beats in a cue: 16 in 4/4, 8 in 6/8 */
-
-/* A cue's own tempo from its length (start to the next start); green when within 2 BPM of the song's Tempo. */
-static int gap_green(const App *a, double gap, double tempo) {
-    if (!(gap > 0)) return 0;
-    double bpm = 60.0 / (gap / sig_beats(a));
-    return fabs(bpm - tempo) <= 2.0;
-}
-
-/* The Assisted Cue entry's model: the average length of the green cues and the last cue's start; 0 when it is not available (Cue's rules). */
-static int assist_model(const App *a, double *avg, double *anchor) {
-    double tempo = set_tempo(a), sum = 0;
-    int n = 0;
-    if (tempo <= 0 || a->cues.nc < 2) return 0;
-    for (int i = 1; i < a->cues.nc; i++) {
-        double gap = a->cues.c[i].start - a->cues.c[i - 1].start;
-        if (gap_green(a, gap, tempo)) { sum += gap; n++; }
-    }
-    if (!n) return 0;
-    *avg = sum / n;
-    *anchor = a->cues.c[a->cues.nc - 1].start;
-    return 1;
-}
-
 static void compose_cue_panel(App *a, R3Screen *s, double vt) {
     r3_fill(s, 0, 7, R3_COLS, 2, 32, R3_ST(R3_ST_BODY));
     int idx = active_caption(a, vt);
     if (idx >= 0) r3_text_scroll(s, 1, 7, a->cues.c[idx].text, 59, R3_ST(R3_ST_STRONG));
-    else if (!a->cues.nc) r3_text_fit(s, 1, 7, "No cues yet. Select+A stamps one.", 59, R3_ST(R3_ST_HINT));
+    else if (!a->cues.nc) r3_text_fit(s, 1, 7, "No cues yet. D-pad Down stamps one.", 59, R3_ST(R3_ST_HINT));
     /* the beat dot at the right of the first row: pulses once a beat from the start of the cue playing, while the song plays and the Tempo is known */
     double tempo = set_tempo(a);
     if (a->eng.playing && a->cues.nc && tempo > 0) {
@@ -680,6 +921,149 @@ static void compose_cue_panel(App *a, R3Screen *s, double vt) {
     }
 }
 
+/* ---- rows 9-20: the panels. Two show at a time (the carousel), the stick moves in the one with the double frame --------------------------------------- */
+
+static int marker_at(const App *a, double t) {                     /* the marker on a cue's time (Cue matches by time, within 10 ms) */
+    for (int i = 0; i < a->cues.nm; i++) if (fabs(a->cues.m[i].time - t) < 0.01) return i;
+    return -1;
+}
+
+static int panel_at(const App *a, int slot) { return (a->pan_first + slot) % P_COUNT; }
+
+static int panel_count(const App *a, int p) {
+    int idx[10];
+    switch (p) {
+    case P_MARKERS: return a->cues.nm;
+    case P_CUES: return a->cues.nc;
+    case P_META: return 5;
+    case P_SETLIST: return a->nsl;
+    case P_LAST: return hist_rank(a, 0, idx);
+    case P_TOP: return hist_rank(a, 1, idx);
+    }
+    return 0;
+}
+
+static int *panel_sel(App *a, int p) { return p == P_MARKERS ? &a->msel : p == P_CUES ? &a->csel : &a->psel[p]; }
+
+static void sel_bar(R3Screen *s, int col, int y, int w) {
+    r3_fill(s, col, y, w, 1, 32, R3_BLACK, P_ACC0);
+    grad_h(s, col, y, w, P_ACC0, 0, RAMP - 1);
+}
+
+/* The song in songs[] with this id, or -1 (a song in a list can be one that is not on this card). */
+static int song_by_id(const App *a, const char *id) {
+    for (int i = 0; i < a->nsongs; i++) if (!strcmp(a->songs[i].id, id)) return i;
+    return -1;
+}
+
+static const char *const META_NAMES[5] = {"Key", "Tempo", "Sig", "Scripter", "Created"};
+
+static const char *meta_value(const App *a, int i) {
+    static char shown[64];
+    const char *v = i == 0 ? a->cues.meta.key : i == 1 ? a->cues.meta.tempo : i == 2 ? a->cues.meta.sig : i == 3 ? a->cues.meta.scripter : a->cues.meta.created;
+    if (i == 2 && !v[0]) return "4/4";
+    if (i == 4) { snprintf(shown, sizeof shown, "%.10s", v[0] ? v : ""); return v[0] ? shown : "on export"; }
+    return v[0] ? v : "?";
+}
+
+static void compose_panel(App *a, R3Screen *s, int slot, double vt, int cm) {
+    const int p = panel_at(a, slot), col = slot * 32, focus = a->pan_focus == slot, n = panel_count(a, p), per = 10;
+    int *sel = panel_sel(a, p);
+    if (*sel >= n) *sel = n ? n - 1 : 0;
+    int page, pages;
+    r3_list_window(n, *sel, per, &page, &pages);
+    char right[32] = "", foot[40] = "";
+    if (pages > 1) snprintf(right, sizeof right, "Page %d/%d", page, pages);
+    if (p == P_CUES && !right[0] && set_tempo(a) > 0) { char tv[16]; fmt_tempo(set_tempo(a), tv, sizeof tv); snprintf(right, sizeof right, "%s bpm", tv); }
+    if (focus) snprintf(foot, sizeof foot, "%s", p == P_META ? "A edit" : p == P_SETLIST || p == P_LAST || p == P_TOP ? "A open" : "A jump");
+    R3Box b = {focus, PANEL_NAMES[p], right[0] ? right : NULL, foot[0] ? foot : NULL, 0};
+    r3_box(s, col, 9, 32, 12, &b);
+    const int x0 = col + 1, wi = 30, first = (page - 1) * per;
+    int rank[10];
+    if (p == P_LAST || p == P_TOP) hist_rank(a, p == P_TOP, rank);
+    if (!n && p != P_META) {
+        const char *l1 = p == P_MARKERS ? "No markers yet." : p == P_CUES ? "No cues yet." : p == P_SETLIST ? "The Set List is empty." : "Nothing opened yet.";
+        const char *l2 = p == P_MARKERS ? "Bookmark a cue in the Cues" : p == P_CUES ? "D-pad Down stamps one" : p == P_SETLIST ? "L1+R1 > Add this song" : "Songs you open show here.";
+        const char *l3 = p == P_MARKERS ? "panel (L1+R1 menu)." : p == P_CUES ? "at the playhead." : "";
+        r3_text_fit(s, x0 + 1, 11, l1, wi - 2, R3_ST(R3_ST_BODY));
+        r3_text_fit(s, x0 + 1, 12, l2, wi - 2, R3_ST(R3_ST_HINT));
+        r3_text_fit(s, x0 + 1, 13, l3, wi - 2, R3_ST(R3_ST_HINT));
+        return;
+    }
+    double tempo = set_tempo(a), sug = 0;
+    unsigned char *cluster = NULL;
+    if (p == P_CUES && tempo <= 0 && a->cues.nc >= 2 && a->cues.nc <= 400) {        /* no Tempo set: the cues are judged against their own most common tempo */
+        cluster = (unsigned char *)calloc((size_t)a->cues.nc, 1);
+        if (cluster && !suggest_cluster(a, &sug, cluster)) { free(cluster); cluster = NULL; }
+    }
+    for (int k = 0; k < per; k++) {
+        int i = first + k, y = 10 + k;
+        if (i >= n) break;
+        int on = i == *sel && focus;
+        if (i == *sel) {
+            if (focus) sel_bar(s, x0, y, wi);
+            else r3_put(s, x0, y, 16, R3_LIGHT_GRAY, R3_BLACK);                   /* the selection of the panel the stick is not in: a pointer only */
+        }
+        int fgs = on ? -1 : R3_LIGHT_GRAY;
+        (void)fgs;
+        if (p == P_MARKERS) {
+            int hue = hue_of(a->cues.m[i].label);
+            char tm[16];
+            fmt_time_s(a->cues.m[i].time, tm, sizeof tm);
+            int tw = r3_width(tm);
+            if (i == cm) r3_put(s, x0, y, 16, on ? pick_fg(s->bg[y * R3_COLS + x0]) : R3_LIGHT_GREEN, -1);
+            r3_put(s, x0 + 1, y, 32, pick_fg(P_HUE0 + hue), P_HUE0 + hue);
+            (on ? gscroll : gtext)(s, x0 + 3, y, a->cues.m[i].label, wi - 3 - tw - 2, on ? -1 : (i == cm ? R3_WHITE : R3_LIGHT_GRAY));
+            gtext(s, x0 + wi - 1 - tw, y, tm, tw, on ? -1 : R3_LIGHT_CYAN);
+        } else if (p == P_CUES) {
+            char tm[16];
+            fmt_time_s(a->cues.c[i].start, tm, sizeof tm);
+            int dot = cue_dot(a, i, tempo, cluster, sug), ci = cur_caption(a, vt);
+            if (i == ci) r3_put(s, x0, y, 16, on ? pick_fg(s->bg[y * R3_COLS + x0]) : R3_LIGHT_GREEN, -1);
+            if (dot) { int bg = dot == DOT_GREEN ? R3_LIGHT_GREEN : dot == DOT_YELLOW ? R3_YELLOW : R3_LIGHT_RED; r3_put(s, x0 + 1, y, 32, R3_BLACK, bg); }
+            gtext(s, x0 + 3, y, tm, 5, on ? -1 : R3_LIGHT_CYAN);
+            if (marker_at(a, a->cues.c[i].start) >= 0) r3_put(s, x0 + 9, y, 4, on ? pick_fg(s->bg[y * R3_COLS + x0 + 9]) : R3_LIGHT_CYAN, -1);
+            (on ? gscroll : gtext)(s, x0 + 11, y, a->cues.c[i].text, wi - 11 - 1, on ? -1 : (i == ci ? R3_WHITE : R3_LIGHT_GRAY));
+        } else if (p == P_META) {
+            gtext(s, x0 + 1, y, META_NAMES[i], 9, on ? -1 : R3_LIGHT_GRAY);
+            (on ? gscroll : gtext)(s, x0 + 11, y, meta_value(a, i), wi - 12, on ? -1 : (i == 4 ? R3_LIGHT_GRAY : R3_WHITE));
+        } else if (p == P_SETLIST) {
+            char num[8];
+            snprintf(num, sizeof num, "%d", i + 1);
+            gtext(s, x0 + 1, y, num, 3, on ? -1 : R3_LIGHT_CYAN);
+            int here = a->open >= 0 && !strcmp(a->songs[a->open].id, a->sl[i].id);
+            if (here) r3_put(s, x0 + 4, y, 16, on ? pick_fg(s->bg[y * R3_COLS + x0 + 4]) : R3_LIGHT_GREEN, -1);
+            (on ? gscroll : gtext)(s, x0 + 5, y, a->sl[i].title, wi - 6, on ? -1 : R3_LIGHT_GRAY);
+        } else {
+            const HistItem *h = &a->hist[rank[i]];
+            int si = song_by_id(a, h->id), top = p == P_TOP;
+            char cnt[12];
+            snprintf(cnt, sizeof cnt, "x%d", h->count);
+            int cw = top ? r3_width(cnt) : 0;
+            if (si >= 0 && a->songs[si].has_cues) r3_put(s, x0, y, 13, on ? pick_fg(s->bg[y * R3_COLS + x0]) : R3_LIGHT_CYAN, -1);   /* a note: its cues are on this card */
+            (on ? gscroll : gtext)(s, x0 + 2, y, h->title, wi - 3 - (cw ? cw + 1 : 0), on ? -1 : R3_LIGHT_GRAY);
+            if (cw) gtext(s, x0 + wi - 1 - cw, y, cnt, cw, on ? -1 : R3_LIGHT_CYAN);
+        }
+    }
+    if (p == P_META) {                                                              /* under the five fields: what Cue's Tempo logic makes of the cues */
+        char l[64];
+        double t2;
+        if (tempo_unset(a) && suggest_cluster(a, &t2, NULL)) { char tv[16]; fmt_tempo(t2, tv, sizeof tv); snprintf(l, sizeof l, "Suggested tempo %s bpm", tv); }
+        else if (a->cues.nc < 2) snprintf(l, sizeof l, "Two cues give a tempo.");
+        else snprintf(l, sizeof l, "Tempo set: erase to suggest.");
+        r3_text_fit(s, x0 + 1, 16, l, wi - 2, R3_ST(R3_ST_HINT));
+        snprintf(l, sizeof l, "%d cues, %d markers", a->cues.nc, a->cues.nm);
+        r3_text_fit(s, x0 + 1, 17, l, wi - 2, R3_ST(R3_ST_HINT));
+        if (!sig_valid(a->cues.meta.sig) && a->cues.meta.sig[0]) r3_text_fit(s, x0 + 1, 18, "Sig counts as 4/4: A on it.", wi - 2, R3_ST(R3_ST_WARN));
+    }
+    free(cluster);
+}
+
+static void compose_panels(App *a, R3Screen *s, double vt, int cm) {
+    compose_panel(a, s, 0, vt, cm);
+    compose_panel(a, s, 1, vt, cm);
+}
+
 static void compose_player(App *a, R3Screen *s) {
     r3_clear(s);
     const double dur = dur_of(a), pos = engine_pos_sec(&a->eng), vt = pos - a->offset;
@@ -701,65 +1085,7 @@ static void compose_player(App *a, R3Screen *s) {
     int cm = cur_marker(a, vt);
     compose_cue_panel(a, s, vt);
 
-    /* rows 9-20, left: the markers, a page of ten, the cursor on a bar of the accent gradient, the marker playing now flagged */
-    int per = MARK_ROWS, page, pages;
-    r3_list_window(a->cues.nm, a->msel, per, &page, &pages);
-    char pg[24] = "";
-    if (pages > 1) snprintf(pg, sizeof pg, "Page %d/%d", page, pages);
-    R3Box mb = {1, "Markers", pg[0] ? pg : NULL, NULL, 0};
-    r3_box(s, 0, 9, 26, 12, &mb);
-    if (!a->cues.nm) {
-        r3_text_fit(s, 2, 11, "No markers yet.", 22, R3_ST(R3_ST_BODY));
-        r3_text_fit(s, 2, 12, "Select adds one", 22, R3_ST(R3_ST_HINT));
-        r3_text_fit(s, 2, 13, "at the playhead.", 22, R3_ST(R3_ST_HINT));
-    }
-    int first = (page - 1) * per;
-    for (int i = first; i < a->cues.nm && i < first + per; i++) {
-        int y = 10 + i - first, hue = hue_of(a->cues.m[i].label);
-        char tm[16];
-        fmt_time_s(a->cues.m[i].time, tm, sizeof tm);
-        if (i == a->msel) { r3_fill(s, 1, y, 24, 1, 32, R3_BLACK, P_ACC0); grad_h(s, 1, y, 24, P_ACC0, 0, RAMP - 1); }
-        r3_put(s, 1, y, i == cm ? 16 : 32, i == a->msel ? pick_fg(s->bg[y * R3_COLS + 1]) : R3_LIGHT_GREEN, -1);
-        r3_put(s, 2, y, 221, i == a->msel ? pick_fg(s->bg[y * R3_COLS + 2]) : R3_LIGHT_GRAY, P_HUE0 + hue);
-        r3_put(s, 2, y, 32, pick_fg(P_HUE0 + hue), P_HUE0 + hue);
-        int tw2 = r3_width(tm);
-        (i == a->msel ? gscroll : gtext)(s, 4, y, a->cues.m[i].label, 24 - 4 - tw2 - 1, i == a->msel ? -1 : (i == cm ? R3_WHITE : R3_LIGHT_GRAY));
-        gtext(s, 24 - tw2, y, tm, tw2, i == a->msel ? -1 : R3_LIGHT_CYAN);
-    }
-
-    /* rows 9-20, right: the cues, the one playing on a gradient bar, those before it fading away above, those to come fading below */
-    char meta[40] = "";
-    int mn = 0;
-    if (a->cues.meta.key[0]) mn += snprintf(meta + mn, sizeof meta - (size_t)mn, "Key %s", a->cues.meta.key);
-    if (a->cues.meta.tempo[0]) mn += snprintf(meta + mn, sizeof meta - (size_t)mn, "%s%s bpm", mn ? "  " : "", a->cues.meta.tempo);
-    if (a->cues.meta.sig[0]) mn += snprintf(meta + mn, sizeof meta - (size_t)mn, "%s%s", mn ? "  " : "", a->cues.meta.sig);
-    R3Box cb = {1, "Cues", meta[0] ? meta : NULL, NULL, 0};
-    r3_box(s, 26, 9, 38, 12, &cb);
-    int ci = cur_caption(a, vt);
-    if (!a->cues.nc) {
-        r3_text_fit(s, 28, 11, "No cues for this song.", 34, R3_ST(R3_ST_BODY));
-        r3_text_fit(s, 28, 12, "Import a Cue bundle, or fetch the cue", 34, R3_ST(R3_ST_HINT));
-        r3_text_fit(s, 28, 13, "file from Start > Sync.", 34, R3_ST(R3_ST_HINT));
-    } else {
-        int rows = 10, before = 3;
-        int base = ci - before;
-        if (ci < 0) base = -before + 0;
-        for (int r = 0; r < rows; r++) {
-            int idx = base + r, y = 10 + r;
-            if (idx < 0 || idx >= a->cues.nc) continue;
-            int rel = idx - ci;                              /* negative: before the one playing */
-            int fade = rel < 0 ? -rel : rel;
-            if (ci >= 0 && rel == 0) {
-                r3_fill(s, 27, y, 36, 1, 32, R3_BLACK, P_ACC0);
-                grad_h(s, 27, y, 36, P_ACC0, 0, RAMP - 1);
-                gscroll(s, 28, y, a->cues.c[idx].text, 34, -1);
-            } else {
-                int step = (fade * 5 > RAMP - 1) ? RAMP - 1 : fade * 5;
-                if (ci < 0) step = idx * 4 < RAMP - 1 ? idx * 4 : RAMP - 1;
-                gtext(s, 28, y, a->cues.c[idx].text, 34, P_NEU0 + step);
-            }
-        }
-    }
+    compose_panels(a, s, vt, cm);
 
     /* rows 21-23: the command line: what just happened, the keys, and where the next marker is */
     char status[128] = "";
@@ -777,7 +1103,7 @@ static void compose_player(App *a, R3Screen *s) {
         snprintf(all, sizeof all, "%s%s%s", extra, status[0] ? "  " : "", status);
         snprintf(status, sizeof status, "%s", all);
     }
-    R3Cmd cmd = {a->reply, a->reply_style, a->eng.playing ? '>' : '|', "A play  X jump  Y loop  L1 R1 step  Sel mark  Sel+A cue  Start menu", 0, status,
+    R3Cmd cmd = {a->reply, a->reply_style, a->eng.playing ? '>' : '|', "Down cue  A go  Start play  Select 0:00  Y loop  Fn panels  L1+R1 menu", 0, status,
                  a->eng.noaudio && !a->demo ? "no sound device" : "", R3_ST_WARN};
     r3_command_line(s, &cmd);
 }
@@ -793,7 +1119,7 @@ static void compose_job(App *a, R3Screen *s) {
         else r3_put(s, 4 + i, 6, 176, R3_ST(R3_ST_HINT));
     }
     for (int i = 0; i < a->job_nlines && i < 6; i++) r3_text_scroll(s, 4, 8 + i, a->job_lines[i], 56, R3_ST(i == a->job_nlines - 1 ? R3_ST_STRONG : R3_ST_BODY));
-    R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, "Start your own list in MusiCue/inbox/urls.txt", "", R3_ST_HINT};
+    R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, "Your own list: MusiCue/inbox/urls.txt", "", R3_ST_HINT};
     r3_command_line(s, &cmd);
 }
 
@@ -818,6 +1144,28 @@ static void compose_id(App *a, R3Screen *s) {
     r3_command_line(s, &cmd);
 }
 
+static void compose_text(App *a, R3Screen *s) {
+    r3_clear(s);
+    compose_topbar(a, s, "MusiCue", "Metadata");
+    char title[40];
+    snprintf(title, sizeof title, "Edit: %s", META_NAMES[a->tfield == 3 ? 3 : a->tfield]);
+    R3Box b = {1, title, NULL, "A keep   B cancel", 0};
+    r3_box(s, 2, 5, 60, 12, &b);
+    int from = a->tpos > 40 ? a->tpos - 40 : 0;                               /* the line scrolls with the cursor: a field can be longer than the box */
+    for (int i = 0; i < 56; i++) {
+        int k = from + i;
+        int ch = k < a->tlen ? (unsigned char)a->tbuf[k] : (k == a->tpos ? 32 : 0);
+        if (k == a->tpos) { int bg = P_ACC0 + RAMP / 2; r3_put(s, 4 + i, 9, ch ? ch : 32, pick_fg(bg), bg); }
+        else if (ch) r3_put(s, 4 + i, 9, ch, R3_ST(R3_ST_STRONG));
+        else if (k < a->tmax) r3_put(s, 4 + i, 9, 250, R3_ST(R3_ST_HINT));
+    }
+    r3_text_fit(s, 4, 7, a->tfield == 1 ? "Beats per minute. Erase it and keep for a suggestion." : a->tfield == 0 ? "The musical key, e.g. C or Am." : "Who made these cues.", 56, R3_ST(R3_ST_BODY));
+    r3_text_fit(s, 4, 12, "Up/Down letter   L1/R1 jump 8   Left/Right move", 56, R3_ST(R3_ST_HINT));
+    r3_text_fit(s, 4, 13, "Y erase   A keep   a keyboard types it", 56, R3_ST(R3_ST_HINT));
+    R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, "", "", R3_ST_HINT};
+    r3_command_line(s, &cmd);
+}
+
 static void compose_note(App *a, R3Screen *s) {
     r3_clear(s);
     compose_topbar(a, s, "MusiCue", VERSION);
@@ -833,11 +1181,12 @@ static void compose(App *a, R3Screen *s) {
     case M_PLAYER: compose_player(a, s); break;
     case M_MENU:
         if (a->back_mode == M_PLAYER) compose_player(a, s); else compose_library(a, s);
-        compose_menu_box(&a->menu, s, a->back_mode == M_PLAYER ? 8 : 5);      /* below the waveform when there is one */
+        compose_menu_box(&a->menu, s, a->back_mode == M_PLAYER ? 7 : 5);      /* below the waveform when there is one */
         break;
     case M_JOB: compose_job(a, s); break;
     case M_NOTE: compose_note(a, s); break;
     case M_ID: compose_id(a, s); break;
+    case M_TEXT: compose_text(a, s); break;
     default: compose_library(a, s);
     }
 }
@@ -891,7 +1240,7 @@ static void present(App *a, R3Video *v, SDL_Renderer *r, const R3Screen *s, int 
 
 /* ---- actions ------------------------------------------------------------------------------------------------------------------------------- */
 
-enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_THEME, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_ADD, A_CUE, A_QUIT, A_CLOSE, A_LABELPICK };
+enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_THEME, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_ADD, A_CUE, A_BOOKMARK, A_CUEDEL, A_RECALC, A_SLADD, A_SLDEL, A_SLUP, A_SLDOWN, A_QUIT, A_CLOSE, A_LABELPICK };
 
 static const char *const PRESET_LABELS[] = {"Intro", "Verse", "Pre-Chorus", "Chorus", "Bridge", "Solo", "Instrumental", "Outro", "End", "Tag"};
 #define NPRESET ((int)(sizeof PRESET_LABELS / sizeof *PRESET_LABELS))
@@ -914,16 +1263,52 @@ static void mark_here(App *a) {
     if (i < 0) { say(a, R3_ST_ERROR, "No room for another marker."); return; }
     cue_sort(&a->cues);
     for (int k = 0; k < a->cues.nm; k++) if (!strcmp(a->cues.m[k].label, label) && fabs(a->cues.m[k].time - vt) < 0.0005) a->msel = k;
-    say(a, R3_ST_OK, "Marked %s at %.1fs. Start > Name it.", label, vt);
+    say(a, R3_ST_OK, "Marked %s at %.1fs. L1+R1 > Name it.", label, vt);
 }
 
-/* Cue's "Cue" button: a cue (a line of words, to be typed later) at the playhead, reading "- - - -" until it is. */
+/* Cue's "Cue" button (here D-pad Down): a cue at the playhead, reading "- - - -" until its words are typed. The Tempo is suggested again from the cues (only if it is unset). */
 static void cue_here(App *a) {
     double vt = engine_pos_sec(&a->eng) - a->offset;
     if (vt < 0) vt = 0;
     if (cue_add_caption(&a->cues, vt, 0, 0, "- - - -") < 0) { say(a, R3_ST_ERROR, "No room for another cue."); return; }
     cue_sort(&a->cues);
-    say(a, R3_ST_OK, "Cue at %.1fs (%d cues).", vt, a->cues.nc);
+    for (int i = 0; i < a->cues.nc; i++) if (fabs(a->cues.c[i].start - vt) < 0.0005) a->csel = i;
+    a->stick_idle_ms = 1e9;                                     /* the cursor goes to the new cue and follows the playing one */
+    int changed = maybe_suggest_tempo(a);
+    say(a, R3_ST_OK, "Cue at %.1fs (%d cues).%s", vt, a->cues.nc, changed ? " Tempo suggested." : "");
+}
+
+/* Delete cue i, and the marker on its time (a marker cannot outlive the cue it is on, as in Cue); the Tempo is suggested again if it is unset. */
+static void cue_delete(App *a, int i) {
+    if (i < 0 || i >= a->cues.nc) return;
+    int m = marker_at(a, a->cues.c[i].start);
+    if (m >= 0) cue_del_marker(&a->cues, m);
+    memmove(&a->cues.c[i], &a->cues.c[i + 1], (size_t)(a->cues.nc - i - 1) * sizeof *a->cues.c);
+    a->cues.nc--;
+    a->cues.dirty = 1;
+    if (a->csel >= a->cues.nc) a->csel = a->cues.nc ? a->cues.nc - 1 : 0;
+    if (a->msel >= a->cues.nm) a->msel = a->cues.nm ? a->cues.nm - 1 : 0;
+    maybe_suggest_tempo(a);
+    say(a, R3_ST_HINT, "Cue deleted.");
+}
+
+/* Cue's marker box on a cue row: a marker on the cue's time, named by its words (or "Mark n" while they are still "- - - -"); again, and it is gone. */
+static void cue_bookmark(App *a, int i) {
+    if (i < 0 || i >= a->cues.nc) return;
+    double t = a->cues.c[i].start;
+    int m = marker_at(a, t);
+    if (m >= 0) {
+        cue_del_marker(&a->cues, m);
+        if (a->msel >= a->cues.nm) a->msel = a->cues.nm ? a->cues.nm - 1 : 0;
+        say(a, R3_ST_HINT, "Marker removed.");
+        return;
+    }
+    char label[64];
+    if (strcmp(a->cues.c[i].text, "- - - -") && a->cues.c[i].text[0]) snprintf(label, sizeof label, "%.40s", a->cues.c[i].text);
+    else snprintf(label, sizeof label, "Mark %d", a->cues.nm + 1);
+    if (cue_add_marker(&a->cues, t, label, 0) < 0) { say(a, R3_ST_ERROR, "No room for another marker."); return; }
+    cue_sort(&a->cues);
+    say(a, R3_ST_OK, "Marker: %s.", label);
 }
 
 static void loop_cycle(App *a) {
@@ -938,6 +1323,145 @@ static void loop_cycle(App *a) {
 
 static void seek_rel(App *a, double d) { engine_seek(&a->eng, engine_pos_sec(&a->eng) + d); }
 
+/* ---- the panels' actions ------------------------------------------------------------------------------------------------------------------------- */
+
+static void open_by_id(App *a, const char *id, const char *title) {
+    int i = song_by_id(a, id);
+    if (i < 0) { say(a, R3_ST_WARN, "%s is not on this card.", title); return; }
+    save_cues(a);
+    if (!open_song(a, i)) a->mode = a->open >= 0 || a->demo ? M_PLAYER : M_LIBRARY;
+}
+
+static void meta_text_start(App *a, int field) {
+    static const char *const KEY_ALPHA = "ABCDEFG#bm7 ?";
+    static const char *const NUM_ALPHA = "0123456789.";
+    static const char *const ANY_ALPHA = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789 .-_'";
+    const char *cur = field == 0 ? a->cues.meta.key : field == 1 ? a->cues.meta.tempo : a->cues.meta.scripter;
+    a->tfield = field;
+    a->tmax = field == 0 ? 40 : field == 1 ? 12 : 60;
+    a->talpha = field == 0 ? KEY_ALPHA : field == 1 ? NUM_ALPHA : ANY_ALPHA;
+    snprintf(a->tbuf, sizeof a->tbuf, "%s", strcmp(cur, "?") ? cur : "");
+    a->tlen = (int)strlen(a->tbuf);
+    a->tpos = a->tlen;
+    a->mode = M_TEXT;
+    say(a, R3_ST_HINT, "Up/Down letter, Left/Right move, Y erase, A keeps, B cancels.");
+}
+
+/* Keep what was typed. A Tempo must be a positive number, or empty (or ?) to be suggested from the cues; changing the Sig re-suggests too (Cue's input handler). */
+static void meta_text_done(App *a) {
+    static const char *const F[] = {"key", "tempo", "sig", "scripter"};
+    char v[72];
+    snprintf(v, sizeof v, "%s", a->tbuf);
+    while (a->tlen > 0 && v[a->tlen - 1] == ' ') v[--a->tlen] = 0;
+    if (a->tfield == 1 && v[0]) {
+        char *end;
+        double t = strtod(v, &end);
+        if (*end || !(t > 0)) { say(a, R3_ST_WARN, "Tempo is beats per minute: a number above 0, or erase it."); return; }
+    }
+    cue_meta_set(&a->cues, F[a->tfield], v[0] ? v : "?");
+    if (a->tfield == 1) { int ch = maybe_suggest_tempo(a); say(a, R3_ST_OK, ch ? "Tempo suggested from the cues." : "Tempo kept."); }
+    else say(a, R3_ST_OK, "%s kept.", META_NAMES[a->tfield == 3 ? 3 : a->tfield]);
+    a->cues.dirty = 1;
+    a->mode = M_PLAYER;
+}
+
+static void meta_accept(App *a, int i) {
+    if (i == 2) {                                               /* Sig: the two Cue knows */
+        cue_meta_set(&a->cues, "sig", !strcmp(a->cues.meta.sig, "4/4") || !a->cues.meta.sig[0] ? "6/8" : "4/4");
+        a->cues.dirty = 1;
+        int ch = maybe_suggest_tempo(a);
+        say(a, R3_ST_OK, "Sig %s.%s", a->cues.meta.sig, ch ? " Tempo suggested." : "");
+    } else if (i == 4) say(a, R3_ST_HINT, "Created is set when the cues are exported.");
+    else meta_text_start(a, i);
+}
+
+/* Cue's Recalculate: an unset Tempo is suggested from the cues; one a person set stands (the dots are re-judged against it anyway). */
+static void recalc_tempo(App *a) {
+    if (!tempo_unset(a)) { say(a, R3_ST_HINT, "Tempo is set to %s. Erase it (Metadata > Tempo) to suggest one.", a->cues.meta.tempo); return; }
+    if (a->cues.nc < 2) { say(a, R3_ST_WARN, "At least two cues are needed to calculate a tempo."); return; }
+    if (maybe_suggest_tempo(a)) { a->cues.dirty = 1; say(a, R3_ST_OK, "Tempo %s bpm.", a->cues.meta.tempo); }
+}
+
+/* A on the focused panel's selection. */
+static void panel_accept(App *a) {
+    int p = panel_at(a, a->pan_focus), sel = *panel_sel(a, p);
+    switch (p) {
+    case P_MARKERS: jump_marker(a, sel); break;
+    case P_CUES:
+        if (sel >= 0 && sel < a->cues.nc) { engine_seek(&a->eng, a->cues.c[sel].start + a->offset); engine_play(&a->eng, 1); say(a, R3_ST_HINT, "%s", a->cues.c[sel].text); }
+        break;
+    case P_META: meta_accept(a, sel); break;
+    case P_SETLIST: if (sel >= 0 && sel < a->nsl) open_by_id(a, a->sl[sel].id, a->sl[sel].title); break;
+    case P_LAST: case P_TOP: {
+        int rank[10], n = hist_rank(a, p == P_TOP, rank);
+        if (sel >= 0 && sel < n) open_by_id(a, a->hist[rank[sel]].id, a->hist[rank[sel]].title);
+        break;
+    }
+    }
+}
+
+/* The right stick: up and down move the selection in the panel it is in, left and right hop to the other panel on display. */
+static void stick_action(App *a, int act) {
+    a->stick_idle_ms = 0;
+    int p = panel_at(a, a->pan_focus), *sel = panel_sel(a, p), n = panel_count(a, p);
+    if (act == R3_UP || act == R3_DOWN) *sel = r3_list_key(*sel, n, 10, act);
+    else if (act == R3_LEFT) a->pan_focus = 0;
+    else if (act == R3_RIGHT) a->pan_focus = 1;
+}
+
+static void panels_turn(App *a) {                              /* Fn: the carousel turns one place; what the stick was in stays where it is */
+    a->pan_first = (a->pan_first + 1) % P_COUNT;
+    say(a, R3_ST_HINT, "%s | %s", PANEL_NAMES[panel_at(a, 0)], PANEL_NAMES[panel_at(a, 1)]);
+}
+
+/* A typed key while a metadata field is open (a keyboard); true when used. */
+static int text_key(App *a, SDL_Keycode k, Uint16 mod) {
+    int ch = 0;
+    if (k >= SDLK_a && k <= SDLK_z) ch = (mod & KMOD_SHIFT) ? toupper((int)k) : (int)k;
+    else if (k >= SDLK_0 && k <= SDLK_9) ch = (int)k;
+    else if (k == SDLK_SPACE) ch = ' ';
+    else if (k == SDLK_PERIOD) ch = '.';
+    else if (k == SDLK_MINUS) ch = (mod & KMOD_SHIFT) ? '_' : '-';
+    else if (k == SDLK_QUOTE) ch = '\'';
+    else if (k == SDLK_BACKSPACE) { if (a->tpos > 0) { memmove(a->tbuf + a->tpos - 1, a->tbuf + a->tpos, (size_t)(a->tlen - a->tpos + 1)); a->tpos--; a->tlen--; } return 1; }
+    if (!ch) return 0;
+    if (a->tfield == 1 && !strchr("0123456789.", ch)) return 1;
+    if (a->tlen < a->tmax && a->tlen + 1 < (int)sizeof a->tbuf) {
+        memmove(a->tbuf + a->tpos + 1, a->tbuf + a->tpos, (size_t)(a->tlen - a->tpos + 1));
+        a->tbuf[a->tpos++] = (char)ch;
+        a->tlen++;
+    }
+    return 1;
+}
+
+static void text_action(App *a, int act) {
+    const int alen = (int)strlen(a->talpha);
+    switch (act) {
+    case R3_BACK: a->mode = M_PLAYER; say(a, R3_ST_HINT, "Unchanged."); break;
+    case R3_ACCEPT: meta_text_done(a); break;
+    case R3_LEFT: if (a->tpos > 0) a->tpos--; break;
+    case R3_RIGHT: if (a->tpos < a->tlen) a->tpos++; break;
+    case R3_Y:
+        if (a->tpos > 0) { memmove(a->tbuf + a->tpos - 1, a->tbuf + a->tpos, (size_t)(a->tlen - a->tpos + 1)); a->tpos--; a->tlen--; }
+        break;
+    case R3_UP: case R3_DOWN: case R3_PAGEUP: case R3_PAGEDOWN: {
+        int step = act == R3_UP ? 1 : act == R3_DOWN ? -1 : act == R3_PAGEUP ? 8 : -8;
+        if (a->tpos == a->tlen) {                                    /* past the end: a new character, starting from the first of the alphabet */
+            if (a->tlen >= a->tmax) break;
+            a->tbuf[a->tlen++] = a->talpha[0];
+            a->tbuf[a->tlen] = 0;
+            if (step == 1 || step == -1) break;
+        }
+        const char *at = strchr(a->talpha, a->tbuf[a->tpos]);
+        int i = at ? (int)(at - a->talpha) : 0;
+        a->tbuf[a->tpos] = a->talpha[((i + step) % alen + alen) % alen];
+        break;
+    }
+    default: break;
+    }
+}
+
+
 static void save_offset(const App *a) {
     if (a->open < 0) return;
     char path[PATH_MAX], buf[32];
@@ -950,10 +1474,23 @@ static void build_main_menu(App *a) {
     char v[40];
     menu_clear(&a->menu, a->back_mode == M_PLAYER ? "Song" : "MusiCue");
     if (a->back_mode == M_PLAYER) {
+        int fp = panel_at(a, a->pan_focus);
+        menu_add(&a->menu, A_CUE, "Cue here (D-pad Down)", "");
         menu_add(&a->menu, A_MARK, "Mark here", "");
-        menu_add(&a->menu, A_CUE, "Cue here (Select+A)", "");
-        menu_add(&a->menu, A_LABEL, "Name the selected marker", a->cues.nm ? a->cues.m[a->msel].label : "");
-        menu_add(&a->menu, A_DELETE, "Delete the selected marker", "");
+        if (fp == P_MARKERS) {
+            menu_add(&a->menu, A_LABEL, "Name the selected marker", a->cues.nm ? a->cues.m[a->msel].label : "");
+            menu_add(&a->menu, A_DELETE, "Delete the selected marker", "");
+        } else if (fp == P_CUES) {
+            menu_add(&a->menu, A_BOOKMARK, "Bookmark the selected cue", a->cues.nc && marker_at(a, a->cues.c[a->csel].start) >= 0 ? "marked" : "");
+            menu_add(&a->menu, A_CUEDEL, "Delete the selected cue", "");
+        } else if (fp == P_META) {
+            menu_add(&a->menu, A_RECALC, "Recalculate tempo", "");
+        } else if (fp == P_SETLIST) {
+            menu_add(&a->menu, A_SLDEL, "Remove from the Set List", "");
+            menu_add(&a->menu, A_SLUP, "Move up", "");
+            menu_add(&a->menu, A_SLDOWN, "Move down", "");
+        }
+        menu_add(&a->menu, A_SLADD, "Add this song to the Set List", a->open >= 0 && setlist_find(a, a->songs[a->open].id) >= 0 ? "in list" : "");
         snprintf(v, sizeof v, "%+.2f s", a->offset);
         menu_add(&a->menu, A_OFFSET, "Offset (audio against cues)", v);
         menu_add(&a->menu, A_SAVE, "Save cues", a->cues.dirty ? "unsaved" : "saved");
@@ -1287,6 +1824,17 @@ static void menu_choose(App *a) {
     case A_OFFSET: case A_THEME: case A_LICENSE: menu_adjust(a, 1); break;
     case A_SYNC: job_start(a, NULL); break;
     case A_ADD: id_open(a); break;
+    case A_BOOKMARK: cue_bookmark(a, a->csel); a->mode = M_PLAYER; break;
+    case A_CUEDEL: cue_delete(a, a->csel); a->mode = M_PLAYER; break;
+    case A_RECALC: recalc_tempo(a); a->mode = M_PLAYER; break;
+    case A_SLADD:
+        if (a->open < 0) say(a, R3_ST_WARN, "Open a song from the card to add it (the demo is not a file).");
+        else { int r = setlist_add(a, a->songs[a->open].id, a->songs[a->open].name); say(a, r < 0 ? R3_ST_ERROR : R3_ST_OK, r < 0 ? "The Set List is full." : r ? "Added to the Set List." : "Set List entry updated."); }
+        a->mode = M_PLAYER;
+        break;
+    case A_SLDEL: setlist_remove(a, a->psel[P_SETLIST]); if (a->psel[P_SETLIST] >= a->nsl) a->psel[P_SETLIST] = a->nsl ? a->nsl - 1 : 0; say(a, R3_ST_HINT, "Removed from the Set List."); a->mode = M_PLAYER; break;
+    case A_SLUP: a->psel[P_SETLIST] = setlist_move(a, a->psel[P_SETLIST], -1); a->mode = M_PLAYER; break;
+    case A_SLDOWN: a->psel[P_SETLIST] = setlist_move(a, a->psel[P_SETLIST], 1); a->mode = M_PLAYER; break;
     case A_IMPORT: {
         int c = 0, n = import_inbox(a, &c);
         scan_songs(a);
@@ -1304,7 +1852,17 @@ static void menu_choose(App *a) {
     }
 }
 
+/* MusiCue's own actions, beside the theme's R3_*: Start (play/stop), Fn (turn the panels) and the right stick's four directions. */
+enum { MC_PLAY = 100, MC_FN, MC_SU, MC_SD, MC_SL, MC_SR };
+
+static void menu_toggle(App *a) {                                   /* L1+R1: the menu opens and closes (a pad has no Start for it) */
+    if (a->mode == M_MENU) a->mode = a->back_mode == M_PLAYER || a->menu.it[0].id >= A_LABELPICK ? (a->open >= 0 || a->demo ? M_PLAYER : M_LIBRARY) : a->back_mode;
+    else if (a->mode == M_LIBRARY || a->mode == M_PLAYER) open_menu(a);
+}
+
 static void app_action(App *a, int act) {
+    if (act >= MC_SU && act <= MC_SR && a->mode != M_PLAYER)        /* outside the player the stick moves in lists like the D-pad */
+        act = act == MC_SU ? R3_UP : act == MC_SD ? R3_DOWN : act == MC_SL ? R3_LEFT : R3_RIGHT;
     switch (a->mode) {
     case M_LIBRARY:
         if (act == R3_ACCEPT) { if (a->nsongs && !open_song(a, a->lsel)) a->mode = M_LIBRARY; }
@@ -1314,13 +1872,20 @@ static void app_action(App *a, int act) {
         break;
     case M_PLAYER:
         switch (act) {
-        case R3_ACCEPT: if (a->select_held) cue_here(a); else engine_play(&a->eng, !a->eng.playing); break;
+        case R3_ACCEPT: case R3_X: panel_accept(a); break;                  /* A: the selection of the panel the stick is in */
+        case MC_PLAY: engine_play(&a->eng, !a->eng.playing); break;         /* Start */
+        case R3_SELECT: engine_seek(&a->eng, 0); say(a, R3_ST_HINT, "Back to 0:00."); break;
         case R3_BACK: save_cues(a); close_song(a); a->mode = M_LIBRARY; break;
-        case R3_MORE: open_menu(a); break;
-        case R3_X: if (a->cues.nm) jump_marker(a, a->msel); break;
+        case R3_MORE: open_menu(a); break;                                  /* a keyboard's F1 (the pad's is L1+R1) */
         case R3_Y: loop_cycle(a); break;
-        case R3_UP: case R3_DOWN: a->msel = r3_list_key(a->msel, a->cues.nm, MARK_ROWS, act); break;
-        case R3_PAGEUP: case R3_PAGEDOWN: {
+        case R3_DOWN: cue_here(a); break;                                   /* D-pad Down: Cue */
+        case R3_UP: break;
+        case MC_FN: panels_turn(a); break;
+        case MC_SU: stick_action(a, R3_UP); break;
+        case MC_SD: stick_action(a, R3_DOWN); break;
+        case MC_SL: stick_action(a, R3_LEFT); break;
+        case MC_SR: stick_action(a, R3_RIGHT); break;
+        case R3_PAGEUP: case R3_PAGEDOWN: {                                 /* L1, R1: the marker before, the marker after */
             int cm = cur_marker(a, engine_pos_sec(&a->eng) - a->offset);
             int target = act == R3_PAGEUP ? (cm > 0 && engine_pos_sec(&a->eng) - a->offset - a->cues.m[cm].time < 1.5 ? cm - 1 : cm) : cm + 1;
             if (target >= 0 && target < a->cues.nm) jump_marker(a, target);
@@ -1331,10 +1896,10 @@ static void app_action(App *a, int act) {
         case R3_RIGHT: seek_rel(a, 1); break;
         case R3_HOME: seek_rel(a, -10); break;
         case R3_END: seek_rel(a, 10); break;
-        case R3_SELECT: break;
         default: break;
         }
         break;
+    case M_TEXT: text_action(a, act); break;
     case M_MENU:
         if (act == R3_BACK || act == R3_MORE) { a->mode = a->back_mode == M_PLAYER || a->menu.it[0].id >= A_LABELPICK ? (a->open >= 0 || a->demo ? M_PLAYER : M_LIBRARY) : a->back_mode; }
         else if (act == R3_ACCEPT) menu_choose(a);
@@ -1363,16 +1928,37 @@ static void app_action(App *a, int act) {
             else if (a->idpos < 10) a->idpos++;
             else id_go(a);                                                                  /* A on the last, filled slot fetches */
             break;
-        case R3_MORE: id_go(a); break;
+        case R3_MORE: case MC_PLAY: id_go(a); break;
         default: break;
         }
         break;
     }
 }
 
+/* The right stick held: the selection keeps moving (a first wait, then a steady repeat). */
+static void stick_fire(App *a) {
+    if (a->stick_y) app_action(a, a->stick_y < 0 ? MC_SU : MC_SD);
+    else if (a->stick_x) app_action(a, a->stick_x < 0 ? MC_SL : MC_SR);
+}
+
+static void stick_axis(App *a, int axis, int value) {              /* SDL axes 2 and 3 are the right stick (docs/hardware-findings.md) */
+    int dir = value > 20000 ? 1 : value < -20000 ? -1 : (abs(value) < 10000 ? 0 : 2);   /* 2: in between, no change (so the stick does not chatter) */
+    if (dir == 2) return;
+    int *cur = axis == 2 ? &a->stick_x : &a->stick_y;
+    if (dir == *cur) return;
+    *cur = dir;
+    if (dir) { a->stick_rep_ms = 350; stick_fire(a); }
+}
+
 static void app_tick(App *a, double ms) {
     engine_tick(&a->eng, ms);
     r3_marquee_clock(ms);
+    a->stick_idle_ms += ms;
+    if (a->stick_x || a->stick_y) { a->stick_rep_ms -= ms; if (a->stick_rep_ms <= 0) { a->stick_rep_ms = 120; stick_fire(a); } }
+    if (a->mode == M_PLAYER && a->eng.playing && a->stick_idle_ms > 4000) {        /* the cue cursor follows the cue playing, unless the stick moved lately */
+        int ci = cur_caption(a, engine_pos_sec(&a->eng) - a->offset);
+        if (ci >= 0) a->csel = ci;
+    }
     if (a->mode == M_PLAYER && a->eng.ended) { a->eng.ended = 0; say(a, R3_ST_HINT, "The end. A plays it again."); }
     job_poll(a);
 }
@@ -1383,6 +1969,9 @@ static void app_init(App *a, const char *data) {
     a->theme = r3_theme_find("Nord");
     snprintf(a->data, sizeof a->data, "%s", data);
     a->job_fd = -1;
+    a->sl = (SetItem *)calloc(SETLIST_MAX, sizeof *a->sl);
+    a->hist = (HistItem *)calloc(HIST_MAX, sizeof *a->hist);
+    a->stick_idle_ms = 1e9;
 }
 
 static void app_free(App *a) {
@@ -1390,6 +1979,8 @@ static void app_free(App *a) {
     save_cues(a);
     close_song(a);
     free(a->songs);
+    free(a->sl);
+    free(a->hist);
 }
 
 /* ---- the tests ----------------------------------------------------------------------------------------------------------------------------- */
@@ -1786,6 +2377,160 @@ static void test_cue_panel(void) {
     app_free(&a);
 }
 
+/* The panels, the pad's new map, the Tempo logic of Cue, the Set List and the songs opened here. */
+static void test_panels_and_tempo(void) {
+    App a;
+    app_init(&a, g_tmp);
+    char d[PATH_MAX];
+    snprintf(d, sizeof d, "%s/panels", g_tmp);
+    snprintf(a.data, sizeof a.data, "%s", d);
+    mkdirs(d);
+    open_demo(&a);
+    R3Screen s;
+
+    /* the carousel: Fn turns it one place; two panels show, the stick hops between them and moves in the one it is in */
+    CHECK(panel_at(&a, 0) == P_MARKERS && panel_at(&a, 1) == P_CUES, "Markers and Cues first");
+    app_action(&a, MC_FN);
+    CHECK(panel_at(&a, 0) == P_CUES && panel_at(&a, 1) == P_META, "Fn: Cues and Metadata");
+    for (int i = 0; i < 5; i++) app_action(&a, MC_FN);
+    CHECK(panel_at(&a, 0) == P_MARKERS && panel_at(&a, 1) == P_CUES, "six turns come round");
+    CHECK(a.pan_focus == 0, "the left panel has the stick");
+    app_action(&a, MC_SD);
+    CHECK(a.msel == 1, "the stick moves the selection in the left panel");
+    app_action(&a, MC_SR);
+    CHECK(a.pan_focus == 1, "right hops to the right panel");
+    app_action(&a, MC_SD);
+    app_action(&a, MC_SD);
+    CHECK(a.csel == 2 && a.msel == 1, "and moves there");
+    app_action(&a, MC_SL);
+    CHECK(a.pan_focus == 0, "left hops back");
+    compose(&a, &s);
+    CHECK(s.ch[9 * R3_COLS + 0] == 201 && s.ch[9 * R3_COLS + 32] == 218, "the panel with the stick has the double frame, the other the single");
+
+    /* D-pad Down is Cue; Select is 0:00; Start plays and stops */
+    engine_seek(&a.eng, 33.0);
+    int before = a.cues.nc;
+    app_action(&a, R3_DOWN);
+    CHECK(a.cues.nc == before + 1 && a.csel >= 0 && fabs(a.cues.c[a.csel].start - 33.0) < 0.01 && !strcmp(a.cues.c[a.csel].text, "- - - -"), "D-pad Down places a Cue");
+    app_action(&a, R3_SELECT);
+    CHECK(engine_pos_sec(&a.eng) == 0, "Select goes to 0:00");
+    app_action(&a, MC_PLAY);
+    CHECK(a.eng.playing, "Start plays");
+    app_action(&a, MC_PLAY);
+    CHECK(!a.eng.playing, "Start stops");
+    a.mode = M_LIBRARY;
+    menu_toggle(&a);
+    CHECK(a.mode == M_MENU, "L1+R1 opens the menu");
+    menu_toggle(&a);
+    CHECK(a.mode == M_LIBRARY, "and closes it");
+    a.mode = M_PLAYER;
+
+    /* Tempo, as Cue does it: 16 beats a cue in 4/4 (8 in 6/8), cues 9.6 s apart are 100 bpm */
+    CueSet *c = &a.cues;
+    cue_free(c); cue_init(c);
+    for (int i = 0; i < 5; i++) cue_add_caption(c, i * 9.6, 0, 0, "x");
+    CHECK(fabs(gap_tempo(&a, 9.6) - 100) < 1e-9, "9.6 s of 4/4 is 100 bpm");
+    cue_meta_set(c, "sig", "6/8");
+    CHECK(fabs(gap_tempo(&a, 4.8) - 100) < 1e-9, "4.8 s of 6/8 is 100 bpm");
+    cue_meta_set(c, "sig", "4/4");
+    CHECK(classify_dot(100, 100) == DOT_GREEN && classify_dot(102, 100) == DOT_GREEN && classify_dot(102.1, 100) == DOT_YELLOW && classify_dot(105, 100) == DOT_YELLOW && classify_dot(105.1, 100) == DOT_RED && classify_dot(94.9, 100) == DOT_RED, "green within 2, yellow within 5, else red");
+    CHECK(tempo_unset(&a) && set_tempo(&a) == 0, "a new song has no Tempo");
+    CHECK(maybe_suggest_tempo(&a) && !strcmp(c->meta.tempo, "100"), "four cues of 9.6 s suggest 100: %s", c->meta.tempo);
+    cue_meta_set(c, "tempo", "?");
+    cue_add_caption(c, 4 * 9.6 + 10.0, 0, 0, "odd");             /* a gap of 10 s: 96 bpm, within 4 of 100: yellow, not in the cluster of four */
+    cue_sort(c);
+    double sug;
+    unsigned char in[16];
+    CHECK(suggest_cluster(&a, &sug, in) && fabs(sug - 100) < 1e-9 && in[0] && in[3] && !in[4], "the largest group within 2 bpm is the four 100s: %.2f", sug);
+    CHECK(cue_dot(&a, 4, 0, in, sug) == DOT_YELLOW && cue_dot(&a, 0, 0, in, sug) == DOT_GREEN && cue_dot(&a, 5, 0, in, sug) == DOT_NONE, "outside the group is yellow; the last cue has no dot");
+    cue_meta_set(c, "tempo", "120");
+    CHECK(!maybe_suggest_tempo(&a) && !strcmp(c->meta.tempo, "120"), "a Tempo that was typed is never overwritten");
+    CHECK(cue_dot(&a, 0, 120, NULL, 0) == DOT_RED, "100 against 120 is red");
+    cue_meta_set(c, "tempo", "");
+    CHECK(tempo_unset(&a) && maybe_suggest_tempo(&a), "blank is unset too");
+    cue_meta_set(c, "tempo", "98.5");
+    CHECK(fabs(set_tempo(&a) - 98.5) < 1e-9, "decimals are fine");
+    char tv[16];
+    fmt_tempo(96.0, tv, sizeof tv); CHECK(!strcmp(tv, "96"), "96 not 96.00: %s", tv);
+    fmt_tempo(96.5, tv, sizeof tv); CHECK(!strcmp(tv, "96.5"), "96.5: %s", tv);
+    fmt_tempo(96.125, tv, sizeof tv); CHECK(!strcmp(tv, "96.13") || !strcmp(tv, "96.12"), "at most two decimals: %s", tv);
+    cue_meta_set(c, "sig", "7/4");
+    CHECK(!sig_valid(c->meta.sig) && sig_beats(&a) == 16, "an unknown Sig counts as 4/4");
+
+    /* the Metadata panel: A on a row edits it (Sig toggles), Tempo checks its number and an empty one is suggested */
+    a.csel = 0;
+    cue_meta_set(c, "sig", "4/4");
+    a.pan_first = P_CUES;                                          /* Cues left, Metadata right */
+    a.pan_focus = 1;
+    a.psel[P_META] = 2;
+    app_action(&a, R3_ACCEPT);
+    CHECK(!strcmp(c->meta.sig, "6/8"), "A on Sig toggles it");
+    a.psel[P_META] = 1;
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_TEXT && !strcmp(a.tbuf, "98.5"), "A on Tempo opens it");
+    snprintf(a.tbuf, sizeof a.tbuf, "fast"); a.tlen = 4;
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_TEXT && !strcmp(c->meta.tempo, "98.5"), "a Tempo that is not a number is refused");
+    a.tbuf[0] = 0; a.tlen = a.tpos = 0;
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_PLAYER && !tempo_unset(&a), "an empty Tempo is suggested from the cues: %s", c->meta.tempo);
+    a.psel[P_META] = 0;
+    app_action(&a, R3_ACCEPT);
+    a.tbuf[0] = 0; a.tlen = a.tpos = 0;
+    app_action(&a, R3_UP);
+    app_action(&a, R3_UP);
+    app_action(&a, R3_RIGHT);
+    app_action(&a, R3_UP);
+    CHECK(!strcmp(a.tbuf, "BA"), "the pad types a key (Up starts A, Up again B, Right moves on, Up starts the next A): %s", a.tbuf);
+    app_action(&a, R3_ACCEPT);
+    CHECK(!strcmp(c->meta.key, "BA") && c->dirty, "and keeps it");
+    compose(&a, &s);                                               /* Metadata on screen */
+
+    /* delete a cue and bookmark a cue (a marker on its time) */
+    a.pan_first = P_MARKERS;
+    a.pan_focus = 1;
+    int n0 = c->nc;
+    a.csel = 1;
+    cue_bookmark(&a, 1);
+    CHECK(c->nm == 1 && marker_at(&a, c->c[1].start) == 0, "bookmarking a cue puts a marker on its time");
+    cue_bookmark(&a, 1);
+    CHECK(c->nm == 0, "and again takes it off");
+    cue_bookmark(&a, 1);
+    cue_delete(&a, 1);
+    CHECK(c->nc == n0 - 1 && c->nm == 0, "deleting a cue takes its marker with it");
+
+    /* the Set List: add (once), move, remove, and it is on the card in setlist.tsv */
+    setlist_load(&a);
+    CHECK(a.nsl == 0, "empty at first");
+    CHECK(setlist_add(&a, "abcDEF12345", "One") == 1 && setlist_add(&a, "bbbDEF12345", "Two") == 1 && setlist_add(&a, "abcDEF12345", "One again") == 0 && a.nsl == 2, "two songs; adding one again updates it");
+    CHECK(setlist_move(&a, 1, -1) == 0 && !strcmp(a.sl[0].id, "bbbDEF12345"), "move up");
+    CHECK(setlist_move(&a, 0, -1) == 0, "the first cannot go up");
+    setlist_load(&a);
+    CHECK(a.nsl == 2 && !strcmp(a.sl[0].title, "Two") && !strcmp(a.sl[1].title, "One again"), "the Set List comes back from the card in order");
+    setlist_remove(&a, 0);
+    CHECK(a.nsl == 1 && !strcmp(a.sl[0].id, "abcDEF12345"), "remove");
+
+    /* the songs opened here: Last 10 is newest first, Top 10 is most opened first */
+    hist_load(&a);
+    CHECK(a.nhist == 0, "nothing opened yet");
+    hist_touch(&a, "aaaaaaaaaaa", "A"); hist_touch(&a, "bbbbbbbbbbb", "B"); hist_touch(&a, "ccccccccccc", "C"); hist_touch(&a, "aaaaaaaaaaa", "A"); hist_touch(&a, "aaaaaaaaaaa", "A"); hist_touch(&a, "bbbbbbbbbbb", "B");
+    int r[10], n = hist_rank(&a, 0, r);
+    CHECK(n == 3 && !strcmp(a.hist[r[0]].id, "bbbbbbbbbbb") && !strcmp(a.hist[r[1]].id, "aaaaaaaaaaa") && !strcmp(a.hist[r[2]].id, "ccccccccccc"), "Last: B, A, C");
+    n = hist_rank(&a, 1, r);
+    CHECK(n == 3 && !strcmp(a.hist[r[0]].id, "aaaaaaaaaaa") && a.hist[r[0]].count == 3 && !strcmp(a.hist[r[1]].id, "bbbbbbbbbbb") && !strcmp(a.hist[r[2]].id, "ccccccccccc"), "Top: A (3), B (2), C (1)");
+    hist_load(&a);
+    CHECK(a.nhist == 3 && hist_rank(&a, 1, r) == 3 && a.hist[r[0]].count == 3, "kept on the card");
+    for (int i = 0; i < 14; i++) { char id[16]; snprintf(id, sizeof id, "x%010d", i); hist_touch(&a, id, "song"); }
+    CHECK(hist_rank(&a, 0, r) == 10 && hist_rank(&a, 1, r) == 10, "at most ten show");
+    a.pan_first = P_SETLIST;
+    compose(&a, &s);
+    a.pan_first = P_LAST;
+    compose(&a, &s);
+    a.pan_first = P_TOP;                                           /* Top, then Markers */
+    compose(&a, &s);
+    app_free(&a);
+}
+
 static void test_screens(void) {
     App a;
     app_init(&a, g_tmp);
@@ -1813,6 +2558,19 @@ static void test_screens(void) {
         check_contrast(&a, "player");
         engine_seek(&a.eng, 5);
         check_contrast(&a, "player at the start");
+        for (int pf = 0; pf < P_COUNT; pf++) {                       /* every pair of panels the carousel shows, with a Set List and songs to list */
+            a.pan_first = pf;
+            a.pan_focus = pf & 1;
+            a.nsl = 2; a.nhist = 2;
+            snprintf(a.sl[0].id, sizeof a.sl[0].id, "demoSong001"); snprintf(a.sl[0].title, sizeof a.sl[0].title, "Demo");
+            snprintf(a.sl[1].id, sizeof a.sl[1].id, "zzzzzzzzzzz"); snprintf(a.sl[1].title, sizeof a.sl[1].title, "Not here");
+            snprintf(a.hist[0].id, sizeof a.hist[0].id, "demoSong001"); snprintf(a.hist[0].title, sizeof a.hist[0].title, "Demo"); a.hist[0].count = 3; a.hist[0].last = 2;
+            snprintf(a.hist[1].id, sizeof a.hist[1].id, "zzzzzzzzzzz"); snprintf(a.hist[1].title, sizeof a.hist[1].title, "Not here"); a.hist[1].count = 1; a.hist[1].last = 1;
+            check_contrast(&a, "panels");
+            a.nsl = 0; a.nhist = 0;
+            check_contrast(&a, "empty panels");
+        }
+        a.pan_first = 0; a.pan_focus = 0;
         a.loop_state = 2; a.loop_a = 40; a.loop_b = 50;
         a.msel = 3;
         open_menu(&a);
@@ -1838,11 +2596,14 @@ static void test_screens(void) {
     app_action(&a, R3_ACCEPT);
     CHECK(a.mode == M_PLAYER && a.open == 1 && a.track.frames == 88200, "A opens the song");
     CHECK(a.cues.nm == 0, "no cue file yet");
-    app_action(&a, R3_ACCEPT);
-    CHECK(a.eng.playing, "A plays");
+    app_action(&a, MC_PLAY);
+    CHECK(a.eng.playing, "Start plays");
+    app_action(&a, MC_PLAY);
+    CHECK(!a.eng.playing, "and stops");
+    app_action(&a, MC_PLAY);
     for (int i = 0; i < 20; i++) app_tick(&a, 25);
     mark_here(&a);
-    CHECK(a.cues.nm == 1 && fabs(a.cues.m[0].time - 0.5) < 0.05, "Select marks the playhead: %.3f", a.cues.nm ? a.cues.m[0].time : -1);
+    CHECK(a.cues.nm == 1 && fabs(a.cues.m[0].time - 0.5) < 0.05, "Mark here marks the playhead: %.3f", a.cues.nm ? a.cues.m[0].time : -1);
     save_cues(&a);
     char cj[PATH_MAX];
     cue_path(&a, "abcDEF12345", "json", cj, sizeof cj);
@@ -1864,7 +2625,7 @@ static void test_screens(void) {
     app_action(&a, R3_Y);
     CHECK(a.loop_state == 0 && !a.eng.loop, "and once more clears it");
     app_action(&a, R3_MORE);
-    CHECK(a.mode == M_MENU && a.menu.n > 4, "Start opens the menu");
+    CHECK(a.mode == M_MENU && a.menu.n > 4, "the menu opens");
     app_action(&a, R3_BACK);
     CHECK(a.mode == M_PLAYER, "B closes it");
     app_free(&a);
@@ -1917,6 +2678,7 @@ static int selftest(void) {
     test_add_id();
     test_marquee();
     test_cue_panel();
+    test_panels_and_tempo();
     char cmd[PATH_MAX + 16];
     snprintf(cmd, sizeof cmd, "rm -rf '%s'", d);
     if (system(cmd) != 0) fprintf(stderr, "could not remove %s\n", d);
@@ -1935,6 +2697,17 @@ static int save_screenshot(const char *file, const char *screen, int theme) {
     engine_seek(&a.eng, 41.3);
     a.loop_state = 2; a.loop_a = 33.0; a.loop_b = 46.5;
     a.msel = 3;
+    static const char *const sample[] = {"Blue Hour", "Slow Dance in C", "Night Bus Jam", "Practice take 4", "Waltz for Mina", "Old Riff"};
+    for (int i = 0; i < 6; i++) {                                    /* made-up songs for the Set List, Last 10 and Top 10 panels of a screenshot */
+        snprintf(a.sl[i].id, sizeof a.sl[i].id, "song%07d", i);
+        snprintf(a.sl[i].title, sizeof a.sl[i].title, "%s", sample[i]);
+        snprintf(a.hist[i].id, sizeof a.hist[i].id, "song%07d", i);
+        snprintf(a.hist[i].title, sizeof a.hist[i].title, "%s", sample[i]);
+        a.hist[i].count = 9 - i * 2 + (i % 2);
+        a.hist[i].last = 100 - i * 3;
+    }
+    a.nsl = 4; a.nhist = 6;
+    if (!strncmp(screen, "player:", 7)) { a.pan_first = atoi(screen + 7) % P_COUNT; a.pan_focus = 1; a.csel = 2; screen = "player"; }
     if (!strcmp(screen, "library")) {
         close_song(&a);
         a.songs = (Song *)calloc(6, sizeof *a.songs);
@@ -2075,46 +2848,66 @@ int main(int argc, char **argv) {
     const char *dirs[] = {"media", "cues", "inbox", "export"};
     for (int i = 0; i < 4; i++) { sub_path(&app, dirs[i], NULL, sub, sizeof sub); mkdirs(sub); }
     load_settings(&app);
+    setlist_load(&app);
+    hist_load(&app);
     if (theme >= 0) app.theme = theme;
     apply_theme(&app);
     scan_songs(&app);
     if (data.notice[0]) say(&app, R3_ST_WARN, "%s", data.notice);
-    else say(&app, R3_ST_HINT, "%d song%s. A opens one, Start is the menu.", app.nsongs, app.nsongs == 1 ? "" : "s");
+    else say(&app, R3_ST_HINT, "%d song%s. A opens one, L1+R1 is the menu.", app.nsongs, app.nsongs == 1 ? "" : "s");
 
     R3Screen screen_cells;
     int force = 1;
     Uint32 last = SDL_GetTicks();
     while (!app.quit) {
         SDL_Event e;
-        int busy = force || video.settle > 0 || app.eng.playing || r3_toast_active(&toast) || app.mode == M_JOB;
+        int busy = force || video.settle > 0 || app.eng.playing || r3_toast_active(&toast) || app.mode == M_JOB || app.stick_x || app.stick_y;
         int have = wait_event(&e, busy ? 16 : 250, busy ? 8 : 40);
         while (have) {
             switch (e.type) {
             case SDL_QUIT: app.quit = 1; break;
             case SDL_WINDOWEVENT: force = 1; break;
             case SDL_JOYDEVICEADDED: SDL_JoystickOpen(e.jdevice.which); break;
-            case SDL_JOYBUTTONUP:
-                if (r3_pad_action(e.jbutton.button) == R3_SELECT) {
-                    if (!app.select_used && app.mode == M_PLAYER) mark_here(&app);
-                    app.select_held = 0;
+            case SDL_JOYAXISMOTION:
+                if (e.jaxis.axis == 2 || e.jaxis.axis == 3) stick_axis(&app, e.jaxis.axis, e.jaxis.value);
+                break;
+            case SDL_JOYBUTTONUP: {
+                int bt = e.jbutton.button;
+                if (bt == 12) app.select_held = 0;
+                else if (bt == 4 || bt == 5) {                 /* L1 and R1 step a marker, on release, unless they were pressed together (the menu) */
+                    if (bt == 4) app.pad_l1 = 0; else app.pad_r1 = 0;
+                    if (!app.chord) app_action(&app, bt == 4 ? R3_PAGEUP : R3_PAGEDOWN);
+                    if (!app.pad_l1 && !app.pad_r1) app.chord = 0;
                 }
                 break;
+            }
             case SDL_JOYBUTTONDOWN: {
                 if (r3_toast_key(&toast)) break;
-                int act = r3_pad_action(e.jbutton.button);
-                if (act == R3_SELECT) { app.select_held = 1; app.select_used = 0; break; }
-                if (act == R3_MORE && app.select_held) { app.select_used = 1; app.quit = 1; break; }
-                if (app.select_held) app.select_used = 1;
-                if (act != R3_NONE) app_action(&app, act);
+                int bt = e.jbutton.button;
+                if (bt == 4 || bt == 5) {
+                    if (bt == 4) app.pad_l1 = 1; else app.pad_r1 = 1;
+                    if (app.pad_l1 && app.pad_r1) { app.chord = 1; menu_toggle(&app); }     /* L1+R1: the menu, always */
+                } else if (bt == 12) { app.select_held = 1; app_action(&app, R3_SELECT); }  /* Select: back to 0:00 */
+                else if (bt == 13) { if (app.select_held) app.quit = 1; else app_action(&app, MC_PLAY); }   /* Start: play and stop; with Select, leave */
+                else if (bt == 16) { if (app.mode == M_PLAYER) app_action(&app, MC_FN); }   /* Fn: turn the panels */
+                else { int act = r3_pad_action(bt); if (act != R3_NONE) app_action(&app, act); }
                 break;
             }
             case SDL_KEYDOWN: {
                 if (r3_toast_key(&toast)) break;
                 SDL_Keycode k = e.key.keysym.sym;
                 if (app.mode == M_ID && id_key(&app, k, e.key.keysym.mod)) break;      /* a keyboard types the id */
+                if (app.mode == M_TEXT && text_key(&app, k, e.key.keysym.mod)) break;  /* ... and a metadata field */
                 int act = k == SDLK_x ? R3_X : k == SDLK_y ? R3_Y : k == SDLK_m && app.mode == M_PLAYER ? R3_NONE : r3_key_action(k);
+                if (app.mode == M_PLAYER) {                                                /* a keyboard: Tab is Fn, I K J L the right stick, Space is Start */
+                    if (k == SDLK_TAB) act = MC_FN;
+                    else if (k == SDLK_i) act = MC_SU;
+                    else if (k == SDLK_k) act = MC_SD;
+                    else if (k == SDLK_j) act = MC_SL;
+                    else if (k == SDLK_l) act = MC_SR;
+                }
                 if (k == SDLK_m && app.mode == M_PLAYER) mark_here(&app);
-                if (k == SDLK_SPACE) act = R3_ACCEPT;
+                if (k == SDLK_SPACE) act = MC_PLAY;
                 if (k == SDLK_q) app.quit = 1;
                 if (act != R3_NONE) app_action(&app, act);
                 break;

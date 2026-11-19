@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""musicue-sync: MusiCue's one online step (docs/MUSICUE.md). Run from MusiCue's Start > Sync, or by hand.
+"""musicue-sync: MusiCue's one online step (docs/MUSICUE.md). Run from MusiCue's menu (L1+R1) > Sync, or by hand.
 
     musicue-sync --data DIR [--id VIDEOID] [--cc-only | --any-license] [--no-audio] [--cues-base URL] [--yt-dlp PATH]
 
@@ -9,10 +9,10 @@ Reads DIR/inbox/urls.txt: one YouTube link or 11-character video id a line (a `#
      that file is not there yet, so a person's own edits are never overwritten.
   2. The audio, when yt-dlp is installed (the r3i6nos-ytdlp package, an add-on) and DIR/media/ has no file with [<id>] in its name yet: the AAC audio stream
      (about 1 MB a minute) into DIR/media/ as "Title [id].m4a". By default only videos whose licence is Creative Commons (--cc-only): the video's licence
-     is read by yt-dlp, and a video that is not Creative Commons is skipped and said so. --any-license (Start > Fetch from YouTube) lifts that; what
+     is read by yt-dlp, and a video that is not Creative Commons is skipped and said so. --any-license (menu > Fetch from YouTube) lifts that; what
      you fetch is yours to answer for under the site's terms and your own law.
 
-With --id VIDEOID (Start > Add: YouTube ID) it does the same for that one video and does not read urls.txt.
+With --id VIDEOID (menu > Add: YouTube ID) it does the same for that one video and does not read urls.txt.
 
 Progress goes to stdout as lines the app reads: `PROGRESS n/m message`, then `DONE ...`. Standard library only; nothing is sent but the requests
 themselves (no identifier, no counter, no account). Overrides, for tests: MUSICUE_YTDLP (the yt-dlp command), MUSICUE_CUES_BASE (the cue server's URL),
@@ -168,7 +168,7 @@ def fetch_audio(vid, media_dir, ytdlp, cc_only, on_frac=None):
         return "got", "audio saved"
     out = "\n".join(lines)
     if "pass filter" in out:
-        return "skip", "not Creative Commons (Start > Fetch from YouTube changes that)"
+        return "skip", "not Creative Commons (the menu's Fetch from YouTube changes that)"
     errs = [ln for ln in lines if ln.startswith("ERROR")]
     return "fail", (errs[-1] if errs else f"yt-dlp exit {proc.returncode}")[:90]
 
