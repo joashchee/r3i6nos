@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # RUNS: 3
-# NEEDS: Leave the pad alone while it runs (about a minute).
+# NEEDS: Leave the pad alone while it runs (a minute or two).
 # RUN 1: Nothing in the USB-C (OTG) port, charger out
 # RUN 1: (the power numbers need the battery).
 # RUN 2: The wired Ethernet adapter in the port, its
@@ -24,14 +24,17 @@ packages (what is installed and from where, the free room in ROOTFS, the catalog
 (a throwaway key signs a file: the good file passes and a changed one fails), and the state of the last system update; docs/PACKAGES-OTA.md),
 power (what the background work costs the battery: the hot-plug daemon, the menu, the periodic jobs; the idle draw in mW; docs/POWER.md),
 usb gadget and usb ethernet (whether the OTG port can act as a network card for a computer, or host a wired adapter: the answers the screen
-mirror needs, ROADMAP section 28, docs/SCREEN-MIRROR.md; read-only, from /proc and /sys).
+mirror needs, ROADMAP section 28, docs/SCREEN-MIRROR.md; read-only, from /proc and /sys),
+video hardware (the VPU and RGA as the kernel shows them: device tree, /dev nodes, modules loaded, on disk or never autoloaded, userspace libraries, the DRAM size and type clues;
+read-only, no root) and video decode (how fast the CPU decodes a synthetic H.264 clip at 240p, 360p, 480p and 720p the way Commander's player asks ffmpeg, with a goal for 480p; run 1 of 3
+only; docs/VIDEO-DECODE.md, ROADMAP section 35).
 
 Standard library only. Overrides, for tests: R3I6NOS_ETC (/etc), R3I6NOS_PROC (/proc), R3I6NOS_SYS (/sys), R3I6NOS_DEV (/dev),
 R3I6NOS_CARDS_STATE (/run/r3i6nos/cards), R3I6NOS_REPORT_DIR (the folder to write in), R3I6NOS_REPORT_MB (16: the speed test's size),
 R3I6NOS_SETUP_VAR, R3I6NOS_SETUP_RUN, R3I6NOS_SETUP_BOOT (where r3i6nos-setup leaves its record, state and report),
 R3I6NOS_SOUND (r3i6nos-sound), R3I6NOS_HOTPLUG (r3i6nos-hotplug),
 R3I6NOS_CLOCK (r3i6nos-clock), and for the power section (docs/POWER.md): R3I6NOS_REPORT_POWER_S (30: seconds per measuring window),
-R3I6NOS_BATTERY (r3i6nos-battery), R3I6NOS_PKG (r3i6nos-pkg), R3I6NOS_OPENSSL, R3I6NOS_PKG_CACHE, R3I6NOS_APP_ROOT (/opt/native_apps), R3I6NOS_TOOLS_DIR (/opt/loveos/bin), R3I6NOS_LDD (ldd), R3I6NOS_MODULES (/lib/modules), R3I6NOS_BOOTSTATE_CMD (r3i6nos-bootstate), R3I6NOS_MENU_MATCH (/opt/loveos/menu: how the menu's process
+R3I6NOS_BATTERY (r3i6nos-battery), R3I6NOS_PKG (r3i6nos-pkg), R3I6NOS_OPENSSL, R3I6NOS_PKG_CACHE, R3I6NOS_APP_ROOT (/opt/native_apps), R3I6NOS_TOOLS_DIR (/opt/loveos/bin), R3I6NOS_LDD (ldd), R3I6NOS_MODULES (/lib/modules), R3I6NOS_FFMPEG (ffmpeg), R3I6NOS_LDCONFIG (ldconfig), R3I6NOS_VIDEO_FRAMES (90), R3I6NOS_VIDEO_BENCH (0 skips the decode benchmark), R3I6NOS_BOOTSTATE_CMD (r3i6nos-bootstate), R3I6NOS_MENU_MATCH (/opt/loveos/menu: how the menu's process
 is told), R3I6NOS_POWER_AB (1: do the stop-and-compare even when not root, tests).
 """
 import gzip
@@ -80,6 +83,11 @@ PKG_RESERVE_PCT = int(ENV("R3I6NOS_PKG_RESERVE_PCT", "10"))
 PKG_CACHE = Path(ENV("R3I6NOS_PKG_CACHE") or Path.home() / ".cache/r3i6nos-pkg")
 SYSUPDATE_OUT = Path(ENV("R3I6NOS_SYSUPDATE_OUT", "/run/r3i6nos-sysupdate"))
 MENU_MATCH = ENV("R3I6NOS_MENU_MATCH", "/opt/loveos/menu")
+FFMPEG = ENV("R3I6NOS_FFMPEG", "ffmpeg")                         # the image's ffmpeg-min; the video sections encode and decode with it
+LDCONFIG = ENV("R3I6NOS_LDCONFIG", "ldconfig")
+VIDEO_FRAMES = int(ENV("R3I6NOS_VIDEO_FRAMES", "90"))             # frames of the synthetic clip (3 s at 30 fps); R3I6NOS_VIDEO_BENCH=0 skips the decode benchmark
+VIDEO_BENCH = ENV("R3I6NOS_VIDEO_BENCH", "1")
+GOAL_DECODE_X = 1.5                                               # software decode of the 480p clip must run at least this many times real time (a goal to adjust from the first report)
 # the goals the power section checks against (docs/POWER.md): a goal missed is a FAIL line, not a silent number
 GOAL_DAEMON_CPU = 1.0        # % of one core, the hot-plug daemon
 GOAL_DAEMON_WAKEUPS = 4.0    # context switches a second, the hot-plug daemon (its poll is once a second)
@@ -1253,6 +1261,230 @@ def usb_sections(r):
     usb_ethernet(r, gadget)
 
 
+# ---- video: what the unit has for decoding video, and what software decode costs ----------------------------------------------------
+# docs/VIDEO-DECODE.md, ROADMAP section 35. The RK3326 has a VPU (H.264, H.265, VP8, VC-1, MPEG-4 to 1080p60; no VP9, no AV1) and an RGA, and the stock 4.4.189 kernel
+# ships their drivers as modules (mpp_service, rk-vcodec, rga2); nothing in the image loads them and Debian 12 has no userspace for them. This answers, read-only and with no
+# root, whether the nodes exist, whether the modules are loaded or could ever autoload, what DRAM the unit has, and how fast the CPU decodes the video the apps would play.
+
+VIDEO_MOD_RE = re.compile(r"mpp_|rk_vcodec|vcodec|vpu_|^rga|hantro|rockchip_vpu|rkvdec|rkvenc|vdpu|vepu|hevc|h265")
+VIDEO_NODE_RE = re.compile(r"^(mpp_service|vpu[-_]?service|vpu_combo|hevc[-_]?service|rkvdec\w*|rkvenc\w*|vepu\w*|rga\d*|ion|video\d+|media\d+)$")
+VIDEO_DT_RE = re.compile(r"^(vpu|vcodec|rkvdec|hevc|vepu|rk_rga|rga|mpp|video-codec)")
+
+
+def dt_strings(path):
+    """The NUL-separated strings of a device-tree property, or []."""
+    try:
+        return [x.decode("ascii", "replace") for x in Path(path).read_bytes().split(b"\0") if x]
+    except OSError:
+        return []
+
+
+def node_mode(path):
+    try:
+        st = os.stat(path)
+    except OSError:
+        return None
+    kind = "char device" if (st.st_mode & 0o170000) == 0o020000 else "block device" if (st.st_mode & 0o170000) == 0o060000 else "file"
+    return f"{kind} {st.st_mode & 0o777:03o}, " + ("usable by this user" if os.access(path, os.R_OK | os.W_OK) else "not readable and writable by this user")
+
+
+def video_hardware(r):
+    """== video hardware ==: the VPU and RGA as the kernel shows them, the DRAM, and the userspace that would drive them."""
+    r.step("the video hardware")
+    r.section("video hardware")
+    dt = PROC / "device-tree"
+    found = sorted(d for d in dt.iterdir() if VIDEO_DT_RE.match(d.name)) if dt.is_dir() else []
+    if not dt.is_dir():
+        r.line("SKIP", "device tree", "no /proc/device-tree")
+    for d in found:
+        r.line("INFO", f"device tree {d.name}", f"{', '.join(dt_strings(d / 'compatible')) or 'no compatible'}; status {', '.join(dt_strings(d / 'status')) or 'okay (not set)'}")
+    if dt.is_dir() and not found:
+        r.line("INFO", "device tree video nodes", "none named vpu, vcodec, rkvdec, hevc, vepu, rga or mpp")
+    nodes = sorted(p for p in DEV.iterdir() if VIDEO_NODE_RE.match(p.name)) if DEV.is_dir() else []
+    usable = []
+    for n in nodes:
+        what = node_mode(n)
+        r.line("INFO", f"/dev/{n.name}", what or "unreadable")
+        if what and "usable by this user" in what and not n.name.startswith(("video", "media")):
+            usable.append(n.name)
+    for sub in ("dma_heap", "dri"):
+        d = DEV / sub
+        if d.is_dir():
+            r.line("INFO", f"/dev/{sub}", ", ".join(sorted(x.name for x in d.iterdir())) or "empty")
+    if not nodes:
+        r.line("INFO", "video device nodes", "none of /dev/mpp_service, vpu_service, rga, ion, video*, media*")
+    devs = [ln.split()[1] for ln in (read(PROC / "devices") or "").splitlines() if len(ln.split()) == 2 and re.search(r"mpp|vpu|rga|vcodec|ion|video4linux|rkvdec|hevc", ln, re.I)]
+    r.line("INFO", "/proc/devices", ", ".join(devs) or "no mpp, vpu, rga, ion or video4linux entry")
+
+    k = Kernel()
+    mods = sorted(m for m in (k.loaded | k.files | k.builtin) if VIDEO_MOD_RE.search(m))
+    for m in mods:
+        state = "loaded" if m in k.loaded else "built in" if m in k.builtin else "module file only (not loaded)"
+        r.line("INFO", f"module {m}", state)
+    if not mods:
+        r.line("INFO", "video modules", f"none by those names under {MODULES}/{k.release or '?'} or in /proc/modules")
+    unloaded = [m for m in mods if m in k.files and m not in k.loaded and m not in k.builtin]
+    # a module that is on disk but never loads by itself: no modalias line for it in modules.alias, and nothing in the image runs modprobe for it
+    aliases = (read(MODULES / k.release / "modules.alias") or "") if k.release else ""
+    autoload = {m for m in unloaded if any(norm(ln.split()[-1]) == m for ln in aliases.splitlines() if ln.startswith("alias ") and ln.split())}
+    if unloaded:
+        if autoload:
+            r.line("INFO", "autoload", "these have a modalias, so udev may load them: " + ", ".join(sorted(autoload)))
+        noauto = sorted(set(unloaded) - autoload)
+        if noauto:
+            r.line("INFO", "never loaded by itself", f"{', '.join(noauto)}: no modalias entry, and nothing in the image runs modprobe; a root `modprobe` is needed")
+    opts = [o for o in (k.cfg or {}) if re.search(r"ROCKCHIP_(MPP|RGA|VPU)|^RK_VCODEC|^ROCKCHIP_RGA|MEDIA_SUPPORT|^V4L2_MEM2MEM|^ION$|^DMABUF", o)]
+    r.line("INFO" if k.cfg is not None else "SKIP", "kernel config for video", ", ".join(f"{o}={k.cfg[o]}" for o in sorted(opts)) or "none of the MPP, RGA, VPU, V4L2 or ION options set" if k.cfg is not None
+           else "no kernel config readable")
+    if usable:
+        r.line("PASS", "a video accelerator node is usable", f"/dev/{', /dev/'.join(usable)}: userspace could try it (not tried here: no library to drive it)")
+    elif unloaded:
+        r.line("INFO", "verdict", "the VPU/RGA drivers are on disk but not loaded and no node exists; hardware decode needs a root modprobe first, then a userspace library the image does not have")
+    elif found or nodes:
+        r.line("INFO", "verdict", "the hardware is in the device tree but no usable accelerator node exists")
+    else:
+        r.line("INFO", "verdict", "no VPU or RGA driver or node was found")
+
+    out = run(["ldconfig", "-p"] if LDCONFIG == "ldconfig" else [LDCONFIG, "-p"])
+    libs = sorted({ln.split()[0] for ln in (out or "").splitlines() if re.search(r"rockchip_mpp|librga|libvpu|libv4l2|libdrm_rockchip", ln)})
+    r.line("INFO" if out is not None else "SKIP", "userspace libraries", ", ".join(libs) or "no librockchip_mpp, librga or libv4l" if out is not None else "ldconfig -p did not run")
+    hw = run([FFMPEG, "-hide_banner", "-hwaccels"])
+    if hw is None:
+        r.line("SKIP", "ffmpeg hardware acceleration", f"{FFMPEG} did not run")
+    else:
+        methods = [ln.strip() for ln in hw.splitlines()[1:] if ln.strip()]
+        r.line("INFO", "ffmpeg hardware acceleration", ", ".join(methods) or "none listed (ffmpeg-min is built without any)")
+
+    # DRAM: the datasheet allows DDR3, DDR3L, DDR4, LPDDR2 and LPDDR3, and the stock device tree does not say which this unit has
+    size = None
+    for mem in sorted(dt.glob("memory*")) if dt.is_dir() else []:
+        try:
+            raw = (mem / "reg").read_bytes()
+        except OSError:
+            continue
+        if len(raw) >= 16:
+            size = (size or 0) + int.from_bytes(raw[8:16], "big")
+        elif len(raw) >= 8:
+            size = (size or 0) + int.from_bytes(raw[4:8], "big")
+    r.line("INFO" if size else "SKIP", "dram size in the device tree", f"{size // (1 << 20)} MiB (the bootloader may change it)" if size else "no memory node with a reg property")
+    dev = SYS / "class/devfreq"
+    for d in sorted(dev.glob("*")) if dev.is_dir() else []:
+        r.line("INFO", f"devfreq {d.name}", f"cur {read(d / 'cur_freq') or '?'} Hz, governor {read(d / 'governor') or '?'}, available {read(d / 'available_frequencies') or '?'}")
+    log = run(["dmesg"], 5)
+    if log is None:
+        r.line("SKIP", "dram in the kernel log", "dmesg is not readable by this user")
+    else:
+        hits = [ln.strip()[:150] for ln in log.splitlines() if re.search(r"ddr|dram|lpddr|dmc|vpu|rga|mpp", ln, re.I)]
+        for h in hits[:8]:
+            r.line("INFO", "kernel log", h)
+        if not hits:
+            r.line("INFO", "dram in the kernel log", "no line mentions ddr, dram, dmc, vpu, rga or mpp")
+    r.line("INFO", "next", "the DRAM type decides the memory notes in docs/r36s-chips-review.md; a root modprobe of the modules above is the next step only if the decode below is too slow")
+
+
+def synthetic_yuv(w, h, n):
+    """n frames of w x h 8-bit 4:2:0: a ramp that scrolls under a fixed noise screen (so every frame needs real residual data, as footage does), made with big-integer bit
+    operations so it is fast on a Cortex-A35. Flat chroma."""
+    import random
+    step = 2 * w
+    ramp = bytes(x * 255 // max(w - 1, 1) for x in range(w))
+    rows = []
+    for y in range(h + 2 * n):
+        o = (y * 3) % w
+        rows.append(ramp[o:] + ramp[:o])
+    luma = b"".join(rows)
+    hi = bytes(b & 0xF0 for b in range(256))
+    lo = bytes(b >> 4 for b in range(256))
+    noise = int.from_bytes(random.Random(7).randbytes(w * h).translate(lo), "big")
+    chroma = bytes([128]) * (w * h // 2)
+    for k in range(n):
+        yield (int.from_bytes(luma[k * step:k * step + w * h].translate(hi), "big") | noise).to_bytes(w * h, "big") + chroma
+
+
+def timed_run(cmd, stdin_frames=None):
+    """(wall seconds, cpu seconds, peak MiB of this child, exit status, first line of stderr): the child's own rusage, not the largest of every child so far."""
+    with tempfile.TemporaryFile() as err:
+        t0 = time.perf_counter()
+        p = subprocess.Popen(cmd, stdin=subprocess.PIPE if stdin_frames is not None else subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=err)
+        if stdin_frames is not None:
+            try:
+                for f in stdin_frames:
+                    p.stdin.write(f)
+                p.stdin.close()
+            except (BrokenPipeError, OSError):
+                pass
+        _, status, ru = os.wait4(p.pid, 0)
+        wall = time.perf_counter() - t0
+        p.returncode = os.waitstatus_to_exitcode(status)
+        err.seek(0)
+        first = (err.read().decode("utf-8", "replace").strip().splitlines() or [""])[0]
+    return wall, ru.ru_utime + ru.ru_stime, ru.ru_maxrss / 1024, p.returncode, first
+
+
+def video_decode(r):
+    """== video decode ==: how fast the CPU decodes H.264 at the sizes the apps could play, the way Commander's player asks ffmpeg (scaled to 640x400, BGRA, 30 fps)."""
+    r.step("software video decode")
+    r.section("video decode")
+    run_k = setup_run()
+    if VIDEO_BENCH == "0":
+        r.line("SKIP", "software decode", "R3I6NOS_VIDEO_BENCH=0")
+        return
+    if run_k and run_k[0] != 1:
+        r.line("SKIP", "software decode", f"measured on run 1 of {run_k[1]} only (it loads every core for up to a minute)")
+        return
+    enc = run([FFMPEG, "-hide_banner", "-encoders"])
+    if enc is None:
+        r.line("SKIP", "software decode", f"{FFMPEG} did not run: no ffmpeg in the image, nothing to measure")
+        return
+    if "libx264" not in enc:
+        r.line("SKIP", "software decode", "this ffmpeg cannot encode H.264 (libx264), so it cannot make the test clip")
+        return
+    ncpu = os.cpu_count() or 1
+    gov = read(SYS / "devices/system/cpu/cpu0/cpufreq/scaling_governor")
+    f0 = read(SYS / "devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")
+    r.line("INFO", "cpu", f"{ncpu} CPUs, governor {gov or '?'}, cpu0 {int(f0) // 1000 if f0 and f0.isdigit() else '?'} MHz before")
+    r.line("INFO", "clip", f"synthetic ({VIDEO_FRAMES} frames at 30 fps: a scrolling ramp under a noise screen), H.264 veryfast at a target bit rate for each size; real footage can cost more or less")
+    vf = "scale=640:400:force_original_aspect_ratio=decrease:flags=neighbor,pad=640:400:(ow-iw)/2:(oh-ih)/2,fps=30"
+    # the target bit rate of each size is about what YouTube serves in H.264 (kbit/s), so the decode cost is that of a realistic stream
+    cases = ((320, 240, 400, "240p, YouTube's format 18", False), (640, 360, 700, "360p", False), (640, 480, 1000, "480p, the default cap and the screen", True), (1280, 720, 2500, "720p", False))
+    slow = False
+    with tempfile.TemporaryDirectory() as d:
+        for w, h, kbps, label, goal in cases:
+            name = f"{label.split(',')[0]} decode"
+            if slow:
+                r.line("SKIP", name, "the encode of the clip was too slow to go on to larger sizes")
+                continue
+            clip = os.path.join(d, f"c{h}.mp4")
+            wall, cpu, mib, rc, why = timed_run([FFMPEG, "-v", "error", "-y", "-f", "rawvideo", "-pix_fmt", "yuv420p", "-s", f"{w}x{h}", "-r", "30", "-i", "pipe:0",
+                                                 "-c:v", "libx264", "-preset", "veryfast", "-b:v", f"{kbps}k", "-maxrate", f"{kbps}k", "-bufsize", f"{2 * kbps}k", "-pix_fmt", "yuv420p", clip], synthetic_yuv(w, h, VIDEO_FRAMES))
+            if rc != 0 or not os.path.exists(clip):
+                r.line("FAIL" if goal else "SKIP", f"{name} clip", f"could not make the {w}x{h} clip: {why or 'exit ' + str(rc)}")
+                continue
+            if wall > 90:
+                slow = True
+            secs = VIDEO_FRAMES / 30
+            kbit = os.path.getsize(clip) * 8 / secs / 1000
+            best = None
+            for _ in range(2):
+                res = timed_run([FFMPEG, "-v", "error", "-i", clip, "-an", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1"])
+                if res[3] == 0 and (best is None or res[0] < best[0]):
+                    best = res
+            if best is None:
+                r.line("FAIL" if goal else "SKIP", name, f"ffmpeg could not decode the clip: {res[4] or 'exit ' + str(res[3])}")
+                continue
+            wall, cpu, mib, _, _ = best
+            x = secs / wall if wall > 0 else 0.0
+            text = (f"{w}x{h} at {kbit:.0f} kbit/s (target {kbps}): {x:.1f}x real time ({wall:.2f} s for {secs:.1f} s of video), {cpu:.2f} s of CPU = {100 * cpu / wall:.0f}% of wall "
+                    f"({100 * cpu / wall / ncpu:.0f}% of all {ncpu} cores), {mib:.0f} MiB peak")
+            if goal:
+                r.line("PASS" if x >= GOAL_DECODE_X else "FAIL", name, text + f"; goal at least {GOAL_DECODE_X}x")
+            else:
+                r.line("INFO", name, text)
+    f1 = read(SYS / "devices/system/cpu/cpu0/cpufreq/scaling_cur_freq")
+    r.line("INFO", "cpu after", f"cpu0 {int(f1) // 1000 if f1 and f1.isdigit() else '?'} MHz")
+    r.line("INFO", "reading this", "below 1x the player drops frames; between 1x and 1.5x it keeps up with no room for the menu, sound and scaling. If 480p passes with room to spare, hardware decode is not needed (ROADMAP section 35)")
+
+
 def demo_recording():
     """True while a Rec demo holds /run/loveos/demo/lock with a live pid (docs/DEMO-RECORDINGS.md: the unit's whole power is its)."""
     try:
@@ -1276,11 +1508,11 @@ def main(argv):
     try:
         folder, card = where(cards)
         r = Report(folder, how, rel.get("VERSION", "?"), card, quiet)
-        r.steps = 13 + 2 * len(mounted_cards(cards))
+        r.steps = 15 + 2 * len(mounted_cards(cards))
     except OSError as e:
         print(f"r3i6nos-report: cannot write the report: {e}", file=sys.stderr)
         return 1
-    for part in (lambda: (system(r, rel), setup_section(r)), lambda: boot(r), lambda: sound(r), lambda: clock(r), lambda: storage(r, cards), lambda: packages(r), lambda: runtimes(r), lambda: usb_sections(r), lambda: power_section(r)):
+    for part in (lambda: (system(r, rel), setup_section(r)), lambda: boot(r), lambda: sound(r), lambda: clock(r), lambda: storage(r, cards), lambda: packages(r), lambda: runtimes(r), lambda: usb_sections(r), lambda: power_section(r), lambda: video_hardware(r), lambda: video_decode(r)):
         try:
             part()
         except Exception as e:  # a broken check is a line in the report, never a missing report

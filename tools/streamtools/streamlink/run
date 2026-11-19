@@ -1,0 +1,11 @@
+#!/bin/bash
+# streamlink (r3i6nos package r3i6nos-streamlink; docs/STREAM-TOOLS.md): plays or saves live streams and HLS/DASH from the sites it has plugins for. The image's Python 3.11 runs it.
+HERE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+LIB="$HERE/lib/r3i6nos-streamlink"
+PY="${R3I6NOS_PYTHON:-python3}"
+export PYTHONPATH="$LIB/site-packages${PYTHONPATH:+:$PYTHONPATH}"
+[ -r /etc/ssl/certs/ca-certificates.crt ] && export REQUESTS_CA_BUNDLE="${REQUESTS_CA_BUNDLE:-/etc/ssl/certs/ca-certificates.crt}" SSL_CERT_FILE="${SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}"
+ARGS=()
+FF="${R3I6NOS_FFMPEG:-/usr/bin/ffmpeg}"
+[ -x "$FF" ] && ARGS+=(--ffmpeg-ffmpeg "$FF")
+exec "$PY" -s -m streamlink "${ARGS[@]}" "$@"

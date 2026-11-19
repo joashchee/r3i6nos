@@ -1,0 +1,11 @@
+#!/bin/bash
+# gallery-dl (r3i6nos package r3i6nos-gallery-dl; docs/STREAM-TOOLS.md): downloads image galleries and collections from many sites. The image's Python 3.11 runs it.
+HERE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+LIB="$HERE/lib/r3i6nos-gallery-dl"
+PY="${R3I6NOS_PYTHON:-python3}"
+export PYTHONPATH="$LIB/site-packages${PYTHONPATH:+:$PYTHONPATH}"
+# requests would use certifi's bundle; the image's own CA store (ca-certificates) is the one to trust
+[ -r /etc/ssl/certs/ca-certificates.crt ] && export REQUESTS_CA_BUNDLE="${REQUESTS_CA_BUNDLE:-/etc/ssl/certs/ca-certificates.crt}" SSL_CERT_FILE="${SSL_CERT_FILE:-/etc/ssl/certs/ca-certificates.crt}"
+ARGS=()
+[ -n "${R3I6NOS_APP_DATA:-}" ] && ARGS+=(-d "$R3I6NOS_APP_DATA/gallery-dl")   # a frontend's data folder (rule 16); -d of your own wins
+exec "$PY" -s -m gallery_dl "${ARGS[@]}" "$@"

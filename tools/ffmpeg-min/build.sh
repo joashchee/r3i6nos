@@ -54,7 +54,7 @@ AUDIO=aac,aac_latm,mp1,mp1float,mp2,mp2float,mp3,mp3float,ac3,eac3,dca,flac,vorb
     --enable-decoder="$VIDEO,$AUDIO" \
     --enable-gpl --enable-libx264 --enable-zlib --pkg-config-flags=--static \
     --extra-cflags="-I$W/x264/include" --extra-ldflags="-L$W/x264/lib -L$W/zs" \
-    --enable-encoder=rawvideo,pcm_s16le,libx264,aac --enable-muxer=rawvideo,pcm_s16le,mp4 \
+    --enable-encoder=rawvideo,pcm_s16le,libx264,aac --enable-muxer=rawvideo,pcm_s16le,mp4,matroska,webm,ipod \
     --enable-filter=scale,fps,pad,format,aresample,aformat,null,anull,setpts \
     --enable-swscale --enable-swresample >"$W/configure.log" 2>&1 || { tail -25 "$W/configure.log"; exit 1; }
 make -j"$JOBS" >"$W/make.log" 2>&1 || { tail -25 "$W/make.log"; exit 1; }
@@ -73,7 +73,7 @@ for d in $(echo "$VIDEO,$AUDIO" | tr ',' ' ' | sed 's/msmpeg4v3/msmpeg4/'); do "
 for d in mov matroska avi asf flv mpeg mpegts mpegvideo wav mp3 ogg flac aiff aac wv ac3 eac3 dts rawvideo image2 image2pipe jpeg_pipe webp_pipe tiff_pipe psd_pipe png_pipe; do
     "$MIN" -hide_banner -demuxers 2>/dev/null | awk '{print $2}' | tr ',' '\n' | grep -qx "$d" || { echo "    MISSING demuxer: $d"; fail=1; }
 done
-for m in mp4 rawvideo s16le; do "$MIN" -hide_banner -muxers 2>/dev/null | awk '{print $2}' | grep -qx "$m" || { echo "    MISSING muxer: $m"; fail=1; }; done
+for m in mp4 rawvideo s16le matroska webm ipod; do "$MIN" -hide_banner -muxers 2>/dev/null | awk '{print $2}' | grep -qx "$m" || { echo "    MISSING muxer: $m"; fail=1; }; done
 for e in libx264 aac rawvideo pcm_s16le; do "$MIN" -hide_banner -encoders 2>/dev/null | awk '{print $2}' | grep -qx "$e" || { echo "    MISSING encoder: $e"; fail=1; }; done
 
 # decode what the full ffmpeg encodes, the way Commander's player does (player.h), and compare the bytes
@@ -134,6 +134,28 @@ acase flac flac -c:a flac
 acase wav wav -c:a pcm_s16le
 acase aiff aiff -c:a pcm_s16be
 acase wavpack wv -c:a wavpack
+# stream-copy merges and remuxes, what yt-dlp asks of ffmpeg for a video and an audio stream it downloaded separately (ROADMAP section 34): the reference makes
+# the two streams, the minimal one joins them with -c copy (as yt-dlp does), and the reference must read the result back with both streams and no error
+mcase() { # name out-ext video-encoder audio-encoder in-ext-video in-ext-audio
+    local name="$1" oext="$2" venc="$3" aenc="$4" vext="$5" aext="$6"
+    local v="$T/m-$name-v.$vext" a="$T/m-$name-a.$aext" o="$T/m-$name.$oext"
+    if ! ffmpeg -v error -f lavfi -i testsrc2=s=320x240:r=25:d=2 -an -c:v "$venc" -pix_fmt yuv420p -y "$v" 2>/dev/null \
+       || ! ffmpeg -v error -f lavfi -i "sine=f=440:d=2" -vn -c:a "$aenc" -y "$a" 2>/dev/null; then echo "    skip  merge $name (the reference ffmpeg cannot make the inputs)"; return; fi
+    if "$MIN" -v error -y -i "$v" -i "$a" -c copy -map 0:v:0 -map 1:a:0 "$o" 2>"$T/m-$name.err" \
+       && [ "$(ffmpeg -hide_banner -i "$o" 2>&1 | grep -c '^ *Stream #')" = 2 ] && [ -z "$(ffmpeg -v error -i "$o" -f null - 2>&1)" ]; then
+        echo "    ok    merge $name: video .$vext + audio .$aext -> .$oext (stream copy)"
+    else echo "    FAIL  merge $name -> .$oext"; head -3 "$T/m-$name.err" | sed 's/^/          /'; fail=1; fi
+}
+echo "[*] stream-copy merge (yt-dlp):"
+mcase h264-aac mp4 libx264 aac mp4 m4a
+mcase vp9-opus webm libvpx-vp9 libopus webm webm
+mcase vp9-opus mkv libvpx-vp9 libopus webm webm
+mcase h264-aac mkv libx264 aac mp4 m4a
+if ffmpeg -v error -f lavfi -i "sine=f=440:d=2" -vn -c:a aac -f adts -y "$T/x.aac" 2>/dev/null; then
+    if "$MIN" -v error -y -i "$T/x.aac" -c copy -bsf:a aac_adtstoasc -f ipod "$T/x.m4a" 2>/dev/null && [ -z "$(ffmpeg -v error -i "$T/x.m4a" -f null - 2>&1)" ]; then
+        echo "    ok    remux ADTS AAC -> .m4a (ipod muxer, aac_adtstoasc)"
+    else echo "    FAIL  remux ADTS AAC -> .m4a"; fail=1; fi
+fi
 echo "[*] no encoder exists in the reference ffmpeg for wmv3, vc1, svq3, vp6, wmapro: their decoders are in the binary but have not decoded a file"
 
 # stills, the way Commander's Picture tab asks (apps/commander-native/player.h pl_still): the first frame, native size, BGRA

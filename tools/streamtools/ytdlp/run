@@ -1,0 +1,28 @@
+#!/bin/bash
+# yt-dlp (r3i6nos package r3i6nos-ytdlp; docs/STREAM-TOOLS.md): the image's Python 3.11 runs the release zipapp, QuickJS-ng solves YouTube's JavaScript challenges, the
+# image's /usr/bin/ffmpeg joins separate video and audio. Defaults come first, so any option you give wins.
+HERE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+LIB="$HERE/lib/r3i6nos-ytdlp"
+PY="${R3I6NOS_PYTHON:-python3}"
+for a in "$@"; do
+    case "$a" in
+        --) break ;;
+        -U|--update|--update-to|--update-to=*)
+            echo "yt-dlp: it cannot update itself here (its folder is part of a signed package). Update the package: r3i6nos-pkg update (docs/STREAM-TOOLS.md)." >&2
+            exit 2 ;;
+    esac
+done
+export PYTHONPATH="$LIB/site-packages${PYTHONPATH:+:$PYTHONPATH}"
+# the player and challenge cache: the app's data folder when a frontend gave one (rule 16), else the user's cache
+if [ -n "${R3I6NOS_YTDLP_CACHE:-}" ]; then CACHE="$R3I6NOS_YTDLP_CACHE"
+elif [ -n "${R3I6NOS_APP_DATA:-}" ]; then CACHE="$R3I6NOS_APP_DATA/.yt-dlp-cache"
+else CACHE="${XDG_CACHE_HOME:-${HOME:-/tmp}/.cache}/yt-dlp"; fi
+ARGS=(--cache-dir "$CACHE" --js-runtimes "quickjs:$LIB/bin/qjs")
+FF="${R3I6NOS_FFMPEG:-/usr/bin/ffmpeg}"
+[ -x "$FF" ] && ARGS+=(--ffmpeg-location "$FF")
+# files go to the app's data folder when a frontend gave one (relative -o is under it); an -o with an absolute path or -P of your own still wins
+[ -n "${R3I6NOS_APP_DATA:-}" ] && ARGS+=(-P "$R3I6NOS_APP_DATA")
+# the screen is 640x480 and the CPU has no video decoder: at most 480p, and H.264 + AAC that the image's ffmpeg can join into an MP4 without re-encoding; the last
+# alternatives take whatever the site has. -f, -S and --merge-output-format of your own replace these.
+ARGS+=(-f 'bv*[height<=480][vcodec^=avc1]+ba[acodec^=mp4a]/b[height<=480][ext=mp4]/bv*[height<=480]+ba/b[height<=480]/b' --merge-output-format mp4)
+exec "$PY" -s "$LIB/yt-dlp" "${ARGS[@]}" "$@"

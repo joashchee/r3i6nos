@@ -58,11 +58,20 @@ class Fake(unittest.TestCase):
                                              "echo 'mixer Boost: 2 of 0-6, 33%, +6.0 dB'\n")
         (t / "bin/r3i6nos-clock").write_text("#!/bin/sh\necho 'now: 2026-11-09 21:30:00 +0800'\necho 'set by a person: 2026-11-09 21:29:40 +0800'\n"
                                              "echo 'rtc: none'\n")
+        # a fake ffmpeg (the video sections): -hwaccels and -encoders answer from files beside it, an encode (stdin in, last argument out) leaves a file, a decode sleeps for
+        # the time in decode-sleep; its answers are files, because the report's child processes do not see the test's environment
+        (t / "bin/ffmpeg").write_text('#!/bin/sh\nd="$(dirname "$0")"\ncase "$*" in\n'
+                                      '  *-hwaccels*) echo "Hardware acceleration methods:"; cat "$d/hwaccels" 2>/dev/null; true ;;\n'
+                                      '  *-encoders*) echo " V....D libx264 libx264 H.264"; cat "$d/encoders" 2>/dev/null; true ;;\n'
+                                      '  *pipe:0*) cat >/dev/null; for a; do last="$a"; done; head -c 4000 /dev/zero > "$last"; [ -f "$d/encode-fails" ] && exit 1; exit 0 ;;\n'
+                                      '  *pipe:1*) sleep "$(cat "$d/decode-sleep" 2>/dev/null || echo 0)"; [ -f "$d/decode-fails" ] && { echo "Invalid data found" >&2; exit 1; }; exit 0 ;;\nesac\n')
+        (t / "bin/ffmpeg").chmod(0o755)
         for f in ("systemctl", "systemd-analyze", "r3i6nos-sound", "r3i6nos-clock"):
             (t / "bin" / f).chmod(0o755)
         self.env = {"R3I6NOS_ETC": str(t / "etc"), "R3I6NOS_PROC": str(t / "proc"), "R3I6NOS_SYS": str(t / "sys"), "R3I6NOS_DEV": str(t / "dev"),
                     "R3I6NOS_CARDS_STATE": str(t / "run/cards"), "R3I6NOS_REPORT_MB": "2", "R3I6NOS_SOUND": str(t / "bin/r3i6nos-sound"), "R3I6NOS_CLOCK": str(t / "bin/r3i6nos-clock"),
-                    "R3I6NOS_BOOTSTATE": str(t / "run/boot-state"), "R3I6NOS_REPORT_POWER_S": "0.3", "PATH": f"{t / 'bin'}:{os.environ.get('PATH', '')}"}
+                    "R3I6NOS_BOOTSTATE": str(t / "run/boot-state"), "R3I6NOS_REPORT_POWER_S": "0.3",
+                    "R3I6NOS_FFMPEG": str(t / "bin/ffmpeg"), "R3I6NOS_LDCONFIG": str(t / "bin/ldconfig"), "R3I6NOS_VIDEO_BENCH": "0", "R3I6NOS_VIDEO_FRAMES": "3", "PATH": f"{t / 'bin'}:{os.environ.get('PATH', '')}"}
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -212,8 +221,8 @@ class SystemReport(Fake):
         with mock.patch.object(m.Report, "step", watch), mock.patch.dict(os.environ, {"PATH": self.env["PATH"]}), mock.patch("sys.stdout", io.StringIO()):
             self.assertEqual(m.main(["--from-settings", "--quiet"]), 0)
         steps = [dict(l.split("=", 1) for l in text.splitlines()) for text in seen]
-        self.assertEqual([s["steps"] for s in steps], ["17"] * 18, "5 sections, 2 checks on each of the two cards, packages, runtimes, 2 in usb and 4 in power, then done")
-        self.assertEqual([s["step"] for s in steps], [str(i) for i in range(1, 18)] + ["17"])
+        self.assertEqual([s["steps"] for s in steps], ["19"] * 20, "5 sections, 2 checks on each of the two cards, packages, runtimes, 2 in usb, 4 in power and 2 in video, then done")
+        self.assertEqual([s["step"] for s in steps], [str(i) for i in range(1, 20)] + ["19"])
         self.assertIn("speed", steps[6]["doing"])
         self.assertEqual(steps[-1]["doing"], "done")
         self.assertEqual(steps[-1]["file"], str(self.t / "sys2/r3i6nos/r36s-report.txt"))
@@ -753,6 +762,184 @@ class UsbSections(Fake):
             m.usb_sections(r)
         r.line.assert_called_once_with("FAIL", "usb gadget", "a check crashed: boom")
         eth.assert_called_once_with(r, "unknown")
+
+
+class VideoSections(Fake):
+    """== video hardware == and == video decode ==: the VPU and RGA as the kernel shows them, the DRAM, and the software decode benchmark (docs/VIDEO-DECODE.md)."""
+
+    RELEASE = "4.4.189"
+
+    def setUp(self):
+        super().setUp()
+        t = self.t
+        (t / "proc/sys/kernel").mkdir(parents=True)
+        (t / "proc/sys/kernel/osrelease").write_text(self.RELEASE + "\n")
+        (t / "lib").mkdir()
+        self.env["R3I6NOS_MODULES"] = str(t / "lib")
+        (t / "bin/ldconfig").write_text("#!/bin/sh\necho '\\t' ; echo '\\tlibc.so.6 (libc6,AArch64) => /lib/libc.so.6'\n")
+        (t / "bin/ldconfig").chmod(0o755)
+        (t / "bin/dmesg").write_text("#!/bin/sh\nexit 1\n")
+        (t / "bin/dmesg").chmod(0o755)
+
+    def modules(self, files=(), loaded=(), builtin=(), alias=()):
+        base = self.t / "lib" / self.RELEASE
+        for f in files:
+            (base / "kernel/drivers/video/rockchip" / f"{f}.ko").parent.mkdir(parents=True, exist_ok=True)
+            (base / "kernel/drivers/video/rockchip" / f"{f}.ko").write_text("")
+        base.mkdir(parents=True, exist_ok=True)
+        (base / "modules.builtin").write_text("".join(f"kernel/drivers/video/rockchip/{b}.ko\n" for b in builtin))
+        (base / "modules.alias").write_text("".join(f"alias platform:{a} {a.replace('-', '_')}\n" for a in alias))
+        (self.t / "proc/modules").write_text("".join(f"{m} 1000 0 - Live 0x0\n" for m in loaded))
+
+    def dt(self, name, compatible, status=None):
+        d = self.t / "proc/device-tree" / name
+        d.mkdir(parents=True, exist_ok=True)
+        (d / "compatible").write_bytes(b"\0".join(c.encode() for c in compatible) + b"\0")
+        if status:
+            (d / "status").write_bytes(status.encode() + b"\0")
+
+    def section(self, name, os_env=None, **env):
+        """The named section; env is what the report reads when it loads (its constants), os_env what it reads when it runs (os.environ)."""
+        m = load(dict(self.env, **env))
+        with mock.patch.dict(os.environ, dict({"PATH": self.env["PATH"]}, **(os_env or {}))), mock.patch("sys.stdout", io.StringIO()):
+            self.assertEqual(m.main(["--from-settings", "--quiet"]), 0)
+        text = self.text(self.t / "sys2/r3i6nos")
+        a = text.index(f"== {name} ==")
+        b = text.find("== ", a + 5)
+        return text[a:b if b > 0 else None]
+
+    # ---- video hardware
+
+    def test_nothing_there_says_no_driver_and_no_node(self):
+        s = self.section("video hardware")
+        self.assertIn("INFO video device nodes: none of", s)
+        self.assertIn("INFO video modules: none by those names", s)
+        self.assertIn("INFO verdict: no VPU or RGA driver or node was found", s)
+        self.assertIn("SKIP kernel config for video: no kernel config readable", s)
+        self.assertIn("INFO userspace libraries: no librockchip_mpp, librga or libv4l", s)
+        self.assertIn("INFO ffmpeg hardware acceleration: none listed", s)
+        self.assertIn("SKIP dram in the kernel log: dmesg is not readable", s)
+
+    def test_the_stock_kernel_has_the_modules_on_disk_and_nothing_loads_them(self):
+        self.dt("vpu_service@ff442000", ["rockchip,vpu_sub"], "okay")
+        self.dt("vpu_combo", ["rockchip,vpu_combo"])
+        self.dt("rk_rga@ff480000", ["rockchip,rga2"])
+        self.dt("serial@ff030000", ["rockchip,uart"])
+        self.modules(files=["mpp_service", "rk-vcodec", "rga2", "mpp_dev_vepu", "vpu_iommu_drm"], loaded=["snd_soc_core"])
+        s = self.section("video hardware")
+        self.assertIn("INFO device tree vpu_service@ff442000: rockchip,vpu_sub; status okay", s)
+        self.assertIn("INFO device tree rk_rga@ff480000: rockchip,rga2; status okay (not set)", s)
+        self.assertNotIn("serial@", s)
+        for m in ("mpp_service", "rk_vcodec", "rga2", "mpp_dev_vepu", "vpu_iommu_drm"):
+            self.assertIn(f"INFO module {m}: module file only (not loaded)", s)
+        self.assertNotIn("snd_soc_core", s)
+        self.assertIn("INFO never loaded by itself: mpp_dev_vepu, mpp_service, rga2, rk_vcodec, vpu_iommu_drm: no modalias entry", s)
+        self.assertIn("INFO verdict: the VPU/RGA drivers are on disk but not loaded and no node exists", s)
+
+    def test_a_module_with_a_modalias_may_load_by_itself(self):
+        self.modules(files=["rk-vcodec", "rga2"], alias=["rk-vcodec"])
+        s = self.section("video hardware")
+        self.assertIn("INFO autoload: these have a modalias, so udev may load them: rk_vcodec", s)
+        self.assertIn("INFO never loaded by itself: rga2: no modalias entry", s)
+
+    def test_loaded_modules_and_a_usable_node_pass(self):
+        self.modules(files=["mpp_service", "rga2"], loaded=["mpp_service", "rga2"], builtin=["rk-vcodec"])
+        for n in ("mpp_service", "rga", "video0"):
+            (self.t / "dev" / n).write_text("")
+            (self.t / "dev" / n).chmod(0o666)
+        (self.t / "dev/ion").write_text("")
+        (self.t / "dev/ion").chmod(0o000)
+        (self.t / "dev/dri").mkdir()
+        (self.t / "dev/dri/card0").write_text("")
+        (self.t / "proc/devices").write_text("Character devices:\n  1 mem\n 10 misc\n 81 video4linux\n244 mpp_service\n")
+        s = self.section("video hardware")
+        self.assertIn("INFO module mpp_service: loaded", s)
+        self.assertIn("INFO module rk_vcodec: built in", s)
+        self.assertIn("INFO /dev/mpp_service: file 666, usable by this user", s)
+        self.assertRegex(s, r"INFO /dev/ion: file 000, not readable and writable by this user" if os.geteuid() != 0 else r"INFO /dev/ion: ")
+        self.assertIn("INFO /dev/dri: card0", s)
+        self.assertIn("INFO /proc/devices: video4linux, mpp_service", s)
+        self.assertIn("PASS a video accelerator node is usable: /dev/mpp_service, /dev/rga", s)
+        self.assertNotIn("/dev/video0, ", s.split("PASS a video accelerator")[1].split("\n")[0], "video nodes are not accelerators")
+        self.assertNotIn("INFO verdict", s)
+
+    def test_dram_from_the_device_tree_devfreq_and_the_kernel_log(self):
+        mem = self.t / "proc/device-tree/memory"
+        mem.mkdir(parents=True)
+        (mem / "reg").write_bytes((0).to_bytes(8, "big") + (0x40000000).to_bytes(8, "big"))
+        d = self.t / "sys/class/devfreq/dmc"
+        d.mkdir(parents=True)
+        (d / "cur_freq").write_text("528000000\n")
+        (d / "governor").write_text("dmc_ondemand\n")
+        (d / "available_frequencies").write_text("328000000 528000000\n")
+        (self.t / "bin/dmesg").write_text("#!/bin/sh\necho '[    0.9] rockchip-dmc dmc: Rockchip DMC: ddr type LPDDR3'\necho '[    1.0] usb 1-1: new device'\n")
+        s = self.section("video hardware")
+        self.assertIn("INFO dram size in the device tree: 1024 MiB", s)
+        self.assertIn("INFO devfreq dmc: cur 528000000 Hz, governor dmc_ondemand, available 328000000 528000000", s)
+        self.assertIn("INFO kernel log: [ 0.9] rockchip-dmc dmc: Rockchip DMC: ddr type LPDDR3", s)
+        self.assertNotIn("new device", s)
+
+    def test_userspace_libraries_and_ffmpeg_acceleration_are_listed(self):
+        (self.t / "bin/ldconfig").write_text("#!/bin/sh\necho '\\tlibrockchip_mpp.so.1 (libc6,AArch64) => /usr/lib/librockchip_mpp.so.1'\necho '\\tlibc.so.6 (libc6,AArch64) => /lib/libc.so.6'\n"
+                                              "echo '\\tlibrga.so.2 (libc6,AArch64) => /usr/lib/librga.so.2'\n")
+        (self.t / "bin/hwaccels").write_text("drm\nrkmpp\n")
+        s = self.section("video hardware")
+        self.assertIn("INFO userspace libraries: librga.so.2, librockchip_mpp.so.1", s)
+        self.assertIn("INFO ffmpeg hardware acceleration: drm, rkmpp", s)
+
+    def test_without_ffmpeg_the_acceleration_line_is_a_skip(self):
+        s = self.section("video hardware", R3I6NOS_FFMPEG=str(self.t / "bin/none"))
+        self.assertIn("SKIP ffmpeg hardware acceleration:", s)
+
+    # ---- video decode
+
+    def test_the_benchmark_is_off_when_asked_and_says_so(self):
+        self.assertIn("SKIP software decode: R3I6NOS_VIDEO_BENCH=0", self.section("video decode"))
+
+    def test_a_fast_decode_passes_the_goal_and_the_other_sizes_are_info(self):
+        s = self.section("video decode", R3I6NOS_VIDEO_BENCH="1")
+        self.assertRegex(s, r"INFO cpu: \d+ CPUs")
+        self.assertRegex(s, r"INFO 240p decode: 320x240 at \d+ kbit/s \(target 400\): [\d.]+x real time")
+        self.assertRegex(s, r"INFO 360p decode: 640x360 at \d+ kbit/s \(target 700\)")
+        self.assertRegex(s, r"PASS 480p decode: 640x480 at \d+ kbit/s \(target 1000\): [\d.]+x real time .*; goal at least 1\.5x")
+        self.assertRegex(s, r"INFO 720p decode: 1280x720 at \d+ kbit/s \(target 2500\)")
+        self.assertIn("INFO reading this:", s)
+
+    def test_a_slow_decode_fails_the_480p_goal(self):
+        (self.t / "bin/decode-sleep").write_text("0.5\n")
+        s = self.section("video decode", R3I6NOS_VIDEO_BENCH="1")
+        self.assertRegex(s, r"FAIL 480p decode: 640x480 .*goal at least 1\.5x")
+        self.assertRegex(s, r"INFO 240p decode: ")
+
+    def test_a_decode_that_errors_is_a_fail_for_480p_and_a_skip_for_the_rest(self):
+        (self.t / "bin/decode-fails").write_text("")
+        s = self.section("video decode", R3I6NOS_VIDEO_BENCH="1")
+        self.assertIn("FAIL 480p decode: ffmpeg could not decode the clip: Invalid data found", s)
+        self.assertIn("SKIP 240p decode: ffmpeg could not decode the clip", s)
+
+    def test_a_clip_that_cannot_be_made_is_reported(self):
+        (self.t / "bin/encode-fails").write_text("")
+        s = self.section("video decode", R3I6NOS_VIDEO_BENCH="1")
+        self.assertIn("FAIL 480p decode clip: could not make the 640x480 clip", s)
+
+    def test_no_x264_or_no_ffmpeg_is_a_skip_that_says_why(self):
+        (self.t / "bin/encoders").write_text("")
+        (self.t / "bin/ffmpeg").write_text((self.t / "bin/ffmpeg").read_text().replace('" V....D libx264 libx264 H.264"', '" A....D aac AAC"'))
+        self.assertIn("SKIP software decode: this ffmpeg cannot encode H.264", self.section("video decode", R3I6NOS_VIDEO_BENCH="1"))
+        self.assertIn("SKIP software decode: ", self.section("video decode", R3I6NOS_VIDEO_BENCH="1", R3I6NOS_FFMPEG=str(self.t / "bin/none")))
+
+    def test_only_the_first_of_several_runs_measures(self):
+        s = self.section("video decode", R3I6NOS_VIDEO_BENCH="1", os_env={"R3I6NOS_REPORT_SETUP": "2/3"})
+        self.assertIn("SKIP software decode: measured on run 1 of 3 only", s)
+
+    def test_the_synthetic_clip_is_the_size_asked_and_not_flat(self):
+        m = load(dict(self.env))
+        frames = list(m.synthetic_yuv(64, 48, 4))
+        self.assertEqual(len(frames), 4)
+        self.assertTrue(all(len(f) == 64 * 48 * 3 // 2 for f in frames))
+        self.assertNotEqual(frames[0], frames[1], "it moves")
+        self.assertGreater(len(set(frames[0][:64 * 48])), 20, "luma has texture")
+        self.assertEqual(set(frames[0][64 * 48:]), {128}, "chroma is flat")
 
 
 if __name__ == "__main__":

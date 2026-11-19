@@ -1,0 +1,7 @@
+# gallery-dl: every Python package the tool needs, for Debian 12's Python 3.11 on arm64, with the sha256 of the wheel. Made by scripts/build-streamtools.sh --relock; do not edit.
+certifi==2026.10.23 --hash=sha256:e9b54de76e530bb6cf0ccd036787103acb58fd42ba930ea8bf948ddbaa2f61d1
+charset-normalizer==3.5.2 --hash=sha256:d760fe2a4d7c3b226cb9026d6a842868d52a7901bd98420e1baf14e80da85cf5
+gallery-dl==1.32.20 --hash=sha256:e09729c8f24f788ac64a663268603377fbf51d4b97818d49e2150c5d78067709
+idna==3.20 --hash=sha256:ab7ae7122974553370f0bdb919e1a960b2cd1bc1ef0276416d896db81c14582c
+requests==2.34.2 --hash=sha256:2a0d60c172f83ac6ab31e4554906c0f3b3588d37b5cb939b1c061f4907e278e0
+urllib3==2.8.0 --hash=sha256:0cf3cae568d36aa9576b28dfb35f11328f1cb974ca7647d9475ebb86c75ac6e3
