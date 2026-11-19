@@ -455,10 +455,9 @@ static void demo_cues(CueSet *c) {
     for (int b = 0; b * bar < 96; b++) {
         char txt[64];
         double st = b * bar;
-        if (b % 4 == 0) snprintf(txt, sizeof txt, "%s", prog);
-        else snprintf(txt, sizeof txt, "bar %d", b + 1);
-        if (b % 4 == 0) cue_add_caption(c, st, 1, st + 4 * bar, txt);
-        else if (b % 4 == 2 && st > 8 && st < 88) cue_add_caption(c, st, 1, st + 2 * bar, "(hold the chord)");
+        if (b % 4) continue;                                          /* a cue every four bars (16 beats at 100 bpm: every cue is a green one) */
+        snprintf(txt, sizeof txt, "%s", (b / 4) % 3 == 2 ? "(hold the chord)" : prog);
+        cue_add_caption(c, st, 0, 0, txt);
     }
     cue_meta_set(c, "key", "C");
     cue_meta_set(c, "tempo", "100");
@@ -602,6 +601,85 @@ static void compose_menu_box(const Menu *m, R3Screen *s, int top) {
     }
 }
 
+/* ---- the cue panel (rows 7-8): Cue's own rules (its web app's captions, beat dot and Assisted Cue entry) ---------------------------------------- */
+
+static double cap_end(const App *a, int i) {
+    const CueCaption *c = &a->cues.c[i];
+    if (c->has_end) return c->end;
+    return i + 1 < a->cues.nc ? a->cues.c[i + 1].start : c->start + 6;           /* until the next cue, or 6 s for the last */
+}
+
+/* The cue playing at vt: its start has passed and its end has not. */
+static int active_caption(const App *a, double vt) {
+    for (int i = 0; i < a->cues.nc; i++) if (vt >= a->cues.c[i].start && vt < cap_end(a, i)) return i;
+    return -1;
+}
+
+static double set_tempo(const App *a) {
+    char *end;
+    double t = strtod(a->cues.meta.tempo, &end);
+    return a->cues.meta.tempo[0] && end != a->cues.meta.tempo && isfinite(t) && t > 0 ? t : 0;
+}
+
+static int sig_beats(const App *a) { return !strcmp(a->cues.meta.sig, "6/8") ? 8 : 16; }          /* beats in a cue: 16 in 4/4, 8 in 6/8 */
+
+/* A cue's own tempo from its length (start to the next start); green when within 2 BPM of the song's Tempo. */
+static int gap_green(const App *a, double gap, double tempo) {
+    if (!(gap > 0)) return 0;
+    double bpm = 60.0 / (gap / sig_beats(a));
+    return fabs(bpm - tempo) <= 2.0;
+}
+
+/* The Assisted Cue entry's model: the average length of the green cues and the last cue's start; 0 when it is not available (Cue's rules). */
+static int assist_model(const App *a, double *avg, double *anchor) {
+    double tempo = set_tempo(a), sum = 0;
+    int n = 0;
+    if (tempo <= 0 || a->cues.nc < 2) return 0;
+    for (int i = 1; i < a->cues.nc; i++) {
+        double gap = a->cues.c[i].start - a->cues.c[i - 1].start;
+        if (gap_green(a, gap, tempo)) { sum += gap; n++; }
+    }
+    if (!n) return 0;
+    *avg = sum / n;
+    *anchor = a->cues.c[a->cues.nc - 1].start;
+    return 1;
+}
+
+static void compose_cue_panel(App *a, R3Screen *s, double vt) {
+    r3_fill(s, 0, 7, R3_COLS, 2, 32, R3_ST(R3_ST_BODY));
+    int idx = active_caption(a, vt);
+    if (idx >= 0) r3_text_scroll(s, 1, 7, a->cues.c[idx].text, 59, R3_ST(R3_ST_STRONG));
+    else if (!a->cues.nc) r3_text_fit(s, 1, 7, "No cues yet. Select+A stamps one.", 59, R3_ST(R3_ST_HINT));
+    /* the beat dot at the right of the first row: pulses once a beat from the start of the cue playing, while the song plays and the Tempo is known */
+    double tempo = set_tempo(a);
+    if (a->eng.playing && a->cues.nc && tempo > 0) {
+        double beat = 60.0 / tempo, anchor = a->cues.c[0].start;
+        for (int i = 0; i < a->cues.nc; i++) if (a->cues.c[i].start <= vt) anchor = a->cues.c[i].start; else break;
+        double off = fmod(vt - anchor, beat);
+        if (off < 0) off += beat;
+        double ph = off / beat, d = (ph < 0.5 ? ph : 1 - ph) * 2;                /* 0 on the beat, 1 half way between: Cue's pulse fades out and back */
+        if (d < 0.5) r3_put(s, 62, 7, 10, R3_LIGHT_GREEN, R3_BLACK);
+        else r3_put(s, 62, 7, 7, R3_GREEN, R3_BLACK);
+    }
+    /* the second row: the Assisted Cue entry when it applies, else the next cue (muted, only while a cue is playing) */
+    double avg = 0, anchor = 0;
+    int assist = a->eng.playing && assist_model(a, &avg, &anchor) && vt >= anchor - 0.25 && dur_of(a) - anchor >= avg;
+    if (assist) {
+        double p = 1 - (vt - anchor) / avg;
+        if (p < 0) p = 0;
+        if (p > 1) p = 1;
+        int k = (int)(p * 30 + 0.5);                                              /* each half is 30 cells; the fill hugs the middle and shrinks toward it */
+        for (int i = 0; i < 30; i++) {
+            int lc = 1 + i, rc = 62 - i, fl = lc >= 31 - k, fr = rc <= 32 + k;   /* i counts out from the edges: the middle ones are filled last */
+            int bg = P_ACC0 + i * (RAMP - 1) / 29;
+            if (fl) r3_put(s, lc, 8, 32, pick_fg(bg), bg); else r3_put(s, lc, 8, 176, R3_ST(R3_ST_HINT));
+            if (fr) r3_put(s, rc, 8, 32, pick_fg(bg), bg); else r3_put(s, rc, 8, 176, R3_ST(R3_ST_HINT));
+        }
+    } else if (idx >= 0 && idx + 1 < a->cues.nc) {
+        r3_text_scroll(s, 1, 8, a->cues.c[idx + 1].text, 62, R3_ST(R3_ST_HINT));
+    }
+}
+
 static void compose_player(App *a, R3Screen *s) {
     r3_clear(s);
     const double dur = dur_of(a), pos = engine_pos_sec(&a->eng), vt = pos - a->offset;
@@ -619,39 +697,9 @@ static void compose_player(App *a, R3Screen *s) {
     (void)wbg;
     r3_fill(s, 0, 1, R3_COLS, 6, 32, R3_LIGHT_GRAY, R3_BLACK);
 
-    /* row 7: the song's sections as a strip, one cell a tenth of the waveform's width: a section's colour comes from its name */
+    /* rows 7-8: the cue panel, as Cue's: the line now, the next one muted, the tempo dot, and the Assisted Cue entry's two bars draining to the middle */
     int cm = cur_marker(a, vt);
-    for (int c = 0; c < R3_COLS; c++) {
-        double t = (c + 0.5) / R3_COLS * dur - a->offset;
-        int k = cur_marker(a, t);
-        int played = (c + 0.5) / R3_COLS * dur <= pos;
-        int bg = k < 0 ? P_NEU0 + RAMP - 1 : (played ? P_HUE0 : P_HUED0) + hue_of(a->cues.m[k].label);
-        if (k < 0) bg = R3_BLACK;
-        r3_put(s, c, 7, 32, pick_fg(bg), bg);
-    }
-    for (int i = 0; i < a->cues.nm; i++) {            /* a section's name at its first cell, if it fits before the next marker */
-        int c0 = (int)((a->cues.m[i].time + a->offset) / (dur > 0 ? dur : 1) * R3_COLS);
-        int c1 = i + 1 < a->cues.nm ? (int)((a->cues.m[i + 1].time + a->offset) / dur * R3_COLS) : R3_COLS;
-        if (c0 < 0 || c0 >= R3_COLS) continue;
-        gtext(s, c0, 7, a->cues.m[i].label, c1 - c0 > 1 ? c1 - c0 - (c1 - c0 > 3) : 1, -1);
-    }
-    int px = (int)(pos / (dur > 0 ? dur : 1) * R3_COLS);
-    if (px >= 0 && px < R3_COLS) { int bg = s->bg[7 * R3_COLS + px]; r3_put(s, px, 7, 31, pick_fg(bg), -1); (void)bg; }
-
-    /* row 8: the transport */
-    char ts[32], line[96];
-    fmt_time(pos, ts, sizeof ts);
-    r3_put(s, 1, 8, a->eng.playing ? 16 : 186, a->eng.playing ? R3_LIGHT_GREEN : R3_YELLOW, R3_BLACK);
-    snprintf(line, sizeof line, "%s", ts);
-    r3_text_fit(s, 3, 8, line, 10, R3_ST(R3_ST_STRONG));
-    if (a->loop_state) {
-        char la[16], lb[16];
-        fmt_time(a->loop_a, la, sizeof la);
-        if (a->loop_state == 2) fmt_time(a->loop_b, lb, sizeof lb); else snprintf(lb, sizeof lb, "...");
-        snprintf(line, sizeof line, "%c A %s  B %s", a->loop_state == 2 ? 'L' : ' ', la, lb);
-        r3_text_fit(s, 16, 8, line, 30, R3_ST(R3_ST_WARN));
-    }
-    if (a->offset != 0) { snprintf(line, sizeof line, "offset %+.2fs", a->offset); r3_text_right(s, 62, 8, line, R3_ST(R3_ST_HINT)); }
+    compose_cue_panel(a, s, vt);
 
     /* rows 9-20, left: the markers, a page of ten, the cursor on a bar of the accent gradient, the marker playing now flagged */
     int per = MARK_ROWS, page, pages;
@@ -714,10 +762,22 @@ static void compose_player(App *a, R3Screen *s) {
     }
 
     /* rows 21-23: the command line: what just happened, the keys, and where the next marker is */
-    char status[64] = "";
+    char status[128] = "";
     if (cm >= 0 && cm + 1 < a->cues.nm) snprintf(status, sizeof status, "%s, then %s in %.0fs", a->cues.m[cm].label, a->cues.m[cm + 1].label, a->cues.m[cm + 1].time - vt);
     else if (cm >= 0) snprintf(status, sizeof status, "%s", a->cues.m[cm].label);
-    R3Cmd cmd = {a->reply, a->reply_style, a->eng.playing ? '>' : '|', "A play  X jump  Y loop  L1 R1 step  Sel mark  Start menu", 0, status,
+    if (a->loop_state || a->offset != 0) {                          /* what the transport row used to say */
+        char extra[64] = "", la[16], lb[16];
+        if (a->loop_state) {
+            fmt_time(a->loop_a, la, sizeof la);
+            if (a->loop_state == 2) fmt_time(a->loop_b, lb, sizeof lb); else snprintf(lb, sizeof lb, "...");
+            snprintf(extra, sizeof extra, "%s A %s B %s", a->loop_state == 2 ? "Loop" : "Loop", la, lb);
+        }
+        if (a->offset != 0) { size_t n = strlen(extra); snprintf(extra + n, sizeof extra - n, "%soffset %+.2fs", n ? "  " : "", a->offset); }
+        char all[128];
+        snprintf(all, sizeof all, "%s%s%s", extra, status[0] ? "  " : "", status);
+        snprintf(status, sizeof status, "%s", all);
+    }
+    R3Cmd cmd = {a->reply, a->reply_style, a->eng.playing ? '>' : '|', "A play  X jump  Y loop  L1 R1 step  Sel mark  Sel+A cue  Start menu", 0, status,
                  a->eng.noaudio && !a->demo ? "no sound device" : "", R3_ST_WARN};
     r3_command_line(s, &cmd);
 }
@@ -831,7 +891,7 @@ static void present(App *a, R3Video *v, SDL_Renderer *r, const R3Screen *s, int 
 
 /* ---- actions ------------------------------------------------------------------------------------------------------------------------------- */
 
-enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_THEME, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_ADD, A_QUIT, A_CLOSE, A_LABELPICK };
+enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_THEME, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_ADD, A_CUE, A_QUIT, A_CLOSE, A_LABELPICK };
 
 static const char *const PRESET_LABELS[] = {"Intro", "Verse", "Pre-Chorus", "Chorus", "Bridge", "Solo", "Instrumental", "Outro", "End", "Tag"};
 #define NPRESET ((int)(sizeof PRESET_LABELS / sizeof *PRESET_LABELS))
@@ -855,6 +915,15 @@ static void mark_here(App *a) {
     cue_sort(&a->cues);
     for (int k = 0; k < a->cues.nm; k++) if (!strcmp(a->cues.m[k].label, label) && fabs(a->cues.m[k].time - vt) < 0.0005) a->msel = k;
     say(a, R3_ST_OK, "Marked %s at %.1fs. Start > Name it.", label, vt);
+}
+
+/* Cue's "Cue" button: a cue (a line of words, to be typed later) at the playhead, reading "- - - -" until it is. */
+static void cue_here(App *a) {
+    double vt = engine_pos_sec(&a->eng) - a->offset;
+    if (vt < 0) vt = 0;
+    if (cue_add_caption(&a->cues, vt, 0, 0, "- - - -") < 0) { say(a, R3_ST_ERROR, "No room for another cue."); return; }
+    cue_sort(&a->cues);
+    say(a, R3_ST_OK, "Cue at %.1fs (%d cues).", vt, a->cues.nc);
 }
 
 static void loop_cycle(App *a) {
@@ -882,6 +951,7 @@ static void build_main_menu(App *a) {
     menu_clear(&a->menu, a->back_mode == M_PLAYER ? "Song" : "MusiCue");
     if (a->back_mode == M_PLAYER) {
         menu_add(&a->menu, A_MARK, "Mark here", "");
+        menu_add(&a->menu, A_CUE, "Cue here (Select+A)", "");
         menu_add(&a->menu, A_LABEL, "Name the selected marker", a->cues.nm ? a->cues.m[a->msel].label : "");
         menu_add(&a->menu, A_DELETE, "Delete the selected marker", "");
         snprintf(v, sizeof v, "%+.2f s", a->offset);
@@ -1206,6 +1276,7 @@ static void menu_choose(App *a) {
     }
     switch (id) {
     case A_MARK: a->mode = M_PLAYER; mark_here(a); break;
+    case A_CUE: a->mode = M_PLAYER; cue_here(a); break;
     case A_LABEL: open_label_menu(a); break;
     case A_DELETE:
         if (a->cues.nm) { cue_del_marker(&a->cues, a->msel); if (a->msel >= a->cues.nm) a->msel = a->cues.nm ? a->cues.nm - 1 : 0; say(a, R3_ST_HINT, "Marker deleted."); }
@@ -1243,7 +1314,7 @@ static void app_action(App *a, int act) {
         break;
     case M_PLAYER:
         switch (act) {
-        case R3_ACCEPT: engine_play(&a->eng, !a->eng.playing); break;
+        case R3_ACCEPT: if (a->select_held) cue_here(a); else engine_play(&a->eng, !a->eng.playing); break;
         case R3_BACK: save_cues(a); close_song(a); a->mode = M_LIBRARY; break;
         case R3_MORE: open_menu(a); break;
         case R3_X: if (a->cues.nm) jump_marker(a, a->msel); break;
@@ -1653,6 +1724,68 @@ static void test_marquee(void) {
     CHECK(o[0] == 'A' && o[2] == 'd', "a new text starts at its beginning");
 }
 
+static void row_text(const R3Screen *s, int row, char *out) {
+    for (int i = 0; i < R3_COLS; i++) out[i] = s->ch[row * R3_COLS + i] >= 32 && s->ch[row * R3_COLS + i] < 127 ? (char)s->ch[row * R3_COLS + i] : ' ';
+    out[R3_COLS] = 0;
+}
+
+/* The cue panel on rows 7-8, by Cue's rules: the line now, the next one, the beat dot, and the two draining bars at the last cue. */
+static void test_cue_panel(void) {
+    App a;
+    app_init(&a, g_tmp);
+    open_demo(&a);
+    char r7[R3_COLS + 1], r8[R3_COLS + 1];
+    R3Screen s;
+    engine_seek(&a.eng, 12);                                        /* the second cue (9.6 s) is playing */
+    engine_play(&a.eng, 1);
+    compose(&a, &s);
+    row_text(&s, 7, r7);
+    row_text(&s, 8, r8);
+    CHECK(strstr(r7, "C   G   Am  F") && !strchr(r7, '\x1f'), "row 7 is the cue playing now: %s", r7);
+    CHECK(strstr(r8, "(hold the chord)"), "row 8 is the next cue (the third is the hold line): %s", r8);
+    engine_seek(&a.eng, 20);                                        /* the third (19.2 s) */
+    compose(&a, &s);
+    row_text(&s, 8, r8);
+    CHECK(strstr(r8, "C   G   Am  F"), "the next line follows: %s", r8);
+    int dots = 0;
+    for (double t = 12; t < 12.7; t += 0.05) {                      /* 0.6 s a beat: the dot changes shape through a beat */
+        engine_seek(&a.eng, t);
+        compose(&a, &s);
+        dots += s.ch[7 * R3_COLS + 62] == 10 || s.ch[7 * R3_COLS + 62] == 7;
+    }
+    CHECK(dots == 14, "the beat dot is there while playing (%d)", dots);
+    engine_play(&a.eng, 0);
+    compose(&a, &s);
+    CHECK(s.ch[7 * R3_COLS + 62] == 32, "no beat dot when paused");
+    /* the bars: at the last cue, full at its start, draining to the middle one cue's length later */
+    cue_free(&a.cues);
+    cue_init(&a.cues);
+    for (int i = 0; i < 4; i++) cue_add_caption(&a.cues, i * 10.0, 0, 0, "line");
+    cue_meta_set(&a.cues, "tempo", "96");
+    cue_meta_set(&a.cues, "sig", "4/4");
+    engine_play(&a.eng, 1);
+    engine_seek(&a.eng, 30.0);
+    compose(&a, &s);
+    int filled = 0;
+    for (int c = 0; c < R3_COLS; c++) filled += s.ch[8 * R3_COLS + c] == 32 && s.bg[8 * R3_COLS + c] != R3_BLACK;
+    CHECK(filled == 60, "full bars at the last cue: %d of 60 cells", filled);
+    engine_seek(&a.eng, 35.0);
+    compose(&a, &s);
+    filled = 0;
+    for (int c = 0; c < R3_COLS; c++) filled += s.ch[8 * R3_COLS + c] == 32 && s.bg[8 * R3_COLS + c] != R3_BLACK;
+    CHECK(filled >= 28 && filled <= 32, "half drained half way: %d", filled);
+    CHECK(s.ch[8 * R3_COLS + 30] == 32 && s.bg[8 * R3_COLS + 30] != R3_BLACK && s.bg[8 * R3_COLS + 33] != R3_BLACK && s.ch[8 * R3_COLS + 5] == 176, "the fill hugs the middle, the track shows at the edges");
+    engine_seek(&a.eng, 20.0);
+    compose(&a, &s);
+    filled = 0;
+    for (int c = 0; c < R3_COLS; c++) filled += s.ch[8 * R3_COLS + c] == 32 && s.bg[8 * R3_COLS + c] != R3_BLACK;
+    CHECK(filled == 0, "no bars before the last cue (%d)", filled);
+    engine_seek(&a.eng, 25.0);
+    cue_here(&a);
+    CHECK(a.cues.nc == 5 && !strcmp(a.cues.c[3].text, "- - - -") && fabs(a.cues.c[3].start - 25.0) < 0.1, "Cue here stamps a cue at the playhead");
+    app_free(&a);
+}
+
 static void test_screens(void) {
     App a;
     app_init(&a, g_tmp);
@@ -1783,6 +1916,7 @@ static int selftest(void) {
     test_screens();
     test_add_id();
     test_marquee();
+    test_cue_panel();
     char cmd[PATH_MAX + 16];
     snprintf(cmd, sizeof cmd, "rm -rf '%s'", d);
     if (system(cmd) != 0) fprintf(stderr, "could not remove %s\n", d);

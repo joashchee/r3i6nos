@@ -58,6 +58,10 @@ a recommendation to confirm or change; it is not legal advice, and what a person
 | **Practice speed** | the web app has none; `ffmpeg-min` has no `atempo`, so it would need a time-stretch in the app |
 | **Checking the Creative Commons filter** | against a real video's `license` field (the packaged yt-dlp, `docs/STREAM-TOOLS.md`); the filter is tested against a fake yt-dlp |
 
+## The cue panel (2026-11-19)
+
+Rows 7 and 8, under the waveform, are Cue's cue panel (the section strip and the playhead triangle are gone; the loop and the offset moved to the command line's status). **Row 7: the cue playing now** (its start has passed and its end has not; a cue with no end runs to the next cue, the last one 6 s), with the **beat dot** at the right, a green dot that pulses once a beat (from the Tempo, anchored to the start of the cue playing, only while the song plays). **Row 8: the next cue, muted**, only while a cue is playing. **At the last cue, row 8 is Cue's Assisted Cue entry instead**: two bars, full at the last cue's start, draining toward the middle over the average length of the cues whose own tempo is green (within 2 BPM of the Tempo; 16 beats a cue in 4/4, 8 in 6/8), shown only when the Tempo is set, the song plays and there is room for one more cue, as Cue's `updateAssist()` decides. MusiCue had no way to make a cue, so **Select+A** (and Start > Cue here) stamps one at the playhead, reading "- - - -" as in Cue; the words are still typed in Cue. Tested in `--selftest` (`test_cue_panel`); **not looked at on a unit**.
+
 ## Add: YouTube ID (2026-11-19)
 
 Start > **Add: YouTube ID (11 chars)** opens an 11-slot entry (no on-screen keyboard exists yet: Up/Down cycle A-Z a-z 0-9 - _, L1/R1 jump 8, Left/Right move, Y erases, a USB keyboard types it; case matters).
