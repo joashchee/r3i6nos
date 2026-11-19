@@ -135,6 +135,17 @@ is blocked and on what.
    and Rec demo write to `$R3I6NOS_APP_DATA`, its README lists what is app data, and its self-test covers the card-out case; say untested what has not
    run on the unit. A third-party game in `Love 11.5/` or `Love 12.0/` is not an r3i6nos app and is exempt.
 
+17. **Every app made for r3i6nos has a main menu and follows the input mapping** (`docs/r3i6nos-mapping.md`; ROADMAP section 39). **L1 + R1 opens the main menu,
+   whose first items are, in this order: About, Colour theme, Device report (rule 9), Rec demo (rule 11), Benchmark, Quit**, then the app's own. Never
+   renamed, reordered or missing; **Benchmark alone is hidden when the app has nothing to measure.** **Quit is how an app is left: r3i6nos apps do not use
+   Select + Start to leave.** The system chords are the same everywhere: L2 + R2 the contextual menu, **Fn the next panel (a carousel; Fn is only ever the
+   panel key, never a modifier)**, L1 + Fn the first panel, R1 + Fn the previous panel. The one-touch buttons (D-pad, A, B, X, Y, Select, Start) are the app's
+   own, from what it does, the document's table being the default; the right stick and D-pad move the selection, the left stick the cursor or pointer, with
+   FM1-NTT's stick dead zone (0.35) and a conservative top rate (6 steps a second, the pointer 120 px/s); **R1 held is "increase": up/down become Page up/down, left/right Home/End, the pointer 3 times as fast**. **The virtual mouse (L3) and virtual keyboard (R3) are per app: an app says whether it has them. While one shows it
+   overrides Select and Start (and, for the keyboard, the D-pad and the face buttons).** A new app is not done until it has the menu with these items and a
+   self-test that checks them; an app that cannot follow the mapping says why in its README. A third-party game or port is exempt and keeps
+   `r3i6nos-portquit`. **Not built yet:** the theme does not provide the menu, and the apps still leave with Select + Start until each has Quit.
+
 ## Check before committing
 
 `scripts/check.sh` (Python tests, Lua test, `bash -n`, shellcheck). Report
