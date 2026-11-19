@@ -115,6 +115,18 @@ static int gtext(R3Screen *s, int col, int row, const char *str, int max, int fg
     return col + n;
 }
 
+/* gtext for a line that may be too long: it scrolls (the theme's marquee, KlamANSI's method) in colours chosen as gtext does. Returns the next column. */
+static int gscroll(R3Screen *s, int col, int row, const char *str, int max, int fg) {
+    unsigned char g[256], m[256];
+    if (max > 255) max = 255;
+    int n = r3_marquee_cells(col, row, str, max, g, m);
+    for (int i = 0; i < n && col + i < R3_COLS; i++) {
+        int bg = s->bg[row * R3_COLS + col + i];
+        r3_put(s, col + i, row, g[i], fg >= 0 ? fg : pick_fg(bg), -1);
+    }
+    return col + n;
+}
+
 /* A horizontal gradient of ramp slots under cells (the characters stay). */
 static void grad_h(R3Screen *s, int col, int row, int w, int ramp0, int from, int to) {
     for (int i = 0; i < w; i++) {
@@ -551,7 +563,7 @@ static void compose_library(App *a, R3Screen *s) {
             int fgs = i == a->lsel ? -1 : R3_LIGHT_GRAY;
             put_auto(s, 2, y, 14, i == a->lsel ? s->bg[y * R3_COLS + 2] : R3_BLACK);
             if (i != a->lsel) r3_put(s, 2, y, 14, R3_LIGHT_CYAN, R3_BLACK);
-            gtext(s, 4, y, a->songs[i].name, R3_COLS - 8 - mw - (mw ? 2 : 0), fgs);
+            (i == a->lsel ? gscroll : gtext)(s, 4, y, a->songs[i].name, R3_COLS - 8 - mw - (mw ? 2 : 0), fgs);
             if (mw) gtext(s, R3_COLS - 2 - mw, y, mark, mw, i == a->lsel ? -1 : R3_LIGHT_GREEN);
         }
     } else {
@@ -600,7 +612,7 @@ static void compose_player(App *a, R3Screen *s) {
     snprintf(right, sizeof right, "%s / %s", t1, t2);
     compose_topbar(a, s, "MusiCue", right);
     int tw = r3_width(right);
-    gtext(s, 11, 0, title, R3_COLS - 14 - tw, -1);
+    gscroll(s, 11, 0, title, R3_COLS - 14 - tw, -1);
 
     /* rows 1-6: the waveform (pixels, drawn by the presenter); the cells under it are its colour, for anything that mirrors the text */
     int wbg = P_NEU0;
@@ -663,7 +675,7 @@ static void compose_player(App *a, R3Screen *s) {
         r3_put(s, 2, y, 221, i == a->msel ? pick_fg(s->bg[y * R3_COLS + 2]) : R3_LIGHT_GRAY, P_HUE0 + hue);
         r3_put(s, 2, y, 32, pick_fg(P_HUE0 + hue), P_HUE0 + hue);
         int tw2 = r3_width(tm);
-        gtext(s, 4, y, a->cues.m[i].label, 24 - 4 - tw2 - 1, i == a->msel ? -1 : (i == cm ? R3_WHITE : R3_LIGHT_GRAY));
+        (i == a->msel ? gscroll : gtext)(s, 4, y, a->cues.m[i].label, 24 - 4 - tw2 - 1, i == a->msel ? -1 : (i == cm ? R3_WHITE : R3_LIGHT_GRAY));
         gtext(s, 24 - tw2, y, tm, tw2, i == a->msel ? -1 : R3_LIGHT_CYAN);
     }
 
@@ -692,7 +704,7 @@ static void compose_player(App *a, R3Screen *s) {
             if (ci >= 0 && rel == 0) {
                 r3_fill(s, 27, y, 36, 1, 32, R3_BLACK, P_ACC0);
                 grad_h(s, 27, y, 36, P_ACC0, 0, RAMP - 1);
-                gtext(s, 28, y, a->cues.c[idx].text, 34, -1);
+                gscroll(s, 28, y, a->cues.c[idx].text, 34, -1);
             } else {
                 int step = (fade * 5 > RAMP - 1) ? RAMP - 1 : fade * 5;
                 if (ci < 0) step = idx * 4 < RAMP - 1 ? idx * 4 : RAMP - 1;
@@ -720,7 +732,7 @@ static void compose_job(App *a, R3Screen *s) {
         if (i < full) { int bg = P_ACC0 + i * (RAMP - 1) / 55; r3_put(s, 4 + i, 6, 32, pick_fg(bg), bg); }
         else r3_put(s, 4 + i, 6, 176, R3_ST(R3_ST_HINT));
     }
-    for (int i = 0; i < a->job_nlines && i < 6; i++) r3_text_fit(s, 4, 8 + i, a->job_lines[i], 56, R3_ST(i == a->job_nlines - 1 ? R3_ST_STRONG : R3_ST_BODY));
+    for (int i = 0; i < a->job_nlines && i < 6; i++) r3_text_scroll(s, 4, 8 + i, a->job_lines[i], 56, R3_ST(i == a->job_nlines - 1 ? R3_ST_STRONG : R3_ST_BODY));
     R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, "Start your own list in MusiCue/inbox/urls.txt", "", R3_ST_HINT};
     r3_command_line(s, &cmd);
 }
@@ -751,7 +763,7 @@ static void compose_note(App *a, R3Screen *s) {
     compose_topbar(a, s, "MusiCue", VERSION);
     R3Box b = {1, "MusiCue", NULL, "A or B: close", 0};
     r3_box(s, 6, 8, 52, 8, &b);
-    for (int i = 0; i < 3; i++) r3_text_fit(s, 8, 10 + i * 1, a->note[i], 48, R3_ST(R3_ST_BODY));
+    for (int i = 0; i < 3; i++) r3_text_scroll(s, 8, 10 + i * 1, a->note[i], 48, R3_ST(R3_ST_BODY));
     R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, "", "", R3_ST_HINT};
     r3_command_line(s, &cmd);
 }
@@ -1289,6 +1301,7 @@ static void app_action(App *a, int act) {
 
 static void app_tick(App *a, double ms) {
     engine_tick(&a->eng, ms);
+    r3_marquee_clock(ms);
     if (a->mode == M_PLAYER && a->eng.ended) { a->eng.ended = 0; say(a, R3_ST_HINT, "The end. A plays it again."); }
     job_poll(a);
 }
@@ -1609,6 +1622,37 @@ static void test_add_id(void) {
     unsetenv("R3I6NOS_MUSICUE_NOAUDIO");
 }
 
+/* A line too long for its cells scrolls in a closed loop after a hold, the way KlamANSI's does; one that fits, or with the clock off, does not. */
+static void test_marquee(void) {
+    unsigned char o[40], m[40];
+    const char *t = "A long title that cannot fit";           /* 28 cells */
+    r3_marq_on = 0;
+    int n = r3_marquee_cells(2, 3, t, 10, o, m);
+    CHECK(n == 10 && o[9] == 175 && o[0] == 'A', "clock off: cut with the guillemet");
+    r3_marquee_clock(0);
+    n = r3_marquee_cells(2, 3, t, 10, o, m);
+    CHECK(n == 10 && o[0] == 'A' && o[1] == ' ', "clock on, just shown: holds at its start");
+    for (int i = 0; i < R3_MARQUEE_HOLD; i++) r3_marquee_clock(R3_MARQUEE_TICK_MS);
+    r3_marquee_cells(2, 3, t, 10, o, m);
+    CHECK(o[0] == 'A', "still held after the hold's ticks");
+    r3_marquee_clock(R3_MARQUEE_TICK_MS);
+    r3_marquee_cells(2, 3, t, 10, o, m);
+    CHECK(o[0] == ' ' && o[1] == 'l', "then it moves one cell a tick");
+    for (int i = 0; i < 28 + 5 - 1 + 0; i++) r3_marquee_clock(R3_MARQUEE_TICK_MS);
+    r3_marquee_cells(2, 3, t, 10, o, m);
+    CHECK(o[0] == 'A' || o[0] == ' ' || o[0] == 4, "it loops");
+    int diamonds = 0;
+    for (int tick = 0; tick < 40; tick++) {
+        r3_marquee_clock(R3_MARQUEE_TICK_MS);
+        r3_marquee_cells(2, 3, t, 10, o, m);
+        for (int i = 0; i < 10; i++) if (m[i]) { diamonds++; CHECK(o[i] == 4, "the marked cell is the diamond"); }
+    }
+    CHECK(diamonds > 0, "the loop's diamond comes round");
+    CHECK(r3_marquee_cells(2, 3, "short", 10, o, m) == 5 && !m[0], "a line that fits is not scrolled");
+    r3_marquee_cells(2, 3, "A different title that is also long", 10, o, m);
+    CHECK(o[0] == 'A' && o[2] == 'd', "a new text starts at its beginning");
+}
+
 static void test_screens(void) {
     App a;
     app_init(&a, g_tmp);
@@ -1738,6 +1782,7 @@ static int selftest(void) {
     if (trace) fprintf(stderr, "[screens]\n");
     test_screens();
     test_add_id();
+    test_marquee();
     char cmd[PATH_MAX + 16];
     snprintf(cmd, sizeof cmd, "rm -rf '%s'", d);
     if (system(cmd) != 0) fprintf(stderr, "could not remove %s\n", d);

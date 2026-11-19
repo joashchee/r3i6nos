@@ -253,6 +253,61 @@ static inline int r3_text_fit(R3Screen *s, int col, int row, const char *str, in
     return r3_put_cells(s, col, row, g, n, fg, bg);
 }
 
+/* Scrolling text, KlamANSI's method (docs/ANSI-TEXT-MODE.md there): a line too long for its cells scrolls sideways in a closed loop, one cell a tick
+ * (two ticks a second), after a hold of two ticks at its start; "  <diamond>  " marks where it ends and starts again. An app starts the clock with
+ * r3_marquee_clock(ms) every frame; until it does (and for a line that fits) nothing moves and a long line is cut with the guillemet as r3_text_fit does,
+ * so an app that never calls it looks as it always did. Each place on the screen (column and row) keeps when its text was first shown, so a new text
+ * starts from its beginning. */
+#define R3_MARQUEE_TICK_MS 500
+#define R3_MARQUEE_HOLD 2
+#define R3_MARQUEE_SLOTS 24
+static int r3_marq_on, r3_marq_tick;
+static struct { int key; unsigned hash; int t0; } r3_marq_slot[R3_MARQUEE_SLOTS];
+
+static inline void r3_marquee_clock(double ms) {
+    static double acc;
+    r3_marq_on = 1;
+    acc += ms;
+    while (acc >= R3_MARQUEE_TICK_MS) { acc -= R3_MARQUEE_TICK_MS; r3_marq_tick++; }
+}
+
+/* The cells of str to show in max cells at (col, row): fills out[0..max) and mark[] (1 for a cell of the loop's diamond mark) and returns the count.
+ * Fits: the text as it is. Too long with the clock off: cut with the guillemet. Too long with the clock on: the scrolled window. */
+static inline int r3_marquee_cells(int col, int row, const char *str, int max, unsigned char *out, unsigned char *mark) {
+    unsigned char g[300];
+    int n = r3_decode(str, g, 256);
+    if (max < 0) max = 0;
+    memset(mark, 0, (size_t)max);
+    if (n <= max) { memcpy(out, g, (size_t)n); return n; }
+    if (!r3_marq_on) return r3_fit(str, max, out);
+    static const unsigned char sep[5] = {32, 32, 4, 32, 32};   /* 4 is the diamond in code page 437 */
+    memcpy(g + n, sep, 5);
+    int loop = n + 5, key = row * R3_COLS + col + 1, k = -1, free_k = 0;
+    unsigned h = 2166136261u;
+    for (const char *q = str; *q; q++) h = (h ^ (unsigned char)*q) * 16777619u;
+    for (int i = 0; i < R3_MARQUEE_SLOTS; i++) {
+        if (r3_marq_slot[i].key == key) { k = i; break; }
+        if (!r3_marq_slot[i].key) free_k = i;
+    }
+    if (k < 0) { k = free_k; r3_marq_slot[k].key = key; r3_marq_slot[k].hash = 0; }
+    if (r3_marq_slot[k].hash != h) { r3_marq_slot[k].hash = h; r3_marq_slot[k].t0 = r3_marq_tick; }
+    int t = r3_marq_tick - r3_marq_slot[k].t0, from = t > R3_MARQUEE_HOLD ? (t - R3_MARQUEE_HOLD) % loop : 0;
+    for (int i = 0; i < max; i++) {
+        int j = (from + i) % loop;
+        out[i] = g[j];
+        mark[i] = j == n + 2;
+    }
+    return max;
+}
+
+static inline int r3_text_scroll(R3Screen *s, int col, int row, const char *str, int max, int fg, int bg) {
+    unsigned char g[256], m[256];
+    if (max > 255) max = 255;
+    int n = r3_marquee_cells(col, row, str, max, g, m);
+    for (int i = 0; i < n && col + i < R3_COLS; i++) r3_put(s, col + i, row, g[i], m[i] && bg == R3_BLACK ? R3_YELLOW : fg, bg);
+    return col + n;
+}
+
 /* Text whose last cell is at col. */
 static inline void r3_text_right(R3Screen *s, int col, int row, const char *str, int fg, int bg) {
     unsigned char g[256];
@@ -341,12 +396,12 @@ typedef struct {
 static inline void r3_command_line(R3Screen *s, const R3Cmd *o) {
     int top = R3_COMMAND_TOP;
     r3_fill(s, 0, top, R3_COLS, R3_COMMAND_ROWS, 32, R3_ST(R3_ST_BODY));
-    if (o->reply) r3_text_fit(s, 1, top, o->reply, R3_COLS - 2, R3_ST(o->reply_style ? o->reply_style : R3_ST_HINT));
+    if (o->reply) r3_text_scroll(s, 1, top, o->reply, R3_COLS - 2, R3_ST(o->reply_style ? o->reply_style : R3_ST_HINT));
     r3_put(s, 0, top + 1, o->mode ? o->mode : '>', R3_ST(R3_ST_OK));
     int x = r3_text_fit(s, 2, top + 1, o->line ? o->line : "", R3_COLS - 4, R3_ST(R3_ST_STRONG));
     if (o->caret) r3_put(s, x, top + 1, 219, R3_ST(R3_ST_STRONG));
     int rn = o->right ? r3_width(o->right) : 0;
-    if (o->left) r3_text_fit(s, 1, top + 2, o->left, R3_COLS - 3 - rn, R3_ST(R3_ST_BODY));
+    if (o->left) r3_text_scroll(s, 1, top + 2, o->left, R3_COLS - 3 - rn, R3_ST(R3_ST_BODY));
     if (o->right) {
         unsigned char g[256];
         int n = r3_fit(o->right, R3_COLS - 2, g);

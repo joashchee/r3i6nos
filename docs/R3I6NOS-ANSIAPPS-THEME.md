@@ -15,7 +15,7 @@ turns whole pages (`Page 2/3` in its top edge).
 |---|---|---|
 | 0 | **Top bar** (reserved) | White on blue: the app's name at the left, a count or state at the right. Nothing else ever uses this row. |
 | 1-20 | **Display view** (64x20) | The app's screen: lists, dialogs, its own picture. |
-| 21 | Command line, row 1: **reply** | The answer to the last action or a tip. Light cyan; `ok` light green, `warn` yellow, `error` light red. Too long: cut with `»`. |
+| 21 | Command line, row 1: **reply** | The answer to the last action or a tip. Light cyan; `ok` light green, `warn` yellow, `error` light red. Too long: cut with `»`, or, in an app that runs the marquee clock, scrolled (see "Scrolling text"). |
 | 22 | Command line, row 2: **prompt** | The mode character (`>` in light green), a space, and the line (white, with a block caret). On a pad with no keyboard it shows what A would run (`run Some Game`). |
 | 23 | Command line, row 3: **status** | Left: where you are (`3 of 17`). Right: a state (`native`). |
 
@@ -128,3 +128,12 @@ loading step, and put any load error in `what`. There is no Lua version yet.
 screen mirror (`docs/SCREEN-MIRROR.md`) when one is on. An app does nothing: the tap runs when a screen has changed and is about to be
 remembered as the previous one, and with no mirror it costs one test of a flag file, at most once a second. An app that draws its own screen
 without `T.draw` or `r3_video_draw` is not mirrored. The Lua module is optional (`pcall(require)`), so an image's theme folder that predates it still works.
+
+
+## Scrolling text (native C, 2026-11-19)
+
+A line too long for its cells scrolls sideways, KlamANSI's method (its `docs/ANSI-TEXT-MODE.md`, "Command line"): a closed loop, one cell a tick, two ticks a second, a hold of two ticks at its start, and a yellow
+diamond between spaces where the end meets the start. `r3_marquee_clock(ms)` (called once a frame) starts the clock; `r3_text_scroll(s, col, row, str, max, fg, bg)` draws a line that way, and `r3_marquee_cells` gives the
+cells for an app that colours its own text (MusiCue's `gscroll`). The command line's reply and left status use it. **An app that never calls the clock, and any line that fits, looks exactly as before** (cut with `»`).
+Each place (column, row) remembers when its text was first shown, so a new text starts at its beginning. Scroll only what the person is on (the selected row), not a whole list. Used by MusiCue; the other native apps can
+call the clock to get it on their command lines. Untested on the unit.
