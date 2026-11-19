@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+"""musicue-sync: MusiCue's one online step (docs/MUSICUE.md). Run from MusiCue's Start > Sync, or by hand.
+
+    musicue-sync --data DIR [--cc-only | --any-license] [--no-audio] [--cues-base URL] [--yt-dlp PATH]
+
+Reads DIR/inbox/urls.txt: one YouTube link or 11-character video id a line (a `#` starts a comment, `|` after the link starts a note). For each:
+
+  1. Cue's server cue files, https://cue.chordica.com/data/<id>.json and .srt, if there are any (most videos have none): saved to DIR/cues/ ONLY when
+     that file is not there yet, so a person's own edits are never overwritten.
+  2. The audio, when yt-dlp is installed (the r3i6nos-ytdlp package, an add-on) and DIR/media/ has no file with [<id>] in its name yet: the AAC audio stream
+     (about 1 MB a minute) into DIR/media/ as "Title [id].m4a". By default only videos whose licence is Creative Commons (--cc-only): the video's licence
+     is read by yt-dlp, and a video that is not Creative Commons is skipped and said so. --any-license (Start > Fetch from YouTube) lifts that; what
+     you fetch is yours to answer for under the site's terms and your own law.
+
+Progress goes to stdout as lines the app reads: `PROGRESS n/m message`, then `DONE ...`. Standard library only; nothing is sent but the requests
+themselves (no identifier, no counter, no account). Overrides, for tests: MUSICUE_YTDLP (the yt-dlp command), MUSICUE_CUES_BASE (the cue server's URL),
+MUSICUE_TIMEOUT (seconds a request waits, 20), MUSICUE_YTDLP_TIMEOUT (a download's limit, 900).
+"""
+import argparse
+import glob
+import os
+import re
+import shutil
+import subprocess
+import sys
+import urllib.error
+import urllib.request
+
+CUES_BASE = os.environ.get("MUSICUE_CUES_BASE", "https://cue.chordica.com/data/")
+TIMEOUT = float(os.environ.get("MUSICUE_TIMEOUT", "20"))
+YTDLP_TIMEOUT = float(os.environ.get("MUSICUE_YTDLP_TIMEOUT", "900"))
+MAX_CUE_BYTES = 1 << 20
+ID_RE = re.compile(r"^[A-Za-z0-9_-]{11}$")
+URL_ID = re.compile(r"(?:youtu\.be/|youtube(?:-nocookie)?\.com/(?:watch\?(?:[^#\s]*&)?v=|embed/|shorts/|live/|v/))([A-Za-z0-9_-]{11})")
+
+
+def say(text):
+    print(text, flush=True)
+
+
+def video_id(line):
+    """The video id in a line of urls.txt, or None. A bare id, or the id in a YouTube link; nothing else is accepted (the id becomes a file name)."""
+    line = line.split("|", 1)[0].split("#", 1)[0].strip()
+    if not line:
+        return None
+    if ID_RE.match(line):
+        return line
+    m = URL_ID.search(line)
+    return m.group(1) if m else None
+
+
+def read_ids(path):
+    ids, seen = [], set()
+    try:
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for line in f:
+                vid = video_id(line)
+                if vid and vid not in seen:
+                    seen.add(vid)
+                    ids.append(vid)
+    except OSError:
+        return None
+    return ids
+
+
+def fetch(url):
+    """The body of url (at most MAX_CUE_BYTES), or None for a missing file; raises OSError for any other trouble."""
+    req = urllib.request.Request(url, headers={"User-Agent": "musicue-sync"})
+    try:
+        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+            body = r.read(MAX_CUE_BYTES + 1)
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            return None
+        raise OSError(f"HTTP {e.code}")
+    except (urllib.error.URLError, TimeoutError) as e:
+        raise OSError(str(getattr(e, "reason", e)))
+    if len(body) > MAX_CUE_BYTES:
+        raise OSError("the file is too big")
+    return body
+
+
+def save_new(path, body):
+    """Write body to path only if path does not exist (a person's edits are never overwritten). Returns True when written."""
+    if os.path.exists(path):
+        return False
+    tmp = path + ".part"
+    with open(tmp, "wb") as f:
+        f.write(body)
+    os.replace(tmp, path)
+    return True
+
+
+def fetch_cues(vid, cues_dir):
+    """(files saved, note). A 404 is not an error: most videos have no server cues."""
+    base = CUES_BASE.rstrip("/") + "/"
+    saved, kept, missing = 0, 0, 0
+    for ext in ("json", "srt"):
+        try:
+            body = fetch(f"{base}{vid}.{ext}")
+        except OSError as e:
+            return saved, f"cue server: {e}"
+        if body is None:
+            missing += 1
+            continue
+        if b"<html" in body[:200].lower():                 # a host that answers every path with its home page
+            missing += 1
+            continue
+        if save_new(os.path.join(cues_dir, f"{vid}.{ext}"), body):
+            saved += 1
+        else:
+            kept += 1
+    if saved:
+        return saved, f"{saved} cue file{'s' if saved != 1 else ''}"
+    if kept:
+        return 0, "kept your cues"
+    return 0, "no cues on the server"
+
+
+def have_media(vid, media_dir):
+    return bool(glob.glob(os.path.join(glob.escape(media_dir), f"*[[]{vid}[]]*")))
+
+
+def fetch_audio(vid, media_dir, ytdlp, cc_only):
+    """(status, note): status is 'got', 'have', 'skip' or 'fail'."""
+    if have_media(vid, media_dir):
+        return "have", "audio already in media/"
+    cmd = [ytdlp]
+    if cc_only:
+        cmd += ["--match-filter", "license*=Creative Commons"]
+    cmd += ["-f", "ba[acodec^=mp4a]/ba/b", "--no-playlist", "--no-progress", "--newline",
+            "-o", os.path.join(media_dir, "%(title).80s [%(id)s].%(ext)s"), f"https://www.youtube.com/watch?v={vid}"]
+    try:
+        p = subprocess.run(cmd, capture_output=True, text=True, timeout=YTDLP_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        return "fail", "yt-dlp took too long"
+    except OSError as e:
+        return "fail", f"cannot run yt-dlp: {e.strerror or e}"
+    if have_media(vid, media_dir):
+        return "got", "audio saved"
+    out = (p.stdout or "") + (p.stderr or "")
+    if "does not pass filter" in out or "pass filter" in out:
+        return "skip", "not Creative Commons (Start > Fetch from YouTube changes that)"
+    errs = [ln for ln in out.splitlines() if ln.startswith("ERROR")]
+    return "fail", (errs[-1] if errs else f"yt-dlp exit {p.returncode}")[:90]
+
+
+def main(argv):
+    ap = argparse.ArgumentParser(prog="musicue-sync", add_help=True)
+    ap.add_argument("--data", required=True, help="MusiCue's data folder (media/, cues/, inbox/)")
+    g = ap.add_mutually_exclusive_group()
+    g.add_argument("--cc-only", action="store_true", help="fetch only Creative Commons videos (the default)")
+    g.add_argument("--any-license", action="store_true", help="fetch any video")
+    ap.add_argument("--no-audio", action="store_true", help="fetch cue data only, never audio")
+    ap.add_argument("--cues-base", default=None)
+    ap.add_argument("--yt-dlp", dest="ytdlp", default=None)
+    args = ap.parse_args(argv)
+    global CUES_BASE
+    if args.cues_base:
+        CUES_BASE = args.cues_base
+    cc_only = not args.any_license
+    media, cues = os.path.join(args.data, "media"), os.path.join(args.data, "cues")
+    os.makedirs(media, exist_ok=True)
+    os.makedirs(cues, exist_ok=True)
+    ids = read_ids(os.path.join(args.data, "inbox", "urls.txt"))
+    if ids is None:
+        say("DONE nothing to do: put YouTube links in MusiCue/inbox/urls.txt, one a line")
+        return 0
+    if not ids:
+        say("DONE urls.txt has no links or ids")
+        return 0
+    ytdlp = None if args.no_audio else (args.ytdlp or os.environ.get("MUSICUE_YTDLP") or shutil.which("yt-dlp"))
+    if not ytdlp and not args.no_audio:
+        say("yt-dlp is not installed (the r3i6nos-ytdlp package): fetching cue data only")
+    n_cues = n_audio = n_skip = n_fail = 0
+    for i, vid in enumerate(ids, 1):
+        saved, note = fetch_cues(vid, cues)
+        n_cues += saved
+        if ytdlp:
+            say(f"PROGRESS {i - 1}/{len(ids)} {vid}: {note}")          # the cue part is done; the audio follows
+            status, anote = fetch_audio(vid, media, ytdlp, cc_only)
+            n_audio += status == "got"
+            n_skip += status == "skip"
+            n_fail += status == "fail"
+            say(f"PROGRESS {i}/{len(ids)} {vid}: {anote}")
+        else:
+            say(f"PROGRESS {i}/{len(ids)} {vid}: {note}")
+    say(f"DONE {len(ids)} video{'s' if len(ids) != 1 else ''}: {n_cues} cue files, {n_audio} audio saved, {n_skip} skipped, {n_fail} failed")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

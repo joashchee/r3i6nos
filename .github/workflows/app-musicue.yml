@@ -1,0 +1,57 @@
+name: App - MusiCue
+
+# MusiCue's own build, apart from the firmware's. Runs when MusiCue (or what it compiles against) changes,
+# by hand, or on a `musicue-v*` tag, which also publishes a GitHub release with the .deb. MusiCue is a user-installed package
+# (the card's native_deb/): the firmware build does not bundle it.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "apps/musicue-native/**"
+      - "theme/**"
+      - "NOTICE"
+      - "LICENSE"
+      - "scripts/build_native_app.sh"
+      - "scripts/smoke_native.sh"
+      - ".github/workflows/native-app.yml"
+      - ".github/workflows/app-musicue.yml"
+    tags: ["musicue-v*"]
+  pull_request:
+    paths:
+      - "apps/musicue-native/**"
+      - "theme/**"
+      - "scripts/build_native_app.sh"
+      - ".github/workflows/native-app.yml"
+      - ".github/workflows/app-musicue.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/native-app.yml
+    with:
+      app: musicue-native
+      # musicue-v1.2 -> 1.2; anything else keeps the default
+      version: ${{ startsWith(github.ref, 'refs/tags/musicue-v') && github.ref_name || '1.0' }}
+
+  release:
+    needs: build
+    if: ${{ startsWith(github.ref, 'refs/tags/musicue-v') }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: ${{ needs.build.outputs.artifact }}
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sha256sum MusiCue.deb | tee MusiCue.deb.sha256
+          gh release create "${{ github.ref_name }}" MusiCue.deb MusiCue.deb.sha256 \
+            --repo "${{ github.repository }}" --title "MusiCue ${{ github.ref_name }}" \
+            --notes "MusiCue for the R36S as an arm64 .deb: drop it in \`native_deb/\` on the games card. Not run on a real R36S yet."

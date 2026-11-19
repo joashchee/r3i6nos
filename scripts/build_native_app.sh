@@ -29,7 +29,7 @@ SMOKE=""
 CONF="$REPO/apps/$APP_DIR/app.conf"
 [ -f "$CONF" ] || { echo "build_native_app: no $CONF" >&2; exit 1; }
 
-TYPE=native NAME="" BIN="" PKG="" SRC="" THEME=0 DESC=""
+TYPE=native NAME="" BIN="" PKG="" SRC="" THEME=0 DESC="" EXTRA_FILES=""
 # shellcheck disable=SC1090  # the app's own manifest
 . "$CONF"
 [ "$TYPE" = native ] || { echo "build_native_app: $CONF is not TYPE=native (a LÖVE app: scripts/build_love_app.sh)" >&2; exit 1; }
@@ -75,6 +75,16 @@ echo "[*] Compiling $BIN (arm64)..."
 file "$pkgdir/usr/games/$BIN" | grep -q 'ARM aarch64' || { echo "build_native_app: $BIN is not an arm64 binary" >&2; exit 1; }
 "$HOST-readelf" -d "$pkgdir/usr/games/$BIN" | grep -q 'libSDL2-2.0.so.0' || { echo "build_native_app: $BIN does not link SDL2" >&2; exit 1; }
 
+# Files an app packs beside its program (a helper script): EXTRA_FILES="src:dest:mode ...", src in the app's folder, dest inside the package (no leading slash, no ..).
+for entry in $EXTRA_FILES; do
+    src="${entry%%:*}"; rest="${entry#*:}"; dest="${rest%%:*}"; mode="${rest#*:}"
+    [ "$mode" = "$rest" ] && mode=644
+    case "$dest" in /*|*..*|"") echo "build_native_app: EXTRA_FILES: unsafe destination '$dest'" >&2; exit 1 ;; esac
+    [ -f "$REPO/apps/$APP_DIR/$src" ] || { echo "build_native_app: EXTRA_FILES: no apps/$APP_DIR/$src" >&2; exit 1; }
+    mkdir -p "$pkgdir/$(dirname "$dest")"
+    install -m "$mode" "$REPO/apps/$APP_DIR/$src" "$pkgdir/$dest"
+done
+
 cp "$REPO/LICENSE" "$pkgdir/usr/share/doc/$BIN/copyright"
 if [ "$THEME" = 1 ]; then
     # The theme's font is CC BY-SA 4.0 and is compiled in: its credit and licence travel with the binary.
@@ -88,7 +98,7 @@ Version: $VERSION
 Architecture: arm64
 Maintainer: r3i6nos <noreply@users.noreply.github.com>
 Installed-Size: $size_kb
-Depends: libsdl2-2.0-0
+Depends: libsdl2-2.0-0${EXTRA_FILES:+, python3-minimal, libpython3-stdlib}
 Section: games
 Priority: optional
 Homepage: https://github.com/joashchee/r3i6nos
