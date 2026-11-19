@@ -114,6 +114,16 @@ class Persist(unittest.TestCase):
         self.assertFalse(list((self.t / "card/r3i6nos/settings").glob(".*.r3i6nos-part")), "no temporary file is left")
         self.assertEqual(oct(os.stat(self.card("wifi.json")).st_mode & 0o777), "0o600", "the Wi-Fi file is root-only where the card has modes")
 
+    def test_the_boot_pass_restores_but_writes_nothing_to_the_card(self):
+        self.set_settings()
+        p = self.run_persist("sync", "--restore-only")
+        self.assertNotIn("saved", p.stdout)
+        self.assertEqual(p.stdout.count(": deferred"), 7)
+        self.assertFalse(self.card("wifi.json").exists(), "nothing is saved while the menu waits")
+        self.assertFalse(self.card("README.txt").exists())
+        p = self.run_persist("sync")                                   # the later pass saves what the boot pass left
+        self.assertIn("wifi: saved", p.stdout)
+
     def test_a_second_sync_changes_nothing(self):
         self.set_settings()
         self.run_persist("sync")

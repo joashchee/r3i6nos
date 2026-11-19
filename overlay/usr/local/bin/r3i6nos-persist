@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """r3i6nos-persist - keeps the menu's saved settings on the data card, so they survive a reflash and a new system card (docs/SAVED-SETTINGS.md).
 
-    r3i6nos-persist sync [ITEM ...]   bring this unit and the data card into step, for every item or the ones named
+    r3i6nos-persist sync [--restore-only] [ITEM ...]   bring this unit and the data card into step, for every item or the ones named
     r3i6nos-persist status [--items]  what the last sync found (and, with --items, how each item compares right now); changes nothing
     r3i6nos-persist list              the items: id, where it lives here, its file on the card
     r3i6nos-persist forget ITEM       delete the card's copy of ITEM and stop syncing it (the Wi-Fi key, say); `keep ITEM` starts again
@@ -262,7 +262,7 @@ def write_skip(s):
 
 # ---- the sync of one item -----------------------------------------------------------------------------------------------------------------
 
-def sync_item(item, card_dir, base_sha, base_known):
+def sync_item(item, card_dir, base_sha, base_known, restore_only=False):
     """(action, new base sha or None, restored-locally). action: same none saved restored deleted-card, '+conflict' when the other side was kept aside."""
     lb, lm = read_regular(item.local)
     cb, cm = read_regular(card_dir / item.name)
@@ -273,6 +273,8 @@ def sync_item(item, card_dir, base_sha, base_known):
         write_file(conflicts / f"{item.name}-{who}-{stamp()}", data, 0o600 if item.secret else 0o644)
 
     def save():
+        if restore_only:                                           # the boot pass: the menu is waiting, so nothing is written to the card; the later pass saves
+            return "deferred", base_sha, False
         write_file(card_dir / item.name, lb, item.mode)
         return "saved", L, False
 
@@ -306,6 +308,8 @@ def sync_item(item, card_dir, base_sha, base_known):
         keep_aside(lb, "unit")
         res = restore()
         return res[0] + "+conflict", res[1], True
+    if restore_only:
+        return "deferred", base_sha, False
     keep_aside(cb, "card")
     res = save()
     return res[0] + "+conflict", res[1], False
@@ -323,6 +327,8 @@ def write_status(lines):
 
 
 def cmd_sync(args):
+    restore_only = "--restore-only" in args                       # at boot, before the menu: bring settings back, write nothing to the card (a slow SD fsync each)
+    args = [a for a in args if a != "--restore-only"]
     ids = [i.id for i in items()]
     for a in args:
         if a not in ids:
@@ -339,7 +345,7 @@ def cmd_sync(args):
     card_dir = root.joinpath(*FOLDER)
     try:
         card_dir.mkdir(parents=True, exist_ok=True)
-        if not (card_dir / "README.txt").exists():
+        if not restore_only and not (card_dir / "README.txt").exists():
             (card_dir / "README.txt").write_text(README)
     except OSError as e:
         write_status([("STATE", "error"), ("WHY", f"cannot make {card_dir}: {e.strerror}"), ("LAST", int(time.time()))])
@@ -357,7 +363,7 @@ def cmd_sync(args):
             print(f"{item.id}: skipped (forgotten here)")
             continue
         try:
-            action, new_base, got_local = sync_item(item, card_dir, mine.get(item.id), item.id in mine)
+            action, new_base, got_local = sync_item(item, card_dir, mine.get(item.id), item.id in mine, restore_only)
         except Fail as e:
             errors.append(f"{item.id}: {e}")
             print(f"{item.id}: not synced: {e}")

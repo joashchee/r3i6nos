@@ -11,7 +11,8 @@ Type=oneshot
 RemainAfterExit=yes
 # Never fails the boot: with no usable data card it changes nothing. At shutdown the working copies are saved to the card (the sound service has saved
 # its levels by then: this unit stops after it, because it started before it).
-ExecStart=-/usr/local/bin/r3i6nos-persist sync
+# At boot only the restore half runs (the menu waits for this unit, and a save is an fsync to a slow card each); r3i6nos-persist-boot.timer saves a minute later.
+ExecStart=-/usr/local/bin/r3i6nos-persist sync --restore-only
 ExecStop=-/usr/local/bin/r3i6nos-persist sync
 TimeoutStartSec=120
 TimeoutStopSec=30

@@ -199,6 +199,9 @@ ln -sfn /etc/systemd/system/r3i6nos-persist.service \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-persist.service"
 ln -sfn /etc/systemd/system/r3i6nos-persist.path \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-persist.path"
+mkdir -p "$ROOTFS/etc/systemd/system/timers.target.wants"
+ln -sfn /etc/systemd/system/r3i6nos-persist-boot.timer \
+    "$ROOTFS/etc/systemd/system/timers.target.wants/r3i6nos-persist-boot.timer"
 mkdir -p "$ROOTFS/var/lib/r3i6nos-persist"
 # The RK817 codec's outputs stay off until its "Playback Path" is set (r3i6nos-sound): without this no app is heard.
 ln -sfn /etc/systemd/system/r3i6nos-sound.service \

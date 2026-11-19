@@ -1,0 +1,11 @@
+[Unit]
+Description=Save the settings that changed during boot to the data card, a minute after the menu is up
+Documentation=file:/usr/local/bin/r3i6nos-persist
+
+[Timer]
+# The boot pass (r3i6nos-persist.service) only restores, so the menu is not held up by writes to the card; this is the save half.
+OnBootSec=60
+Unit=r3i6nos-persist-sync.service
+
+[Install]
+WantedBy=timers.target
