@@ -8,6 +8,7 @@ import re
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -66,12 +67,14 @@ class Fake(unittest.TestCase):
                                       '  *pipe:0*) cat >/dev/null; for a; do last="$a"; done; head -c 4000 /dev/zero > "$last"; [ -f "$d/encode-fails" ] && exit 1; exit 0 ;;\n'
                                       '  *pipe:1*) sleep "$(cat "$d/decode-sleep" 2>/dev/null || echo 0)"; [ -f "$d/decode-fails" ] && { echo "Invalid data found" >&2; exit 1; }; exit 0 ;;\nesac\n')
         (t / "bin/ffmpeg").chmod(0o755)
+        (t / "bin/r3i6nos-persist").write_text("#!/bin/sh\ncat \"$(dirname \"$0\")/persist.out\" 2>/dev/null\n")
+        (t / "bin/r3i6nos-persist").chmod(0o755)
         for f in ("systemctl", "systemd-analyze", "r3i6nos-sound", "r3i6nos-clock"):
             (t / "bin" / f).chmod(0o755)
         self.env = {"R3I6NOS_ETC": str(t / "etc"), "R3I6NOS_PROC": str(t / "proc"), "R3I6NOS_SYS": str(t / "sys"), "R3I6NOS_DEV": str(t / "dev"),
                     "R3I6NOS_CARDS_STATE": str(t / "run/cards"), "R3I6NOS_REPORT_MB": "2", "R3I6NOS_SOUND": str(t / "bin/r3i6nos-sound"), "R3I6NOS_CLOCK": str(t / "bin/r3i6nos-clock"),
                     "R3I6NOS_BOOTSTATE": str(t / "run/boot-state"), "R3I6NOS_REPORT_POWER_S": "0.3",
-                    "R3I6NOS_FFMPEG": str(t / "bin/ffmpeg"), "R3I6NOS_LDCONFIG": str(t / "bin/ldconfig"), "R3I6NOS_VIDEO_BENCH": "0", "R3I6NOS_VIDEO_FRAMES": "3", "PATH": f"{t / 'bin'}:{os.environ.get('PATH', '')}"}
+                    "R3I6NOS_PERSIST": str(t / "bin/r3i6nos-persist"), "R3I6NOS_FFMPEG": str(t / "bin/ffmpeg"), "R3I6NOS_LDCONFIG": str(t / "bin/ldconfig"), "R3I6NOS_VIDEO_BENCH": "0", "R3I6NOS_VIDEO_FRAMES": "3", "PATH": f"{t / 'bin'}:{os.environ.get('PATH', '')}"}
 
     def tearDown(self):
         self.tmp.cleanup()
@@ -221,8 +224,8 @@ class SystemReport(Fake):
         with mock.patch.object(m.Report, "step", watch), mock.patch.dict(os.environ, {"PATH": self.env["PATH"]}), mock.patch("sys.stdout", io.StringIO()):
             self.assertEqual(m.main(["--from-settings", "--quiet"]), 0)
         steps = [dict(l.split("=", 1) for l in text.splitlines()) for text in seen]
-        self.assertEqual([s["steps"] for s in steps], ["19"] * 20, "5 sections, 2 checks on each of the two cards, packages, runtimes, 2 in usb, 4 in power and 2 in video, then done")
-        self.assertEqual([s["step"] for s in steps], [str(i) for i in range(1, 20)] + ["19"])
+        self.assertEqual([s["steps"] for s in steps], ["20"] * 21, "5 sections, 2 checks on each of the two cards, the saved settings, packages, runtimes, 2 in usb, 4 in power and 2 in video, then done")
+        self.assertEqual([s["step"] for s in steps], [str(i) for i in range(1, 21)] + ["20"])
         self.assertIn("speed", steps[6]["doing"])
         self.assertEqual(steps[-1]["doing"], "done")
         self.assertEqual(steps[-1]["file"], str(self.t / "sys2/r3i6nos/r36s-report.txt"))
@@ -940,6 +943,84 @@ class VideoSections(Fake):
         self.assertNotEqual(frames[0], frames[1], "it moves")
         self.assertGreater(len(set(frames[0][:64 * 48])), 20, "luma has texture")
         self.assertEqual(set(frames[0][64 * 48:]), {128}, "chroma is flat")
+
+
+class SavedSettingsSection(Fake):
+    """== saved settings ==: r3i6nos-persist's status against a fake helper (docs/SAVED-SETTINGS.md)."""
+
+    ALL = ("wifi", "timezone", "clock-set", "clock", "mixer", "battery", "clock-asked")
+
+    def persist(self, state="synced", rows=None, **extra):
+        lines = [f"STATE={state}", "AT=" + str(self.t / "sys2/r3i6nos/settings"), f"LAST={int(time.time()) - 5}", "ITEMS=7", "CONFLICTS=0"]
+        lines += [f"{k}={v}" for k, v in extra.items()]
+        for item in self.ALL:
+            lines.append(f"item={item} " + (rows or {}).get(item, "state=same local=abcd1234 card=abcd1234"))
+        (self.t / "bin/persist.out").write_text("\n".join(lines) + "\n")
+
+    def section(self):
+        self.report()
+        text = self.text(self.t / "sys2/r3i6nos")
+        a = text.index("== saved settings ==")
+        b = text.find("== ", a + 5)
+        return text[a:b if b > 0 else None]
+
+    def test_in_step_is_all_pass(self):
+        self.persist()
+        s = self.section()
+        self.assertRegex(s, r"PASS last sync: \d+ s ago, 7 of 7 items on the data card at ")
+        for item in self.ALL:
+            self.assertIn(f"PASS item {item}: the same on both", s)
+        self.assertNotIn("FAIL", s)
+
+    def test_what_was_restored_saved_and_kept_aside_is_listed(self):
+        self.persist(RESTORED="wifi,timezone", SAVED="mixer", CONFLICTS="2")
+        s = self.section()
+        self.assertIn("INFO restored from the card: wifi,timezone", s)
+        self.assertIn("INFO saved to the card: mixer", s)
+        self.assertIn("INFO kept aside: 2 older copies in r3i6nos/settings/.merge-conflicts", s)
+
+    def test_no_card_is_a_skip_and_never_ran_is_a_fail(self):
+        self.persist(state="no-card", WHY="No data card is in.")
+        self.assertIn("SKIP data card: no usable data card (No data card is in.)", self.section())
+        (self.t / "bin/persist.out").write_text("STATE=never\n")
+        self.assertIn("FAIL last sync: r3i6nos-persist has never run", self.section())
+
+    def test_a_card_that_cannot_be_used_is_a_fail_with_the_reason(self):
+        self.persist(state="readonly", WHY="The data card cannot be written (Read-only file system).")
+        self.assertIn("FAIL data card: not usable for the saved settings: The data card cannot be written", self.section())
+
+    def test_items_that_differ_are_info_and_unusable_ones_are_fails(self):
+        self.persist(rows={"mixer": "state=differs local=11111111 card=22222222", "wifi": "state=card-invalid local=none card=33333333", "battery": "state=absent local=none card=none",
+                           "clock": "state=skipped local=none card=none"}, ERRORS="wifi: the card's copy is not usable: not JSON")
+        s = self.section()
+        self.assertIn("INFO item mixer: differs (here 11111111, card 22222222); it syncs at the next change", s)
+        self.assertIn("FAIL item wifi: card-invalid:", s)
+        self.assertIn("FAIL not synced: wifi: the card's copy is not usable", s)
+        self.assertIn("INFO item battery: not set on this unit", s)
+        self.assertIn("INFO item clock: not kept on the card", s)
+
+    def test_the_wifi_password_on_exfat_is_said_to_be_readable_by_anyone(self):
+        self.persist()
+        d = self.t / "sys2/r3i6nos/settings"
+        d.mkdir(parents=True)
+        (d / "wifi.json").write_text("{}")
+        s = self.section()
+        self.assertIn("INFO wifi key on the card: exfat cannot keep a file private", s)
+
+    def test_the_wifi_password_on_ext4_is_a_pass_when_root_only_and_a_fail_when_not(self):
+        self.cards(SYSTEM_DEV="/dev/mmcblk0p3", SYSTEM_FS="exfat", SYSTEM_AT=str(self.t / "sys1"), DATA_DEV="/dev/mmcblk1p1", DATA_FS="ext4", DATA_AT=str(self.t / "sys2"))
+        self.persist()
+        d = self.t / "sys2/r3i6nos/settings"
+        d.mkdir(parents=True)
+        (d / "wifi.json").write_text("{}")
+        os.chmod(d / "wifi.json", 0o600)
+        self.assertIn("PASS wifi key on the card: ext4 file mode 600 (root only)", self.section())
+        os.chmod(d / "wifi.json", 0o644)
+        self.assertIn("FAIL wifi key on the card: ext4 file mode 644 (other users can read it)", self.section())
+
+    def test_a_helper_that_is_missing_is_a_skip(self):
+        (self.t / "bin/r3i6nos-persist").unlink()
+        self.assertIn("SKIP r3i6nos-persist: did not run", self.section())
 
 
 if __name__ == "__main__":

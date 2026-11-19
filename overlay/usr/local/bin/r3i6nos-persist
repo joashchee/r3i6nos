@@ -1,0 +1,471 @@
+#!/usr/bin/env python3
+"""r3i6nos-persist - keeps the menu's saved settings on the data card, so they survive a reflash and a new system card (docs/SAVED-SETTINGS.md).
+
+    r3i6nos-persist sync [ITEM ...]   bring this unit and the data card into step, for every item or the ones named
+    r3i6nos-persist status [--items]  what the last sync found (and, with --items, how each item compares right now); changes nothing
+    r3i6nos-persist list              the items: id, where it lives here, its file on the card
+    r3i6nos-persist forget ITEM       delete the card's copy of ITEM and stop syncing it (the Wi-Fi key, say); `keep ITEM` starts again
+
+What is kept (an explicit list, nothing else is ever read or written): the saved Wi-Fi network and its key, the time zone, the clock (the last
+saved time, and the mark that a person set it), the sound mixer's levels, the battery history, and the mark that the clock question was asked. NOT kept,
+on purpose: the SSH password and host keys (a card cannot keep a key private, and a new system card should have its own), each app's data (rule 16 has its
+own way: docs/APP-DATA.md), the system's package and update state (it belongs to the system card), and the games and packages (they are on the card already).
+
+Where: <data card>/r3i6nos/settings/, one file for each item. The card is the home of the settings and this unit keeps a working copy, so the unit still
+boots, joins its network and plays sound with the card out. Per item, with `base` the content both sides had at the last sync (kept here, for this card's id):
+  - only this unit has it: save it to the card.   - only the card has it (a fresh flash): restore it.   - the same: nothing.
+  - this unit deleted it since the last sync (Forget in Settings, Clear the battery history): delete the card's copy too.
+  - one side changed since the last sync: the other side takes it.   - both changed: the newer file wins and the other is kept in
+    r3i6nos/settings/.merge-conflicts/, never deleted.   - no last sync to go by (a card this unit has not met) and they differ: the card wins and this
+    unit's copy goes to .merge-conflicts/.
+Everything that comes off the card is checked before it is used (a time zone must be a zone in /usr/share/zoneinfo, the Wi-Fi file a name and a key, ...):
+a bad file is left alone and reported. Files are written to a temporary name, synced, compared by SHA-256 and renamed into place. A symbolic link or a
+file over 8 MiB is never read or written.
+
+What is stored for Wi-Fi is the network's KEY (the 256-bit WPA key made from the password, as r3i6nos-net stores it: the password itself is never written). It cannot be turned back into the
+password (a weak password can still be guessed from it offline) but it lets anyone join that network. On an ext4 data card the file is root-only (0600); **exFAT and FAT cannot keep a file private**, so anyone who holds the card
+can read it. `forget wifi` takes it off the card and keeps it off.
+
+Runs as root: at boot after the cards are mounted and before the sound service and the menu (r3i6nos-persist.service), at shutdown, and when the Wi-Fi file,
+the time zone, the clock's mark or the card's mount state changes (r3i6nos-persist.path). It never formats, creates a partition or touches any other folder.
+It writes /run/r3i6nos/persist for the menu's Settings > Data card and the device report.
+
+Standard library only. Uses r3i6nos-appdata's own idea of a valid data card (mounted by role, exFAT, FAT or ext4, writable, 64 MiB free), loaded from that
+file so there is one definition. Overrides, for tests: R3I6NOS_PERSIST_VARLIB (/var/lib), R3I6NOS_PERSIST_ETC (/etc), R3I6NOS_PERSIST_HOME (/home/loveos),
+R3I6NOS_PERSIST_STATE (/var/lib/r3i6nos-persist), R3I6NOS_PERSIST_OUT (/run/r3i6nos/persist), R3I6NOS_APPDATA_ENGINE (r3i6nos-appdata),
+R3I6NOS_CLOCK (r3i6nos-clock), R3I6NOS_ZONEINFO (/usr/share/zoneinfo), and the engine's own R3I6NOS_CARDS_FILE and R3I6NOS_APPDATA_MIN_FREE_MB.
+"""
+import fcntl
+import hashlib
+import importlib.machinery
+import importlib.util
+import json
+import os
+import re
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ENV = os.environ.get
+VARLIB = Path(ENV("R3I6NOS_PERSIST_VARLIB", "/var/lib"))
+ETC = Path(ENV("R3I6NOS_PERSIST_ETC", "/etc"))
+HOME = Path(ENV("R3I6NOS_PERSIST_HOME", "/home/loveos"))
+STATE = Path(ENV("R3I6NOS_PERSIST_STATE", "/var/lib/r3i6nos-persist"))
+OUT = Path(ENV("R3I6NOS_PERSIST_OUT", "/run/r3i6nos/persist"))
+APPDATA = ENV("R3I6NOS_APPDATA_ENGINE", "/usr/local/bin/r3i6nos-appdata")
+CLOCK = ENV("R3I6NOS_CLOCK", "/usr/local/bin/r3i6nos-clock")
+ZONEINFO = Path(ENV("R3I6NOS_ZONEINFO", "/usr/share/zoneinfo"))
+FOLDER = ("r3i6nos", "settings")          # <data card>/r3i6nos/settings
+CONFLICTS = ".merge-conflicts"
+MAX_BYTES = 8 << 20
+ZONE_RE = re.compile(r"[A-Za-z0-9_+-]+(?:/[A-Za-z0-9_+-]+){0,2}")
+README = ("r3i6nos keeps its saved settings here (Wi-Fi network and key, time zone, clock, sound levels, battery history), so they survive a reflash.\n"
+          "Do not edit these files. The Wi-Fi key (made from the password; the password itself is not stored) is in wifi.json: on exFAT and FAT anyone who has this card can read it. To take it off the card, run\n"
+          "`r3i6nos-persist forget wifi` on the unit (over SSH), or delete wifi.json here and wipe the unit's saved network with Settings > Network > Forget.\n")
+
+
+class Fail(Exception):
+    pass
+
+
+# ---- the items ---------------------------------------------------------------------------------------------------------------------------
+
+def v_wifi(data):
+    try:
+        d = json.loads(data.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError):
+        return "not JSON"
+    if not isinstance(d, dict) or not isinstance(d.get("ssid"), str) or not isinstance(d.get("psk", ""), str):
+        return "not a saved network"
+    ssid, psk = d["ssid"], d.get("psk", "")
+    if not ssid or len(ssid.encode("utf-8", "replace")) > 32 or any(ord(c) < 32 or ord(c) == 127 for c in ssid):
+        return "a Wi-Fi name is 1 to 32 characters"
+    if len(psk) > 64 or any(ord(c) < 32 or ord(c) == 127 for c in psk):
+        return "a Wi-Fi key is at most 64 characters"
+    return None
+
+
+def v_zone(data):
+    try:
+        z = data.decode("ascii").strip()
+    except UnicodeDecodeError:
+        return "not a zone name"
+    if not ZONE_RE.fullmatch(z) or ".." in z or not (ZONEINFO / z).is_file():
+        return f"{z[:30]!r} is not a zone in {ZONEINFO}"
+    return None
+
+
+def v_clock(data):
+    return None if re.fullmatch(rb"\d{9,11}\n?", data) else "not a time"
+
+
+def v_oneline(data):
+    if len(data) > 200 or b"\0" in data or len(data.strip().splitlines()) > 1:
+        return "not a one-line mark"
+    return None
+
+
+def v_mixer(data):
+    if len(data) > (1 << 20) or b"\0" in data or b"state." not in data[:400]:
+        return "not a mixer state"
+    return None
+
+
+def v_text(data):
+    if b"\0" in data:
+        return "not text"
+    try:
+        data.decode("utf-8")
+    except UnicodeDecodeError:
+        return "not text"
+    return None
+
+
+def after_zone(item):
+    """Point /etc/localtime at the restored zone (the zone name was checked)."""
+    zone = item.local.read_text().strip()
+    link, tmp = ETC / "localtime", ETC / ".localtime.r3i6nos"
+    try:
+        tmp.unlink()
+    except OSError:
+        pass
+    os.symlink(str(ZONEINFO / zone), tmp)
+    os.replace(tmp, link)
+
+
+def after_clock(item):
+    """The clock service ran before the card was open: let it look at the restored time again (it only ever moves the clock forward)."""
+    try:
+        subprocess.run([CLOCK, "restore"], capture_output=True, timeout=20)
+    except (OSError, subprocess.SubprocessError):
+        pass
+
+
+class Item:
+    def __init__(self, id, label, local, name, validate, mode=0o644, after=None, secret=False):
+        self.id, self.label, self.local, self.name, self.validate, self.mode, self.after, self.secret = id, label, local, name, validate, mode, after, secret
+
+
+def items():
+    r = VARLIB / "r3i6nos"
+    return [
+        Item("wifi", "Wi-Fi network and key", r / "wifi.json", "wifi.json", v_wifi, 0o600, None, True),
+        Item("timezone", "Time zone", ETC / "timezone", "timezone", v_zone, 0o644, after_zone),
+        Item("clock-set", "Clock: set by a person", r / "clock-set", "clock-set", v_oneline),
+        Item("clock", "Clock: last saved time", r / "clock", "clock", v_clock, 0o644, after_clock),
+        Item("mixer", "Sound mixer levels", VARLIB / "alsa" / "asound.state", "mixer.state", v_mixer),
+        Item("battery", "Battery history", VARLIB / "r3i6nos-battery" / "history.tsv", "battery-history.tsv", v_text),
+        Item("clock-asked", "Clock question asked", HOME / ".r3i6nos-clock-asked", "clock-asked", v_oneline),
+    ]
+
+
+# ---- files ---------------------------------------------------------------------------------------------------------------------------------
+
+def read_regular(path):
+    """(bytes, mtime), (None, 0) when there is no file, or raises Fail for a link, a special file or one that is too big."""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return None, 0.0
+    except OSError as e:
+        raise Fail(e.strerror or str(e))
+    import stat as statmod
+    if not statmod.S_ISREG(st.st_mode):
+        raise Fail("not a regular file (links and special files are never used)")
+    if st.st_size > MAX_BYTES:
+        raise Fail("over 8 MiB")
+    with open(path, "rb") as f:
+        return f.read(), st.st_mtime
+
+
+def sha(data):
+    return hashlib.sha256(data).hexdigest() if data is not None else None
+
+
+def write_file(path, data, mode, owner_from=None):
+    """Atomically: a temporary name beside it, synced, compared by SHA-256, renamed over. Raises Fail when the copy does not match."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_name(f".{path.name}.r3i6nos-part")
+    with open(tmp, "wb") as f:
+        f.write(data)
+        f.flush()
+        os.fsync(f.fileno())
+    try:
+        os.chmod(tmp, mode)                      # a card without Unix modes (exFAT, FAT) refuses or ignores this
+    except OSError:
+        pass
+    if owner_from is not None and os.geteuid() == 0:
+        try:
+            st = os.stat(owner_from)
+            os.chown(tmp, st.st_uid, st.st_gid)
+        except OSError:
+            pass
+    with open(tmp, "rb") as f:
+        if sha(f.read()) != sha(data):
+            tmp.unlink()
+            raise Fail("the copy does not match what was written")
+    os.replace(tmp, path)
+
+
+def stamp():
+    return time.strftime("%Y%m%d-%H%M%S")
+
+
+# ---- the card ------------------------------------------------------------------------------------------------------------------------------
+
+def load_engine():
+    loader = importlib.machinery.SourceFileLoader("r3i6nos_appdata_engine", APPDATA)
+    spec = importlib.util.spec_from_loader("r3i6nos_appdata_engine", loader)
+    mod = importlib.util.module_from_spec(spec)
+    sys.dont_write_bytecode = True
+    loader.exec_module(mod)
+    return mod
+
+
+def find_card():
+    """(card root, card id, '') for a valid data card, or (None, None, state word)."""
+    eng = load_engine()
+    _s, root, fs, _sfs = eng.roots()
+    state, why = eng.card_state(root, fs)
+    if state != "valid":
+        return None, None, state, why
+    return root, eng.card_id(root, create=True), "valid", ""
+
+
+def read_base():
+    try:
+        d = json.loads((STATE / "synced.json").read_text())
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def write_base(d):
+    STATE.mkdir(parents=True, exist_ok=True)
+    tmp = STATE / ".synced.json.part"
+    tmp.write_text(json.dumps(d))
+    os.replace(tmp, STATE / "synced.json")
+
+
+def read_skip():
+    try:
+        return {ln.strip() for ln in (STATE / "skip").read_text().splitlines() if ln.strip()}
+    except OSError:
+        return set()
+
+
+def write_skip(s):
+    STATE.mkdir(parents=True, exist_ok=True)
+    (STATE / "skip").write_text("".join(f"{x}\n" for x in sorted(s)))
+
+
+# ---- the sync of one item -----------------------------------------------------------------------------------------------------------------
+
+def sync_item(item, card_dir, base_sha, base_known):
+    """(action, new base sha or None, restored-locally). action: same none saved restored deleted-card, '+conflict' when the other side was kept aside."""
+    lb, lm = read_regular(item.local)
+    cb, cm = read_regular(card_dir / item.name)
+    L, C = sha(lb), sha(cb)
+    conflicts = card_dir / CONFLICTS
+
+    def keep_aside(data, who):
+        write_file(conflicts / f"{item.name}-{who}-{stamp()}", data, 0o600 if item.secret else 0o644)
+
+    def save():
+        write_file(card_dir / item.name, lb, item.mode)
+        return "saved", L, False
+
+    def restore(extra=""):
+        why = item.validate(cb)
+        if why:
+            raise Fail(f"the card's copy is not usable: {why}")
+        if lb is not None and extra:
+            keep_aside(lb, "unit")
+        write_file(item.local, cb, item.mode, owner_from=item.local.parent if item.local.parent.exists() else None)
+        return "restored" + extra, C, True
+
+    if L is None and C is None:
+        return "none", None, False
+    if L is None:
+        if base_known and base_sha is not None and C == base_sha:
+            (card_dir / item.name).unlink()                       # a person deleted it here (Forget, Clear history): it goes from the card too
+            return "deleted-card", None, False
+        return restore()
+    if C is None:
+        return save()
+    if L == C:
+        return "same", L, False
+    if not base_known or base_sha is None:                        # a card this unit has not met: the card is the home, this unit's copy is kept aside
+        return restore("+conflict")
+    if L == base_sha:
+        return restore()
+    if C == base_sha:
+        return save()
+    if cm >= lm:                                                  # both changed: the newer wins, the other is kept
+        keep_aside(lb, "unit")
+        res = restore()
+        return res[0] + "+conflict", res[1], True
+    keep_aside(cb, "card")
+    res = save()
+    return res[0] + "+conflict", res[1], False
+
+
+def write_status(lines):
+    OUT.parent.mkdir(parents=True, exist_ok=True)
+    tmp = OUT.with_name(OUT.name + ".part")
+    tmp.write_text("".join(f"{k}={v}\n" for k, v in lines))
+    os.replace(tmp, OUT)
+    try:
+        os.chmod(OUT, 0o644)
+    except OSError:
+        pass
+
+
+def cmd_sync(args):
+    ids = [i.id for i in items()]
+    for a in args:
+        if a not in ids:
+            raise Fail(f"no such item: {a} (r3i6nos-persist list)")
+    STATE.mkdir(parents=True, exist_ok=True)
+    lock = open(STATE / "lock", "w")
+    fcntl.flock(lock, fcntl.LOCK_EX)                              # the boot sync and a path-triggered one must not interleave
+    root, cid, state, why = find_card()
+    if root is None:
+        word = "no-card" if state == "none" else state
+        write_status([("STATE", word), ("WHY", why), ("LAST", int(time.time()))])
+        print(f"no usable data card ({why}); nothing changed")
+        return 0
+    card_dir = root.joinpath(*FOLDER)
+    try:
+        card_dir.mkdir(parents=True, exist_ok=True)
+        if not (card_dir / "README.txt").exists():
+            (card_dir / "README.txt").write_text(README)
+    except OSError as e:
+        write_status([("STATE", "error"), ("WHY", f"cannot make {card_dir}: {e.strerror}"), ("LAST", int(time.time()))])
+        print(f"cannot make {card_dir}: {e.strerror}")
+        return 0
+    bases = read_base()
+    mine = bases.get(cid, {}) if isinstance(bases.get(cid), dict) else {}
+    skip = read_skip()
+    saved, restored, conflicts, errors, skipped = [], [], 0, [], []
+    for item in items():
+        if args and item.id not in args:
+            continue
+        if item.id in skip:
+            skipped.append(item.id)
+            print(f"{item.id}: skipped (forgotten here)")
+            continue
+        try:
+            action, new_base, got_local = sync_item(item, card_dir, mine.get(item.id), item.id in mine)
+        except Fail as e:
+            errors.append(f"{item.id}: {e}")
+            print(f"{item.id}: not synced: {e}")
+            continue
+        except OSError as e:
+            errors.append(f"{item.id}: {e.strerror or e}")
+            print(f"{item.id}: not synced: {e.strerror or e}")
+            continue
+        if new_base is None:
+            mine.pop(item.id, None)
+        else:
+            mine[item.id] = new_base
+        if action.startswith("saved"):
+            saved.append(item.id)
+        if action.startswith("restored"):
+            restored.append(item.id)
+        if "+conflict" in action:
+            conflicts += 1
+        if got_local and item.after:
+            try:
+                item.after(item)
+            except (OSError, Fail) as e:
+                errors.append(f"{item.id}: restored, but {e}")
+        print(f"{item.id}: {action}")
+    bases[cid] = mine
+    write_base(bases)
+    present = sum(1 for it in items() if (card_dir / it.name).is_file())
+    write_status([("STATE", "synced"), ("AT", str(card_dir)), ("CARD", cid), ("LAST", int(time.time())), ("ITEMS", present), ("SAVED", ",".join(saved)),
+                  ("RESTORED", ",".join(restored)), ("CONFLICTS", conflicts), ("SKIPPED", ",".join(skipped)), ("ERRORS", "; ".join(errors))])
+    return 0
+
+
+def cmd_status(args):
+    try:
+        sys.stdout.write(OUT.read_text())
+    except OSError:
+        print("STATE=never")
+    if "--items" in args:
+        root, _cid, state, why = find_card()
+        card_dir = root.joinpath(*FOLDER) if root else None
+        skip = read_skip()
+        for item in items():
+            row = [f"item={item.id}"]
+            try:
+                lb, _ = read_regular(item.local)
+                cb, _ = read_regular(card_dir / item.name) if card_dir else (None, 0)
+            except Fail as e:
+                print(f"item={item.id} state=unsafe why={e}")
+                continue
+            L, C = sha(lb), sha(cb)
+            word = ("skipped" if item.id in skip else "no-card" if card_dir is None else "absent" if L is None and C is None else "local-only" if C is None
+                    else "card-only" if L is None else "same" if L == C else "differs")
+            if C is not None and item.validate(cb):
+                word = "card-invalid"
+            row += [f"state={word}", f"local={(L or 'none')[:8]}", f"card={(C or 'none')[:8]}"]
+            print(" ".join(row))
+    return 0
+
+
+def cmd_list(_args):
+    for it in items():
+        print(f"{it.id}\t{it.local}\t{'/'.join(FOLDER)}/{it.name}\t{it.label}")
+    return 0
+
+
+def cmd_forget(args):
+    if len(args) != 1 or args[0] not in [i.id for i in items()]:
+        raise Fail("usage: r3i6nos-persist forget ITEM   (r3i6nos-persist list)")
+    item = next(i for i in items() if i.id == args[0])
+    s = read_skip()
+    s.add(item.id)
+    write_skip(s)
+    root, cid, _state, _why = find_card()
+    if root is not None:
+        p = root.joinpath(*FOLDER) / item.name
+        try:
+            p.unlink()
+            print(f"{item.id}: deleted from the data card")
+        except FileNotFoundError:
+            print(f"{item.id}: was not on the data card")
+        bases = read_base()
+        bases.get(cid, {}).pop(item.id, None)
+        write_base(bases)
+    print(f"{item.id}: not kept on the card from now on (r3i6nos-persist keep {item.id} to start again)")
+    return 0
+
+
+def cmd_keep(args):
+    if len(args) != 1:
+        raise Fail("usage: r3i6nos-persist keep ITEM")
+    s = read_skip()
+    s.discard(args[0])
+    write_skip(s)
+    print(f"{args[0]}: kept on the card again, from the next sync")
+    return 0
+
+
+def main(argv):
+    verbs = {"sync": cmd_sync, "status": cmd_status, "list": cmd_list, "forget": cmd_forget, "keep": cmd_keep}
+    if not argv or argv[0] not in verbs:
+        print(__doc__.split("\n\n")[0], file=sys.stderr)
+        return 2
+    try:
+        return verbs[argv[0]](argv[1:])
+    except Fail as e:
+        print(f"r3i6nos-persist: {e}", file=sys.stderr)
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv[1:]))

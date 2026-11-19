@@ -1,0 +1,20 @@
+[Unit]
+Description=Keep the menu's saved settings (Wi-Fi, time zone, clock, sound levels, battery history) on the data card
+Documentation=file:/usr/local/bin/r3i6nos-persist
+# After the cards are mounted by role (the data card is /roms2), and before the sound service and the menu read their state: on a fresh system card the
+# settings are brought back from the data card first, so the first boot of a reflashed unit already knows its Wi-Fi, its zone and its volume.
+After=r3i6nos-cards.service
+Before=r3i6nos-sound.service loveos.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# Never fails the boot: with no usable data card it changes nothing. At shutdown the working copies are saved to the card (the sound service has saved
+# its levels by then: this unit stops after it, because it started before it).
+ExecStart=-/usr/local/bin/r3i6nos-persist sync
+ExecStop=-/usr/local/bin/r3i6nos-persist sync
+TimeoutStartSec=120
+TimeoutStopSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -25,6 +25,8 @@ packages (what is installed and from where, the free room in ROOTFS, the catalog
 power (what the background work costs the battery: the hot-plug daemon, the menu, the periodic jobs; the idle draw in mW; docs/POWER.md),
 usb gadget and usb ethernet (whether the OTG port can act as a network card for a computer, or host a wired adapter: the answers the screen
 mirror needs, ROADMAP section 28, docs/SCREEN-MIRROR.md; read-only, from /proc and /sys),
+saved settings (whether the Wi-Fi network, time zone, clock, sound levels and battery history are kept on the data card, what the last sync did, how each item
+compares with the card's copy, who can read the Wi-Fi key there; r3i6nos-persist, docs/SAVED-SETTINGS.md),
 video hardware (the VPU and RGA as the kernel shows them: device tree, /dev nodes, modules loaded, on disk or never autoloaded, userspace libraries, the DRAM size and type clues;
 read-only, no root) and video decode (how fast the CPU decodes a synthetic H.264 clip at 240p, 360p, 480p and 720p the way Commander's player asks ffmpeg, with a goal for 480p; run 1 of 3
 only; docs/VIDEO-DECODE.md, ROADMAP section 35).
@@ -34,7 +36,7 @@ R3I6NOS_CARDS_STATE (/run/r3i6nos/cards), R3I6NOS_REPORT_DIR (the folder to writ
 R3I6NOS_SETUP_VAR, R3I6NOS_SETUP_RUN, R3I6NOS_SETUP_BOOT (where r3i6nos-setup leaves its record, state and report),
 R3I6NOS_SOUND (r3i6nos-sound), R3I6NOS_HOTPLUG (r3i6nos-hotplug),
 R3I6NOS_CLOCK (r3i6nos-clock), and for the power section (docs/POWER.md): R3I6NOS_REPORT_POWER_S (30: seconds per measuring window),
-R3I6NOS_BATTERY (r3i6nos-battery), R3I6NOS_PKG (r3i6nos-pkg), R3I6NOS_OPENSSL, R3I6NOS_PKG_CACHE, R3I6NOS_APP_ROOT (/opt/native_apps), R3I6NOS_TOOLS_DIR (/opt/loveos/bin), R3I6NOS_LDD (ldd), R3I6NOS_MODULES (/lib/modules), R3I6NOS_FFMPEG (ffmpeg), R3I6NOS_LDCONFIG (ldconfig), R3I6NOS_VIDEO_FRAMES (90), R3I6NOS_VIDEO_BENCH (0 skips the decode benchmark), R3I6NOS_BOOTSTATE_CMD (r3i6nos-bootstate), R3I6NOS_MENU_MATCH (/opt/loveos/menu: how the menu's process
+R3I6NOS_BATTERY (r3i6nos-battery), R3I6NOS_PKG (r3i6nos-pkg), R3I6NOS_OPENSSL, R3I6NOS_PKG_CACHE, R3I6NOS_APP_ROOT (/opt/native_apps), R3I6NOS_TOOLS_DIR (/opt/loveos/bin), R3I6NOS_LDD (ldd), R3I6NOS_MODULES (/lib/modules), R3I6NOS_PERSIST (r3i6nos-persist), R3I6NOS_FFMPEG (ffmpeg), R3I6NOS_LDCONFIG (ldconfig), R3I6NOS_VIDEO_FRAMES (90), R3I6NOS_VIDEO_BENCH (0 skips the decode benchmark), R3I6NOS_BOOTSTATE_CMD (r3i6nos-bootstate), R3I6NOS_MENU_MATCH (/opt/loveos/menu: how the menu's process
 is told), R3I6NOS_POWER_AB (1: do the stop-and-compare even when not root, tests).
 """
 import gzip
@@ -83,6 +85,7 @@ PKG_RESERVE_PCT = int(ENV("R3I6NOS_PKG_RESERVE_PCT", "10"))
 PKG_CACHE = Path(ENV("R3I6NOS_PKG_CACHE") or Path.home() / ".cache/r3i6nos-pkg")
 SYSUPDATE_OUT = Path(ENV("R3I6NOS_SYSUPDATE_OUT", "/run/r3i6nos-sysupdate"))
 MENU_MATCH = ENV("R3I6NOS_MENU_MATCH", "/opt/loveos/menu")
+PERSIST = ENV("R3I6NOS_PERSIST", "/usr/local/bin/r3i6nos-persist")  # keeps the menu's saved settings on the data card (docs/SAVED-SETTINGS.md)
 FFMPEG = ENV("R3I6NOS_FFMPEG", "ffmpeg")                         # the image's ffmpeg-min; the video sections encode and decode with it
 LDCONFIG = ENV("R3I6NOS_LDCONFIG", "ldconfig")
 VIDEO_FRAMES = int(ENV("R3I6NOS_VIDEO_FRAMES", "90"))             # frames of the synthetic clip (3 s at 30 fps); R3I6NOS_VIDEO_BENCH=0 skips the decode benchmark
@@ -1485,6 +1488,66 @@ def video_decode(r):
     r.line("INFO", "reading this", "below 1x the player drops frames; between 1x and 1.5x it keeps up with no room for the menu, sound and scaling. If 480p passes with room to spare, hardware decode is not needed (ROADMAP section 35)")
 
 
+def saved_settings(r):
+    """== saved settings ==: whether the menu's settings (Wi-Fi, time zone, clock, sound levels, battery history) are kept on the data card (r3i6nos-persist,
+    docs/SAVED-SETTINGS.md), what the last sync did, how each item compares with the card's copy now, and who can read the Wi-Fi key there."""
+    r.step("the saved settings")
+    r.section("saved settings")
+    code, out, err = run_full([PERSIST, "status", "--items"], 30)
+    if code != 0:
+        r.line("SKIP", "r3i6nos-persist", f"did not run: {err or code}")
+        return
+    st, rows = {}, []
+    for ln in out.splitlines():
+        if ln.startswith("item="):
+            rows.append(dict(kv.split("=", 1) for kv in ln.split() if "=" in kv))
+        elif "=" in ln:
+            k, _, v = ln.partition("=")
+            st[k.strip()] = v.strip()
+    state = st.get("STATE", "never")
+    when = int(st["LAST"]) if st.get("LAST", "").isdigit() else 0
+    ago = f"{max(0, int(time.time()) - when)} s ago" if when else "never"
+    if state == "synced":
+        r.line("PASS", "last sync", f"{ago}, {st.get('ITEMS', '?')} of {len(rows)} items on the data card at {st.get('AT', '?')}")
+    elif state == "no-card":
+        r.line("SKIP", "data card", f"no usable data card ({st.get('WHY') or 'none is in'}): the settings are on the system card only")
+    elif state == "never":
+        r.line("FAIL", "last sync", "r3i6nos-persist has never run (r3i6nos-persist.service is not enabled, or it failed)")
+    else:
+        r.line("FAIL", "data card", f"not usable for the saved settings: {st.get('WHY') or state}")
+    if st.get("RESTORED"):
+        r.line("INFO", "restored from the card", st["RESTORED"])
+    if st.get("SAVED"):
+        r.line("INFO", "saved to the card", st["SAVED"])
+    if st.get("CONFLICTS", "0") not in ("", "0"):
+        r.line("INFO", "kept aside", f"{st['CONFLICTS']} older copies in r3i6nos/settings/.merge-conflicts on the card")
+    if st.get("ERRORS"):
+        r.line("FAIL", "not synced", st["ERRORS"])
+    for row in rows:
+        item, word = row.get("item", "?"), row.get("state", "?")
+        what = f"here {row.get('local', 'none')}, card {row.get('card', 'none')}"
+        if word == "same":
+            r.line("PASS", f"item {item}", f"the same on both ({what})")
+        elif word in ("absent", "skipped", "no-card"):
+            r.line("INFO" if word != "no-card" else "SKIP", f"item {item}", {"absent": "not set on this unit", "skipped": "not kept on the card (forgotten with r3i6nos-persist forget)",
+                                                                              "no-card": "no data card to compare with"}[word])
+        elif word in ("card-invalid", "unsafe"):
+            r.line("FAIL", f"item {item}", f"{word}: {row.get('why') or 'the card copy is not usable and was not restored'} ({what})")
+        else:
+            r.line("INFO", f"item {item}", f"{word} ({what}); it syncs at the next change, at shutdown and at the next boot")
+    cards = keyvals(STATE)
+    at, fs = st.get("AT", ""), cards.get("DATA_FS", "")
+    if at:
+        try:
+            mode = os.stat(os.path.join(at, "wifi.json")).st_mode & 0o777
+            if fs in ("exfat", "vfat"):
+                r.line("INFO", "wifi key on the card", f"{fs} cannot keep a file private: anyone who holds the card can read it, and it lets them join that network (take it off with r3i6nos-persist forget wifi)")
+            else:
+                r.line("PASS" if mode & 0o077 == 0 else "FAIL", "wifi key on the card", f"{fs} file mode {mode:03o}" + (" (root only)" if mode & 0o077 == 0 else " (other users can read it)"))
+        except OSError:
+            r.line("INFO", "wifi key on the card", "none there")
+
+
 def demo_recording():
     """True while a Rec demo holds /run/loveos/demo/lock with a live pid (docs/DEMO-RECORDINGS.md: the unit's whole power is its)."""
     try:
@@ -1508,11 +1571,11 @@ def main(argv):
     try:
         folder, card = where(cards)
         r = Report(folder, how, rel.get("VERSION", "?"), card, quiet)
-        r.steps = 15 + 2 * len(mounted_cards(cards))
+        r.steps = 16 + 2 * len(mounted_cards(cards))
     except OSError as e:
         print(f"r3i6nos-report: cannot write the report: {e}", file=sys.stderr)
         return 1
-    for part in (lambda: (system(r, rel), setup_section(r)), lambda: boot(r), lambda: sound(r), lambda: clock(r), lambda: storage(r, cards), lambda: packages(r), lambda: runtimes(r), lambda: usb_sections(r), lambda: power_section(r), lambda: video_hardware(r), lambda: video_decode(r)):
+    for part in (lambda: (system(r, rel), setup_section(r)), lambda: boot(r), lambda: sound(r), lambda: clock(r), lambda: storage(r, cards), lambda: saved_settings(r), lambda: packages(r), lambda: runtimes(r), lambda: usb_sections(r), lambda: power_section(r), lambda: video_hardware(r), lambda: video_decode(r)):
         try:
             part()
         except Exception as e:  # a broken check is a line in the report, never a missing report

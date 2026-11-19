@@ -193,6 +193,13 @@ ln -sfn /etc/systemd/system/r3i6nos-cards.service \
 # The console prepares its own card from the original (docs/TWO-SLOT-SETUP.md): a no-op on every ordinary boot.
 ln -sfn /etc/systemd/system/r3i6nos-setup.service \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-setup.service"
+# The menu's saved settings (Wi-Fi, time zone, clock, sound levels, battery history) live on the data card too, so a reflash does not lose them
+# (docs/SAVED-SETTINGS.md): restored at boot before the sound service and the menu, saved at shutdown and when the Wi-Fi network or the zone changes.
+ln -sfn /etc/systemd/system/r3i6nos-persist.service \
+    "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-persist.service"
+ln -sfn /etc/systemd/system/r3i6nos-persist.path \
+    "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-persist.path"
+mkdir -p "$ROOTFS/var/lib/r3i6nos-persist"
 # The RK817 codec's outputs stay off until its "Playback Path" is set (r3i6nos-sound): without this no app is heard.
 ln -sfn /etc/systemd/system/r3i6nos-sound.service \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-sound.service"

@@ -1,0 +1,16 @@
+[Unit]
+Description=Watch the saved settings that a person changes in the menu, and the cards being mounted
+Documentation=file:/usr/local/bin/r3i6nos-persist
+
+[Path]
+# A new or changed or deleted Wi-Fi network (Settings > Network, Forget), the clock's "a person set it" mark and the time zone (Settings > Date and time),
+# and the card state that r3i6nos-cards and the data card formatter rewrite when a card is mounted. The mixer, the clock's hourly save and the battery
+# history change all the time and are saved at shutdown and at the next boot instead.
+PathChanged=/var/lib/r3i6nos/wifi.json
+PathChanged=/var/lib/r3i6nos/clock-set
+PathChanged=/etc/timezone
+PathChanged=/run/r3i6nos/cards
+Unit=r3i6nos-persist-sync.service
+
+[Install]
+WantedBy=multi-user.target

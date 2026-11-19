@@ -12,6 +12,7 @@ Start opens Settings: **Network**, **SSH**, **Battery** (`docs/BATTERY.md`), **S
   Disconnect, Instructions (what to plug in, wired, Wi-Fi, if it does not work).
 - **The top bar** (2026-11-18): left of the battery, `ë` when a wired link is up, `¥` and three cells (`█` reached, `░` not) when Wi-Fi is connected, nothing with no link (`menu/netstatus.lua`; the signal is `/proc/net/wireless`: -67 dBm or better is three cells, -80 two, else one). Untested on a unit.
 - **SSH:** Status, Set SSH password (typed twice), Start SSH, Stop SSH, Instructions.
+- **The saved Wi-Fi network and its key (the WPA key made from the password; the password itself is never stored) are kept on the data card too** (`docs/SAVED-SETTINGS.md`, 2026-11-19), so a reflash does not lose them. On an ext4 data card the file is root-only; **on exFAT or FAT anyone who holds the card, and any game the unit runs, can read it, and it lets them join that network** (Settings > Data card > Status says so). `r3i6nos-persist forget wifi` (over SSH) takes it off the card and keeps it off. The SSH password and the host keys are never kept on the card.
 - **On-screen keyboard:** D-pad moves, A types, X deletes, Y changes layer (abc, ABC, symbols), Select shows or hides the text, Start is done, B cancels.
   A real keyboard types too.
 - **Test connection** reports each step as `[ok]` or `[FAIL]` with what to try: link, address, gateway and a ping to it, a DNS lookup of

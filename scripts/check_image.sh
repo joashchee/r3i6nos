@@ -92,6 +92,8 @@ fi
 [ -L "$MNT/etc/systemd/system/multi-user.target.wants/loveos.service" ] || fail "loveos.service not enabled"
 [ -L "$MNT/etc/systemd/system/multi-user.target.wants/r3i6nos-cards.service" ] || fail "r3i6nos-cards.service not enabled"
 [ -L "$MNT/etc/systemd/system/multi-user.target.wants/r3i6nos-setup.service" ] || fail "r3i6nos-setup.service not enabled"
+[ -L "$MNT/etc/systemd/system/multi-user.target.wants/r3i6nos-persist.service" ] || fail "r3i6nos-persist.service not enabled"
+[ -x "$MNT/usr/local/bin/r3i6nos-persist" ] || fail "r3i6nos-persist not installed"
 grep -q '^loveos:x:1000:' "$MNT/etc/passwd" || fail "no loveos user (uid 1000)"
 ls "$MNT"/opt/love/*/bin/love >/dev/null 2>&1 || fail "no LÖVE runtime in /opt/love"
 [ -z "$(find "$MNT/proc" -mindepth 1 -maxdepth 1 | head -1)" ] || fail "/proc not empty in the image"

@@ -33,6 +33,10 @@ How it works (`overlay/usr/local/bin/r3i6nos-format`, the same two-file protocol
 
 **Untested on the unit.** What to find out with a real card in TF2: whether the kernel re-reads the table at once (then no restart is asked) or not (then the dialog shows), how long `mkfs` takes on a big card (the menu waits up to 25 minutes), and that the result mounts and a computer can read the exFAT card.
 
+## Saved settings (2026-11-19)
+
+The menu's own settings (the saved Wi-Fi network and password, the time zone, the clock, the sound levels, the battery history) are kept on the data card too, in `r3i6nos/settings/`, and brought back onto a fresh system card at its first boot: `docs/SAVED-SETTINGS.md`.
+
 ## Why not labels
 
 Before this, `/etc/fstab` mounted `LABEL=EASYROMS` at `/roms`, and `flash-macos.sh` gives the system card's partition 3 that label, while

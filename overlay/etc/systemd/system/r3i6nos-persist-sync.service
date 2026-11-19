@@ -1,0 +1,9 @@
+[Unit]
+Description=Save a changed setting to the data card (the Wi-Fi network, the time zone, the clock's mark, or a card that was just opened)
+Documentation=file:/usr/local/bin/r3i6nos-persist
+
+[Service]
+Type=oneshot
+# Started by r3i6nos-persist.path, a moment after the change. The helper takes a lock, so it never runs over the boot sync.
+ExecStart=-/usr/local/bin/r3i6nos-persist sync
+TimeoutStartSec=120
