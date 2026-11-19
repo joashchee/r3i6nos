@@ -186,6 +186,18 @@ class Sync(unittest.TestCase):
         self.assertEqual(rc, 2)
         self.assertTrue(lines[-1].startswith("DONE that is not a YouTube id"), lines)
 
+    def test_the_bar_moves_while_yt_dlp_downloads(self):
+        yt = self.fake_ytdlp('for a; do case "$prev" in -o) out="$a" ;; esac; prev="$a"; done\n'
+                             'echo "[download]   0.0% of 3.00MiB"; echo "[download]  50.0% of 3.00MiB"; echo "[download] 100% of 3.00MiB"\n'
+                             'mkdir -p "$(dirname "$out")"; : > "$(dirname "$out")/Song [aaaaaaaaaaa].m4a"\nexit 0\n')
+        rc, lines = self.run_sync("--yt-dlp", yt, "--id", "aaaaaaaaaaa")
+        bars = [int(ln.split()[1].split("/")[0]) for ln in lines if ln.startswith("BAR ")]
+        self.assertEqual(bars[0], 50)                       # the cue part is done: a little
+        self.assertEqual(bars[1:], sorted(bars[1:]))
+        self.assertIn(525, bars)                            # half way through the download
+        self.assertEqual(bars[-1], 1000)
+        self.assertTrue(lines[-1].startswith("DONE 1 video"), lines)
+
     def test_any_license_lifts_the_filter(self):
         log = self.d / "args.txt"
         yt = self.fake_ytdlp(f'echo "$@" > {log}\nexit 0\n')

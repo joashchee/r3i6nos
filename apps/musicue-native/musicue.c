@@ -1058,6 +1058,9 @@ static void job_poll(App *a) {
                     if (sscanf(a->job_buf + 9, "%d/%d", &x, &y) == 2 && y > 0) a->job_frac = (double)x / y;
                     const char *msg = strchr(a->job_buf + 9, ' ');
                     if (msg) job_line(a, msg + 1);
+                } else if (!strncmp(a->job_buf, "BAR ", 4)) {                 /* the bar only: no new line on the screen */
+                    int x = 0, y = 1;
+                    if (sscanf(a->job_buf + 4, "%d/%d", &x, &y) == 2 && y > 0) a->job_frac = (double)x / y;
                 } else if (!strncmp(a->job_buf, "DONE", 4)) { a->job_frac = 1; a->job_done = 1; job_line(a, a->job_buf); }
                 else if (a->job_buf[0]) job_line(a, a->job_buf);
             } else a->job_buf[a->job_len++] = c;

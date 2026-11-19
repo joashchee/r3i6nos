@@ -25,6 +25,7 @@ import re
 import shutil
 import subprocess
 import sys
+import threading
 import urllib.error
 import urllib.request
 
@@ -123,28 +124,53 @@ def have_media(vid, media_dir):
     return bool(glob.glob(os.path.join(glob.escape(media_dir), f"*[[]{vid}[]]*")))
 
 
-def fetch_audio(vid, media_dir, ytdlp, cc_only):
-    """(status, note): status is 'got', 'have', 'skip' or 'fail'."""
+PCT_RE = re.compile(r"\[download\]\s+(\d+(?:\.\d+)?)%")
+
+
+def bar(frac):
+    """A bar-only update for the app (no new line on its job screen)."""
+    say(f"BAR {int(max(0.0, min(1.0, frac)) * 1000)}/1000")
+
+
+def fetch_audio(vid, media_dir, ytdlp, cc_only, on_frac=None):
+    """(status, note): status is 'got', 'have', 'skip' or 'fail'. on_frac(0..1) is called as yt-dlp reports its download percentage."""
     if have_media(vid, media_dir):
         return "have", "audio already in media/"
     cmd = [ytdlp]
     if cc_only:
         cmd += ["--match-filter", "license*=Creative Commons"]
-    cmd += ["-f", "ba[acodec^=mp4a]/ba/b", "--no-playlist", "--no-progress", "--newline",
+    cmd += ["-f", "ba[acodec^=mp4a]/ba/b", "--no-playlist", "--progress", "--newline",
             "-o", os.path.join(media_dir, "%(title).80s [%(id)s].%(ext)s"), f"https://www.youtube.com/watch?v={vid}"]
     try:
-        p = subprocess.run(cmd, capture_output=True, text=True, timeout=YTDLP_TIMEOUT)
-    except subprocess.TimeoutExpired:
-        return "fail", "yt-dlp took too long"
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
     except OSError as e:
         return "fail", f"cannot run yt-dlp: {e.strerror or e}"
+    timer = threading.Timer(YTDLP_TIMEOUT, proc.kill)
+    timer.start()
+    lines, last = [], -1
+    try:
+        for ln in proc.stdout:                 # read as it comes: the bar moves while yt-dlp downloads
+            lines.append(ln.rstrip("\n"))
+            m = PCT_RE.search(ln)
+            if m and on_frac:
+                pct = int(float(m.group(1)))
+                if pct != last:                # one update per percent
+                    last = pct
+                    on_frac(pct / 100.0)
+        proc.wait()
+    finally:
+        timer.cancel()
+        if proc.poll() is None:
+            proc.kill()
+    if proc.returncode is not None and proc.returncode < 0 and not have_media(vid, media_dir):
+        return "fail", "yt-dlp took too long"
     if have_media(vid, media_dir):
         return "got", "audio saved"
-    out = (p.stdout or "") + (p.stderr or "")
-    if "does not pass filter" in out or "pass filter" in out:
+    out = "\n".join(lines)
+    if "pass filter" in out:
         return "skip", "not Creative Commons (Start > Fetch from YouTube changes that)"
-    errs = [ln for ln in out.splitlines() if ln.startswith("ERROR")]
-    return "fail", (errs[-1] if errs else f"yt-dlp exit {p.returncode}")[:90]
+    errs = [ln for ln in lines if ln.startswith("ERROR")]
+    return "fail", (errs[-1] if errs else f"yt-dlp exit {proc.returncode}")[:90]
 
 
 def main(argv):
@@ -187,7 +213,8 @@ def main(argv):
         n_cues += saved
         if ytdlp:
             say(f"PROGRESS {i - 1}/{len(ids)} {vid}: {note}")          # the cue part is done; the audio follows
-            status, anote = fetch_audio(vid, media, ytdlp, cc_only)
+            bar((i - 1 + 0.05) / len(ids))                              # a little, so the bar shows life while yt-dlp works out the stream (slow on the unit)
+            status, anote = fetch_audio(vid, media, ytdlp, cc_only, lambda f, i=i: bar((i - 1 + 0.05 + 0.95 * f) / len(ids)))
             n_audio += status == "got"
             n_skip += status == "skip"
             n_fail += status == "fail"
