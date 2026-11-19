@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """musicue-sync: MusiCue's one online step (docs/MUSICUE.md). Run from MusiCue's Start > Sync, or by hand.
 
-    musicue-sync --data DIR [--cc-only | --any-license] [--no-audio] [--cues-base URL] [--yt-dlp PATH]
+    musicue-sync --data DIR [--id VIDEOID] [--cc-only | --any-license] [--no-audio] [--cues-base URL] [--yt-dlp PATH]
 
 Reads DIR/inbox/urls.txt: one YouTube link or 11-character video id a line (a `#` starts a comment, `|` after the link starts a note). For each:
 
@@ -11,6 +11,8 @@ Reads DIR/inbox/urls.txt: one YouTube link or 11-character video id a line (a `#
      (about 1 MB a minute) into DIR/media/ as "Title [id].m4a". By default only videos whose licence is Creative Commons (--cc-only): the video's licence
      is read by yt-dlp, and a video that is not Creative Commons is skipped and said so. --any-license (Start > Fetch from YouTube) lifts that; what
      you fetch is yours to answer for under the site's terms and your own law.
+
+With --id VIDEOID (Start > Add: YouTube ID) it does the same for that one video and does not read urls.txt.
 
 Progress goes to stdout as lines the app reads: `PROGRESS n/m message`, then `DONE ...`. Standard library only; nothing is sent but the requests
 themselves (no identifier, no counter, no account). Overrides, for tests: MUSICUE_YTDLP (the yt-dlp command), MUSICUE_CUES_BASE (the cue server's URL),
@@ -151,6 +153,7 @@ def main(argv):
     g = ap.add_mutually_exclusive_group()
     g.add_argument("--cc-only", action="store_true", help="fetch only Creative Commons videos (the default)")
     g.add_argument("--any-license", action="store_true", help="fetch any video")
+    ap.add_argument("--id", dest="one_id", default=None, help="fetch this one 11-character video id instead of reading inbox/urls.txt")
     ap.add_argument("--no-audio", action="store_true", help="fetch cue data only, never audio")
     ap.add_argument("--cues-base", default=None)
     ap.add_argument("--yt-dlp", dest="ytdlp", default=None)
@@ -162,7 +165,13 @@ def main(argv):
     media, cues = os.path.join(args.data, "media"), os.path.join(args.data, "cues")
     os.makedirs(media, exist_ok=True)
     os.makedirs(cues, exist_ok=True)
-    ids = read_ids(os.path.join(args.data, "inbox", "urls.txt"))
+    if args.one_id is not None:
+        if not ID_RE.match(args.one_id):
+            say("DONE that is not a YouTube id (11 letters, digits, - or _)")
+            return 2
+        ids = [args.one_id]
+    else:
+        ids = read_ids(os.path.join(args.data, "inbox", "urls.txt"))
     if ids is None:
         say("DONE nothing to do: put YouTube links in MusiCue/inbox/urls.txt, one a line")
         return 0

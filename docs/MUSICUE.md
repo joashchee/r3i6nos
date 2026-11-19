@@ -58,6 +58,13 @@ a recommendation to confirm or change; it is not legal advice, and what a person
 | **Practice speed** | the web app has none; `ffmpeg-min` has no `atempo`, so it would need a time-stretch in the app |
 | **Checking the Creative Commons filter** | against a real video's `license` field (the packaged yt-dlp, `docs/STREAM-TOOLS.md`); the filter is tested against a fake yt-dlp |
 
+## Add: YouTube ID (2026-11-19)
+
+Start > **Add: YouTube ID (11 chars)** opens an 11-slot entry (no on-screen keyboard exists yet: Up/Down cycle A-Z a-z 0-9 - _, L1/R1 jump 8, Left/Right move, Y erases, a USB keyboard types it; case matters).
+A on the last filled slot, or Start, goes. **Online** (a default route in `/proc/net/route`; nothing is sent to find out) it runs `musicue-sync --id <id>`, which does what Sync does for that one video, and when it ends
+the song opens. **Offline** the id is appended to `inbox/urls.txt`, so the next Sync gets it. **The Creative Commons default still applies:** a video that is not CC gets its cues (if the server has any) but no audio, and the job
+screen says so; Start > Fetch from YouTube lifts it. Tested against a fake helper (`--selftest`) and `tests/test_musicue_sync.py`; **untested on a unit and with real yt-dlp over Wi-Fi.**
+
 ## What the earlier work gave this
 
 - `docs/STREAM-TOOLS.md`: the yt-dlp package the add-on runs, its cost (a cold YouTube extraction about 4.5 s of CPU and 211 MiB on an Apple core, **estimated at tens of seconds on the unit**) which is paid once at sync, not at play.

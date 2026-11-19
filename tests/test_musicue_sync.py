@@ -171,6 +171,21 @@ class Sync(unittest.TestCase):
         self.assertIn("PROGRESS 1/1 aaaaaaaaaaa: audio saved", lines)
         self.assertTrue(lines[-1].startswith("DONE 1 video: 0 cue files, 1 audio saved"), lines)
 
+    def test_one_id_is_fetched_alone_and_urls_txt_is_not_read(self):
+        log = self.d / "args.txt"
+        yt = self.fake_ytdlp(f'echo "$@" >> {log}\nexit 0\n')
+        self.urls("bbbbbbbbbbb\n")
+        rc, lines = self.run_sync("--yt-dlp", yt, "--id", "aaaaaaaaaaa")
+        self.assertEqual(rc, 0)
+        self.assertIn("watch?v=aaaaaaaaaaa", log.read_text())
+        self.assertNotIn("bbbbbbbbbbb", log.read_text())
+        self.assertTrue(lines[-1].startswith("DONE 1 video"), lines)
+
+    def test_an_id_that_is_not_eleven_characters_is_refused(self):
+        rc, lines = self.run_sync("--id", "../../etc/pw")
+        self.assertEqual(rc, 2)
+        self.assertTrue(lines[-1].startswith("DONE that is not a YouTube id"), lines)
+
     def test_any_license_lifts_the_filter(self):
         log = self.d / "args.txt"
         yt = self.fake_ytdlp(f'echo "$@" > {log}\nexit 0\n')

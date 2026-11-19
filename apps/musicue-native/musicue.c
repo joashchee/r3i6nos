@@ -149,7 +149,7 @@ static int hue_of(const char *label) {
 
 typedef struct { char path[PATH_MAX]; char name[96]; char id[16]; int has_cues; int nmarkers; } Song;
 
-enum { M_LIBRARY, M_PLAYER, M_MENU, M_JOB, M_NOTE };
+enum { M_LIBRARY, M_PLAYER, M_MENU, M_JOB, M_NOTE, M_ID };
 
 typedef struct { char label[48]; char value[40]; int id; } MItem;
 typedef struct { char title[40]; MItem it[14]; int n, sel; } Menu;
@@ -172,6 +172,8 @@ typedef struct {
     int quit, select_held, select_used;
     /* the sync job */
     pid_t job_pid; int job_fd; char job_buf[512]; int job_len; char job_lines[6][96]; int job_nlines; double job_frac; int job_done;
+    char idbuf[12]; int idpos;              /* Start > Add: the 11 characters of a YouTube id, 0 for an empty slot */
+    char job_want[16];                      /* a sync for one id: open that song when it is done */
     char note[3][72];                       /* a message box (M_NOTE) */
     unsigned wave_sig;
 } App;
@@ -723,6 +725,27 @@ static void compose_job(App *a, R3Screen *s) {
     r3_command_line(s, &cmd);
 }
 
+static const char ID_ALPHA[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+static void compose_id(App *a, R3Screen *s) {
+    r3_clear(s);
+    compose_topbar(a, s, "MusiCue", "Add");
+    R3Box b = {1, "Add: YouTube ID", NULL, "A next/fetch   B cancel", 0};
+    r3_box(s, 8, 5, 48, 13, &b);
+    r3_text_fit(s, 10, 7, "The 11 characters after v= in a YouTube link.", 44, R3_ST(R3_ST_BODY));
+    r3_text_fit(s, 10, 8, "Capitals and small letters are different.", 44, R3_ST(R3_ST_HINT));
+    for (int i = 0; i < 11; i++) {
+        int col = 15 + i * 3, ch = a->idbuf[i] ? a->idbuf[i] : '_';
+        if (i == a->idpos) { int bg = P_ACC0 + RAMP / 2; r3_put(s, col, 11, ch, pick_fg(bg), bg); }
+        else r3_put(s, col, 11, ch, R3_ST(a->idbuf[i] ? R3_ST_STRONG : R3_ST_HINT));
+    }
+    r3_text_fit(s, 10, 14, "Up/Down letter   L1/R1 jump 8   Left/Right move", 44, R3_ST(R3_ST_HINT));
+    r3_text_fit(s, 10, 15, "Y erase   A next, and fetch on the last one", 44, R3_ST(R3_ST_HINT));
+    r3_text_fit(s, 10, 16, "A keyboard types it.", 44, R3_ST(R3_ST_HINT));
+    R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, "Fetches the cues and the audio, then opens it", "", R3_ST_HINT};
+    r3_command_line(s, &cmd);
+}
+
 static void compose_note(App *a, R3Screen *s) {
     r3_clear(s);
     compose_topbar(a, s, "MusiCue", VERSION);
@@ -742,6 +765,7 @@ static void compose(App *a, R3Screen *s) {
         break;
     case M_JOB: compose_job(a, s); break;
     case M_NOTE: compose_note(a, s); break;
+    case M_ID: compose_id(a, s); break;
     default: compose_library(a, s);
     }
 }
@@ -795,7 +819,7 @@ static void present(App *a, R3Video *v, SDL_Renderer *r, const R3Screen *s, int 
 
 /* ---- actions ------------------------------------------------------------------------------------------------------------------------------- */
 
-enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_THEME, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_QUIT, A_CLOSE, A_LABELPICK };
+enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_THEME, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_ADD, A_QUIT, A_CLOSE, A_LABELPICK };
 
 static const char *const PRESET_LABELS[] = {"Intro", "Verse", "Pre-Chorus", "Chorus", "Bridge", "Solo", "Instrumental", "Outro", "End", "Tag"};
 #define NPRESET ((int)(sizeof PRESET_LABELS / sizeof *PRESET_LABELS))
@@ -853,6 +877,7 @@ static void build_main_menu(App *a) {
         menu_add(&a->menu, A_SAVE, "Save cues", a->cues.dirty ? "unsaved" : "saved");
         menu_add(&a->menu, A_EXPORT, "Export for Cue (json, srt, bundle)", "");
     } else {
+        menu_add(&a->menu, A_ADD, "Add: YouTube ID (11 chars)", "");
         menu_add(&a->menu, A_SYNC, "Sync: fetch cues and songs", "");
         menu_add(&a->menu, A_IMPORT, "Import Cue bundles from inbox/", "");
         menu_add(&a->menu, A_DEMO, "Demo song", "");
@@ -990,12 +1015,13 @@ static const char *helper_path(char *buf, size_t cap) {
     return "musicue-sync";
 }
 
-static void job_start(App *a) {
+static void job_start(App *a, const char *one_id) {
     char hbuf[PATH_MAX + 40];
     const char *helper = helper_path(hbuf, sizeof hbuf);
     int fd[2];
     memset(a->job_lines, 0, sizeof a->job_lines);
     a->job_nlines = 0; a->job_frac = 0; a->job_done = 0; a->job_len = 0;
+    snprintf(a->job_want, sizeof a->job_want, "%s", one_id ? one_id : "");
     if (pipe(fd) != 0) { say(a, R3_ST_ERROR, "Cannot start the sync."); return; }
     pid_t pid = fork();
     if (pid < 0) { close(fd[0]); close(fd[1]); say(a, R3_ST_ERROR, "Cannot start the sync."); return; }
@@ -1004,7 +1030,8 @@ static void job_start(App *a) {
         dup2(fd[1], 2);
         close(fd[0]); close(fd[1]);
         setenv("R3I6NOS_APP_DATA", a->data, 1);
-        execlp(helper, helper, "--data", a->data, a->any_license ? "--any-license" : "--cc-only", (char *)NULL);
+        if (one_id) execlp(helper, helper, "--data", a->data, a->any_license ? "--any-license" : "--cc-only", "--id", one_id, (char *)NULL);
+        else execlp(helper, helper, "--data", a->data, a->any_license ? "--any-license" : "--cc-only", (char *)NULL);
         _exit(127);
     }
     close(fd[1]);
@@ -1013,7 +1040,7 @@ static void job_start(App *a) {
     a->job_pid = pid;
     a->mode = M_JOB;
     job_line(a, "Starting...");
-    say(a, R3_ST_HINT, "Reading MusiCue/inbox/urls.txt.");
+    say(a, R3_ST_HINT, one_id ? "Fetching %s." : "Reading MusiCue/inbox/urls.txt.", one_id ? one_id : "");
 }
 
 static void job_poll(App *a) {
@@ -1046,7 +1073,89 @@ static void job_poll(App *a) {
         else say(a, R3_ST_OK, "Sync finished.");
         a->job_done = 1;
         scan_songs(a);
+        if (a->job_want[0]) {                           /* Add: the song just fetched opens at once; if only its cues came, the last line says why not */
+            for (int i = 0; i < a->nsongs; i++)
+                if (!strcmp(a->songs[i].id, a->job_want)) {
+                    a->lsel = i;
+                    job_stop(a);
+                    if (!open_song(a, i)) a->mode = M_LIBRARY;
+                    break;
+                }
+            if (a->mode == M_JOB) say(a, R3_ST_WARN, "No audio came for %s: see the last line. A closes.", a->job_want);
+            a->job_want[0] = 0;
+        }
     }
+}
+
+/* ---- Add: a YouTube id typed in, fetched and opened ---------------------------------------------------------------------------------------- */
+
+/* Online: the kernel has a default route (a wired or Wi-Fi link that is up). Nothing is sent to find out. $R3I6NOS_MUSICUE_ONLINE=0/1 overrides it for tests. */
+static int device_online(void) {
+    const char *o = getenv("R3I6NOS_MUSICUE_ONLINE");
+    if (o && *o) return *o != '0';
+    FILE *f = fopen("/proc/net/route", "r");
+    if (!f) return 0;
+    char line[256], ifc[32], dest[16], gw[16];
+    unsigned flags;
+    int up = 0;
+    if (!fgets(line, sizeof line, f)) { fclose(f); return 0; }
+    while (fgets(line, sizeof line, f))
+        if (sscanf(line, "%31s %15s %15s %x", ifc, dest, gw, &flags) == 4 && !strcmp(dest, "00000000") && (flags & 1) && strcmp(ifc, "lo")) up = 1;
+    fclose(f);
+    return up;
+}
+
+static void id_open(App *a) {
+    memset(a->idbuf, 0, sizeof a->idbuf);
+    a->idpos = 0;
+    a->mode = M_ID;
+    say(a, R3_ST_HINT, "Type or pick the 11 characters of a YouTube id.");
+}
+
+static void id_set(App *a, int ch) {
+    a->idbuf[a->idpos] = (char)ch;
+    if (a->idpos < 10) a->idpos++;
+}
+
+static void id_cycle(App *a, int step) {
+    char *c = &a->idbuf[a->idpos];
+    const char *at = *c ? strchr(ID_ALPHA, *c) : NULL;
+    int n = (int)sizeof ID_ALPHA - 1, i = at ? (int)(at - ID_ALPHA) : (step > 0 ? -1 : 0);
+    *c = ID_ALPHA[((i + step) % n + n) % n];
+}
+
+static int id_full(const App *a) { for (int i = 0; i < 11; i++) if (!a->idbuf[i]) return 0; return 1; }
+
+/* Online: fetch its cues and audio now and open the song. Offline: keep the id in inbox/urls.txt, so the next Sync (online) gets it. */
+static void id_go(App *a) {
+    char id[12];
+    snprintf(id, sizeof id, "%.11s", a->idbuf);
+    if (!id_full(a) || !cue_videoid_ok(id)) { say(a, R3_ST_WARN, "An id is 11 characters: letters, digits, - and _."); return; }
+    if (device_online()) { job_start(a, id); return; }
+    char path[PATH_MAX];
+    sub_path(a, "inbox", "urls.txt", path, sizeof path);
+    FILE *f = fopen(path, "a");
+    if (f) { fprintf(f, "%s\n", id); fclose(f); say(a, R3_ST_WARN, "Offline. %s is kept for the next Sync.", id); }
+    else say(a, R3_ST_ERROR, "Offline, and inbox/urls.txt cannot be written.");
+    a->mode = M_LIBRARY;
+}
+
+static void id_erase(App *a) {
+    if (a->idbuf[a->idpos] == 0 && a->idpos > 0) a->idpos--;
+    a->idbuf[a->idpos] = 0;
+}
+
+/* A key on a keyboard while the id is being entered: true when it was used. */
+static int id_key(App *a, SDL_Keycode k, Uint16 mod) {
+    if ((k >= SDLK_a && k <= SDLK_z) || (k >= SDLK_0 && k <= SDLK_9) || k == SDLK_MINUS || k == SDLK_UNDERSCORE) {
+        int ch = (int)k;
+        if (k >= SDLK_a && k <= SDLK_z && (mod & KMOD_SHIFT)) ch = toupper(ch);
+        if (k == SDLK_MINUS && (mod & KMOD_SHIFT)) ch = '_';
+        id_set(a, ch);
+        return 1;
+    }
+    if (k == SDLK_BACKSPACE) { id_erase(a); return 1; }
+    return 0;
 }
 
 /* ---- the menu's choices -------------------------------------------------------------------------------------------------------------------- */
@@ -1090,7 +1199,8 @@ static void menu_choose(App *a) {
     case A_SAVE: say(a, save_cues(a) == 0 ? R3_ST_OK : R3_ST_ERROR, "%s", a->cues.dirty ? "Could not save the cues." : "Cues saved."); a->mode = M_PLAYER; break;
     case A_EXPORT: export_cues(a); a->mode = M_PLAYER; break;
     case A_OFFSET: case A_THEME: case A_LICENSE: menu_adjust(a, 1); break;
-    case A_SYNC: job_start(a); break;
+    case A_SYNC: job_start(a, NULL); break;
+    case A_ADD: id_open(a); break;
     case A_IMPORT: {
         int c = 0, n = import_inbox(a, &c);
         scan_songs(a);
@@ -1151,6 +1261,25 @@ static void app_action(App *a, int act) {
         break;
     case M_NOTE:
         if (act == R3_BACK || act == R3_ACCEPT) a->mode = M_LIBRARY;
+        break;
+    case M_ID:
+        switch (act) {
+        case R3_BACK: a->mode = M_LIBRARY; say(a, R3_ST_HINT, "Nothing added."); break;
+        case R3_UP: id_cycle(a, 1); break;
+        case R3_DOWN: id_cycle(a, -1); break;
+        case R3_PAGEUP: id_cycle(a, 8); break;
+        case R3_PAGEDOWN: id_cycle(a, -8); break;
+        case R3_LEFT: if (a->idpos > 0) a->idpos--; break;
+        case R3_RIGHT: if (a->idpos < 10) a->idpos++; break;
+        case R3_Y: id_erase(a); break;
+        case R3_ACCEPT:
+            if (!a->idbuf[a->idpos]) { id_cycle(a, 1); if (a->idpos < 10) a->idpos++; }     /* an empty slot becomes A and the cursor moves on */
+            else if (a->idpos < 10) a->idpos++;
+            else id_go(a);                                                                  /* A on the last, filled slot fetches */
+            break;
+        case R3_MORE: id_go(a); break;
+        default: break;
+        }
         break;
     }
 }
@@ -1420,6 +1549,63 @@ static void check_contrast(App *a, const char *what) {
     CHECK(worst >= 4.5, "%s, theme %s: a cell at row %d col %d (char %d) has contrast %.2f", what, r3_themes[a->theme].name, worst_i / R3_COLS, worst_i % R3_COLS, worst_i >= 0 ? s.ch[worst_i] : 0, worst);
 }
 
+/* Start > Add: typed or picked, 11 characters; offline it is kept in urls.txt, online the helper runs for that one id and the song opens. */
+static void test_add_id(void) {
+    App a;
+    app_init(&a, g_tmp);
+    char p[PATH_MAX], fake[PATH_MAX], d[PATH_MAX];
+    snprintf(d, sizeof d, "%s/add", g_tmp);
+    snprintf(a.data, sizeof a.data, "%s", d);
+    const char *sub[] = {"media", "cues", "inbox"};
+    for (int i = 0; i < 3; i++) { sub_path(&a, sub[i], NULL, p, sizeof p); mkdirs(p); }
+    scan_songs(&a);
+    id_open(&a);
+    CHECK(a.mode == M_ID && !id_full(&a), "Add opens an empty id");
+    app_action(&a, R3_UP);
+    CHECK(a.idbuf[0] == 'A', "Up on an empty slot gives A");
+    app_action(&a, R3_DOWN);
+    CHECK(a.idbuf[0] == '_', "Down from A wraps to the last character: %c", a.idbuf[0]);
+    id_key(&a, SDLK_d, 0);
+    CHECK(a.idbuf[0] == 'd' && a.idpos == 1, "a keyboard types a letter and moves on");
+    id_key(&a, SDLK_q, KMOD_LSHIFT);
+    CHECK(a.idbuf[1] == 'Q', "shift makes a capital");
+    id_erase(&a);
+    CHECK(a.idbuf[1] == 0 && a.idpos == 1, "Y erases");
+    for (const char *c = "w4w9WgXcQ"; *c; c++) id_key(&a, (SDL_Keycode)tolower((unsigned char)*c), isupper((unsigned char)*c) ? KMOD_LSHIFT : 0);
+    CHECK(a.idpos == 10 && !strncmp(a.idbuf, "dw4w9WgXcQ", 10) && !id_full(&a), "ten typed, one to go");
+    app_action(&a, R3_MORE);
+    CHECK(a.mode == M_ID, "a short id does not go");
+    id_key(&a, SDLK_s, 0);
+    CHECK(id_full(&a) && !strcmp(a.idbuf, "dw4w9WgXcQs"), "eleven");
+    setenv("R3I6NOS_MUSICUE_ONLINE", "0", 1);
+    app_action(&a, R3_ACCEPT);
+    sub_path(&a, "inbox", "urls.txt", p, sizeof p);
+    char *t = cue_read_file(p, NULL);
+    CHECK(a.mode == M_LIBRARY && t && !strcmp(t, "dw4w9WgXcQs\n"), "offline: kept in urls.txt for the next Sync");
+    free(t);
+    /* online: a fake helper makes the audio the way yt-dlp would name it, and the song opens */
+    sub_path(&a, "media", NULL, p, sizeof p);
+    snprintf(fake, sizeof fake, "%s/fakesync", g_tmp);
+    FILE *f = fopen(fake, "w");
+    fprintf(f, "#!/bin/sh\ncase \"$*\" in *--id*dw4w9WgXcQs*) ;; *) echo wrong args; exit 1 ;; esac\ncp %s/a.wav \"%s/Fake [dw4w9WgXcQs].wav\"\necho \"PROGRESS 1/1 dw4w9WgXcQs: audio saved\"\necho \"DONE 1 video\"\n", g_tmp, p);
+    fclose(f);
+    chmod(fake, 0755);
+    setenv("R3I6NOS_MUSICUE_SYNC", fake, 1);
+    setenv("R3I6NOS_MUSICUE_NOAUDIO", "1", 1);
+    setenv("R3I6NOS_MUSICUE_ONLINE", "1", 1);
+    id_open(&a);
+    memcpy(a.idbuf, "dw4w9WgXcQs", 11);
+    a.idpos = 10;
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_JOB, "online: the fetch starts at once");
+    for (int i = 0; i < 300 && a.mode == M_JOB; i++) { app_tick(&a, 10); usleep(10000); }
+    CHECK(a.mode == M_PLAYER && a.open >= 0 && !strcmp(a.songs[a.open].id, "dw4w9WgXcQs"), "the song it fetched is open (mode %d)", a.mode);
+    app_free(&a);
+    unsetenv("R3I6NOS_MUSICUE_SYNC");
+    unsetenv("R3I6NOS_MUSICUE_ONLINE");
+    unsetenv("R3I6NOS_MUSICUE_NOAUDIO");
+}
+
 static void test_screens(void) {
     App a;
     app_init(&a, g_tmp);
@@ -1456,6 +1642,10 @@ static void test_screens(void) {
         a.mode = M_JOB; job_line(&a, "Fetching 3 of 5"); a.job_frac = 0.6;
         check_contrast(&a, "job");
         a.job_nlines = 0;
+        id_open(&a);
+        memcpy(a.idbuf, "dQw4w9WgXc", 10);
+        a.idpos = 4;
+        check_contrast(&a, "add id");
         a.mode = M_LIBRARY;
     }
     a.theme = r3_theme_find("Nord");
@@ -1544,6 +1734,7 @@ static int selftest(void) {
     test_wave();
     if (trace) fprintf(stderr, "[screens]\n");
     test_screens();
+    test_add_id();
     char cmd[PATH_MAX + 16];
     snprintf(cmd, sizeof cmd, "rm -rf '%s'", d);
     if (system(cmd) != 0) fprintf(stderr, "could not remove %s\n", d);
@@ -1738,6 +1929,7 @@ int main(int argc, char **argv) {
             case SDL_KEYDOWN: {
                 if (r3_toast_key(&toast)) break;
                 SDL_Keycode k = e.key.keysym.sym;
+                if (app.mode == M_ID && id_key(&app, k, e.key.keysym.mod)) break;      /* a keyboard types the id */
                 int act = k == SDLK_x ? R3_X : k == SDLK_y ? R3_Y : k == SDLK_m && app.mode == M_PLAYER ? R3_NONE : r3_key_action(k);
                 if (k == SDLK_m && app.mode == M_PLAYER) mark_here(&app);
                 if (k == SDLK_SPACE) act = R3_ACCEPT;
