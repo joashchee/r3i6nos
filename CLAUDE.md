@@ -147,6 +147,14 @@ is blocked and on what.
    self-test that checks them; an app that cannot follow the mapping says why in its README. A third-party game or port is exempt and keeps
    `r3i6nos-portquit`. **Built so far (2026-11-20):** the C theme has the reader and the menu (`theme/r3i6nos_input.h`, `theme/r3i6nos_mainmenu.h`) and the native IO Checker, MusiCue and (2026-11-20) Commander follow them (the C theme's Keymap has help and test, not remap yet: `theme/r3i6nos_keymap.h`); the Lua theme does not, and the other apps still leave with Select + Start until each has Quit.
 
+18. **Every wait shows a progress bar** (`docs/DEVICE-REPORTS.md`, "Progress"; `docs/R3I6NOS-ANSIAPPS-THEME.md`). Whenever a person has to wait for something to finish
+   (a load, a scan, a copy or move, a fetch, a render or an encode, a format, an install, an update, a report, a recording), the app shows a **determinate progress bar**
+   (step, bar, time so far; a percentage or `n of m`) from the moment the wait starts, never a frozen screen or a bare "please wait". Where the total is truly unknown
+   the bar is replaced by a moving indicator plus a counter and the time, and the code says why. **The Device report always has one** (rule 9): every report, in the
+   app (`--report` and the menu item) and from Settings > Device reports, writes its `progress` (`step`, `steps`, `doing`) from the first check and shows the bar over
+   the whole run, including each pass of a multi-run report. Rec demo (rule 11) and the splash's load (rule 12) already do. A new app is not done until each wait
+   it has shows a bar and its self-test checks that the report's progress reaches `step = steps`; say untested what has not run on the unit.
+
 ## Check before committing
 
 `scripts/check.sh` (Python tests, Lua test, `bash -n`, shellcheck). Report

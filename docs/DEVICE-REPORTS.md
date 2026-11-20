@@ -79,6 +79,8 @@ maintainer says it in words.
 
 ### Progress (reports started from Settings > Device reports)
 
+**Every report shows a progress bar (rule 18, 2026-11-20).** A report is a wait, so each one, whether started from its app's main menu, `--report` or Settings > Device reports, writes `progress` from its first check to its last and shows the bar (`step` of `steps`, what it is doing, the time) on its own screen. A report that does not is not done; the in-app report counts every pass of a multi-run report in `steps`, and the self-test checks that `step` reaches `steps` before `end`.
+
 The menu (`menu/reports.lua`) starts one report at a time, in the background, and waits on a screen that shows how far it has got. It
 uses three files in `/run/loveos/report/`:
 
