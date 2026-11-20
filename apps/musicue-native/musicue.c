@@ -43,6 +43,7 @@
 #include "r3i6nos_mainmenu.h"
 #include "r3i6nos_keymap.h"
 #include "r3i6nos_toast.h"
+#include "r3i6nos_report.h"
 #include "r3i6nos_appdata.h"
 #include "cuedata.h"
 #include "audio.h"
@@ -172,7 +173,7 @@ typedef struct { char path[PATH_MAX]; char name[96]; char id[16]; int has_cues; 
 
 enum { M_LIBRARY, M_PLAYER, M_MENU, M_JOB, M_NOTE, M_ID, M_TEXT, M_KT };
 enum { JOB_SYNC, JOB_RENDER, JOB_COMPRESS };                                                 /* what the job screen is running: the sync, or a Key and Tempo render */
-enum { OV_NONE, OV_MM, OV_ABOUT, OV_THEME, OV_KEYMAP };                                      /* what shows over a screen: the main menu (L1+R1), About, the colour theme picker */
+enum { OV_NONE, OV_MM, OV_ABOUT, OV_THEME, OV_KEYMAP, OV_REPORT };                                      /* what shows over a screen: the main menu (L1+R1), About, the colour theme picker */
 enum { MK_LIBRARY, MK_SONG, MK_CONTEXT };                                         /* the app's own menus: the songs' (Add, Sync ...), the song's (offset, save ...), the context menu (L2+R2) */
 enum { TF_KEY, TF_TEMPO, TF_SIG, TF_SCRIPTER, TF_SUFFIX = 10 };                  /* what M_TEXT edits: a metadata field, or the number or letter after a marker's name */
 #define JUMP_SLOTS 8                                                              /* the Jump panel's one-touch buttons: D-pad up, down, left, right, then A, B, X, Y */
@@ -233,6 +234,8 @@ typedef struct {
     char kt_base_id[16], kt_copy_id[16], kt_out[PATH_MAX], kt_title[112], kt_key_txt[16], kt_tempo_txt[16]; double kt_ratio; int kt_semis;   /* the render in progress */
     char note[3][72];                       /* a message box (M_NOTE) */
     unsigned wave_sig;
+    int pending_report;                     /* the Device report was asked for (and confirmed): the main loop runs it */
+    double audio_idle_ms;                   /* how long nothing has sounded: the sound device is closed after 2 s (engine_sleep) */
 } App;
 
 /* The Jump panel's button tags, and the Piano panel's keys: which button plays which note of the octave (C C# D D# E F F# G G# A A# B). */
@@ -1445,6 +1448,15 @@ static void compose(App *a, R3Screen *s) {
         r3_about_draw(s, "MusiCue", VERSION, BUILD_LINE, lines);
     } else if (a->overlay == OV_THEME) r3_theme_pick_draw(s, a->theme_sel, a->theme);
     else if (a->overlay == OV_KEYMAP) r3_km_draw(s, &a->km);
+    else if (a->overlay == OV_REPORT) {
+        r3_box(s, 6, 6, 52, 12, &(R3Box){1, "Device report", NULL, "A run  B cancel", 0});
+        r3_text_fit(s, 8, 8, "Writes r36s-report.txt in MusiCue's data folder.", 48, R3_ST(R3_ST_BODY));
+        r3_text_fit(s, 8, 9, "It opens songs, plays the demo, draws the screen and", 48, R3_ST(R3_ST_BODY));
+        r3_text_fit(s, 8, 10, "makes a Key and Tempo copy: about two minutes, no", 48, R3_ST(R3_ST_BODY));
+        r3_text_fit(s, 8, 11, "input, all four cores for part of it.", 48, R3_ST(R3_ST_BODY));
+        r3_text_fit(s, 8, 13, "For the battery's draw, unplug the charger first.", 48, R3_ST(R3_ST_STRONG));
+        r3_text_fit(s, 8, 14, "Test files are made in the folder and removed.", 48, R3_ST(R3_ST_HINT));
+    }
 }
 
 /* ---- presenting: the cells, with the waveform's pixels laid over rows 1-6 ----------------------------------------------------------------- */
@@ -2560,6 +2572,11 @@ static void overlay_key(App *a, int act) {
     a->force = 1;
     if (a->overlay == OV_ABOUT) { a->overlay = OV_NONE; return; }
     if (a->overlay == OV_KEYMAP) { if (r3_km_key(&a->km, act)) a->overlay = OV_NONE; return; }
+    if (a->overlay == OV_REPORT) {                         /* it asks first: A runs it, B (or the menu key) does not */
+        if (act == R3_ACCEPT) { a->pending_report = 1; a->overlay = OV_NONE; say(a, R3_ST_WARN, "Writing the device report (about two minutes; no input meanwhile)..."); }
+        else if (act == R3_BACK || act == R3_MENU) { a->overlay = OV_NONE; say(a, R3_ST_HINT, "Device report cancelled."); }
+        return;
+    }
     if (a->overlay == OV_THEME) {
         if (act == R3_ACCEPT) {
             a->theme = a->theme_sel;
@@ -2584,7 +2601,7 @@ static void overlay_key(App *a, int act) {
     case R3MM_ABOUT: a->overlay = OV_ABOUT; break;
     case R3MM_THEME: a->overlay = OV_THEME; a->theme_sel = a->theme; break;
     case R3MM_KEYMAP: r3_km_open(&a->km, NULL, 0, 0); a->overlay = OV_KEYMAP; break;
-    case R3MM_REPORT: say(a, R3_ST_WARN, "The device report is not built for MusiCue yet."); break;
+    case R3MM_REPORT: a->overlay = OV_REPORT; break;
     case R3MM_DEMO: say(a, R3_ST_WARN, "Rec demo is not built for MusiCue yet (Rec mode, L1+Start, is another thing)."); break;
     case R3MM_QUIT: a->quit = 1; break;
     case R3MM_OWN0: open_menu(a, a->mode == M_PLAYER ? MK_SONG : MK_LIBRARY); break;
@@ -2762,6 +2779,10 @@ static void app_tick(App *a, double ms) {
         if (a->rec) { say(a, R3_ST_HINT, "The end: Rec stopped, %d cue%s added.", a->nrec, a->nrec == 1 ? "" : "s"); a->rec = 0; }
         else say(a, R3_ST_HINT, "The end. Start plays it again.");
     }
+    if (a->eng.dev && !a->piano && !engine_busy(&a->eng)) {          /* nothing sounds: after 2 s the device is closed (it wakes on the next play or note) */
+        a->audio_idle_ms += ms;
+        if (a->audio_idle_ms > 2000) engine_sleep(&a->eng);
+    } else a->audio_idle_ms = 0;
     job_poll(a);
 }
 
@@ -2791,6 +2812,28 @@ static void app_free(App *a) {
 /* ---- the tests ----------------------------------------------------------------------------------------------------------------------------- */
 
 static int g_bad;
+/* ---- the device report (musicue_report.h) uses the main loop's wait, so it is defined here, before the tests that run the report ---- */
+/* How long the main loop waits for an event and how often it looks while it waits (docs/POWER.md). Input in flight or something moving gets a frame every 16 ms; a song
+ * playing on its own is 30 frames a second (the playhead moves a few pixels a second); a screen at rest looks every 100 ms, and an event wakes it at once. */
+static void loop_pacing(App *a, int force, int settle, int toast, int *ms, int *step) {
+    int busy = force || a->force || settle > 0 || toast || a->mode == M_JOB || r3_input_stick_active(&a->in);
+    if (busy) { *ms = 16; *step = 8; }
+    else if (a->eng.playing) { *ms = 33; *step = 20; }
+    else { *ms = 250; *step = 100; }
+}
+
+static int wait_event(SDL_Event *e, int ms, int step) {
+    Uint32 end = SDL_GetTicks() + (Uint32)ms;
+    for (;;) {
+        if (SDL_PollEvent(e)) return 1;
+        int left = (int)(end - SDL_GetTicks());
+        if (left <= 0) return 0;
+        SDL_Delay((Uint32)(left < step ? left : step));
+    }
+}
+
+#include "musicue_report.h"
+
 #define CHECK(cond, ...) do { if (!(cond)) { g_bad++; fprintf(stderr, "selftest FAIL (%s:%d): ", __FILE__, __LINE__); fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
 
 /* A tap of a pad button through the same path the main loop uses, and a tap with a modifier held. */
@@ -3400,6 +3443,149 @@ static void test_kt(void) {
     CHECK(a.job_done && strstr(a.reply, "missing") && a.job_nlines > 0 && strstr(a.job_lines[a.job_nlines - 1], "not installed"), "no helper: it says so on the job screen and the line: %s", a.reply);
     unsetenv("R3I6NOS_MUSICUE_RENDER");
     app_free(&a);
+}
+
+/* ---- the device report: the menu asks first, and the report has every section and ends with `end` (docs/DEVICE-REPORTS.md) ----------------------------------- */
+
+/* ---- the sound device sleeps while nothing plays and wakes for the next play or note (an open, paused device wakes ~40 times a second: docs/POWER.md) ---- */
+
+static void test_sound_sleep(void) {
+    unsetenv("R3I6NOS_MUSICUE_NOAUDIO");
+    App a;
+    app_init(&a, g_tmp);
+    char d[PATH_MAX], p[PATH_MAX];
+    snprintf(d, sizeof d, "%s/sleep", g_tmp);
+    snprintf(a.data, sizeof a.data, "%s", d);
+    sub_path(&a, "media", NULL, p, sizeof p);
+    mkdirs(p);
+    sub_path(&a, "media", "Sleep Song.wav", p, sizeof p);
+    write_wav(p, 44100, 2, 16, 44100 * 5, 0);
+    scan_songs(&a);
+    CHECK(open_song(&a, 0) && a.eng.dev != 0 && !a.eng.noaudio && !a.eng.asleep, "a song opens with the sound device open (SDL's dummy driver)");
+    app_tick(&a, 1500);
+    CHECK(a.eng.dev != 0, "1.5 s of quiet: the device is still open");
+    app_tick(&a, 600);
+    CHECK(a.eng.dev == 0 && a.eng.asleep, "after 2 s of quiet the device is closed");
+    double p0 = engine_pos_sec(&a.eng);
+    engine_play(&a.eng, 1);
+    CHECK(a.eng.dev != 0 && !a.eng.asleep, "play wakes it");
+    SDL_Delay(300);
+    CHECK(engine_pos_sec(&a.eng) - p0 > 0.15, "and the song plays: %.2f s in 0.3 s", engine_pos_sec(&a.eng) - p0);
+    app_tick(&a, 5000);
+    CHECK(a.eng.dev != 0, "while it plays the device stays open however long that is");
+    engine_play(&a.eng, 0);
+    a.piano = 1;
+    app_tick(&a, 5000);
+    CHECK(a.eng.dev != 0, "while the Piano is open it stays open");
+    a.piano = 0;
+    app_tick(&a, 2100);
+    CHECK(a.eng.dev == 0, "and closes again when the Piano is shut");
+    engine_note_on(&a.eng, 3, 440.0);
+    CHECK(a.eng.dev != 0 && engine_busy(&a.eng), "a piano note wakes it");
+    app_tick(&a, 3000);
+    CHECK(a.eng.dev != 0, "a ringing voice keeps it open");
+    engine_notes_off(&a.eng);
+    app_free(&a);
+    /* the loop's pacing: at rest it looks every 100 ms, a song alone is 30 frames a second, anything moving is 16 ms */
+    App b;
+    app_init(&b, g_tmp);
+    int ms, step;
+    loop_pacing(&b, 0, 0, 0, &ms, &step);
+    CHECK(ms == 250 && step == 100, "at rest the loop looks every 100 ms (%d, %d)", ms, step);
+    b.eng.playing = 1;
+    loop_pacing(&b, 0, 0, 0, &ms, &step);
+    CHECK(ms == 33 && step == 20, "a song playing alone is 30 frames a second (%d, %d)", ms, step);
+    loop_pacing(&b, 1, 0, 0, &ms, &step);
+    CHECK(ms == 16 && step == 8, "input in flight is 16 ms (%d, %d)", ms, step);
+    b.eng.playing = 0;
+    app_free(&b);
+}
+
+static int screen_has(const R3Screen *s, const char *text) {        /* does any row of the screen contain this text? */
+    char row[R3_COLS + 1];
+    for (int y = 0; y < R3_ROWS; y++) {
+        for (int x = 0; x < R3_COLS; x++) { int c = s->ch[y * R3_COLS + x]; row[x] = c >= 32 && c < 127 ? (char)c : ' '; }
+        row[R3_COLS] = 0;
+        if (strstr(row, text)) return 1;
+    }
+    return 0;
+}
+
+static void test_report(void) {
+    App a;
+    app_init(&a, g_tmp);
+    /* the main menu's Device report opens the question; B does not run it, A does */
+    a.mode = M_LIBRARY;
+    mm_open(&a);
+    for (int i = 0; i < 3; i++) dispatch(&a, R3_DOWN);
+    dispatch(&a, R3_ACCEPT);
+    CHECK(a.overlay == OV_REPORT && !a.pending_report, "Device report in the main menu asks first");
+    R3Screen s;
+    compose(&a, &s);
+    CHECK(screen_has(&s, "unplug the charger"), "it says what the report needs");
+    check_contrast(&a, "device report question");
+    dispatch(&a, R3_BACK);
+    CHECK(a.overlay == OV_NONE && !a.pending_report, "B cancels it");
+    a.overlay = OV_REPORT;
+    dispatch(&a, R3_ACCEPT);
+    CHECK(a.overlay == OV_NONE && a.pending_report, "A runs it");
+    a.pending_report = 0;
+    app_free(&a);
+
+    /* the report itself, on SDL's dummy drivers, with short windows and a short song, in a throwaway data folder */
+    setenv("SDL_VIDEODRIVER", "dummy", 0);
+    setenv("SDL_AUDIODRIVER", "dummy", 0);
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) { CHECK(0, "SDL video would not start: %s", SDL_GetError()); return; }
+    SDL_Window *win = SDL_CreateWindow("report", 0, 0, R3_W, R3_H, 0);
+    SDL_Renderer *r = win ? SDL_CreateRenderer(win, -1, SDL_RENDERER_SOFTWARE) : NULL;
+    R3Video video;
+    R3Toast toast;
+    r3_toast_init(&toast);
+    int up = r && r3_video_init(&video, r);
+    CHECK(up, "a window and a renderer on the dummy driver");
+    if (up) {
+        App b;
+        app_init(&b, g_tmp);
+        char d[PATH_MAX], p[PATH_MAX + 64], fake[PATH_MAX];
+        snprintf(d, sizeof d, "%s/report", g_tmp);
+        snprintf(b.data, sizeof b.data, "%s", d);
+        const char *sub[] = {"media", "cues"};
+        for (int i = 0; i < 2; i++) { sub_path(&b, sub[i], NULL, p, sizeof p); mkdirs(p); }
+        sub_path(&b, "media", "Own Song.wav", p, sizeof p);
+        write_wav(p, 44100, 2, 16, 44100 * 3, 0);
+        snprintf(fake, sizeof fake, "%s/fakereportrender", g_tmp);
+        write_script(fake, "#!/bin/sh\nin=; out=\nwhile [ $# -gt 0 ]; do case \"$1\" in --in) in=\"$2\";; --out) out=\"$2\";; --ratio) case \"$2\" in 9) exit 2;; esac;; esac; shift; done\n"
+                           "[ -n \"$in\" ] || exit 2\ncp \"$in\" \"$out\"\necho \"DONE AAC 192k, 0.1 MiB, 1 frames in 0.1 s\"\n");
+        setenv("R3I6NOS_MUSICUE_RENDER", fake, 1);
+        setenv("R3I6NOS_REPORT_POWER_S", "1", 1);
+        setenv("R3I6NOS_REPORT_SONG_S", "10", 1);
+        sub_path(&b, "media", NULL, p, sizeof p);
+        int rc = musicue_report(&b, r, &video, &toast, 1);
+        CHECK(rc == 0, "the report is written (rc %d)", rc);
+        snprintf(p, sizeof p, "%s/r36s-report.txt", d);
+        char *t = cue_read_file(p, NULL);
+        CHECK(t != NULL, "r36s-report.txt is in the data folder");
+        if (t) {
+            const char *need[] = {"== system ==", "== card ==", "== helpers ==", "== songs ==", "== sound ==", "== screen ==", "== power ==", "== key and tempo ==", "== summary ==", NULL};
+            for (int i = 0; need[i]; i++) CHECK(strstr(t, need[i]) != NULL, "the report has %s", need[i]);
+            CHECK(strstr(t, "open a WAV") && strstr(t, "yours (.wav) Own Song"), "it times the app's own open of a WAV and of one of the person's songs");
+            CHECK(strstr(t, "idle") && strstr(t, "playing") && strstr(t, "rendering"), "the power section has idle, playing and rendering");
+            CHECK(strstr(t, "musicue-render") && strstr(t, "ffmpeg aac encoder") && strstr(t, "ffmpeg ipod muxer") && strstr(t, "ffmpeg s16le muxer"), "the helpers section checks the renderer and the muxers MusiCue needs");
+            size_t n = strlen(t);
+            CHECK(n > 4 && !strcmp(t + n - 4, "end\n"), "and it ends with `end`");
+            CHECK(strstr(t, "no personal") == NULL, "no stray text");
+            free(t);
+        }
+        snprintf(p, sizeof p, "%s/.report-work", d);
+        CHECK(access(p, F_OK) != 0, "the test files are gone");
+        CHECK(b.mode == M_LIBRARY && b.open < 0, "the app is back on the songs, nothing open");
+        unsetenv("R3I6NOS_MUSICUE_RENDER"); unsetenv("R3I6NOS_REPORT_POWER_S"); unsetenv("R3I6NOS_REPORT_SONG_S");
+        app_free(&b);
+        r3_video_free(&video);
+    }
+    if (r) SDL_DestroyRenderer(r);
+    if (win) SDL_DestroyWindow(win);
+    SDL_QuitSubSystem(SDL_INIT_VIDEO);
 }
 
 static void test_marquee(void) {
@@ -4112,6 +4298,7 @@ static void test_screens(void) {
     unsetenv("R3I6NOS_MUSICUE_NOAUDIO");
 }
 
+
 static int selftest(void) {
     char tmpl[PATH_MAX];
     snprintf(tmpl, sizeof tmpl, "%s/musicue-selftest-XXXXXX", getenv("TMPDIR") && *getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp");
@@ -4130,6 +4317,8 @@ static int selftest(void) {
     test_screens();
     test_add_id();
     test_kt();
+    test_sound_sleep();
+    test_report();
     test_marquee();
     test_cue_panel();
     test_panels_and_tempo();
@@ -4277,21 +4466,13 @@ static int key_button(SDL_Keycode k) {
 
 static void open_pads(void) { for (int i = 0; i < SDL_NumJoysticks(); i++) SDL_JoystickOpen(i); }
 
-static int wait_event(SDL_Event *e, int ms, int step) {
-    Uint32 end = SDL_GetTicks() + (Uint32)ms;
-    for (;;) {
-        if (SDL_PollEvent(e)) return 1;
-        int left = (int)(end - SDL_GetTicks());
-        if (left <= 0) return 0;
-        SDL_Delay((Uint32)(left < step ? left : step));
-    }
-}
 
 int main(int argc, char **argv) {
-    int selftest_run = 0, theme = -1;
+    int selftest_run = 0, theme = -1, report = 0;
     const char *shot = NULL, *screen = "player", *demo_dir = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--selftest")) selftest_run = 1;
+        else if (!strcmp(argv[i], "--report")) report = 1;
         else if (!strcmp(argv[i], "--version")) { puts("musicue " VERSION); return 0; }
         else if (!strcmp(argv[i], "--sync-path")) { char hb[PATH_MAX + 40]; puts(helper_path(hb, sizeof hb)); return 0; }
         else if (!strcmp(argv[i], "--render-path")) { char hb[PATH_MAX + 40]; puts(render_helper_path(hb, sizeof hb)); return 0; }
@@ -4307,7 +4488,7 @@ int main(int argc, char **argv) {
                 return 2;
             }
         } else {
-            fprintf(stderr, "usage: %s [--selftest | --version | --sync-path | --render-path | --make-demo DIR | [--theme NAME] [--screen library|player|menu|context|mainmenu|about|jump|rec|piano|suffix|kt] --screenshot out.bmp]\n", argv[0]);
+            fprintf(stderr, "usage: %s [--selftest | --report | --version | --sync-path | --render-path | --make-demo DIR | [--theme NAME] [--screen library|player|menu|context|mainmenu|about|jump|rec|piano|suffix|kt] --screenshot out.bmp]\n", argv[0]);
             return 2;
         }
     }
@@ -4346,8 +4527,11 @@ int main(int argc, char **argv) {
     R3AppData data;
     memset(&data, 0, sizeof data);
     R3AppDataUI adui = {r, &video, &toast, NULL, NULL, NULL};
-    r3_appdata_init(&data, "MusiCue", &adui);
-    if (data.quit) { r3_video_free(&video); SDL_DestroyRenderer(r); SDL_DestroyWindow(win); SDL_Quit(); return 0; }
+    if (report) r3_appdata_quiet(&data, "MusiCue");           /* an unattended run never asks and never moves anything (rule 16) */
+    else {
+        r3_appdata_init(&data, "MusiCue", &adui);
+        if (data.quit) { r3_video_free(&video); SDL_DestroyRenderer(r); SDL_DestroyWindow(win); SDL_Quit(); return 0; }
+    }
     snprintf(app.data, sizeof app.data, "%s", data.use);
     char sub[PATH_MAX];
     const char *dirs[] = {"media", "cues", "inbox", "export"};
@@ -4361,13 +4545,23 @@ int main(int argc, char **argv) {
     if (data.notice[0]) say(&app, R3_ST_WARN, "%s", data.notice);
     else say(&app, R3_ST_HINT, "%d song%s. A opens one, L1+R1 is the menu.", app.nsongs, app.nsongs == 1 ? "" : "s");
 
+    if (report) {                                              /* musicue --report: the real window, the report, and out */
+        int rc = musicue_report(&app, r, &video, &toast, 0);
+        app_free(&app);
+        r3_video_free(&video);
+        SDL_DestroyRenderer(r);
+        SDL_DestroyWindow(win);
+        SDL_Quit();
+        return rc;
+    }
     R3Screen screen_cells;
     int force = 1;
     Uint32 last = SDL_GetTicks();
     while (!app.quit) {
         SDL_Event e;
-        int busy = force || app.force || video.settle > 0 || app.eng.playing || r3_toast_active(&toast) || app.mode == M_JOB || r3_input_stick_active(&app.in);
-        int have = wait_event(&e, busy ? 16 : 250, busy ? 8 : 40);
+        int wait_ms, wait_step;
+        loop_pacing(&app, force, video.settle, r3_toast_active(&toast), &wait_ms, &wait_step);
+        int have = wait_event(&e, wait_ms, wait_step);
         while (have) {
             switch (e.type) {
             case SDL_QUIT: app.quit = 1; break;
@@ -4411,6 +4605,16 @@ int main(int argc, char **argv) {
         app_tick(&app, (double)(now - last));
         stick_tick(&app, now);
         last = now;
+        if (app.pending_report) {                              /* the Device report: show that it is working, then run it (no input is read meanwhile) */
+            app.pending_report = 0;
+            compose(&app, &screen_cells);
+            present(&app, &video, r, &screen_cells, 1);
+            int rc = musicue_report(&app, r, &video, &toast, 1);
+            if (rc == 0) say(&app, R3_ST_OK, "Report written: %s/r36s-report.txt", app.data);
+            else say(&app, R3_ST_ERROR, "The report could not be written in %s", app.data);
+            last = SDL_GetTicks();
+            force = 1;
+        }
         if (app.force) { force = 1; app.force = 0; }
         r3_toast_poll(&toast, now);
         compose(&app, &screen_cells);

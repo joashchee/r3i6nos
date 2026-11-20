@@ -213,6 +213,7 @@ typedef struct {
     const Track *t;
     SDL_AudioDeviceID dev;
     int noaudio;
+    int asleep;                         /* the sound device is closed while nothing plays (an open one wakes about 40 times a second feeding silence, and keeps the amplifier on) */
     volatile int playing, ended;
     volatile int64_t pos;               /* frame to play next */
     volatile int loop;                  /* 1: wrap from loop_b back to loop_a */
@@ -274,13 +275,9 @@ static void engine_callback(void *ud, Uint8 *stream, int len) {
 }
 
 /* Open the sound device (unless there is none or R3I6NOS_MUSICUE_NOAUDIO=1). The track must outlive the engine. */
-static void engine_open(Engine *e, const Track *t) {
-    memset(e, 0, sizeof *e);
-    e->t = t;
-    e->loop_a = e->loop_b = 0;
-    const char *na = getenv("R3I6NOS_MUSICUE_NOAUDIO");
-    if (na && *na == '1') { e->noaudio = 1; return; }
-    if (!(SDL_WasInit(SDL_INIT_AUDIO) & SDL_INIT_AUDIO) && SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) { e->noaudio = 1; return; }
+/* Opens the sound device with the engine's own settings. 1 when it is open; 0 leaves noaudio set. */
+static int engine_dev_open(Engine *e) {
+    if (!(SDL_WasInit(SDL_INIT_AUDIO) & SDL_INIT_AUDIO) && SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) { e->noaudio = 1; return 0; }
     SDL_AudioSpec want, have;
     SDL_zero(want);
     want.freq = TRACK_RATE; want.format = AUDIO_S16SYS; want.channels = 2; want.samples = 1024; want.callback = engine_callback; want.userdata = e;
@@ -289,9 +286,36 @@ static void engine_open(Engine *e, const Track *t) {
         if (e->dev) SDL_CloseAudioDevice(e->dev);
         e->dev = 0;
         e->noaudio = 1;
-        return;
+        return 0;
     }
     SDL_PauseAudioDevice(e->dev, 0);
+    return 1;
+}
+
+/* Open the sound device (unless there is none or R3I6NOS_MUSICUE_NOAUDIO=1). The track must outlive the engine. */
+static void engine_open(Engine *e, const Track *t) {
+    memset(e, 0, sizeof *e);
+    e->t = t;
+    e->loop_a = e->loop_b = 0;
+    const char *na = getenv("R3I6NOS_MUSICUE_NOAUDIO");
+    if (na && *na == '1') { e->noaudio = 1; return; }
+    engine_dev_open(e);
+}
+
+/* Close the device while nothing plays and wake it when something does (docs/POWER.md: SDL's audio thread feeds an open, paused device silence about 40 times a
+ * second and the amplifier stays powered). The position, the loop and the voices stay as they were. */
+static void engine_sleep(Engine *e) {
+    if (e->dev && !e->playing) { SDL_CloseAudioDevice(e->dev); e->dev = 0; e->asleep = 1; }
+}
+/* Something is sounding: the song plays or a piano voice is still ringing. */
+static int engine_busy(const Engine *e) {
+    if (e->playing) return 1;
+    for (int v = 0; v < VOICES; v++) if (e->voice[v].active) return 1;
+    return 0;
+}
+static void engine_wake(Engine *e) {
+    if (e->asleep && !e->dev && !e->noaudio) engine_dev_open(e);
+    e->asleep = 0;
 }
 
 static void engine_close(Engine *e) {
@@ -315,6 +339,7 @@ static void engine_seek(Engine *e, double sec) {
 }
 
 static void engine_play(Engine *e, int on) {
+    if (on) engine_wake(e);
     ENGINE_LOCK(e);
     if (on && e->pos >= e->t->frames) e->pos = 0;
     e->playing = on ? 1 : 0;
@@ -342,6 +367,7 @@ static void engine_loop_clear(Engine *e) {
 
 /* A piano note on: freq in Hz, key 0-11 names it so engine_note_off finds it (a held note decays slowly, a released one fades in 50 ms). */
 static void engine_note_on(Engine *e, int key, double freq) {
+    engine_wake(e);
     ENGINE_LOCK(e);
     int slot = -1;
     for (int v = 0; v < VOICES; v++) if (e->voice[v].active && e->voice[v].key == key) slot = v;       /* the same key again restarts its voice */

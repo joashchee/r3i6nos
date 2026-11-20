@@ -102,3 +102,7 @@ song; `--make-demo DIR` writes that song and its cue file. `tests/test_musicue_s
 ## Key and Tempo: a copy at another Key and Tempo (2026-11-20)
 
 Song options > **Key and Tempo: make a copy** renders a copy of the song in another Key and/or Tempo on all four cores (docs/MUSICUE.md, "Key and Tempo: render a copy"). The song needs a Key and a Tempo in Metadata. App data it adds: the copy (`media/Title (A 104bpm) [kt-xxxxxxxx].m4a`, AAC 192 kbps, about 1.4 MiB a minute; or a `.wav`, about 10 MiB a minute, when Select on that screen has chosen WAV; Library menu > Compress copies to AAC turns WAV copies into M4A), its cue file and `.offset`, and `cues/<id>.kt`; while it runs `<copy>.wav.part` and `<copy>.wav.journal` sit beside it. The renderer is `usr/lib/musicue/musicue-render`, packed with the app (Signalsmith Stretch and Linear, MIT; their licences are in the package's doc folder).
+
+## Device report (2026-11-20)
+
+The main menu's **Device report** (L1+R1; it asks first) or `musicue --report` writes `r36s-report.txt` in MusiCue's data folder: the helpers, how long the app takes to open a WAV and an M4A (and a few of your own songs), the sound device, the screen, the power section (idle with a song paused, playing, and rendering a Key and Tempo copy) and the copy itself. It makes a 60 s test song and its copy in `.report-work/` and removes them. Unplug the charger first for the battery's draw. About two minutes, no input meanwhile.
