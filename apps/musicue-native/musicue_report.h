@@ -32,10 +32,14 @@ static void rpt_turn(void *arg) {
     Uint32 now = SDL_GetTicks();
     app_tick(a, (double)(now - c->last));
     c->last = now;
+    /* The main loop takes a->force (set by the menu item that started the report) into its next present and clears it. Left set here it kept loop_pacing busy for
+     * the whole report: a look every 8 ms, 137 wake-ups a second while idle (the unit's first report, 2026-11-20; `--report` never sets it, so Docker missed it). */
+    int force = a->force;
+    a->force = 0;
     r3_toast_poll(c->toast, now);
     compose(a, &c->cells);
     r3_toast_draw(c->toast, &c->cells);
-    present(a, c->video, c->r, &c->cells, 0);
+    present(a, c->video, c->r, &c->cells, force);
 }
 
 typedef struct { int code; double wall; char done[256], error[256], first[256]; } RptRun;

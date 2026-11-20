@@ -3601,8 +3601,10 @@ static void test_report(void) {
         setenv("R3I6NOS_REPORT_POWER_S", "1", 1);
         setenv("R3I6NOS_REPORT_SONG_S", "10", 1);
         sub_path(&b, "media", NULL, p, sizeof p);
+        b.force = 1;                                    /* as the menu item leaves it: the report must not keep the loop busy (first unit report) */
         int rc = musicue_report(&b, r, &video, &toast, 1);
         CHECK(rc == 0, "the report is written (rc %d)", rc);
+        CHECK(b.force == 0, "the report clears the main loop's force flag, or idle polls every 8 ms");
         snprintf(p, sizeof p, "%s/r36s-report.txt", d);
         char *t = cue_read_file(p, NULL);
         CHECK(t != NULL, "r36s-report.txt is in the data folder");
