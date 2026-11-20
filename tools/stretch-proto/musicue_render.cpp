@@ -62,19 +62,50 @@ static bool read_wav16(const std::string &path, Song16 &s) {
     return false;
 }
 
-static bool decode_with_ffmpeg(const std::string &in, const std::string &tmp, std::string &err) {
+// Anything else through ffmpeg, the way the app's own decoder does it: raw 16-bit 44.1 kHz stereo on a pipe (the image's ffmpeg has the s16le muxer and no
+// wav one), straight into the song's memory. ffmpeg's own error lines are left on stderr, which the app shows on the job screen. A song over max_s seconds
+// is refused (the app opens at most 12 minutes of a song, and a copy of part of one would be wrong).
+static bool decode_with_ffmpeg(const std::string &in, double max_s, Song16 &song, std::string &err) {
     const char *ff = getenv("R3I6NOS_FFMPEG");
     if (!ff || !*ff) ff = "ffmpeg";
+    int fd[2];
+    if (pipe(fd) != 0) { err = "no pipe"; return false; }
     pid_t pid = fork();
-    if (pid < 0) { err = "cannot start ffmpeg"; return false; }
+    if (pid < 0) { close(fd[0]); close(fd[1]); err = "cannot start ffmpeg"; return false; }
     if (pid == 0) {
-        execlp(ff, ff, "-v", "error", "-nostdin", "-y", "-i", in.c_str(), "-vn", "-acodec", "pcm_s16le", "-ar", "44100", "-ac", "2", "-f", "wav", tmp.c_str(), (char *)nullptr);
+        dup2(fd[1], 1);
+        close(fd[0]); close(fd[1]);
+        execlp(ff, ff, "-v", "error", "-nostdin", "-i", in.c_str(), "-vn", "-f", "s16le", "-ar", "44100", "-ac", "2", "pipe:1", (char *)nullptr);
         _exit(127);
     }
+    close(fd[1]);
+    const size_t cap_bytes = (size_t)(max_s * 44100.0) * 4;
+    song.channels = 2; song.rate = 44100; song.d.clear(); song.d.reserve(cap_bytes / 2 + 4096);
+    size_t have = 0;                                   // bytes read so far
+    bool too_long = false;
+    for (;;) {
+        if (g_cancel.load()) { kill(pid, SIGTERM); break; }
+        if (song.d.size() * 2 < have + 65536) song.d.resize(std::min(cap_bytes + 65536, have + (size_t)4 * 1048576) / 2 + 1);
+        ssize_t got = read(fd[0], (char *)song.d.data() + have, std::min<size_t>(65536, cap_bytes + 65536 - have));
+        if (got < 0 && errno == EINTR) continue;
+        if (got <= 0) break;
+        have += (size_t)got;
+        if (have > cap_bytes) { too_long = true; kill(pid, SIGTERM); break; }
+    }
+    close(fd[0]);
     int st = 0;
     while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
     if (g_cancel.load()) { err = "cancelled"; return false; }
+    if (too_long) {
+        char buf[96];
+        if (max_s >= 120 && std::fmod(max_s, 60.0) == 0) snprintf(buf, sizeof buf, "the song is longer than %.0f minutes; it cannot be copied", max_s / 60);
+        else snprintf(buf, sizeof buf, "the song is longer than %.0f seconds; it cannot be copied", max_s);
+        err = buf;
+        return false;
+    }
     if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) { err = WIFEXITED(st) && WEXITSTATUS(st) == 127 ? "ffmpeg is not installed" : "ffmpeg could not read the song"; return false; }
+    song.d.resize(have / 4 * 2);
+    song.d.shrink_to_fit();
     return true;
 }
 
@@ -101,15 +132,14 @@ int main(int argc, char **argv) {
 
     say("PROGRESS 0/1 Reading the song...");
     Song16 song;
+    double max_s = 12 * 60;                              // MusiCue's own limit for a song (audio.h TRACK_MAX_SECONDS); $R3I6NOS_RENDER_MAX_S lowers it for tests
+    if (const char *m = getenv("R3I6NOS_RENDER_MAX_S")) if (atof(m) > 0) max_s = atof(m);
     if (!read_wav16(in, song)) {
-        const std::string tmp = out + ".in.wav";
         std::string err;
         say("PROGRESS 0/1 Decoding the song...");
-        if (!decode_with_ffmpeg(in, tmp, err)) { unlink(tmp.c_str()); if (g_cancel.load()) return 130; say("ERROR %s", err.c_str()); return 1; }
-        bool ok = read_wav16(tmp, song);
-        unlink(tmp.c_str());
-        if (!ok) { say("ERROR the decoded song is not readable"); return 1; }
+        if (!decode_with_ffmpeg(in, max_s, song, err)) { if (g_cancel.load()) return 130; say("ERROR %s", err.c_str()); return 1; }
     }
+    if (song.frames() > (int64_t)(max_s * 44100.0)) { say("ERROR the song is longer than %.0f minutes; it cannot be copied", max_s / 60); return 1; }
     if (song.frames() < 44100 * 8) { say("ERROR the song is under 8 seconds"); return 1; }
 
     // room for the copy (and 16 MiB over), before anything is written

@@ -6,7 +6,9 @@
 #   3. a run that dies after a checkpoint (a power cut), run again, gives the same bytes as a run that was not interrupted, and says it resumed;
 #   4. a different ratio on the same part and journal starts again instead of continuing;
 #   5. a SIGTERM leaves the part and the journal and exits 130, and the next run finishes the copy;
-#   6. a song that is too short, one that is not audio and a ratio out of range are refused.
+#   6. a song that is too short, one that is not audio and a ratio out of range are refused;
+#   7. a song that is not a WAV is decoded through an ffmpeg that, like the unit's, has no wav muxer (raw s16le on a pipe), and gives the same bytes;
+#      ffmpeg failing shows its own line; a song over the limit is refused.
 set -u
 B="$1"; T="$(mktemp -d)"; fail=0
 ok() { echo "PASS $1"; }
@@ -55,6 +57,25 @@ if [ "$rc" = 130 ] && [ -e "$T/term.wav.part" ] && [ -e "$T/term.wav.journal" ];
     echo "INFO a 400 s song (70 MiB of 16-bit audio), 4 workers: $(grep '^DONE' <<<"$out")"
     if cmp -s "$T/term.wav" "$T/longref.wav"; then ok "the run after a SIGTERM finishes the same bytes as an uninterrupted one"; else bad "the run after a SIGTERM differs"; fi
 else bad "SIGTERM exits 130 and leaves the part and the journal (exit $rc)"; fi
+
+# anything that is not a WAV goes through ffmpeg as raw s16le on a pipe: the image's ffmpeg has no wav muxer, so this ffmpeg refuses one as the unit's does
+cat > "$T/fakeffmpeg" <<'FF'
+#!/bin/sh
+case "$*" in *"-f wav"*) echo "[NULL @ 0x5598f7ee60] output format 'wav' is not a suitable output format" >&2; echo "Error initializing the muxer for pipe:1: Invalid argument" >&2; exit 1 ;; esac
+case "$*" in *"-f s16le"*"pipe:1"*) tail -c +45 "$FAKE_SRC"; exit 0 ;; esac
+echo "unexpected arguments: $*" >&2; exit 1
+FF
+chmod +x "$T/fakeffmpeg"
+echo "not a wav at all" > "$T/song.m4a"
+out="$(R3I6NOS_FFMPEG="$T/fakeffmpeg" FAKE_SRC="$T/song.wav" "$R" --in "$T/song.m4a" --out "$T/m4a.wav" --ratio 1.25 --semitones -2 --workers 2)"; rc=$?
+if [ "$rc" = 0 ] && grep -q '^DONE ' <<<"$out"; then ok "a song that is not a WAV is decoded through ffmpeg's s16le pipe"; else bad "a song that is not a WAV is decoded through ffmpeg's s16le pipe ($rc): $out"; fi
+if cmp -s "$T/m4a.wav" "$T/w1.wav"; then ok "and the copy is the same bytes as one made from the WAV"; else bad "the copy through ffmpeg differs from the one made from the WAV"; fi
+printf '#!/bin/sh\necho "fake ffmpeg: Invalid data found when processing input" >&2\nexit 1\n' > "$T/badffmpeg"; chmod +x "$T/badffmpeg"
+out="$(R3I6NOS_FFMPEG="$T/badffmpeg" "$R" --in "$T/song.m4a" --out "$T/bad.wav" --ratio 1.25 --semitones -2 2>&1)"; rc=$?
+if [ "$rc" = 1 ] && grep -q '^ERROR ffmpeg could not read the song' <<<"$out" && grep -q 'Invalid data' <<<"$out"; then ok "ffmpeg failing: ffmpeg's own line and an ERROR line"; else bad "ffmpeg failing says why ($rc): $out"; fi
+out="$(R3I6NOS_RENDER_MAX_S=30 R3I6NOS_FFMPEG="$T/fakeffmpeg" FAKE_SRC="$T/song.wav" "$R" --in "$T/song.m4a" --out "$T/long.m4a.wav" --ratio 1.25 --semitones -2)"; rc=$?
+if [ "$rc" = 1 ] && grep -q '^ERROR the song is longer than 30 seconds' <<<"$out"; then ok "a song over the limit is refused, not cut"; else bad "a song over the limit is refused ($rc): $out"; fi
+if [ -e "$T/long.m4a.wav.part" ]; then bad "a refused song leaves no part"; else ok "a refused song leaves no part"; fi
 
 "$S" make-sine "$T/short.wav" 5 440
 out="$("$R" --in "$T/short.wav" --out "$T/short.out.wav" --ratio 1.1 --semitones 0)"; rc=$?
