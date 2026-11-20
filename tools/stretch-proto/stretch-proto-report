@@ -89,7 +89,7 @@ for v in stretch-proto stretch-proto-pffft; do
             r="$(echo "$res" | grep " workers=$w ")"
             [ -n "$r" ] || continue
             x="$(kv x_realtime "$r")"; sp="$(kv speedup "$r")"; wall="$(kv wall_s "$r")"
-            line INFO "$v $pname, $w worker(s)" "$x x real time, wall $wall s, speed-up $sp x, threads busy $(kv cpu_s "$r") s, join $(kv assemble_s "$r") s, $(kv chunks "$r") segments"
+            line INFO "$v $pname, $w worker(s)" "$x x real time, wall $wall s, speed-up $sp x, threads busy $(kv cpu_s "$r") s, join $(kv assemble_s "$r") s (alignment $(kv align_s "$r") s), $(kv chunks "$r") segments"
         done
         line INFO "$v $pname peak memory" "$(echo "$res" | grep '^INFO peak' | sed 's/INFO peak memory: //')"
         x4="$(kv x_realtime "$(echo "$res" | grep ' workers=4 ')")"
@@ -109,15 +109,30 @@ emit ""
 prog "the power draw"
 emit "== power =="
 if [ -n "$bat" ] && [ "$(rd "$bat/status")" = Discharging ] && [ -r "$bat/current_now" ] && [ -r "$bat/voltage_now" ]; then
-    # one 4-worker run, the battery read once a second (docs/POWER.md): the draw while rendering and the draw just before it
-    idle=0; n=0; for _ in 1 2 3 4 5; do idle=$(( idle + $(mw) )); n=$((n+1)); sleep 1; done
-    line INFO "draw idle" "$(( idle / n )) mW"
-    v="${best%% *}"; v="${v:-stretch-proto}"
-    "$BIN/$v" bench "$SECS" --workers 4 > /dev/null 2>&1 &
-    pid=$!; sum=0; n=0
-    while kill -0 "$pid" 2>/dev/null; do sum=$(( sum + $(mw) )); n=$((n+1)); sleep 1; done
-    [ "$n" -gt 0 ] && line INFO "draw while rendering" "$(( sum / n )) mW over $n s (one worker, then four), $(rd "$bat/capacity") % charge"
-    line INFO "power hint" "repeat at 100, 50 and 20 % charge before trusting a small difference (docs/POWER.md)"
+    # The render alone (docs/POWER.md): the test song is made first as a WAV, then the render is run again and again while the battery is read once a
+    # second, 12 readings for each setting. The energy is what the draw above idle costs for each second of song.
+    song="${TMPDIR:-/tmp}/stretch-proto-song.$$.wav"
+    v=stretch-proto
+    if "$BIN/$v" make-song "$song" "$SECS"; then
+        idle=0; n=0; for _ in 1 2 3 4 5; do idle=$(( idle + $(mw) )); n=$((n+1)); sleep 1; done
+        idle=$(( idle / n ))
+        line INFO "draw idle" "$idle mW (screen on, nothing running), $(rd "$bat/capacity") % charge"
+        measure() {   # label, then render options: renders over and over until 12 readings; M_MW is their mean, M_X the speed of the last run
+            local label="$1" sum=0 cnt=0 pid; shift
+            while [ "$cnt" -lt 12 ]; do
+                "$BIN/$v" render "$song" "$song.out" --ratio 0.8 --semitones 3 "$@" > "$song.log" 2>&1 &
+                pid=$!
+                while kill -0 "$pid" 2>/dev/null; do sum=$(( sum + $(mw) )); cnt=$((cnt+1)); sleep 1; done
+            done
+            M_MW=$(( sum / cnt )); M_X="$(sed -n 's/.*(\([0-9.]*\)x real time.*/\1/p' "$song.log" | tail -n 1)"
+            line INFO "draw $label" "$M_MW mW over $cnt s, $M_X x real time, $(( M_MW - idle )) mW above idle, about $(awk "BEGIN{printf \"%.0f\", ($M_MW - $idle) / ($M_X + 0.001)}") mJ per second of song, $(awk "BEGIN{printf \"%.1f\", ($M_MW - $idle) / ($M_X + 0.001) * 240 / 3600}") mWh for a 4-minute song"
+        }
+        measure "4 workers, default preset" --workers 4
+        measure "4 workers, cheaper preset" --workers 4 --cheaper
+        measure "1 worker, cheaper preset" --workers 1 --cheaper
+        line INFO "power hint" "repeat at 100, 50 and 20 % charge before trusting a small difference (docs/POWER.md)"
+    else line SKIP "draw" "could not make the test song in ${TMPDIR:-/tmp}"; fi
+    rm -f "$song" "$song.out" "$song.log"
 else
     line SKIP "draw" "not on battery (status $(rd "${bat:-/nonexistent}/status")): unplug the charger and run again"
 fi

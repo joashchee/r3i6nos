@@ -82,8 +82,12 @@ case "$MODE" in *--package*)
     dpkg-deb --root-owner-group -Zxz --build $S /o/r3i6nos-stretch-proto.deb
     # the package in an empty folder, running its own report on a short song, with fake /sys and /proc, as the unit would
     T=/tmp/inst; rm -rf $T; mkdir -p $T/data; dpkg -x /o/r3i6nos-stretch-proto.deb $T
-    R3I6NOS_APP_DATA=$T/data R3I6NOS_STRETCH_SECS=8 $T/usr/bin/stretch-proto-report > /tmp/report.out || { cat /tmp/report.out; echo "REPORT FAILED"; exit 1; }
-    tail -n 30 $T/data/r36s-report.txt
+    # a fake battery (discharging, the current negative as the unit reports it, 1.5 A at 4 V is 6 W) so the power section runs too
+    B=$T/sys/class/power_supply/battery; mkdir -p $B
+    echo Discharging > $B/status; echo 90 > $B/capacity; echo -300000 > $B/current_now; echo 4000000 > $B/voltage_now
+    R3I6NOS_SYS=$T/sys R3I6NOS_APP_DATA=$T/data R3I6NOS_STRETCH_SECS=8 TMPDIR=$T $T/usr/bin/stretch-proto-report > /tmp/report.out || { cat /tmp/report.out; echo "REPORT FAILED"; exit 1; }
+    tail -n 22 $T/data/r36s-report.txt
+    grep -q "draw 4 workers, default preset: 1200 mW" $T/data/r36s-report.txt || { echo "the power section did not read 1200 mW (0.3 A x 4 V, sign dropped)"; exit 1; }
     [ "$(tail -n 1 $T/data/r36s-report.txt)" = end ] || { echo "report does not end with end"; exit 1; }
     ;;
 esac

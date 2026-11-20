@@ -39,7 +39,7 @@ struct Job {
 
 struct Stats {
     int chunks = 0;
-    double wall_s = 0, cpu_s = 0, audio_s = 0, assemble_s = 0;      // cpu_s: the threads' own time added up (it grows if the cores slow each other); audio_s: the input's length
+    double wall_s = 0, cpu_s = 0, audio_s = 0, assemble_s = 0, align_s = 0;      // cpu_s: the threads' own time added up (it grows if the cores slow each other); audio_s: the input's length
     std::vector<int64_t> seams_out;                 // the cuts, in output frames
 };
 
@@ -127,54 +127,69 @@ inline Pcm render(const Pcm &p, const Job &j, Stats *stats = nullptr) {
     std::vector<int64_t> seams, base(n), shift(n, 0);
     for (int k = 1; k < n; k++) seams.push_back(out_pos(cuts[k], j.ratio));
     for (int k = 0; k < n; k++) base[k] = out_pos(k == 0 ? cuts[0] : cuts[k] - pad_in, j.ratio);
-    auto sample = [&](int k, int64_t g, int64_t sh) -> float {         // piece k's mid channel at global frame g, the piece moved by sh
-        int64_t i = g - base[k] - sh;
-        if (i < 0 || i >= (int64_t)piece[k][0].size()) return 0.f;
-        float v = 0; for (int c = 0; c < p.channels; c++) v += piece[k][c][i];
-        return v / (float)p.channels;
+    // The mid channel of piece k over the global frames [g0, g1), the piece moved by sh: contiguous, so the search below runs over arrays.
+    auto mid = [&](int k, int64_t g0, int64_t g1, int64_t sh, std::vector<float> &v) {
+        v.assign((size_t)(g1 - g0), 0.f);
+        const int64_t len = (int64_t)piece[k][0].size();
+        for (int64_t g = g0; g < g1; g++) {
+            int64_t i = g - base[k] - sh;
+            if (i < 0 || i >= len) continue;
+            float x = 0; for (int c = 0; c < p.channels; c++) x += piece[k][c][i];
+            v[(size_t)(g - g0)] = x / (float)p.channels;
+        }
     };
     const int64_t L = (int64_t)(j.align_ms * 0.001 * p.rate), CW = (int64_t)(0.08 * p.rate);
+    auto t_align = std::chrono::steady_clock::now();
+    std::vector<float> A, B0;
     for (int k = 1; k < n && L > 0; k++) {
-        const int64_t sm = seams[k - 1];
-        std::vector<double> cc(2 * L + 1);
-        double best = -2;
-        for (int64_t s = -L; s <= L; s++) {
-            double ab = 0, aa = 0, bb = 0;
-            for (int64_t g = sm - CW / 2; g < sm + CW / 2; g += 2) {
-                double a = sample(k - 1, g, shift[k - 1]), b = sample(k, g, s);
-                ab += a * b; aa += a * a; bb += b * b;
-            }
-            cc[s + L] = aa > 0 && bb > 0 ? ab / std::sqrt(aa * bb) : 0;
-            best = std::max(best, cc[s + L]);
+        const int64_t sm = seams[k - 1], lo = sm - CW / 2, hi = sm + CW / 2;
+        mid(k - 1, lo, hi, shift[k - 1], A);                      // the piece before, where it is placed
+        mid(k, lo - L, hi + L, 0, B0);                            // this piece unmoved, with room for the search either side
+        std::vector<double> cc((size_t)(2 * L + 1));
+        double best = -2, aa = 0;
+        const int64_t m = hi - lo;
+        for (int64_t i = 0; i < m; i++) aa += (double)A[(size_t)i] * A[(size_t)i];
+        for (int64_t s = -L; s <= L; s++) {                      // this piece moved by s: its sample at g is B0 at g - s
+            const float *b = B0.data() + (L - s);                // b[i] pairs with A[i]
+            float ab = 0, bb = 0;
+            for (int64_t i = 0; i < m; i++) { ab += A[(size_t)i] * b[i]; bb += b[i] * b[i]; }
+            cc[(size_t)(s + L)] = aa > 0 && bb > 0 ? (double)ab / std::sqrt(aa * (double)bb) : 0;
+            best = std::max(best, cc[(size_t)(s + L)]);
         }
         int64_t pick = 0; double pickc = -2;
         for (int64_t s = -L; s <= L; s++)
-            if (cc[s + L] >= best - 0.02 && (pickc < -1 || std::llabs(s) < std::llabs(pick))) { pick = s; pickc = cc[s + L]; }
+            if (cc[(size_t)(s + L)] >= best - 0.02 && (pickc < -1 || std::llabs(s) < std::llabs(pick))) { pick = s; pickc = cc[(size_t)(s + L)]; }
         shift[k] = pick;
     }
+    const double align_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_align).count();
+    // Mix: a piece counts from the start of its fade in (a cut's W/2 before) to the end of its fade out; the body between the two fades is a plain add.
     for (int k = 0; k < n; k++) {
         const int64_t sl = k > 0 ? seams[k - 1] : -1, sr_ = k < n - 1 ? seams[k] : -1;
-        const int64_t len = (int64_t)piece[k][0].size();
-        for (int64_t i = 0; i < len; i++) {
-            int64_t g = base[k] + shift[k] + i;
-            if (g < 0 || g >= M) continue;
-            double w = 1.0;
-            if (sl >= 0) {                                                         // fade in over [sl - W/2, sl + W/2)
-                double t = (double)(g - (sl - W / 2)) / (double)W;
-                if (t <= 0) w = 0; else if (t < 1) w *= j.equal_power ? std::sin(t * M_PI / 2) : t;
+        const int64_t len = (int64_t)piece[k][0].size(), gs = base[k] + shift[k];       // where the piece's first frame lands
+        const int64_t inA = sl >= 0 ? sl - W / 2 : gs, inB = sl >= 0 ? sl + W / 2 : gs;   // fade in [inA, inB)
+        const int64_t outA = sr_ >= 0 ? sr_ - W / 2 : gs + len, outB = sr_ >= 0 ? sr_ + W / 2 : gs + len;   // fade out [outA, outB)
+        const int64_t g0 = std::max<int64_t>(std::max(gs, inA), 0), g1 = std::min(std::min(gs + len, outB), M);
+        const int64_t b0 = std::min(std::max(g0, inB), g1), b1 = std::max(std::min(g1, outA), b0);     // the body: [b0, b1); fades are [g0, b0) and [b1, g1)
+        auto faded = [&](int64_t from, int64_t to) {                                    // a fade in or out: the weight is worked out for each frame
+            for (int64_t g = from; g < to; g++) {
+                double w = 1.0;
+                if (g < inB) { double t = (double)(g - inA) / (double)W; w = j.equal_power ? std::sin(t * M_PI / 2) : t; }
+                if (g >= outA) { double t = (double)(g - outA) / (double)W; w *= j.equal_power ? std::cos(t * M_PI / 2) : 1 - t; }
+                for (int c = 0; c < p.channels; c++) o.ch[c][g] += (float)(w * piece[k][c][g - gs]);
             }
-            if (sr_ >= 0) {                                                        // fade out over [sr - W/2, sr + W/2)
-                double t = (double)(g - (sr_ - W / 2)) / (double)W;
-                if (t >= 1) w = 0; else if (t > 0) w *= j.equal_power ? std::cos(t * M_PI / 2) : 1 - t;
-            }
-            if (w == 0) continue;
-            for (int c = 0; c < p.channels; c++) o.ch[c][g] += (float)(w * piece[k][c][i]);
+        };
+        faded(g0, b0);
+        for (int c = 0; c < p.channels; c++) {                                          // the body: plain adds, which the compiler turns into NEON
+            const float *src = piece[k][c].data() + (b0 - gs); float *dst = o.ch[c].data() + b0;
+            for (int64_t q = 0; q < b1 - b0; q++) dst[q] += src[q];
         }
+        faded(b1, g1);
     }
     if (stats) {
         stats->chunks = n; stats->seams_out = seams; stats->audio_s = (double)N / p.rate;
         stats->wall_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         stats->cpu_s = 0; for (double c : cpu) stats->cpu_s += c;
+        stats->align_s = align_s;
         stats->assemble_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_join).count();
     }
     return o;

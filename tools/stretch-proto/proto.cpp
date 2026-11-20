@@ -1,5 +1,6 @@
 // proto.cpp: command line and self-test for stretch_render.hpp (MIT).
-//   stretch-proto render IN.wav OUT.wav [--ratio R] [--semitones S] [--workers N] [--chunks N] [--equal-power] [--no-quiet-seams]
+//   stretch-proto make-song OUT.wav SECS   the synthetic test song as a WAV
+//   stretch-proto render IN.wav OUT.wav [--ratio R] [--semitones S] [--workers N] [--chunks N] [--cheaper] [--equal-power] [--no-quiet-seams]
 //   stretch-proto selftest      the checks (length, pitch, seams, determinism); exit 1 on a failure
 //   stretch-proto bench [SECS] [--cheaper] [--workers N]   the same synthetic song with 1, 2, 3 and 4 workers: wall time, CPU time, speed against real time
 #include "stretch_render.hpp"
@@ -133,7 +134,7 @@ static void bench(double secs, bool cheaper, int only) {
         Stats st; render(in, j, &st);
         if (w == 1) base = st.wall_s;
         printf("%7d %7d %9.2f %9.2f %12.1f %9.2fx\n", w, st.chunks, st.wall_s, st.cpu_s, st.audio_s / st.wall_s, base / st.wall_s);
-        printf("RESULT fft=%s preset=%s workers=%d chunks=%d wall_s=%.3f cpu_s=%.3f assemble_s=%.3f x_realtime=%.2f speedup=%.2f\n", FFT_NAME, cheaper ? "cheaper" : "default", w, st.chunks, st.wall_s, st.cpu_s, st.assemble_s, st.audio_s / st.wall_s, base / st.wall_s);
+        printf("RESULT fft=%s preset=%s workers=%d chunks=%d wall_s=%.3f cpu_s=%.3f assemble_s=%.3f align_s=%.3f x_realtime=%.2f speedup=%.2f\n", FFT_NAME, cheaper ? "cheaper" : "default", w, st.chunks, st.wall_s, st.cpu_s, st.assemble_s, st.align_s, st.audio_s / st.wall_s, base / st.wall_s);
     }
     printf("INFO peak memory: %ld KiB (the input, the pieces and the output of the last run)\n", peak_kib());
 }
@@ -153,6 +154,11 @@ int main(int argc, char **argv) {
         bench(secs, cheaper, only);
         return 0;
     }
+    if (argc >= 4 && !strcmp(argv[1], "make-song")) {            // the synthetic test song as a WAV, so a measurement can time the render alone
+        double secs = atof(argv[3]);
+        if (secs < 5 || secs > 3600) { fprintf(stderr, "seconds 5-3600\n"); return 2; }
+        return write_wav(argv[2], make_music(secs)) ? 0 : 1;
+    }
     if (argc >= 4 && !strcmp(argv[1], "render")) {
         Job j; j.workers = 4;
         for (int i = 4; i < argc; i++) {
@@ -161,6 +167,7 @@ int main(int argc, char **argv) {
             else if (!strcmp(argv[i], "--workers") && i + 1 < argc) j.workers = atoi(argv[++i]);
             else if (!strcmp(argv[i], "--chunks") && i + 1 < argc) j.chunks = atoi(argv[++i]);
             else if (!strcmp(argv[i], "--equal-power")) j.equal_power = true;
+            else if (!strcmp(argv[i], "--cheaper")) j.cheaper = true;
             else if (!strcmp(argv[i], "--no-quiet-seams")) j.quiet_seams = false;
             else { fprintf(stderr, "unknown option %s\n", argv[i]); return 2; }
         }
@@ -174,6 +181,6 @@ int main(int argc, char **argv) {
         if (clip) printf("WARN %d samples clipped\n", clip);
         return 0;
     }
-    fprintf(stderr, "usage: stretch-proto render IN.wav OUT.wav [--ratio R] [--semitones S] [--workers N] [--chunks N] | selftest | bench [SECS] [--cheaper] [--workers N]\n");
+    fprintf(stderr, "usage: stretch-proto render IN.wav OUT.wav [--ratio R] [--semitones S] [--workers N] [--chunks N] | make-song OUT.wav SECS | selftest | bench [SECS] [--cheaper] [--workers N]\n");
     return 2;
 }
