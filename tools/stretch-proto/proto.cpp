@@ -157,11 +157,19 @@ int main(int argc, char **argv) {
     if (argc >= 5 && !strcmp(argv[1], "make-sine")) {            // make-sine OUT.wav SECS HZ
         return write_wav(argv[2], make_sine(atof(argv[3]), atof(argv[4]))) ? 0 : 1;
     }
+    if (argc >= 5 && !strcmp(argv[1], "make-loud")) {            // make-loud OUT.wav SECS GAIN: the test song times GAIN, hard-clipped at the 16-bit limit as a loud master is
+        Pcm q = make_music(atof(argv[3]));
+        const float gn = (float)atof(argv[4]);
+        for (auto &c : q.ch) for (auto &v : c) v = std::max(-1.f, std::min(1.f, v * gn));
+        return write_wav(argv[2], q) ? 0 : 1;
+    }
     if (argc >= 3 && !strcmp(argv[1], "info")) {                 // info FILE.wav: frames, rate, channels, and the tone's frequency over 2 s in the middle
         Pcm q; std::string err;
         if (!read_wav(argv[2], q, err)) { fprintf(stderr, "%s\n", err.c_str()); return 1; }
         int64_t mid = q.frames() / 2;
-        printf("frames=%lld rate=%d channels=%d hz=%.2f\n", (long long)q.frames(), q.rate, q.channels, tone_hz(q, mid - q.rate, mid + q.rate));
+        float pk = 0;
+        for (auto &c : q.ch) for (float v : c) pk = std::max(pk, std::fabs(v));
+        printf("frames=%lld rate=%d channels=%d peak=%.4f hz=%.2f\n", (long long)q.frames(), q.rate, q.channels, pk, tone_hz(q, mid - q.rate, mid + q.rate));
         return 0;
     }
     if (argc >= 4 && !strcmp(argv[1], "make-song")) {            // the synthetic test song as a WAV, so a measurement can time the render alone

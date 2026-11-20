@@ -41,7 +41,7 @@ struct Params {
     double chunk_s = 20.0, overlap_s = 1.0, seam_s = 0.05, align_ms = 15.0;
 };
 
-struct Piece { std::vector<std::vector<float>> ch; int64_t base = 0; };      // planar floats; base = the output frame of ch[c][0]
+struct Piece { std::vector<std::vector<float>> ch; int64_t base = 0; double peak = 0; };      // peak: the loudest sample before the limiter      // planar floats; base = the output frame of ch[c][0]
 
 inline int64_t opos(int64_t in, double ratio) { return (int64_t)std::llround((double)in / ratio); }
 
@@ -95,6 +95,55 @@ inline Geometry geometry(const Song16 &s, const Params &p) {
     return g;
 }
 
+// ---- the limiter ---------------------------------------------------------------------------------------------------------------------------
+// A phase vocoder overshoots at transients, and a loud master has no room: the copy would clip, which is audible. So every piece goes through a lookahead
+// limiter whose ceiling is a little under full scale. It is done per piece, on the whole piece at once, so it needs no state across the pieces: the same
+// bytes come out with any number of workers and after a resume. A piece that never passes the ceiling is not touched at all (bit for bit).
+//   need[i]  the gain that would bring frame i to the ceiling (1 when it is under it)
+//   m[i]     the smallest need within +-N frames   (the duck starts N frames before a peak and holds N after)
+//   g[i]     the average of m over +-N frames       (so the gain glides in and out, and g[i] <= need[i] for every i: no frame passes the ceiling)
+//   release  g can come back up no faster than 1/release_s a second, so it does not pump
+// N is 1.5 ms (64 frames at 44.1 kHz), the release 200 ms for a full swing (a 3 dB duck is back in about 60 ms).
+inline double limit_piece(std::vector<std::vector<float>> &ch, double ceiling, int rate) {
+    const size_t n = ch[0].size();
+    double peak = 0;
+    std::vector<float> need(n, 1.f);
+    for (size_t i = 0; i < n; i++) {
+        float a = 0;
+        for (auto &c : ch) a = std::max(a, std::fabs(c[i]));
+        peak = std::max(peak, (double)a);
+        if (a > ceiling) need[i] = (float)(ceiling / a);
+    }
+    if (peak <= ceiling) return peak;
+    const int64_t N = std::max(1, (int)std::lround(0.0015 * rate)), nn = (int64_t)n;
+    std::vector<float> m(n);
+    {   // sliding minimum over [i-N, i+N]: a monotonic deque of indices
+        std::vector<int64_t> dq(n + 1); size_t head = 0, tail = 0;
+        int64_t next = 0;
+        for (int64_t i = 0; i < nn; i++) {
+            for (; next <= std::min(nn - 1, i + N); next++) {
+                while (tail > head && need[(size_t)dq[tail - 1]] >= need[(size_t)next]) tail--;
+                dq[tail++] = next;
+            }
+            while (dq[head] < i - N) head++;
+            m[(size_t)i] = need[(size_t)dq[head]];
+        }
+    }
+    std::vector<double> pre(n + 1, 0.0);
+    for (size_t i = 0; i < n; i++) pre[i + 1] = pre[i] + m[i];
+    const double step = 1.0 / (0.2 * rate);
+    double prev = 1.0;
+    for (int64_t i = 0; i < nn; i++) {
+        const int64_t lo = std::max<int64_t>(0, i - N), hi = std::min(nn - 1, i + N);
+        double g = (pre[(size_t)hi + 1] - pre[(size_t)lo]) / (double)(hi - lo + 1);
+        g = std::min(g, prev + step);                  // the release: up no faster than the step, down as fast as g goes (it glides: it is an average)
+        prev = g;
+        for (auto &c : ch) c[(size_t)i] = (float)(c[(size_t)i] * g);
+    }
+    return peak;
+}
+const double LIMIT_CEILING = 0.985;                     // a little under full scale: the rounding to 16 bits and the sum of two pieces in a crossfade stay under 1
+
 // ---- one segment ---------------------------------------------------------------------------------------------------------------------------
 inline Piece render_segment(const Song16 &s, const Params &p, const Geometry &g, int k) {
     using signalsmith::stretch::SignalsmithStretch;
@@ -117,6 +166,7 @@ inline Piece render_segment(const Song16 &s, const Params &p, const Geometry &g,
     const int64_t c0 = opos(g.ia[k], p.ratio) - y0, c1 = opos(g.ib[k], p.ratio) - y0;
     pc.ch.resize(C);
     for (int c = 0; c < C; c++) pc.ch[c].assign(out[c].begin() + c0, out[c].begin() + c1);
+    pc.peak = limit_piece(pc.ch, LIMIT_CEILING, s.rate);
     return pc;
 }
 
@@ -286,7 +336,7 @@ struct Journal {
 };
 
 // ---- the job -------------------------------------------------------------------------------------------------------------------------------
-struct Result { bool ok = false; std::string error; bool cancelled = false; int segments = 0, resumed_from = 0; int clipped = 0; int64_t frames = 0; double wall_s = 0; };
+struct Result { bool ok = false; std::string error; bool cancelled = false; int segments = 0, resumed_from = 0; int clipped = 0; double peak = 0; int64_t frames = 0; double wall_s = 0; };
 
 // Renders `song` into `out_part`, journalling to `journal`; the caller renames the part to the final name. `resume` lets a valid journal continue.
 // progress(done_segments, total_segments) is called after each segment is joined. `cancel` is polled between segments. `die_after`, if > 0, makes the
@@ -326,7 +376,7 @@ inline Result render_song(const Song16 &song, const Params &p, const std::string
                 k = next++;
             }
             Piece pc = render_segment(song, p, g, k);
-            { std::lock_guard<std::mutex> lk(mu); done[k] = std::move(pc); }
+            { std::lock_guard<std::mutex> lk(mu); r.peak = std::max(r.peak, pc.peak); done[k] = std::move(pc); }
             cv.notify_all();
         }
     };

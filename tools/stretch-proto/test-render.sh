@@ -7,7 +7,8 @@
 #   4. a different ratio on the same part and journal starts again instead of continuing;
 #   5. a SIGTERM leaves the part and the journal and exits 130, and the next run finishes the copy;
 #   6. a song that is too short, one that is not audio and a ratio out of range are refused;
-#   7. a song that is not a WAV is decoded through an ffmpeg that, like the unit's, has no wav muxer (raw s16le on a pipe), and gives the same bytes;
+#   7. a loud, hard-clipped master is held under full scale by the limiter (no clipped samples), the same bytes for any worker count and after a resume;
+#   8. a song that is not a WAV is decoded through an ffmpeg that, like the unit's, has no wav muxer (raw s16le on a pipe), and gives the same bytes;
 #      ffmpeg failing shows its own line; a song over the limit is refused.
 set -u
 B="$1"; T="$(mktemp -d)"; fail=0
@@ -57,6 +58,22 @@ if [ "$rc" = 130 ] && [ -e "$T/term.wav.part" ] && [ -e "$T/term.wav.journal" ];
     echo "INFO a 400 s song (70 MiB of 16-bit audio), 4 workers: $(grep '^DONE' <<<"$out")"
     if cmp -s "$T/term.wav" "$T/longref.wav"; then ok "the run after a SIGTERM finishes the same bytes as an uninterrupted one"; else bad "the run after a SIGTERM differs"; fi
 else bad "SIGTERM exits 130 and leaves the part and the journal (exit $rc)"; fi
+
+# a loud, hard-clipped master: the phase vocoder overshoots it, and the limiter holds the copy under full scale (no clipped samples)
+"$S" make-loud "$T/loud.wav" 40 3.0
+loudinfo="$("$S" info "$T/loud.wav")"; loudpeak="${loudinfo##*peak=}"; loudpeak="${loudpeak%% *}"
+out="$("$R" --in "$T/loud.wav" --out "$T/loud-copy.wav" --ratio 1.25 --semitones 2 --workers 4)"
+if grep -q 'clipped' <<<"$out"; then bad "a loud master is not clipped: $out"; else ok "a loud master (peak $loudpeak) is not clipped"; fi
+copyinfo="$("$S" info "$T/loud-copy.wav")"; copypeak="${copyinfo##*peak=}"; copypeak="${copypeak%% *}"
+if awk "BEGIN{exit !($copypeak <= 0.9855 && $copypeak > 0.9)}"; then ok "its loudest sample is $copypeak: under full scale, not turned down for nothing"; else bad "its loudest sample is $copypeak (wanted 0.9 to 0.9855)"; fi
+"$R" --in "$T/loud.wav" --out "$T/loud-1.wav" --ratio 1.25 --semitones 2 --workers 1 > /dev/null
+if cmp -s "$T/loud-copy.wav" "$T/loud-1.wav"; then ok "the limiter gives the same bytes with 1 worker and 4"; else bad "the limiter gives different bytes with 1 worker and 4"; fi
+R3I6NOS_RENDER_DIE_AFTER=1 "$R" --in "$T/loud.wav" --out "$T/loud-cut.wav" --ratio 1.25 --semitones 2 --workers 4 > /dev/null
+"$R" --in "$T/loud.wav" --out "$T/loud-cut.wav" --ratio 1.25 --semitones 2 --workers 2 > /dev/null
+if cmp -s "$T/loud-cut.wav" "$T/loud-1.wav"; then ok "and after a power cut and a resume"; else bad "the limited copy differs after a resume"; fi
+# a song that never reaches the ceiling is not touched: the 0.5 sine's copy peaks near 0.5 (the byte comparisons above, which hold with the limiter in, are the other proof)
+sineinfo="$("$S" info "$T/a.wav")"; sinepeak="${sineinfo##*peak=}"; sinepeak="${sinepeak%% *}"
+if awk "BEGIN{exit !($sinepeak > 0.4 && $sinepeak < 0.6)}"; then ok "a quiet sine stays quiet (peak $sinepeak: the limiter did nothing)"; else bad "the 0.5 sine's copy peaks at $sinepeak"; fi
 
 # anything that is not a WAV goes through ffmpeg as raw s16le on a pipe: the image's ffmpeg has no wav muxer, so this ffmpeg refuses one as the unit's does
 cat > "$T/fakeffmpeg" <<'FF'
