@@ -30,6 +30,7 @@
 #include "r3i6nos_themes.h"
 #include "r3i6nos_input.h"
 #include "r3i6nos_mainmenu.h"
+#include "r3i6nos_keymap.h"
 #include "r3i6nos_report.h"
 #include "r3i6nos_toast.h"
 #include "r3i6nos_appdata.h"
@@ -209,6 +210,7 @@ typedef struct {
     /* the input mapping (docs/r3i6nos-mapping.md): the reader, the main menu over the page, the colour theme */
     R3Input in;
     R3MainMenu mm;
+    R3Keymap km;                            /* the main menu's Keymap (help and test) */
     int overlay, theme, theme_sel;  /* OV_*; the theme in use and the one the picker is on (indexes of r3_themes) */
     /* the R3i6nos Mapping page */
     int map_panel, map_prev;                        /* the panel showing and the one before it (R1 + Fn goes back to it) */
@@ -230,7 +232,7 @@ typedef struct {
     char bench_file[96];
 } App;
 
-enum { OV_NONE, OV_MENU, OV_ABOUT, OV_THEME };
+enum { OV_NONE, OV_MENU, OV_ABOUT, OV_THEME, OV_KEYMAP };
 
 static const char *env_or(const char *name, const char *dflt) {
     const char *v = getenv(name);
@@ -1872,6 +1874,7 @@ static void compose(App *a, R3Screen *s, Uint32 now) {
                                             "Font: IBM VGA 8x16 by VileR, CC BY-SA 4.0.", "Code: MIT. No network, no telemetry.", NULL};
         r3_about_draw(s, "IO Checker", VERSION, BUILD_LINE, lines);
     } else if (a->overlay == OV_THEME) r3_theme_pick_draw(s, a->theme_sel, a->theme);
+    else if (a->overlay == OV_KEYMAP) r3_km_draw(s, &a->km);
 }
 
 /* ---- the video patterns (pixels, not cells) --------------------------------------------------------------------------------- */
@@ -2116,6 +2119,7 @@ static void bench_finish(App *a) {
 static void overlay_key(App *a, int action, Uint32 now) {
     if (action == R3_NONE) return;
     if (a->overlay == OV_ABOUT) { a->overlay = OV_NONE; return; }
+    if (a->overlay == OV_KEYMAP) { if (r3_km_key(&a->km, action)) a->overlay = OV_NONE; a->force = 1; return; }
     if (a->overlay == OV_THEME) {
         if (action == R3_ACCEPT) {
             a->theme = a->theme_sel;
@@ -2140,6 +2144,7 @@ static void overlay_key(App *a, int action, Uint32 now) {
     switch (id) {
     case R3MM_ABOUT: a->overlay = OV_ABOUT; break;
     case R3MM_THEME: a->overlay = OV_THEME; a->theme_sel = a->theme; break;
+    case R3MM_KEYMAP: r3_km_open(&a->km, NULL, 0, 0); a->overlay = OV_KEYMAP; break;
     case R3MM_REPORT: a->pending = H_REPORT; say(a, R3_ST_WARN, "Writing the device report (the card test takes a few seconds)..."); break;
     case R3MM_DEMO: say(a, R3_ST_WARN, "Rec demo is not built for IO Checker yet."); break;
     case R3MM_BENCH: bench_start(a, now); break;
@@ -2241,6 +2246,7 @@ static void handle(App *a, const SDL_Event *e, Uint32 now) {
         event(a, a->js && SDL_JoystickGetButton(a->js, e->jbutton.button), "btn %d %s", b, isdown ? "DOWN" : "UP");
         a->idle_since = now;
         int ac = r3_input_button(&a->in, e->jbutton.button, isdown);     /* the mapping's reader: modifiers, chords, R1 held as increase */
+        if (a->overlay == OV_KEYMAP) r3_km_button(&a->km, e->jbutton.button, isdown, NULL);
         if (isdown) {
             if (a->page == P_MAPPING && !a->overlay) map_press(a, e->jbutton.button, ac);
             else dispatch(a, ac, now);
@@ -3145,7 +3151,7 @@ static int selftest_logic(void) {
         CHECK(a->overlay == OV_MENU && a->mm.open, "L1 + R1 opens the main menu");
         le = joy(SDL_JOYBUTTONUP, L_R1); handle(a, &le, t); le = joy(SDL_JOYBUTTONUP, L_L1); handle(a, &le, t);
         compose(a, &s, t);
-        CHECK(screen_has(&s, "About") && screen_has(&s, "Colour theme") && screen_has(&s, "Device report") && screen_has(&s, "Rec demo") && screen_has(&s, "Benchmark") && screen_has(&s, "Quit"), "the menu has the six items");
+        CHECK(screen_has(&s, "About") && screen_has(&s, "Colour theme") && screen_has(&s, "Keymap") && screen_has(&s, "Device report") && screen_has(&s, "Rec demo") && screen_has(&s, "Benchmark") && screen_has(&s, "Quit"), "the menu has the seven items");
         char mm[160];
         CHECK(r3_mm_selftest(&a->mm, mm, sizeof mm) == 0, "%s", mm);
         PRESS(L_B); CHECK(a->overlay == OV_NONE && !a->quit, "B closes the menu");
@@ -3179,15 +3185,20 @@ static int selftest_logic(void) {
             if (system(cmd3) != 0) fprintf(stderr, "could not remove %s\n", d3);
         }
         r3_mm_open(&a->mm); a->overlay = OV_MENU; PRESS(L_DOWN); PRESS(L_DOWN); PRESS(L_A);
+        CHECK(a->overlay == OV_KEYMAP, "Keymap opens");
+        compose(a, &s, t);
+        CHECK(screen_has(&s, "Keymap: System inputs") && screen_has(&s, "Main menu"), "the Keymap shows the system inputs");
+        PRESS(L_B); CHECK(a->overlay == OV_NONE, "B closes the Keymap");
+        r3_mm_open(&a->mm); a->overlay = OV_MENU; PRESS(L_DOWN); PRESS(L_DOWN); PRESS(L_DOWN); PRESS(L_A);
         CHECK(a->pending == H_REPORT, "Device report from the menu runs the report");
         a->pending = 0;
-        r3_mm_open(&a->mm); a->overlay = OV_MENU; PRESS(L_DOWN); PRESS(L_DOWN); PRESS(L_DOWN); PRESS(L_A);
-        CHECK(a->overlay == OV_NONE && strstr(a->reply, "Rec demo is not built"), "Rec demo says plainly that it is not built yet");
         r3_mm_open(&a->mm); a->overlay = OV_MENU; for (int k = 0; k < 4; k++) PRESS(L_DOWN); PRESS(L_A);
+        CHECK(a->overlay == OV_NONE && strstr(a->reply, "Rec demo is not built"), "Rec demo says plainly that it is not built yet");
+        r3_mm_open(&a->mm); a->overlay = OV_MENU; for (int k = 0; k < 5; k++) PRESS(L_DOWN); PRESS(L_A);
         CHECK(a->page == P_PATTERN && a->sel[P_VIDEO] == PAT_MOTION && a->bench_end != 0, "Benchmark starts the Motion pattern");
         PRESS(L_B); CHECK(a->page == P_VIDEO && a->bench_end == 0 && strstr(a->reply, "Benchmark cancelled"), "B cancels the benchmark");
         PRESS(L_B);
-        r3_mm_open(&a->mm); a->overlay = OV_MENU; for (int k = 0; k < 5; k++) PRESS(L_DOWN); PRESS(L_A);
+        r3_mm_open(&a->mm); a->overlay = OV_MENU; for (int k = 0; k < 6; k++) PRESS(L_DOWN); PRESS(L_A);
         CHECK(a->quit, "Quit in the menu quits");
         a->quit = 0;
         /* the menu is not offered where the screen is pixels, and a stick step moves a list like the D-pad */

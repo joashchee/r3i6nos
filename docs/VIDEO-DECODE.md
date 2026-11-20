@@ -47,6 +47,8 @@ not a 480p measurement.
 
 On an Apple core in Debian 12 arm64 the section ran 21x to 63x real time (480p: 37x at 907 kbit/s); **the unit's number is the one that matters**, and nothing says yet what it will be.
 
+Commander's report now measures this on the unit (`== playback ==`, `docs/PLAYBACK.md`, 2026-11-20): the player's command, one change at a time, the cores busy, the YUV-against-BGRA path and the whole Player on a real clock.
+
 ## What is worth pursuing, in order
 
 1. **Measure software decode on the unit first** (already open: ROADMAP section 20, "does H.264 at 640x400 and 30 fps keep up"). If 480p keeps up with CPU to spare, there is nothing to optimise, and

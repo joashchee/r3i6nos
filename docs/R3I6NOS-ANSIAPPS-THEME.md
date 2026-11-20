@@ -122,7 +122,7 @@ The font data it builds on: `theme/r3i6nos_vga8x16.h` has the 256 glyphs (`r3i6n
 
 ## The main menu (rule 17; **specified 2026-11-19; built in the C theme on 2026-11-20, not yet in the Lua theme**)
 
-Every app made for r3i6nos has a main menu, opened by **L1 + R1** (keyboard: F10 is proposed), drawn as the standard list dialog above (a box centred in
+Every app made for r3i6nos has a main menu, opened by **L1 + R1** (keyboard: the backquote key, and the backslash key for the contextual menu, L2 + R2; settled 2026-11-20), drawn as the standard list dialog above (a box centred in
 the display view, `Page x/y` when it needs it). The input map it belongs to is `docs/r3i6nos-mapping.md`.
 
 **The first items are fixed, in this order, and the app's own items follow them:**
@@ -131,6 +131,7 @@ the display view, `Page x/y` when it needs it). The input map it belongs to is `
 |---|---|
 | **About** | The app's name, version, commit and date (the splash's version line), licence and credits. |
 | **Colour theme** | The theme choice: VGA Classic by default; the true-colour themes where the app offers them (above, "True colour"). A LÖVE app with only the 16 VGA colours shows the item with the one theme it has, not nothing. |
+| **Keymap** | The app's input map: help, test and remap (`docs/r3i6nos-mapping.md`, "The Keymap"). Compulsory since 2026-11-20, right after Colour theme. **Built in the C theme on 2026-11-20 as `theme/r3i6nos_keymap.h`: the help pages (the system's inputs, then a page for each panel the app describes) and the test page; remapping is not built there yet** (FM1-NTT has the first complete one). Not in the Lua theme. |
 | **Device report** | Runs the app's device report (rule 9). |
 | **Rec demo** | Runs the app's Rec demo (rule 11). |
 | **Benchmark** | Runs the app's benchmark and writes it to the app's data folder. **Hidden when the app has nothing to measure**; the other five never are. |

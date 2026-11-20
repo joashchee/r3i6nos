@@ -28,6 +28,9 @@
 #define PL_H (R3_DISPLAY_ROWS * R3_CELL_H)
 #define PL_FRAME_BYTES ((size_t)PL_W * PL_H * 4)
 
+/* The filter the player gives ffmpeg (the report's playback section times the same string with other scale flags). */
+#define PL_VIDEO_VF(flags) "scale=640:400:force_original_aspect_ratio=decrease:flags=" flags ",pad=640:400:(ow-iw)/2:(oh-ih)/2,fps=30"
+
 enum { PL_NONE, PL_R3F, PL_WAV, PL_VIDEO, PL_AUDIO, PL_NTT };
 
 typedef struct {
@@ -115,6 +118,14 @@ static int pl_find_nttplay(char *out, size_t cap) { return pl_find_tool("R3I6NOS
 static int pl_spawn(char *const argv[], int *fd, pid_t *pid) {
     int fds[2];
     if (pipe(fds) != 0) return -1;
+#if defined(__linux__)
+    /* A pipe holds 64 KiB, and one 640x400 BGRA frame is 1 MiB: with the default the player would refill it sixteen times for every frame, and the picture can only move as
+     * fast as the UI loop comes round (the report's whole-path line measured it). Ask for 1 MiB (the unprivileged limit); if the system says no, the default stands. */
+#ifndef F_SETPIPE_SZ
+#define F_SETPIPE_SZ 1031
+#endif
+    { const char *kb = getenv("R3I6NOS_FM_PIPE_KB"); (void)fcntl(fds[0], F_SETPIPE_SZ, (kb && atoi(kb) > 0 ? atoi(kb) : 1024) << 10); }   /* the env is for the report's experiments */
+#endif
     pid_t c = fork();
     if (c < 0) { close(fds[0]); close(fds[1]); return -1; }
     if (c == 0) {
@@ -270,7 +281,7 @@ static int pl_open_wav(Player *p, const char *path, const char **why) {
 static int pl_ffmpeg_start(Player *p, const char *path, int video, const char **why) {
     char ff[PATH_MAX];
     if (!pl_find_ffmpeg(ff, sizeof ff)) { *why = "needs ffmpeg, not installed here"; return -1; }
-    char *vf = "scale=640:400:force_original_aspect_ratio=decrease:flags=neighbor,pad=640:400:(ow-iw)/2:(oh-ih)/2,fps=30";
+    char *vf = PL_VIDEO_VF("neighbor");
     if (video) {
         char *argv[] = {ff, "-v", "error", "-i", (char *)path, "-an", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1", NULL};
         if (pl_spawn(argv, &p->vfd, &p->vpid) != 0) { *why = "ffmpeg would not start"; return -1; }
@@ -415,8 +426,10 @@ static void pl_pause(Player *p, int on) {
 /* The seconds played: the sound's own count when there is sound, else the caller's clock. */
 static void pl_clock(Player *p, double now_ms) {
     if (p->dev && p->primed) {
-        double heard = ((double)p->fed - (double)SDL_GetQueuedAudioSize(p->dev)) / ((double)p->rate * p->bps);
-        if (heard > p->now) p->now = heard;
+        unsigned queued = SDL_GetQueuedAudioSize(p->dev);
+        double heard = ((double)p->fed - (double)queued) / ((double)p->rate * p->bps);
+        if (p->a_eof && queued == 0 && p->playing) p->now += (now_ms - p->last_ms) / 1000.0;   /* the sound is over (or there never was any: a silent video): the wall clock goes on, or the picture would freeze */
+        else if (heard > p->now) p->now = heard;
     } else if (p->playing && !(p->has_audio && p->dev)) {
         p->now += (now_ms - p->last_ms) / 1000.0;
     }

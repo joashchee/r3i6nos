@@ -1,6 +1,6 @@
 /* r3i6nos main menu for native apps (C): rule 17, docs/r3i6nos-mapping.md ("Every app has a main menu") and docs/R3I6NOS-ANSIAPPS-THEME.md. MIT.
  *
- * L1 + R1 opens it. Its first items are fixed, in this order: About, Colour theme, Device report, Rec demo, Benchmark, Quit; the app's own items
+ * L1 + R1 opens it. Its first items are fixed, in this order: About, Colour theme, Keymap, Device report, Rec demo, Benchmark, Quit; the app's own items
  * come after, under the six. Benchmark alone is hidden, when the app has nothing to measure (has_bench = 0). This file owns the order and the
  * hiding, draws the list, the About box and the colour theme picker, and r3_mm_selftest() checks "the items are there and in this order" so an
  * app's own self-test calls it once. The app does what each item means (runs its report, its demo, its benchmark) and leaves on Quit.
@@ -10,11 +10,11 @@
 
 #include <stdio.h>
 
-enum { R3MM_ABOUT, R3MM_THEME, R3MM_REPORT, R3MM_DEMO, R3MM_BENCH, R3MM_QUIT, R3MM_FIXED, R3MM_OWN0 = 100 };
+enum { R3MM_ABOUT, R3MM_THEME, R3MM_KEYMAP, R3MM_REPORT, R3MM_DEMO, R3MM_BENCH, R3MM_QUIT, R3MM_FIXED, R3MM_OWN0 = 100 };
 enum { R3MM_NOTHING = -1, R3MM_CLOSED = -2 };   /* what r3_mm_key returns besides an item's id */
 #define R3MM_MAX_OWN 8
 
-static const char *const R3MM_LABEL[R3MM_FIXED] = {"About", "Colour theme", "Device report", "Rec demo", "Benchmark", "Quit"};
+static const char *const R3MM_LABEL[R3MM_FIXED] = {"About", "Colour theme", "Keymap", "Device report", "Rec demo", "Benchmark", "Quit"};
 
 typedef struct {
     int open, sel;
@@ -62,7 +62,7 @@ static inline void r3_mm_draw(R3Screen *s, const R3MainMenu *m, const char *them
 
 /* "The items are there and in this order": 0 when the menu with and without Benchmark is right, else 1 and msg says what is wrong. */
 static inline int r3_mm_selftest(const R3MainMenu *m, char *msg, size_t cap) {
-    static const int want_all[R3MM_FIXED] = {R3MM_ABOUT, R3MM_THEME, R3MM_REPORT, R3MM_DEMO, R3MM_BENCH, R3MM_QUIT};
+    static const int want_all[R3MM_FIXED] = {R3MM_ABOUT, R3MM_THEME, R3MM_KEYMAP, R3MM_REPORT, R3MM_DEMO, R3MM_BENCH, R3MM_QUIT};
     for (int bench = 0; bench < 2; bench++) {
         R3MainMenu t = *m;
         t.has_bench = bench;

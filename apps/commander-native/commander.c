@@ -4,11 +4,12 @@
  * Native ARM64 C and SDL2, a default app built into r3i6nos. The screen is 64x24 cells of 10x20: row 0 the top bar, rows 1-20
  * two 32-column panels, rows 21-23 the command line (reply, prompt, status). Nothing scrolls: a long folder turns whole pages.
  *
- * Controls (R36S raw buttons, see r3_pad_action; a keyboard works too):
- *   D-pad up/down   move             D-pad left/right  switch panel          L1/R1  page          L2/R2  top/bottom
+ * Controls (the mapping of docs/r3i6nos-mapping.md, rule 17; a keyboard works too):
+ *   D-pad up/down   move             D-pad left/right  switch panel          R1+Up/Down  page     R1+Left/Right  top/bottom
  *   A  open a folder, or view a file B  go to the parent folder               X  tag/untag + down  Y  tag all / none
- *   Start  the menu (copy, move, rename, new folder, delete, sort, hidden files, quit)    Select+Start  quit
- *   Keyboard: F2 rename, F3 view, F5 copy, F6 move, F7 new folder, F8 delete, F10 quit, Tab switch panel, Insert/Space tag.
+ *   Start or L2+R2  the commands menu (copy, move, rename, new folder, delete, sort, hidden files)   Fn  the other panel
+ *   L1+R1  the main menu (About, Colour theme, Keymap, Device report, Rec demo, Quit: only its Quit leaves the app)
+ *   Keyboard: F2 rename, F3 view, F5 copy, F6 move, F7 new folder, F8 delete, ` main menu, \ commands, Tab switch panel, Insert/Space tag.
  *
  * The viewer (A on a file) knows what the file is and opens it in tabs, Left/Right (or X/Y) to switch, Up/Down and L1/R1 to page:
  *   Info      the type (by its bytes, as the ansiapps catalogue Diskette identifies files: formats.h) and its details: picture size
@@ -44,15 +45,23 @@
 #include "r3i6nos_ansiapps.h"
 #include "r3i6nos_themes.h"
 #include "r3i6nos_toast.h"
+#include "r3i6nos_input.h"
+#include "r3i6nos_mainmenu.h"
+#include "r3i6nos_keymap.h"
 #include "r3i6nos_appdata.h"
 #include "r3i6nos_report.h"
 #include "filekind.h"
 #include "formats.h"
 #include "ansiart.h"
 #include "player.h"
+#include "playback_report.h"
 #include "selftest_data.h"
 #include "selftest_ase.h"
 
+#ifndef R3_BUILD_COMMIT
+#define R3_BUILD_COMMIT "dev"           /* scripts/build_native_app.sh passes the git commit */
+#endif
+#define BUILD_LINE R3_BUILD_COMMIT " " __DATE__
 #define VERSION "1.1"
 #define PANE_W 32
 #define PANE_ROWS (R3_DISPLAY_ROWS - 2) /* entries a page */
@@ -1121,13 +1130,13 @@ static void viewer_overlay(const Viewer *w, uint32_t *px) {
 
 /* ---- the application ---------------------------------------------------------------------------------------------------------- */
 
-enum { M_BROWSE, M_MENU, M_CONFIRM, M_INPUT, M_VIEW, M_JOB, M_THEME, M_CONFLICT };
-enum { C_VIEW, C_COPY, C_MOVE, C_RENAME, C_MKDIR, C_DELETE, C_TAGALL, C_UNTAG, C_SORT, C_HIDDEN, C_SWAP, C_SAME, C_THEME, C_FILECOLORS, C_QUIT, C_COUNT };
+enum { M_BROWSE, M_MENU, M_CONFIRM, M_INPUT, M_VIEW, M_JOB, M_THEME, M_CONFLICT, M_MAIN, M_ABOUT, M_KEYMAP, M_RPTASK };
+enum { C_VIEW, C_COPY, C_MOVE, C_RENAME, C_MKDIR, C_DELETE, C_TAGALL, C_UNTAG, C_SORT, C_HIDDEN, C_SWAP, C_SAME, C_FILECOLORS, C_COUNT };
 
 static const struct { const char *label, *key; } MENU[C_COUNT] = {
     {"View", "F3"}, {"Copy", "F5"}, {"Move", "F6"}, {"Rename", "F2"}, {"Make directory", "F7"}, {"Delete", "F8"},
     {"Tag all", ""}, {"Untag all", ""}, {"Sort by", ""}, {"Hidden files", ""}, {"Swap panels", ""},
-    {"Other panel: this folder", ""}, {"Colour theme", ""}, {"File colours", ""}, {"Quit", "F10"},
+    {"Other panel: this folder", ""}, {"File colours", ""},
 };
 
 #define VIEW_DEPTH 4
@@ -1165,7 +1174,11 @@ typedef struct {
     char **job_srcs;
     int job_nsrcs;
     char job_dst[PATH_MAX];
-    int select_held;
+    /* rule 17: the mapping's reader, the main menu (L1+R1), the Keymap, where the menu was opened from, a device report asked for */
+    R3Input in;
+    R3MainMenu mm;
+    R3Keymap km;
+    int mm_from, pending_report;
     /* colour: the theme in use (an index into r3_themes), the one the picker is on, and whether files are coloured by kind (0: yes) */
     int theme, theme_sel, no_file_colors;
 } App;
@@ -1397,6 +1410,9 @@ static void app_init(App *a, const char *left, const char *right) {
     char err[256];
     memset(a, 0, sizeof *a);
     a->job.fd_in = a->job.fd_out = -1;
+    r3_input_init(&a->in);
+    r3_mm_init(&a->mm, 0);          /* Benchmark is hidden: the report times the playback and the identifying, there is no separate benchmark yet */
+    a->mm.own[a->mm.n_own++] = "Commands";
     const char *start[2] = {left, right};
     for (int i = 0; i < 2; i++) {
         if (pane_cd(&a->p[i], &a->opt, start[i], NULL, err, sizeof err) != 0 && pane_cd(&a->p[i], &a->opt, "/", NULL, err, sizeof err) != 0)
@@ -1618,10 +1634,6 @@ static void run_cmd(App *a, int cmd) {
     case C_MKDIR:
         open_input(a, cmd, "New folder name:", "New folder", NULL);
         break;
-    case C_THEME:
-        a->theme_sel = a->theme;
-        a->mode = M_THEME;
-        break;
     case C_FILECOLORS:
         a->no_file_colors = !a->no_file_colors;
         if (save_settings(a) == 0) say(a, R3_ST_OK, "File colours %s", a->no_file_colors ? "off" : "on");
@@ -1658,9 +1670,6 @@ static void run_cmd(App *a, int cmd) {
         else say(a, R3_ST_HINT, "Other panel is here too");
         break;
     }
-    case C_QUIT:
-        a->quit = 1;
-        break;
     }
 }
 
@@ -1773,13 +1782,78 @@ static void menu_values(const App *a, R3Item *items) {
     }
     copy_str(items[C_SORT].value, sizeof items[C_SORT].value, SORT_NAMES[a->opt.sort]);
     copy_str(items[C_HIDDEN].value, sizeof items[C_HIDDEN].value, a->opt.hidden ? "shown" : "hidden");
-    copy_str(items[C_THEME].value, sizeof items[C_THEME].value, r3_themes[a->theme].name);
     copy_str(items[C_FILECOLORS].value, sizeof items[C_FILECOLORS].value, a->no_file_colors ? "off" : "on");
 }
 
 /* One action (a button or a key already mapped) in whatever mode the app is in. */
+static const R3KmRow KM_BROWSE[] = {
+    {"Up", "Move up the list"}, {"Down", "Move down the list"}, {"Left", "The left panel"}, {"Right", "The right panel"}, {"A", "Open the folder, or view the file"},
+    {"B", "Go to the parent folder"}, {"X", "Tag or untag, then move down"}, {"Y", "Tag all, or none"}, {"Start", "The commands menu (also L2+R2)"}, {"Select", "Nothing here"},
+    {"Fn", "The other panel"}, {"R1+Up/Down", "Page up, page down"}, {"R1+Left/Right", "First, last entry"},
+};
+static const R3KmRow KM_VIEWER[] = {
+    {"Left", "The tab before (a picture's frame before)"}, {"Right", "The next tab (a picture's next frame)"}, {"Y", "The tab before"}, {"X", "The next tab"},
+    {"Up", "The page before"}, {"Down", "The next page"}, {"A", "Play or pause; in a list, open the member"}, {"B", "Back to the folder"},
+    {"Start", "In an archive's list, take the member out"}, {"Fn", "The next tab"}, {"R1+Up/Down", "Page up, page down"},
+};
+static const R3KmPage KM_PAGES[] = {{"Folders", KM_BROWSE, (int)(sizeof KM_BROWSE / sizeof KM_BROWSE[0])}, {"Viewer", KM_VIEWER, (int)(sizeof KM_VIEWER / sizeof KM_VIEWER[0])}};
+
+/* The keys of the pad do not live in the one switch below for the chords: those are the same in every mode (rule 17), so they are settled first. */
+static int chord_action(App *a, int action) {
+    int browse = a->mode == M_BROWSE, view = a->mode == M_VIEW;
+    switch (action) {
+    case R3_MENU:
+        if (browse || view) { a->mm_from = a->mode; r3_mm_open(&a->mm); a->mode = M_MAIN; return 1; }
+        return 0;                                   /* the main menu closes itself on it; elsewhere it does nothing */
+    case R3_CONTEXT:
+        if (browse) { a->menu_sel = 0; a->mode = M_MENU; return 1; }
+        if (a->mode == M_MENU) { a->mode = M_BROWSE; return 1; }
+        return view || a->mode == M_MAIN || a->mode == M_KEYMAP || a->mode == M_ABOUT || a->mode == M_THEME || a->mode == M_RPTASK;
+    case R3_PANEL_NEXT: case R3_PANEL_PREV:
+        if (browse) { a->act = 1 - a->act; return 1; }
+        if (view) { Viewer *w = &a->view; char err[256] = ""; if (w->ntabs > 1) viewer_show(w, (w->cur + (action == R3_PANEL_NEXT ? 1 : w->ntabs - 1)) % w->ntabs, err, sizeof err); if (err[0]) say(a, R3_ST_ERROR, "%s", err); return 1; }
+        return 0;
+    case R3_PANEL_FIRST:
+        if (browse) { a->act = 0; return 1; }
+        if (view) { Viewer *w = &a->view; char err[256] = ""; viewer_show(w, 0, err, sizeof err); if (err[0]) say(a, R3_ST_ERROR, "%s", err); return 1; }
+        return 0;
+    case R3_L3: case R3_R3:
+        if (browse) { say(a, R3_ST_HINT, "Commander has no virtual %s.", action == R3_L3 ? "mouse" : "keyboard"); return 1; }
+        return 0;
+    default: return 0;
+    }
+}
+
 static void app_action(App *a, int action) {
+    if (action == R3_START) action = R3_MORE;       /* Start is the commands menu, as it always was here */
+    if (chord_action(a, action)) return;
     switch (a->mode) {
+    case M_MAIN: {
+        int id = r3_mm_key(&a->mm, action);
+        if (id == R3MM_NOTHING) break;
+        a->mode = a->mm_from;
+        switch (id) {
+        case R3MM_ABOUT: a->mode = M_ABOUT; break;
+        case R3MM_THEME: a->theme_sel = a->theme; a->mode = M_THEME; break;
+        case R3MM_KEYMAP: r3_km_open(&a->km, KM_PAGES, 2, a->mm_from == M_VIEW ? 1 : 0); a->mode = M_KEYMAP; break;
+        case R3MM_REPORT: a->mode = M_RPTASK; break;
+        case R3MM_DEMO: say(a, R3_ST_WARN, "Rec demo is not built for Commander yet."); break;
+        case R3MM_QUIT: a->quit = 1; break;
+        case R3MM_OWN0: if (a->mm_from == M_BROWSE) { a->menu_sel = 0; a->mode = M_MENU; } break;
+        default: break;
+        }
+        break;
+    }
+    case M_ABOUT:
+        a->mode = a->mm_from;
+        break;
+    case M_KEYMAP:
+        if (r3_km_key(&a->km, action)) a->mode = a->mm_from;
+        break;
+    case M_RPTASK:
+        if (action == R3_ACCEPT) { a->pending_report = 1; a->mode = a->mm_from; say(a, R3_ST_WARN, "Writing the device report (about a minute; no input meanwhile)..."); }
+        else if (action == R3_BACK) { a->mode = a->mm_from; say(a, R3_ST_HINT, "Device report cancelled"); }
+        break;
     case M_BROWSE:
         browse_action(a, action);
         break;
@@ -1789,10 +1863,10 @@ static void app_action(App *a, int action) {
         a->menu_sel = r3_list_key(a->menu_sel, C_COUNT, r3_list_rows(C_COUNT + 2), action);
         break;
     case M_THEME:    /* the picker shows each theme as the cursor reaches it; A keeps it and saves, B puts the old one back */
-        if (action == R3_BACK) { r3_theme_apply(a->theme); a->mode = M_MENU; break; }
+        if (action == R3_BACK || action == R3_MENU) { r3_theme_apply(a->theme); a->mode = a->mm_from; break; }
         if (action == R3_ACCEPT) {
             a->theme = a->theme_sel;
-            a->mode = M_BROWSE;
+            a->mode = a->mm_from;
             if (save_settings(a) == 0) say(a, R3_ST_OK, "Theme: %s", r3_themes[a->theme].name);
             else say(a, R3_ST_WARN, "Theme: %s (not saved: cannot write the settings)", r3_themes[a->theme].name);
             break;
@@ -1884,7 +1958,6 @@ static int app_key(App *a, SDL_Keycode k) {
     case SDLK_F6: run_cmd(a, C_MOVE); return 1;
     case SDLK_F7: run_cmd(a, C_MKDIR); return 1;
     case SDLK_F8: run_cmd(a, C_DELETE); return 1;
-    case SDLK_F10: run_cmd(a, C_QUIT); return 1;
     case SDLK_TAB: a->act = 1 - a->act; return 1;
     case SDLK_INSERT: case SDLK_SPACE: browse_action(a, R3_X); return 1;
     case SDLK_BACKSPACE: browse_action(a, R3_BACK); return 1;
@@ -1904,6 +1977,7 @@ static int key_action(const App *a, SDL_Keycode k) {
         default: return R3_NONE;
         }
     }
+    if (k == SDLK_BACKQUOTE || k == SDLK_BACKSLASH) return r3_input_key(k);
     int act = r3_key_action(k);
     if (act == R3_MORE && (k == SDLK_TAB || k == SDLK_s)) return R3_NONE; /* Tab is the panel switch here, S is not a command */
     return act;
@@ -1990,7 +2064,7 @@ static void app_compose(const App *a, R3Screen *s) {
 
     R3Cmd c;
     memset(&c, 0, sizeof c);
-    c.reply = a->reply[0] ? a->reply : "A open  B up  X tag  Start menu  Select+Start quit";
+    c.reply = a->reply[0] ? a->reply : "A open  B up  X tag  Start commands  L1+R1 menu";
     c.reply_style = a->reply[0] ? a->reply_style : R3_ST_HINT;
     char line[PATH_MAX + 4], left[160], right[64];
     left[0] = right[0] = 0;
@@ -2118,6 +2192,21 @@ static void app_compose(const App *a, R3Screen *s) {
         R3Item items[C_COUNT];
         menu_values(a, items);
         centered_list(s, "Commander", items, C_COUNT, a->menu_sel, "A Choose  B Close", 40);
+    } else if (a->mode == M_MAIN) {
+        r3_mm_draw(s, &a->mm, r3_themes[a->theme].name);
+    } else if (a->mode == M_ABOUT) {
+        static const char *const lines[] = {"A two-panel file manager and viewer for about 150", "formats, with a Play tab for sound and video.",
+                                            "Font: IBM VGA 8x16 by VileR, CC BY-SA 4.0.", "Code: MIT. No network, no telemetry.", NULL};
+        r3_about_draw(s, "Commander", VERSION, BUILD_LINE, lines);
+    } else if (a->mode == M_KEYMAP) {
+        r3_km_draw(s, &a->km);
+    } else if (a->mode == M_RPTASK) {
+        r3_box(s, 6, 6, 52, 10, &(R3Box){1, "Device report", NULL, "A run  B cancel", 0});
+        r3_text_fit(s, 8, 8, "Writes r36s-report.txt in Commander's data folder.", 48, R3_ST(R3_ST_BODY));
+        r3_text_fit(s, 8, 9, "It times how every kind of file plays, to find what", 48, R3_ST(R3_ST_BODY));
+        r3_text_fit(s, 8, 10, "can be made faster: about a minute, no input.", 48, R3_ST(R3_ST_BODY));
+        r3_text_fit(s, 8, 12, "For the battery's draw, unplug the charger first.", 48, R3_ST(R3_ST_STRONG));
+        r3_text_fit(s, 8, 13, "A video in MusiCue's video folder is played if there is one.", 48, R3_ST(R3_ST_HINT));
     } else if (a->mode == M_THEME) {
         R3Item items[R3_THEME_COUNT];
         memset(items, 0, sizeof items);
@@ -2504,8 +2593,10 @@ static void test_colour(const char *root) {
     R3Screen s;
     for (int t = 0; t < R3_THEME_COUNT; t++) {
         r3_theme_apply(t);
-        for (int m = 0; m < 3; m++) {
-            a.mode = m == 0 ? M_BROWSE : (m == 1 ? M_MENU : M_THEME);
+        for (int m = 0; m < 7; m++) {
+            a.mode = m == 0 ? M_BROWSE : m == 1 ? M_MENU : m == 2 ? M_THEME : m == 3 ? M_MAIN : m == 4 ? M_ABOUT : m == 5 ? M_KEYMAP : M_RPTASK;
+            if (m == 3) { a.mm_from = M_BROWSE; r3_mm_open(&a.mm); }
+            if (m == 5) r3_km_open(&a.km, KM_PAGES, 2, 0);
             a.theme_sel = t;
             app_compose(&a, &s);
             int bad = 0;
@@ -2543,16 +2634,28 @@ static void test_colour(const char *root) {
     }
     CHECK(g0 == r3_pal_gen, "drawing does not change the palette");
 
-    /* the menu: Colour theme opens the picker, which shows each theme as the cursor reaches it, B puts the old one back, A keeps and saves */
-    a.mode = M_MENU;
-    a.menu_sel = C_THEME;
+    /* the main menu (rule 17): L1+R1 opens it, its items are the fixed ones in order, then Commands; Colour theme opens the picker, which shows each theme as the
+     * cursor reaches it, B puts the old one back, A keeps and saves */
+    a.mode = M_BROWSE;
+    app_action(&a, R3_MENU);
+    CHECK(a.mode == M_MAIN, "L1+R1 opens the main menu");
+    char mmsg[160];
+    CHECK(r3_mm_selftest(&a.mm, mmsg, sizeof mmsg) == 0, "%s", mmsg);
+    app_compose(&a, &s);
+    CHECK(dump_has(&s, "About") && dump_has(&s, "Colour theme") && dump_has(&s, "Keymap") && dump_has(&s, "Device report") && dump_has(&s, "Rec demo") && dump_has(&s, "Quit") && dump_has(&s, "Commands") && !dump_has(&s, "Benchmark"), "the main menu has its items, Benchmark hidden");
+    app_action(&a, R3_BACK);
+    CHECK(a.mode == M_BROWSE && !a.quit, "B closes the main menu and does not leave");
+    app_action(&a, R3_MENU);
+    app_action(&a, R3_DOWN);
     app_action(&a, R3_ACCEPT);
     CHECK(a.mode == M_THEME && a.theme_sel == 0, "the menu opens the theme picker on the theme in use");
     app_action(&a, R3_DOWN);
     CHECK(a.theme_sel == 1 && r3_pal[R3_BLACK] == (0xFF000000u | r3_themes[1].vga[R3_BLACK]), "moving shows the theme");
     app_action(&a, R3_BACK);
-    CHECK(a.mode == M_MENU && a.theme == 0 && r3_pal[R3_BLACK] == 0xFF000000u && access(conf, F_OK) != 0, "B puts the old theme back and saves nothing");
-    run_cmd(&a, C_THEME);
+    CHECK(a.mode == M_BROWSE && a.theme == 0 && r3_pal[R3_BLACK] == 0xFF000000u && access(conf, F_OK) != 0, "B puts the old theme back and saves nothing");
+    app_action(&a, R3_MENU);
+    app_action(&a, R3_DOWN);
+    app_action(&a, R3_ACCEPT);
     app_action(&a, R3_DOWN);
     app_action(&a, R3_DOWN);
     app_action(&a, R3_ACCEPT);
@@ -2663,7 +2766,7 @@ static void test_ui(const char *root) {
     app_action(&a, R3_MORE);
     CHECK(a.mode == M_MENU, "Start opens the menu");
     app_compose(&a, &s);
-    CHECK(dump_has(&s, "Make directory") && dump_has(&s, "Quit") && dump_has(&s, "Hidden files"), "menu items");
+    CHECK(dump_has(&s, "Make directory") && !dump_has(&s, "Quit") && dump_has(&s, "Hidden files"), "menu items (Quit is the main menu's alone)");
     shot(&a, &s, "2-menu");
     app_action(&a, R3_BACK);
     CHECK(a.mode == M_BROWSE, "B closes the menu");
@@ -2822,9 +2925,58 @@ static void test_ui(const char *root) {
     CHECK(view_load(&v, p, err, sizeof err) == 0 && v.n == 40 && view_pages(&v) == 3, "62 columns a line, 18 lines a page (%d lines)", v.n);
     view_free(&v);
 
-    /* quit */
-    run_cmd(&a, C_QUIT);
-    CHECK(a.quit, "quit");
+    /* quit: only the main menu's Quit leaves (rule 17): not B, not Select + Start, not a key */
+    a.mode = M_BROWSE;
+    app_action(&a, R3_BACK);
+    app_action(&a, R3_SELECT);
+    app_action(&a, R3_START);
+    app_action(&a, R3_BACK);
+    CHECK(!a.quit, "no one-touch button leaves");
+    app_action(&a, R3_MENU);
+    for (int i = 0; i < 5; i++) app_action(&a, R3_DOWN);
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.quit, "Quit in the main menu leaves");
+    a.quit = 0;
+    /* the chords: Fn turns the panels, L2+R2 is the commands menu, the Keymap opens on the folders' page and its test shows presses */
+    a.mode = M_BROWSE; a.act = 0;
+    app_action(&a, R3_PANEL_NEXT);
+    CHECK(a.act == 1, "Fn is the other panel");
+    app_action(&a, R3_PANEL_FIRST);
+    CHECK(a.act == 0, "L1+Fn is the first panel");
+    app_action(&a, R3_CONTEXT);
+    CHECK(a.mode == M_MENU, "L2+R2 opens the commands menu");
+    app_action(&a, R3_CONTEXT);
+    CHECK(a.mode == M_BROWSE, "L2+R2 closes it");
+    app_action(&a, R3_MENU);
+    for (int i = 0; i < 2; i++) app_action(&a, R3_DOWN);
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_KEYMAP && a.km.page == 1, "Keymap opens on the folders page");
+    app_compose(&a, &s);
+    CHECK(dump_has(&s, "Keymap: Folders") && dump_has(&s, "Tag or untag"), "the Keymap shows the folders' buttons");
+    char kmsg[160];
+    CHECK(r3_km_selftest(KM_PAGES, 2, kmsg, sizeof kmsg) == 0, "%s", kmsg);
+    app_action(&a, R3_END);
+    r3_km_button(&a.km, R3_BTN_X, 1, NULL);
+    app_compose(&a, &s);
+    CHECK(dump_has(&s, "Last: X") && dump_has(&s, "Tag or untag"), "the test page names what X does here");
+    app_action(&a, R3_BACK);
+    CHECK(a.mode == M_KEYMAP, "B only shows on the test page");
+    app_action(&a, R3_MENU);
+    CHECK(a.mode == M_BROWSE, "L1+R1 leaves the Keymap's test");
+    app_action(&a, R3_MENU);
+    for (int i = 0; i < 3; i++) app_action(&a, R3_DOWN);
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_RPTASK, "Device report asks first");
+    app_compose(&a, &s);
+    CHECK(dump_has(&s, "unplug the charger"), "it says what the report needs");
+    app_action(&a, R3_BACK);
+    CHECK(a.mode == M_BROWSE && !a.pending_report, "B cancels it");
+    app_action(&a, R3_MENU);
+    for (int i = 0; i < 3; i++) app_action(&a, R3_DOWN);
+    app_action(&a, R3_ACCEPT);
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_BROWSE && a.pending_report, "A runs it");
+    a.pending_report = 0;
     app_free(&a);
 }
 
@@ -3706,6 +3858,162 @@ static int corpus_walk(const char *dir, int depth, char **out, int n, int cap) {
     return n;
 }
 
+
+/* ---- the report's playback section: the SDL half (the sound device, the screen, the whole Player); the ffmpeg half is playback_report.h --------------------- */
+
+static void pb_report_audio_device(R3Report *rep) {
+    if (!SDL_WasInit(SDL_INIT_AUDIO) && SDL_InitSubSystem(SDL_INIT_AUDIO) != 0) { r3_report_line(rep, R3_SKIP, "sound device", "SDL audio would not start: %s", SDL_GetError()); return; }
+    const char *drv = SDL_GetCurrentAudioDriver();
+    SDL_AudioSpec want, got;
+    SDL_zero(want);
+    want.freq = 44100;
+    want.format = AUDIO_S16SYS;
+    want.channels = 2;
+    want.samples = 2048;
+    double t0 = r3_report_ms();
+    SDL_AudioDeviceID d = SDL_OpenAudioDevice(NULL, 0, &want, &got, 0);   /* as the player opens it: SDL converts */
+    double open_ms = r3_report_ms() - t0;
+    if (!d) { r3_report_line(rep, R3_FAIL, "sound device", "driver %s: the player's own open (44100 Hz, 16-bit stereo, 2048 samples) failed: %s", drv ? drv : "?", SDL_GetError()); return; }
+    SDL_CloseAudioDevice(d);
+    SDL_AudioSpec nat;
+    d = SDL_OpenAudioDevice(NULL, 0, &want, &nat, SDL_AUDIO_ALLOW_ANY_CHANGE);   /* what the device itself takes */
+    if (!d) nat = got; else SDL_CloseAudioDevice(d);
+    double lat = nat.freq > 0 ? 1000.0 * nat.samples / nat.freq : 0;
+    r3_report_line(rep, R3_PASS, "sound device", "driver %s opened in %.0f ms; the device itself takes %d Hz, %d channels, %d samples a buffer (%.0f ms of latency), format 0x%04x%s",
+                   drv ? drv : "?", open_ms, nat.freq, nat.channels, nat.samples, lat, nat.format,
+                   nat.freq != 44100 ? "; it is not 44100 Hz, so SDL resamples every sound the player queues (a cost, and a place to gain by asking for the device's own rate)" : "");
+}
+
+static void pb_report_screen(R3Report *rep, ReportCtx *c) {
+    SDL_RendererInfo ri;
+    if (SDL_GetRendererInfo(c->r, &ri) != 0) { r3_report_line(rep, R3_SKIP, "renderer", "SDL gave no renderer info: %s", SDL_GetError()); return; }
+    int accel = (ri.flags & SDL_RENDERER_ACCELERATED) != 0;
+    r3_report_line(rep, R3_INFO, "renderer", "%s via the %s video driver: %s%s, max texture %dx%d%s", ri.name, SDL_GetCurrentVideoDriver() ? SDL_GetCurrentVideoDriver() : "?",
+                   accel ? "accelerated (the GPU)" : "software (the CPU)", (ri.flags & SDL_RENDERER_PRESENTVSYNC) ? ", vsync on" : ", no vsync", ri.max_texture_width, ri.max_texture_height,
+                   accel ? "" : "; software means every frame is drawn and scaled by the CPU, which the decode must share");
+    double tc = 0, td = 0;
+    const int N = 60;
+    for (int i = 0; i < N; i++) {
+        double a = r3_report_ms();
+        app_compose(c->app, &c->screen);
+        double b = r3_report_ms();
+        app_video_draw(c->video, c->r, &c->screen, c->app, 1);
+        double e = r3_report_ms();
+        tc += b - a;
+        td += e - b;
+    }
+    r3_report_line(rep, R3_INFO, "screen frame", "composing the app's screen %.2f ms, drawing and presenting it %.2f ms (a frame: %.1f fps at most%s)", tc / N, td / N, td / N > 0 ? 1000.0 / (td / N + tc / N) : 0,
+                   td / N > 14 ? "; near 16.7 ms is vsync's wait, not work" : "");
+    /* a video frame uploaded as BGRA at 640x400, and as YUV at 854x480 with the renderer scaling it to 640x400 */
+    uint32_t *bgra = calloc((size_t)640 * 400, 4);
+    unsigned char *yuv = calloc(1, (size_t)854 * 480 * 3 / 2);
+    SDL_Texture *tb = SDL_CreateTexture(c->r, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, 640, 400);
+    SDL_Texture *ty = SDL_CreateTexture(c->r, SDL_PIXELFORMAT_IYUV, SDL_TEXTUREACCESS_STREAMING, 854, 480);
+    SDL_Rect dst = {0, 0, 640, 400};
+    double ms_b = -1, ms_y = -1;
+    if (bgra && tb) {
+        double t0 = r3_report_ms();
+        for (int i = 0; i < N; i++) { SDL_UpdateTexture(tb, NULL, bgra, 640 * 4); SDL_RenderCopy(c->r, tb, NULL, &dst); }
+        SDL_RenderPresent(c->r);
+        ms_b = (r3_report_ms() - t0) / N;
+    }
+    if (yuv && ty) {
+        memset(yuv, 128, (size_t)854 * 480 * 3 / 2);
+        double t0 = r3_report_ms();
+        for (int i = 0; i < N; i++) { SDL_UpdateYUVTexture(ty, NULL, yuv, 854, yuv + 854 * 480, 427, yuv + 854 * 480 + 427 * 240, 427); SDL_RenderCopy(c->r, ty, NULL, &dst); }
+        SDL_RenderPresent(c->r);
+        ms_y = (r3_report_ms() - t0) / N;
+    }
+    if (ms_b >= 0 && ms_y >= 0)
+        r3_report_line(rep, R3_INFO, "texture upload", "a 640x400 BGRA frame %.2f ms; an 854x480 YUV frame (IYUV, the renderer scaling it to 640x400) %.2f ms, %s: %s", ms_b, ms_y, ms_y <= ms_b ? "no dearer" : "dearer",
+                       !accel ? "this renderer is software, so YUV is converted and scaled on the CPU here; the GPU's figure needs a unit with its driver" : ms_y <= ms_b * 1.3 ? "the GPU takes the YUV frame, so ffmpeg need not scale or convert (see the pixel-format advice above)" : "uploading YUV costs more than BGRA on this GPU path");
+    else r3_report_line(rep, R3_SKIP, "texture upload", "this renderer could not make the BGRA or the YUV texture");
+    if (tb) SDL_DestroyTexture(tb);
+    if (ty) SDL_DestroyTexture(ty);
+    free(bgra);
+    free(yuv);
+}
+
+/* The real Player on the clip for `secs` of the real clock, drawing each new frame as the viewer does (an upload, a copy and a present). */
+static void pb_report_player(R3Report *rep, ReportCtx *c, const char *clip, double secs) {
+    Player *p = calloc(1, sizeof *p);
+    if (!p) return;
+    pl_zero(p);
+    const char *why = NULL;
+    double start = (double)SDL_GetTicks();
+    if (pl_open(p, clip, PL_VIDEO, start, &why) != 0) { r3_report_line(rep, R3_FAIL, "whole path", "the Player would not open the clip: %s", why ? why : "?"); free(p); return; }
+    SDL_Texture *t = SDL_CreateTexture(c->r, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, PL_W, PL_H);
+    SDL_Rect dst = {0, R3_DISPLAY_TOP * R3_CELL_H, PL_W, PL_H};
+    R3Power pw;
+    r3_power_begin(&pw);
+    long frames = 0, tick = 0;
+    double now = start, next_sample = 10000.0;
+    char lags[160] = "";
+    double first_lag = 0, last_lag = 0;
+    int have_lag = 0;
+    while (now - start < secs * 1000.0 && !p->ended) {
+        now = (double)SDL_GetTicks();
+        if (pl_pump(p, now) && t) {
+            SDL_UpdateTexture(t, NULL, p->px, PL_W * 4);
+            SDL_RenderCopy(c->r, t, NULL, &dst);
+            SDL_RenderPresent(c->r);
+            frames++;
+        }
+        if ((++tick & 31) == 0) r3_power_sample(&pw);
+        if (now - start >= next_sample) {       /* how far behind the sound the picture is, every 10 s: a number that grows is a drift */
+            double lg = p->now - (double)p->vidx / PL_FPS;
+            size_t u = strlen(lags);
+            if (u + 16 < sizeof lags) snprintf(lags + u, sizeof lags - u, "%s%.0f", u ? ", " : "", lg * 1000.0);
+            if (!have_lag) { first_lag = lg; have_lag = 1; }
+            last_lag = lg;
+            next_sample += 10000.0;
+        }
+        SDL_Delay(8);
+        SDL_PumpEvents();
+    }
+    double wall = ((double)SDL_GetTicks() - start) / 1000.0;
+    R3PowerResult res;
+    r3_report_power_end(rep, &pw, "playing", 0, 0, &res);
+    double lag = p->now - (double)p->vidx / PL_FPS;
+    if (have_lag)
+        r3_report_line(rep, last_lag - first_lag > 0.1 ? R3_FAIL : R3_PASS, "sync drift", "the picture's lag behind the sound every 10 s: %s ms (a rise of more than 100 ms between the first and the last is a drift: the sound's clock and the picture's are not the same rate)", lags);
+    r3_report_line(rep, lag <= 0.25 ? R3_PASS : R3_FAIL, "whole path", "the Player on %s for %.1f s: %ld picture changes and %ld frames taken, picture %.0f ms behind the %s clock (goal 250 ms or less)%s%s",
+                   clip, wall, frames, p->vidx, lag * 1000.0, p->dev ? "sound" : "wall", p->note[0] ? "; " : "", p->note);
+    if (t) SDL_DestroyTexture(t);
+    pl_close(p);
+    free(p);
+}
+
+static void report_playback(R3Report *rep, ReportCtx *c, char **list, int n) {
+    r3_report_section(rep, "playback");
+    const char *bench = getenv("R3I6NOS_PLAYBACK_BENCH");
+    if (bench && !strcmp(bench, "0")) { r3_report_line(rep, R3_SKIP, "playback", "R3I6NOS_PLAYBACK_BENCH=0"); return; }
+    char ff[PATH_MAX], clip[PATH_MAX + 64] = "";
+    int have_ff = pl_find_ffmpeg(ff, sizeof ff), has_audio = 0;
+    if (!have_ff) snprintf(ff, sizeof ff, "ffmpeg");
+    pb_report_machine(rep, ff);
+    double secs = 0;
+    char work[PATH_MAX] = "";
+    if (have_ff) {
+        snprintf(work, sizeof work, "%s/commander-playback-XXXXXX", getenv("TMPDIR") && *getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp");
+        if (!mkdtemp(work)) work[0] = 0;
+        if (work[0]) secs = pb_report_ffmpeg(rep, ff, work, clip, sizeof clip, &has_audio);
+        if (secs > 0) pb_report_sound(rep, ff, clip, secs, has_audio);
+    }
+    pb_report_ntt(rep, list, n);
+    pb_report_audio_device(rep);
+    pb_report_screen(rep, c);
+    double play = getenv("R3I6NOS_PLAYBACK_PLAY_S") && atof(getenv("R3I6NOS_PLAYBACK_PLAY_S")) > 0 ? atof(getenv("R3I6NOS_PLAYBACK_PLAY_S")) : (secs < 6 ? secs : 6);
+    if (secs > 0) pb_report_player(rep, c, clip, play);
+    if (work[0]) {
+        char p[PATH_MAX + 32];
+        snprintf(p, sizeof p, "%s/clip480.mp4", work); unlink(p);
+        snprintf(p, sizeof p, "%s/sine.wav", work); unlink(p);
+        rmdir(work);
+    }
+    r3_report_line(rep, R3_INFO, "reading this", "the app path must beat 1.5x real time with room for the menu and the sound; what each 'advice' line says is a change to try in player.h, measured here before and after. Cores: one busy core and three idle means the decode is serial and the rest are free; the GPU lines say whether SDL can take the scaling. The VPU needs the nodes above and a decoder in ffmpeg that uses them (docs/VIDEO-DECODE.md)");
+}
+
 #define REPORT_IDENTIFY_PER_S 20.0   /* files a second the viewer's identify and info may take: a first guess, set before any measurement */
 
 static int commander_report(App *app, SDL_Renderer *r, R3Video *video, R3Toast *toast, int quiet) {
@@ -3759,9 +4067,10 @@ static int commander_report(App *app, SDL_Renderer *r, R3Video *video, R3Toast *
         double rate = wall > 0 ? (double)done / wall : 0;
         r3_report_line(&rep, rate >= REPORT_IDENTIFY_PER_S ? R3_PASS : R3_FAIL, "identify speed", "%.0f files a second over %d files (goal at least %.0f)", rate, n, REPORT_IDENTIFY_PER_S);
     }
+    r3_report_power_advice(&rep, &idle, &work);
+    report_playback(&rep, &c, list, n);
     for (int i = 0; i < n; i++) free(list[i]);
     free(list);
-    r3_report_power_advice(&rep, &idle, &work);
     int pass = rep.pass, fail = rep.fail, skip = rep.skip;
     if (r3_report_close(&rep) != 0) { fprintf(stderr, "commander: cannot write the report in %s\n", dir); return 1; }
     if (!quiet) printf("Written: %s/r36s-report.txt (PASS %d FAIL %d SKIP %d)\n", dir, pass, fail, skip);
@@ -3772,8 +4081,10 @@ int main(int argc, char **argv) {
     int selftest = 0, report = 0, tab = 0, page = 0;
     const char *shot = NULL, *view = NULL;
     const char *left = getenv("R3I6NOS_FM_LEFT"), *right = getenv("R3I6NOS_FM_RIGHT");
-    if (!left || !*left) left = access("/roms", R_OK) == 0 ? "/roms" : (getenv("HOME") ? getenv("HOME") : "/");
-    if (!right || !*right) right = getenv("HOME") && *getenv("HOME") ? getenv("HOME") : "/";
+    const char *home = getenv("HOME") && *getenv("HOME") ? getenv("HOME") : "/";
+    int left_set = left && *left, right_set = right && *right;     /* an override (tests, a caller) beats the data-card default below */
+    if (!left_set) left = access("/roms", R_OK) == 0 ? "/roms" : home;
+    if (!right_set) right = home;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--selftest")) selftest = 1;
         else if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) shot = argv[++i];
@@ -3839,6 +4150,11 @@ int main(int argc, char **argv) {
         }
     }
 
+    /* Start folders: with a valid data card, left on it (/roms2) and right on the system card (/roms); otherwise left on /roms and right on the home folder. */
+    if (data.data_card[0] && !selftest) {
+        if (!left_set && access(data.data_card, R_OK) == 0) left = data.data_card;
+        if (!right_set && access("/roms", R_OK) == 0) right = "/roms";
+    }
     App app;
     app_init(&app, left, right);
     if (!selftest) load_settings(&app);
@@ -3906,7 +4222,7 @@ int main(int argc, char **argv) {
     while (!app.quit) {
         SDL_Event e;
         /* a job polls; so does a screen still being presented (app_video_draw owes presents after a change); else wait */
-        int busy = force || video.settle > 0 || app_playing(&app) || r3_toast_active(&toast);
+        int busy = force || video.settle > 0 || app_playing(&app) || r3_toast_active(&toast) || r3_input_stick_active(&app.in);
         int recent = last_input && SDL_GetTicks() - last_input < 2000;   /* a press in the last 2 s keeps the looks quick */
         int have = (app.mode == M_JOB) ? SDL_PollEvent(&e) : wait_event(&e, busy ? 16 : 250, busy ? 16 : recent ? 10 : 100);
         if (have) last_input = SDL_GetTicks();
@@ -3915,14 +4231,15 @@ int main(int argc, char **argv) {
             case SDL_QUIT: app.quit = 1; break;
             case SDL_WINDOWEVENT: force = 1; break;
             case SDL_JOYDEVICEADDED: SDL_JoystickOpen(e.jdevice.which); break;
+            case SDL_JOYAXISMOTION: r3_input_axis(&app.in, e.jaxis.axis, e.jaxis.value / 32768.0f); break;   /* axes 2 and 3 are the right stick */
             case SDL_JOYBUTTONUP:
-                if (r3_pad_action(e.jbutton.button) == R3_SELECT) app.select_held = 0;
+                r3_input_button(&app.in, e.jbutton.button, 0);
+                if (app.mode == M_KEYMAP) r3_km_button(&app.km, e.jbutton.button, 0, NULL);
                 break;
             case SDL_JOYBUTTONDOWN: {
                 if (r3_toast_key(&toast)) break; /* the key that clears a failure toast is used up */
-                int act = r3_pad_action(e.jbutton.button);
-                if (act == R3_SELECT) { app.select_held = 1; break; }
-                if (act == R3_MORE && app.select_held) { app.quit = 1; break; } /* Select+Start leaves, as in the input checker */
+                int act = r3_input_button(&app.in, e.jbutton.button, 1);    /* the reader: modifiers, chords, R1 held as increase */
+                if (app.mode == M_KEYMAP) r3_km_button(&app.km, e.jbutton.button, 1, NULL);
                 if (act != R3_NONE) app_action(&app, act);
                 break;
             }
@@ -3939,7 +4256,22 @@ int main(int argc, char **argv) {
             }
             have = SDL_PollEvent(&e);
         }
+        {   /* the right stick as the D-pad, at its own rate */
+            int acts[8], n = r3_input_tick(&app.in, SDL_GetTicks(), acts, 8);
+            for (int i = 0; i < n; i++) app_action(&app, acts[i]);
+        }
         app_tick(&app, 25);
+        if (app.pending_report) {       /* the Device report: show that it is working, then run it (no input is read meanwhile) */
+            app.pending_report = 0;
+            app_compose(&app, &screen);
+            app_video_draw(&video, r, &screen, &app, 1);
+            int rc = commander_report(&app, r, &video, &toast, 1);
+            char dir[PATH_MAX];
+            app_data_dir(dir, sizeof dir);
+            if (rc == 0) say(&app, R3_ST_OK, "Report written: %s/r36s-report.txt", dir);
+            else say(&app, R3_ST_ERROR, "The report could not be written in %s", dir);
+            force = 1;
+        }
         if ((app.mode == M_INPUT) != typing) {
             typing = app.mode == M_INPUT;
             if (typing) SDL_StartTextInput();

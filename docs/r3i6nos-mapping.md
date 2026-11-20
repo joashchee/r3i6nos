@@ -18,23 +18,30 @@ Start, Fn, the two sticks and their presses (L3, R3). Power and volume are keybo
    follow what the app does (MusiCue's Start plays). The table of plain inputs below is the **default** an app starts from and departs from only
    for its function, saying so in its README (the same rule as the theme's, rule 8).
 4. **Fn is always a panel key and never a modifier.**
+5. **A panel may remap the one-touch buttons while it has the focus** (settled 2026-11-20). An app is a set of panels; each panel's own map may bind the D-pad, A, B, X, Y,
+   Select and Start to what that panel does (a MACHINE panel plays notes on them, a MIDI panel sets the channel on Select and Start). It keeps as close to the defaults below
+   as its job allows, and where a default means nothing in that panel's context it uses the button for something that does. The system's inputs (L1, R1, L2, R2, Fn, L3, R3, the chords,
+   R1's "increase") are not the panel's to remap. A panel may give R1 a job of its own that is "increase" in its terms (a MACHINE panel: R1 + left and right the octave, R1 + up and
+   down the key), since "the same kind of action, more of it" is the only rule R1 has.
 
 ## Every app has a main menu (a scaffolding rule)
 
 **Every r3i6nos app has a main menu, opened by L1 + R1, whose first items are these, in this order, with the app's own items after them** (the
-compulsory ones are never renamed, reordered or moved elsewhere; **Benchmark is hidden when the app has nothing to measure**, the other five are always there):
+compulsory ones are never renamed, reordered or moved elsewhere; **Benchmark is hidden when the app has nothing to measure**, the other six are always there):
 
 | Item | Does |
 |---|---|
 | **About** | The app's name, version, commit and date, licence and credits (the splash's version line, rule 12). |
 | **Colour theme** | The theme choice (VGA Classic by default; true-colour themes where the app offers them, rule 8). |
+| **Keymap** | **The app's input map, as help, test and remap** (below, "The Keymap"). Added 2026-11-20 at the maintainer's request, right after Colour theme. |
 | **Device report** | Runs the app's device report (rule 9). |
 | **Rec demo** | Runs the app's Rec demo (rule 11). |
 | **Benchmark** | Runs the app's benchmark: the speed against its goal, shown on screen and written to the report folder. **Hidden when the app has nothing to measure** (a viewer, a settings app); the order of the others does not change. |
 | **Quit** | Leaves the app. |
 
-- **Quit is how an app is left. r3i6nos apps do not use Select + Start to leave** (it was the old convention; each app's own map may now use Select and
-  Start for its function). An app still leaves cleanly when the system closes it (shutdown, the menu's power-off).
+- **Quit is how an app is left, and leaving is a deliberate choice: only the main menu's Quit (or the system closing the app) leaves the desktop or the
+  launcher. No one-touch button, and no keyboard key such as Esc, quits an app** (2026-11-20). r3i6nos apps do not use Select + Start to leave (it was the old
+  convention; each app's own map may now use Select and Start for its function). An app still leaves cleanly when the system closes it (shutdown, the menu's power-off).
 - **This is rule 17 in `CLAUDE.md`** (2026-11-19). It is to be built into the theme (`docs/R3I6NOS-ANSIAPPS-THEME.md`) as one menu structure both the
   LÖVE and C themes provide, so a new app gets the items by calling it, and a self-test checks them (ROADMAP section 39). Not built yet.
 - A third-party game or port (PortMaster, a game in `Love 11.5/`) is not an r3i6nos app and has no such menu; **it keeps the existing way out
@@ -44,8 +51,8 @@ compulsory ones are never renamed, reordered or moved elsewhere; **Benchmark is 
 
 | Chord | Does | Notes |
 |---|---|---|
-| **L1 + R1** | Opens the **main menu / settings** | The app's own menu (its Start menu items, Settings) or, in the boot menu, its Settings. |
-| **L2 + R2** | Opens the **contextual menu** | For the focus: the selected item, or the panel in focus when nothing is selected. |
+| **L1 + R1** | Opens the **main menu / settings** | The app's own menu (its Start menu items, Settings) or, in the boot menu, its Settings. **Keyboard: the backquote key (`` ` ``)** (settled 2026-11-20; it replaces the proposed F10, which an app may already use for its own). |
+| **L2 + R2** | Opens the **contextual menu** | For the focus: the selected item, or the panel in focus when nothing is selected. **Keyboard: the backslash key (`\`)** (settled 2026-11-20). |
 | **Fn** | Next panel | The app's panels turn in a **carousel**: 1, 2, 3, ..., last, then 1 again. |
 | **L1 + Fn** | Jump to the **first panel** | Usually the app's main panel. |
 | **R1 + Fn** | Jump to the **previous panel** | The one shown **before** the one showing now (a history, not "number minus one"). Pressed twice it comes back, like Alt+Tab between two. |
@@ -94,6 +101,23 @@ mouse.
   nothing by default.
 - Raw numbers, from the measured mapping (LÖVE counts from 1, SDL from 0): B 1, A 2, X 3, Y 4; L1 5, R1 6, L2 7, R2 8; D-pad 9-12; Select 13, Start 14;
   L3 15, R3 16; Fn 17; left stick axes 1-2, right stick axes 3-4. **A is 2 and B is 1**: the pad is not laid out like SDL's mapping.
+
+## The Keymap (a compulsory main-menu item, 2026-11-20)
+
+**Every r3i6nos app's main menu has a Keymap item, right after Colour theme. It is the app's input map as a help page, a test and a remapper.** It is the same screen in every app (to be
+built into the LÖVE and C themes once, like the main menu; **the C theme has the help and the test since 2026-11-20 (`theme/r3i6nos_keymap.h`; MusiCue, the IO Checker and Commander use it); remap is still FM1-NTT's alone**); FM1-NTT built the first one (`host/fm1ntt.c`, "the Keymap").
+
+- **Pages.** Pages of the **system's inputs** (the chords, the keyboard keys, R1's "increase", the sticks, L3 and R3, what is never bound), then **one page for each panel whose one-touch buttons
+  mean something**, each row a button and what it does *in that panel*, and **extra pages for the panels that have held-button sets of their own** (FM1-NTT's MACHINE: L1, L2, R2 and R1). The Keymap
+  opens on the page of the panel it was opened over. Left and right turn the pages (R1 held: first and last). Nothing scrolls: more rows than fit are whole pages.
+- **Test.** The last page shows every press with what it does in the panel the Keymap was opened over, the buttons held and the sticks, and acts on none of it; L1 + R1 leaves it.
+- **Remap, with conflict checking.** A on a row, then the new button. **L1, R1, L2, R2, Fn, L3 and R3 are the system's and are refused** (with the reason on screen). A button another action of the same
+  panel already has is a **conflict, asked before anything changes**: A swaps the two, B cancels; a button the panel has no use for is swapped without asking. A binding is always a permutation of the ten
+  bindable buttons (B, A, X, Y, the D-pad, Select, Start), so two actions never share a button and none is left without one. The menus and a question (A yes, B no) always use the defaults, so a bad map
+  cannot lock a person out of the Keymap.
+- **Saved, and easy to revert.** Changes are kept at once in the app's own data folder (`keymap.txt`; a damaged or hand-edited file that is not a permutation is ignored). **X puts the row back, Y the
+  page, Start every panel's (asked first).** A changed row is marked `*`.
+- **Unattended runs use the defaults.** A Device report and a Rec demo press buttons by their default roles, so they set the person's map aside while they run.
 
 ## What the virtual mouse and keyboard override
 

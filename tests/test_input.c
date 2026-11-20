@@ -5,6 +5,7 @@
 #include "r3i6nos_themes.h"
 #include "r3i6nos_input.h"
 #include "r3i6nos_mainmenu.h"
+#include "r3i6nos_keymap.h"
 
 static int fails;
 #define CHECK(c, ...) do { if (!(c)) { fails++; fprintf(stderr, "FAIL line %d: ", __LINE__); fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
@@ -105,17 +106,32 @@ int main(void) {
     CHECK(r3_list_step(7, 20, 5, R3_HOME) == 0 && r3_list_step(7, 20, 5, R3_END) == 19, "home and end");
     CHECK(r3_list_step(7, 20, 5, R3_LEFT) == 7 && r3_list_step(7, 20, 5, R3_RIGHT) == 7, "left and right are the app's, not paging");
 
+    /* the Keymap: the system page first, the test last, rows within a page, only the test records presses */
+    {
+        static const R3KmRow rows[] = {{"A", "Open"}, {"B", "Back"}};
+        static const R3KmPage pg[] = {{"Folders", rows, 2}};
+        char km[160];
+        CHECK(r3_km_selftest(pg, 1, km, sizeof km) == 0, "%s", km);
+        R3Keymap k;
+        r3_km_open(&k, pg, 1, 0);
+        CHECK(k.page == 1 && k.npages == 3 && !r3_km_on_test(&k), "opens on the panel's page");
+        CHECK(r3_km_key(&k, R3_RIGHT) == 0 && r3_km_on_test(&k), "Right turns to the test");
+        r3_km_button(&k, R3_BTN_A, 1, NULL);
+        CHECK(k.last_btn == R3_BTN_A && !strcmp(k.last_what, "Open"), "the test names what A does in the panel");
+        CHECK(r3_km_key(&k, R3_BACK) == 0 && k.open && r3_km_key(&k, R3_MENU) == 1 && !k.open, "on the test only L1+R1 leaves");
+    }
+
     /* the main menu */
     R3MainMenu m;
     char msg[160];
     r3_mm_init(&m, 1);
     CHECK(r3_mm_selftest(&m, msg, sizeof msg) == 0, "%s", msg);
     int ids[R3MM_FIXED + R3MM_MAX_OWN];
-    CHECK(r3_mm_ids(&m, ids) == 6 && ids[0] == R3MM_ABOUT && ids[5] == R3MM_QUIT, "six items with a benchmark");
+    CHECK(r3_mm_ids(&m, ids) == 7 && ids[0] == R3MM_ABOUT && ids[2] == R3MM_KEYMAP && ids[6] == R3MM_QUIT, "seven items with a benchmark, Keymap after Colour theme");
     r3_mm_init(&m, 0);
-    CHECK(r3_mm_ids(&m, ids) == 5 && ids[4] == R3MM_QUIT && ids[3] == R3MM_DEMO, "Benchmark hidden: five items, the order unchanged");
+    CHECK(r3_mm_ids(&m, ids) == 6 && ids[5] == R3MM_QUIT && ids[4] == R3MM_DEMO, "Benchmark hidden: six items, the order unchanged");
     m.own[0] = "Own"; m.n_own = 1;
-    CHECK(r3_mm_ids(&m, ids) == 6 && ids[5] == R3MM_OWN0 && r3_mm_selftest(&m, msg, sizeof msg) == 0, "own items follow Quit");
+    CHECK(r3_mm_ids(&m, ids) == 7 && ids[6] == R3MM_OWN0 && r3_mm_selftest(&m, msg, sizeof msg) == 0, "own items follow Quit");
     r3_mm_open(&m);
     CHECK(r3_mm_key(&m, R3_DOWN) == R3MM_NOTHING && m.sel == 1 && r3_mm_key(&m, R3_ACCEPT) == R3MM_THEME && !m.open, "down, then A, chooses Colour theme and closes");
     r3_mm_open(&m);

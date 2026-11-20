@@ -101,8 +101,8 @@ static inline int r3_input_button(R3Input *in, int b, int down) {
     }
 }
 
-/* A keyboard key as an action: r3_key_action's, and F10 for the main menu. */
-static inline int r3_input_key(SDL_Keycode k) { return k == SDLK_F10 ? R3_MENU : r3_key_action(k); }
+/* A keyboard key as an action: r3_key_action's, the backquote key for the main menu and the backslash key for the contextual menu (settled 2026-11-20). */
+static inline int r3_input_key(SDL_Keycode k) { return k == SDLK_BACKQUOTE ? R3_MENU : k == SDLK_BACKSLASH ? R3_CONTEXT : r3_key_action(k); }
 
 /* An axis moved: v in -1..1. */
 static inline void r3_input_axis(R3Input *in, int axis, float v) {

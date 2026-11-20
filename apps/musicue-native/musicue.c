@@ -40,6 +40,7 @@
 #include "r3i6nos_themes.h"
 #include "r3i6nos_input.h"
 #include "r3i6nos_mainmenu.h"
+#include "r3i6nos_keymap.h"
 #include "r3i6nos_toast.h"
 #include "r3i6nos_appdata.h"
 #include "cuedata.h"
@@ -168,7 +169,7 @@ static int hue_of(const char *label) {
 typedef struct { char path[PATH_MAX]; char name[96]; char id[16]; int has_cues; int nmarkers; } Song;
 
 enum { M_LIBRARY, M_PLAYER, M_MENU, M_JOB, M_NOTE, M_ID, M_TEXT };
-enum { OV_NONE, OV_MM, OV_ABOUT, OV_THEME };                                      /* what shows over a screen: the main menu (L1+R1), About, the colour theme picker */
+enum { OV_NONE, OV_MM, OV_ABOUT, OV_THEME, OV_KEYMAP };                                      /* what shows over a screen: the main menu (L1+R1), About, the colour theme picker */
 enum { MK_LIBRARY, MK_SONG, MK_CONTEXT };                                         /* the app's own menus: the songs' (Add, Sync ...), the song's (offset, save ...), the context menu (L2+R2) */
 enum { TF_KEY, TF_TEMPO, TF_SIG, TF_SCRIPTER, TF_SUFFIX = 10 };                  /* what M_TEXT edits: a metadata field, or the number or letter after a marker's name */
 #define JUMP_SLOTS 8                                                              /* the Jump panel's one-touch buttons: D-pad up, down, left, right, then A, B, X, Y */
@@ -199,6 +200,7 @@ typedef struct {
     int csel;                               /* the cue the cursor is on (follows the cue playing unless the stick moved lately) */
     int pan_first, pan_focus, psel[P_COUNT];   /* the carousel: panel pan_first on the left, the next on the right; which of the two the stick is in; each panel's selection */
     double stick_idle_ms;                   /* since the right stick last moved a selection */
+    R3Keymap km;                            /* the main menu's Keymap (help and test) */
     R3Input in;                             /* the mapping's reader (theme/r3i6nos_input.h): held modifiers, chords, the right stick */
     R3MainMenu mm; int overlay, theme_sel;  /* L1+R1's menu and what shows over a screen */
     int menu_kind;                          /* MK_*: which of the app's own menus M_MENU shows */
@@ -220,7 +222,7 @@ typedef struct {
     int quit, force;
     /* the sync job */
     pid_t job_pid; int job_fd; char job_buf[512]; int job_len; char job_lines[6][96]; int job_nlines; double job_frac; int job_done;
-    char idbuf[12]; int idpos;              /* Start > Add: the 11 characters of a YouTube id, 0 for an empty slot */
+    char idbuf[12]; int idpos, idgx, idgy;            /* Start > Add: the 11 characters of a YouTube id, 0 for an empty slot */
     char job_want[16];                      /* a sync for one id: open that song when it is done */
     char note[3][72];                       /* a message box (M_NOTE) */
     unsigned wave_sig;
@@ -1269,12 +1271,13 @@ static void compose_job(App *a, R3Screen *s) {
 }
 
 static const char ID_ALPHA[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+#define ID_COLS 16
 
 static void compose_id(App *a, R3Screen *s) {
     r3_clear(s);
     compose_topbar(a, s, "MusiCue", "Add");
     R3Box b = {1, "Add: YouTube ID", NULL, "A next/fetch   B cancel", 0};
-    r3_box(s, 8, 5, 48, 13, &b);
+    r3_box(s, 8, 5, 48, 14, &b);
     r3_text_fit(s, 10, 7, "The 11 characters after v= in a YouTube link.", 44, R3_ST(R3_ST_BODY));
     r3_text_fit(s, 10, 8, "Capitals and small letters are different.", 44, R3_ST(R3_ST_HINT));
     for (int i = 0; i < 11; i++) {
@@ -1282,9 +1285,12 @@ static void compose_id(App *a, R3Screen *s) {
         if (i == a->idpos) { int bg = P_ACC0 + RAMP / 2; r3_put(s, col, 11, ch, pick_fg(bg), bg); }
         else r3_put(s, col, 11, ch, R3_ST(a->idbuf[i] ? R3_ST_STRONG : R3_ST_HINT));
     }
-    r3_text_fit(s, 10, 14, "Up/Down letter   L1/R1 jump 8   Left/Right move", 44, R3_ST(R3_ST_HINT));
-    r3_text_fit(s, 10, 15, "Y erase   A next, and fetch on the last one", 44, R3_ST(R3_ST_HINT));
-    r3_text_fit(s, 10, 16, "A keyboard types it.", 44, R3_ST(R3_ST_HINT));
+    for (int i = 0; i < 64; i++) {                                                   /* the on-screen keyboard: 16 x 4 keys, the D-pad moves, A types */
+        int gx = i % ID_COLS, gy = i / ID_COLS, col = 10 + gx * 2 + (gx >= 8), row = 13 + gy;
+        if (gx == a->idgx && gy == a->idgy) { int bg = P_ACC0 + RAMP / 2; r3_put(s, col, row, ID_ALPHA[i], pick_fg(bg), bg); }
+        else r3_put(s, col, row, ID_ALPHA[i], R3_ST(R3_ST_BODY));
+    }
+    r3_text_fit(s, 10, 17, "D-pad pick   A type   X/Y erase   Start fetch", 44, R3_ST(R3_ST_HINT));
     R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, "Fetches the cues and the audio, then opens it", "", R3_ST_HINT};
     r3_command_line(s, &cmd);
 }
@@ -1384,6 +1390,7 @@ static void compose(App *a, R3Screen *s) {
         static const char *const lines[] = {"The R36S port of Cue (chordica.com/cue):", "markers and cues on a song, A-B loops, Set Lists.", "r3i6nos-ansiapps theme, MIT; the font is CC BY-SA 4.0.", "Songs and cues stay on the card; nothing is sent.", NULL};
         r3_about_draw(s, "MusiCue", VERSION, BUILD_LINE, lines);
     } else if (a->overlay == OV_THEME) r3_theme_pick_draw(s, a->theme_sel, a->theme);
+    else if (a->overlay == OV_KEYMAP) r3_km_draw(s, &a->km);
 }
 
 /* ---- presenting: the cells, with the waveform's pixels laid over rows 1-6 ----------------------------------------------------------------- */
@@ -2131,21 +2138,14 @@ static int device_online(void) {
 
 static void id_open(App *a) {
     memset(a->idbuf, 0, sizeof a->idbuf);
-    a->idpos = 0;
+    a->idpos = 0; a->idgx = 0; a->idgy = 0;
     a->mode = M_ID;
-    say(a, R3_ST_HINT, "Type or pick the 11 characters of a YouTube id.");
+    say(a, R3_ST_HINT, "Pick the 11 characters of a YouTube id on the keyboard.");
 }
 
 static void id_set(App *a, int ch) {
     a->idbuf[a->idpos] = (char)ch;
     if (a->idpos < 10) a->idpos++;
-}
-
-static void id_cycle(App *a, int step) {
-    char *c = &a->idbuf[a->idpos];
-    const char *at = *c ? strchr(ID_ALPHA, *c) : NULL;
-    int n = (int)sizeof ID_ALPHA - 1, i = at ? (int)(at - ID_ALPHA) : (step > 0 ? -1 : 0);
-    *c = ID_ALPHA[((i + step) % n + n) % n];
 }
 
 static int id_full(const App *a) { for (int i = 0; i < 11; i++) if (!a->idbuf[i]) return 0; return 1; }
@@ -2272,6 +2272,7 @@ static void mm_open(App *a) {
 static void overlay_key(App *a, int act) {
     a->force = 1;
     if (a->overlay == OV_ABOUT) { a->overlay = OV_NONE; return; }
+    if (a->overlay == OV_KEYMAP) { if (r3_km_key(&a->km, act)) a->overlay = OV_NONE; return; }
     if (a->overlay == OV_THEME) {
         if (act == R3_ACCEPT) {
             a->theme = a->theme_sel;
@@ -2295,6 +2296,7 @@ static void overlay_key(App *a, int act) {
     switch (id) {
     case R3MM_ABOUT: a->overlay = OV_ABOUT; break;
     case R3MM_THEME: a->overlay = OV_THEME; a->theme_sel = a->theme; break;
+    case R3MM_KEYMAP: r3_km_open(&a->km, NULL, 0, 0); a->overlay = OV_KEYMAP; break;
     case R3MM_REPORT: say(a, R3_ST_WARN, "The device report is not built for MusiCue yet."); break;
     case R3MM_DEMO: say(a, R3_ST_WARN, "Rec demo is not built for MusiCue yet (Rec mode, L1+Start, is another thing)."); break;
     case R3MM_QUIT: a->quit = 1; break;
@@ -2329,18 +2331,14 @@ static void app_action(App *a, int act) {
     case M_ID:
         switch (act) {
         case R3_BACK: a->mode = M_LIBRARY; say(a, R3_ST_HINT, "Nothing added."); break;
-        case R3_UP: id_cycle(a, 1); break;
-        case R3_DOWN: id_cycle(a, -1); break;
-        case R3_PAGEUP: id_cycle(a, 8); break;
-        case R3_PAGEDOWN: id_cycle(a, -8); break;
-        case R3_LEFT: if (a->idpos > 0) a->idpos--; break;
-        case R3_RIGHT: if (a->idpos < 10) a->idpos++; break;
-        case R3_Y: id_erase(a); break;
-        case R3_ACCEPT:
-            if (!a->idbuf[a->idpos]) { id_cycle(a, 1); if (a->idpos < 10) a->idpos++; }     /* an empty slot becomes A and the cursor moves on */
-            else if (a->idpos < 10) a->idpos++;
-            else id_go(a);                                                                  /* A on the last, filled slot fetches */
-            break;
+        case R3_UP: a->idgy = (a->idgy + 3) % 4; break;
+        case R3_DOWN: a->idgy = (a->idgy + 1) % 4; break;
+        case R3_LEFT: a->idgx = (a->idgx + ID_COLS - 1) % ID_COLS; break;
+        case R3_RIGHT: a->idgx = (a->idgx + 1) % ID_COLS; break;
+        case R3_PAGEUP: a->idgy = 0; break;
+        case R3_PAGEDOWN: a->idgy = 3; break;
+        case R3_X: case R3_Y: id_erase(a); break;
+        case R3_ACCEPT: id_set(a, ID_ALPHA[a->idgy * ID_COLS + a->idgx]); break;
         case R3_MORE: case R3_START: id_go(a); break;
         default: break;
         }
@@ -2424,6 +2422,7 @@ static int player_press(App *a, int bt, int act) {
  * the system chords' meaning (a shoulder is a note there). */
 static void pad_button(App *a, int bt, int down) {
     int act = r3_input_button(&a->in, bt, down);
+    if (a->overlay == OV_KEYMAP) { r3_km_button(&a->km, bt, down, NULL); if (down) overlay_key(a, act); a->force = 1; return; }
     if (a->mode == M_TEXT && a->tfield == TF_KEY && !a->overlay && (a->piano || bt == R3_BTN_FN)) { piano_button(a, bt, down); return; }
     if (!down) return;
     if (!a->overlay && a->mode == M_PLAYER && player_press(a, bt, act)) return;
@@ -2738,10 +2737,16 @@ static void test_add_id(void) {
     scan_songs(&a);
     id_open(&a);
     CHECK(a.mode == M_ID && !id_full(&a), "Add opens an empty id");
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.idbuf[0] == 'A' && a.idpos == 1, "A on the keyboard types the key under the cursor");
     app_action(&a, R3_UP);
-    CHECK(a.idbuf[0] == 'A', "Up on an empty slot gives A");
-    app_action(&a, R3_DOWN);
-    CHECK(a.idbuf[0] == '_', "Down from A wraps to the last character: %c", a.idbuf[0]);
+    app_action(&a, R3_LEFT);
+    CHECK(a.idgy == 3 && a.idgx == 15, "the D-pad wraps over the grid");
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.idbuf[1] == '_' && a.idpos == 2, "the last key is _");
+    app_action(&a, R3_X);
+    app_action(&a, R3_X);
+    a.idpos = 0; memset(a.idbuf, 0, sizeof a.idbuf);
     id_key(&a, SDLK_d, 0);
     CHECK(a.idbuf[0] == 'd' && a.idpos == 1, "a keyboard types a letter and moves on");
     id_key(&a, SDLK_q, KMOD_LSHIFT);
@@ -2755,7 +2760,7 @@ static void test_add_id(void) {
     id_key(&a, SDLK_s, 0);
     CHECK(id_full(&a) && !strcmp(a.idbuf, "dw4w9WgXcQs"), "eleven");
     setenv("R3I6NOS_MUSICUE_ONLINE", "0", 1);
-    app_action(&a, R3_ACCEPT);
+    app_action(&a, R3_START);
     sub_path(&a, "inbox", "urls.txt", p, sizeof p);
     char *t = cue_read_file(p, NULL);
     CHECK(a.mode == M_LIBRARY && t && !strcmp(t, "dw4w9WgXcQs\n"), "offline: kept in urls.txt for the next Sync");
@@ -2773,7 +2778,7 @@ static void test_add_id(void) {
     id_open(&a);
     memcpy(a.idbuf, "dw4w9WgXcQs", 11);
     a.idpos = 10;
-    app_action(&a, R3_ACCEPT);
+    app_action(&a, R3_START);
     CHECK(a.mode == M_JOB, "online: the fetch starts at once");
     for (int i = 0; i < 300 && a.mode == M_JOB; i++) { app_tick(&a, 10); usleep(10000); }
     CHECK(a.mode == M_PLAYER && a.open >= 0 && !strcmp(a.songs[a.open].id, "dw4w9WgXcQs"), "the song it fetched is open (mode %d)", a.mode);
@@ -3221,7 +3226,7 @@ static void test_pad_map(void) {
     char msg[160];
     CHECK(r3_mm_selftest(&a.mm, msg, sizeof msg) == 0, "%s", msg);
     int ids[R3MM_FIXED + R3MM_MAX_OWN], n = r3_mm_ids(&a.mm, ids);
-    CHECK(n == 6 && ids[0] == R3MM_ABOUT && ids[1] == R3MM_THEME && ids[2] == R3MM_REPORT && ids[3] == R3MM_DEMO && ids[4] == R3MM_QUIT && ids[5] == R3MM_OWN0, "About, Colour theme, Device report, Rec demo, Quit (Benchmark hidden), then the app's own");
+    CHECK(n == 7 && ids[0] == R3MM_ABOUT && ids[1] == R3MM_THEME && ids[2] == R3MM_KEYMAP && ids[3] == R3MM_REPORT && ids[4] == R3MM_DEMO && ids[5] == R3MM_QUIT && ids[6] == R3MM_OWN0, "About, Colour theme, Keymap, Device report, Rec demo, Quit (Benchmark hidden), then the app's own");
     press(&a, R3_BTN_A);
     CHECK(a.overlay == OV_ABOUT, "About opens");
     compose(&a, &s);
@@ -3239,14 +3244,14 @@ static void test_pad_map(void) {
     a.theme = r3_theme_find("Nord");
     apply_theme(&a);
     dispatch(&a, R3_MENU);
-    for (int i = 0; i < 5; i++) press(&a, R3_BTN_DOWN);
-    CHECK(a.mm.sel == 5, "the app's own item is last");
+    for (int i = 0; i < 6; i++) press(&a, R3_BTN_DOWN);
+    CHECK(a.mm.sel == 6, "the app's own item is last");
     press(&a, R3_BTN_A);
     CHECK(a.mode == M_MENU && a.menu_kind == MK_SONG && a.menu.n >= 5, "the app's own item opens the song's options");
     press(&a, R3_BTN_B);
     CHECK(a.mode == M_PLAYER, "B closes it");
     dispatch(&a, R3_MENU);
-    for (int i = 0; i < 4; i++) press(&a, R3_BTN_DOWN);
+    for (int i = 0; i < 5; i++) press(&a, R3_BTN_DOWN);
     press(&a, R3_BTN_A);
     CHECK(a.quit, "Quit leaves the app");
     a.quit = 0;
@@ -3770,8 +3775,8 @@ int main(int argc, char **argv) {
                     break;
                 }
                 int bt = key_button(k);
-                if (k == SDLK_F10) dispatch(&app, R3_MENU);
-                else if (k == SDLK_F9) dispatch(&app, R3_CONTEXT);
+                if (k == SDLK_F10 || k == SDLK_BACKQUOTE) dispatch(&app, R3_MENU);
+                else if (k == SDLK_F9 || k == SDLK_BACKSLASH) dispatch(&app, R3_CONTEXT);
                 else if (bt >= 0) pad_button(&app, bt, 1);
                 else dispatch(&app, r3_input_key(k));
                 break;

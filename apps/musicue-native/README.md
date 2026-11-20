@@ -21,7 +21,7 @@ with gradients and shades made from the chosen theme.
 7. **Offset**: a per-song shift (+/-30 s in 50 ms steps) for a file that starts earlier or later than the video the cues were made on.
 8. **Themes**: 13, with true-colour gradients (Nord is the default). Every text cell on a gradient takes black or white by contrast: all pairs pass 4.5:1 in every theme (`--selftest`).
 9. **Sync** (L1+R1 menu, with the sync helper): Cue's server cue files and, with the yt-dlp package, Creative Commons audio, from `inbox/urls.txt`.
-   **Add: YouTube ID** (menu, first item): type or pick the 11 characters (Up/Down letter, R1+Up/Down jump 8, Left/Right move, Y erase, a USB keyboard types it); online, it fetches that one video's cues and audio at once and opens the song; offline, it keeps the id in `inbox/urls.txt` for the next Sync.
+   **Add: YouTube ID** (menu, first item): pick the 11 characters on an on-screen keyboard (a 16 by 4 grid: D-pad moves, A types, X or Y erases, Start fetches; a USB keyboard types it too); online, it fetches that one video's cues and audio at once and opens the song; offline, it keeps the id in `inbox/urls.txt` for the next Sync.
 
 ## The pad (the mapping of `docs/r3i6nos-mapping.md`, and the maintainer's map of 2026-11-20)
 

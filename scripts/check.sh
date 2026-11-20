@@ -2,6 +2,8 @@
 # Runs every check the CI runs. Tools that are not installed are reported, not skipped silently.
 set -u
 cd "$(dirname "$0")/.." || exit 1
+# scripts/check.sh --app APP [--theme]: only that native app's checks (scripts/check-app.sh), in a minute instead of the whole run
+if [ "${1:-}" = "--app" ]; then shift; exec scripts/check-app.sh "$@"; fi
 fail=0
 
 step() { echo "== $1"; }

@@ -27,7 +27,7 @@ Checker (2026-11-09), which measured the pad's layout.
   `.github/workflows/build.yml`); `scripts/smoke_native.sh` runs its `--selftest` under qemu. `io-checker-native --screenshot out.bmp
   [page]` draws a page to a file; `--report` writes the device report without a window (over SSH; with no window it has no power windows, CLAUDE.md rule 14: the Device report item in the app measures the idle list and the Motion pattern). Commander: `commander --report` (a window; the power section: idle, then identifying the test corpus).
 
-**Leaving:** B or Quit on the list, or hold Select+Start (raw 13 and 14) for a second, which goes back to the list from any page.
+**Leaving:** B or Quit on the list, or hold Select+Start (raw 13 and 14) for a second, which goes back to the list from any page. (The IO Checker's own; Commander and MusiCue leave only from the main menu's Quit.)
 The input page goes back by itself after **15 seconds** without input (counted down in the last 10), so a dead Select or Start cannot
 trap anyone. Esc on a keyboard.
 
@@ -43,20 +43,23 @@ the LÖVE app under a fake LÖVE, and the native build's self-test and screensho
 Commander, and the first app on the **r3i6nos-ansiapps theme** (`docs/R3I6NOS-ANSIAPPS-THEME.md`, C header `theme/r3i6nos_ansiapps.h`).
 Row 0 is the top bar (free space), rows 1-20 are two 32-column panels (the active one double-framed, 18 entries a page, `Page` as `n/m` in
 its edge), rows 21-23 are the command line: a tip or the last result, the folder as the prompt (or the line being typed), and the selected
-file's mode, size and date with its place in the list (a progress bar while it works). The left panel starts on the games card (`/roms`), the right on `$HOME`.
+file's mode, size and date with its place in the list (a progress bar while it works). **The panels start (2026-11-20): with a valid data card in, the left on it (`/roms2`) and the right on the system card (`/roms`); otherwise the left on `/roms` and the right on `$HOME`.**
 
 | Button | Does |
 |---|---|
 | D-pad up / down | move |
 | D-pad left / right | switch panel (the left panel is active after left) |
-| L1 / R1, L2 / R2 | page up / down, top / bottom |
+| R1 + up / down, R1 + left / right | page up / down, first / last entry (R1 held is "increase", `docs/r3i6nos-mapping.md`) |
+| Fn, L1 + Fn, R1 + Fn | the other panel, the left panel, the other panel (in the viewer: next, first, previous tab) |
+| right stick | the same as the D-pad, up to 6 steps a second |
 | A | open a folder, or view a file (see **The viewer** below) |
 | B | parent folder (the folder you came from stays selected); cancels a running job |
 | X | tag / untag the entry and move down; **Y** tags all or none |
-| Start | the menu: View, Copy, Move, Rename, Make directory, Delete, Tag all, Untag all, Sort by, Hidden files, Swap panels, Other panel = this folder, Quit |
-| Select + Start | quit to the menu |
+| Start, or L2 + R2 | the commands menu: View, Copy, Move, Rename, Make directory, Delete, Tag all, Untag all, Sort by, Hidden files, Swap panels, Other panel = this folder, File colours |
+| **L1 + R1** | **the main menu (rule 17):** About, Colour theme, Keymap (help for the folders and the viewer, and a test that shows each press), Device report, Rec demo (not built yet), Quit, then Commands. Benchmark is hidden: the report times the playback and the identifying. **Only the main menu's Quit leaves the app** (not B, not Select + Start, not a key) |
 
-A keyboard works too: F2 rename, F3 view, F5 copy, F6 move, F7 new folder, F8 delete, F10 quit, Tab switch panel, Insert/Space tag.
+A keyboard works too: F2 rename, F3 view, F5 copy, F6 move, F7 new folder, F8 delete, ` (backquote) the main menu, \ (backslash) the commands menu, Tab switch panel, Insert/Space tag.
+**Device report** (main menu, or `commander --report`) asks first (A runs, B cancels; unplug the charger for the battery's draw), then writes `r36s-report.txt` in Commander's data folder: the system, the power section, and **`== playback ==`** (`docs/PLAYBACK.md`): every way Commander plays something, timed, with advice on the cores, the GPU and the VPU.
 Rename and new folder use the command line: Up/Down step the last letter through a list, Right adds a letter, Left deletes one, A accepts,
 B cancels (a keyboard just types).
 
