@@ -2830,6 +2830,7 @@ static void app_free(App *a) {
 /* ---- the tests ----------------------------------------------------------------------------------------------------------------------------- */
 
 static int g_bad;
+static char g_prog_file[4200];
 /* ---- the device report (musicue_report.h) uses the main loop's wait, so it is defined here, before the tests that run the report ---- */
 /* How long the main loop waits for an event and how often it looks while it waits (docs/POWER.md). Input in flight or something moving gets a frame every 16 ms; a song
  * playing on its own is 30 frames a second (the playhead moves a few pixels a second); a screen at rest looks every 100 ms, and an event wakes it at once. */
@@ -3601,10 +3602,20 @@ static void test_report(void) {
         setenv("R3I6NOS_REPORT_POWER_S", "1", 1);
         setenv("R3I6NOS_REPORT_SONG_S", "10", 1);
         sub_path(&b, "media", NULL, p, sizeof p);
+        snprintf(g_prog_file, sizeof g_prog_file, "%s/progress", g_tmp);
+        setenv("R3I6NOS_REPORT_PROGRESS", g_prog_file, 1);       /* Settings > Device reports sets this: the bar's file */
         b.force = 1;                                    /* as the menu item leaves it: the report must not keep the loop busy (first unit report) */
         int rc = musicue_report(&b, r, &video, &toast, 1);
         CHECK(rc == 0, "the report is written (rc %d)", rc);
         CHECK(b.force == 0, "the report clears the main loop's force flag, or idle polls every 8 ms");
+        CHECK(g_rpt_prog.max_step == RPT_STEPS && !g_rpt_prog.on, "the report's progress reaches step %d of %d and ends (rule 18; reached %d)", RPT_STEPS, RPT_STEPS, g_rpt_prog.max_step);
+        CHECK(g_rpt_prog.drawn >= RPT_STEPS, "the bar was drawn at every step (%d draws)", g_rpt_prog.drawn);
+        {
+            char *pg = cue_read_file(g_prog_file, NULL);
+            CHECK(pg && strstr(pg, "step=13\n") && strstr(pg, "steps=13\n") && strstr(pg, "r36s-report.txt"), "the progress file ends at step=13 steps=13 and names the report");
+            free(pg);
+        }
+        unsetenv("R3I6NOS_REPORT_PROGRESS");
         snprintf(p, sizeof p, "%s/r36s-report.txt", d);
         char *t = cue_read_file(p, NULL);
         CHECK(t != NULL, "r36s-report.txt is in the data folder");

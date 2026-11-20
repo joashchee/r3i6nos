@@ -20,6 +20,86 @@
 
 typedef struct { App *app; SDL_Renderer *r; R3Video *video; R3Toast *toast; R3Screen cells; Uint32 last; } RptCtx;
 
+
+/* ---- the progress bar (rule 18): the report takes about two minutes, so it shows how far it has got, from its first check to its last ---------------------------------------------
+ * RPT_STEPS milestones (rpt_at sets the step, so a skipped part still moves the bar on), and inside a long one a fraction (a power window, the render) from the clock.
+ * While a window is measured the bar is only the three command rows laid over the player's own screen, so what is measured is still that screen; a blocking part (opening a
+ * song, the helpers) shows a screen of its own. Both redraw at most once a second. It also writes $R3I6NOS_REPORT_PROGRESS (step, steps, doing, file: docs/DEVICE-REPORTS.md,
+ * "Progress") when the menu started it, and the self-test reads `g_rpt_prog` to check the bar reaches the last step. */
+#define RPT_STEPS 13
+typedef struct {
+    App *app; SDL_Renderer *r; R3Video *video;
+    int step, shown_step, shown_s;          /* the milestone; what is on the screen (a redraw only when it changes) */
+    double t0, win_t0, win_len;             /* the report's clock; the current window's start and expected length (s; 0: none) */
+    char doing[96], file[PATH_MAX + 16];
+    int on, max_step, drawn;                /* on: the report is running; the highest step seen; how many redraws */
+} RptProg;
+static RptProg g_rpt_prog;
+
+static int rpt_percent(const RptProg *g) {
+    double frac = 0;
+    if (g->win_len > 0) { frac = (r3_report_ms() - g->win_t0) / 1000.0 / g->win_len; if (frac > 0.98) frac = 0.98; if (frac < 0) frac = 0; }
+    int pct = (int)(((g->step - 1) + frac) * 100.0 / RPT_STEPS);
+    if (g->step >= RPT_STEPS) pct = 100;
+    return pct < 0 ? 0 : pct > 100 ? 100 : pct;
+}
+
+/* The three command rows: what it is doing, the bar, the step and the time. */
+static void rpt_prog_rows(const RptProg *g, R3Screen *s) {
+    int pct = rpt_percent(g), full = pct / 10, secs = (int)((r3_report_ms() - g->t0) / 1000.0);
+    char bar[40], stat[64];
+    snprintf(bar, sizeof bar, "[%.*s%.*s] %d%%", full, "##########", 10 - full, "..........", pct);
+    snprintf(stat, sizeof stat, "step %d of %d, %d s", g->step, RPT_STEPS, secs);
+    R3Cmd cmd = {g->doing, R3_ST_STRONG, '>', bar, 0, stat, "", R3_ST_HINT};
+    r3_command_line(s, &cmd);
+}
+
+/* Redraw if the step or the second changed. overlay: the player's cells are on s already (a window); otherwise a screen of its own. */
+static void rpt_prog_draw(int own_screen) {
+    RptProg *g = &g_rpt_prog;
+    if (!g->on || !g->video || !g->r) return;
+    int secs = (int)((r3_report_ms() - g->t0) / 1000.0);
+    if (g->step == g->shown_step && secs == g->shown_s) return;
+    g->shown_step = g->step; g->shown_s = secs; g->drawn++;
+    if (!own_screen) return;
+    R3Screen s;
+    r3_clear(&s);
+    compose_topbar(g->app, &s, "MusiCue", "Device report");
+    r3_box(&s, 6, 5, 52, 10, &(R3Box){1, "Device report", NULL, NULL, 0});
+    r3_text_fit(&s, 8, 7, "The unit is measuring itself: sound, screen, power.", 48, R3_ST(R3_ST_BODY));
+    r3_text_fit(&s, 8, 8, "No input is read until it is done (about two minutes).", 48, R3_ST(R3_ST_BODY));
+    r3_progress(&s, 8, 11, 48, rpt_percent(g));
+    rpt_prog_rows(g, &s);
+    r3_video_draw(g->video, g->r, &s, 1);
+}
+
+/* The milestone n of RPT_STEPS has started. */
+static void rpt_at(int n, const char *doing) {
+    RptProg *g = &g_rpt_prog;
+    if (!g->on) return;
+    g->step = n; g->win_len = 0;
+    if (n > g->max_step) g->max_step = n;
+    snprintf(g->doing, sizeof g->doing, "%s", doing);
+    const char *pf = getenv("R3I6NOS_REPORT_PROGRESS");
+    if (pf && *pf) {                                        /* Settings > Device reports reads it (written whole, renamed over) */
+        char tmp[PATH_MAX + 8];
+        snprintf(tmp, sizeof tmp, "%s.tmp", pf);
+        FILE *f = fopen(tmp, "w");
+        if (f) {
+            fprintf(f, "step=%d\nsteps=%d\ndoing=%s\nfile=%s\n", n, RPT_STEPS, doing, g->file);
+            if (fclose(f) == 0) rename(tmp, pf); else unlink(tmp);
+        }
+    }
+    g->shown_step = -1;                                     /* a new step always redraws */
+    rpt_prog_draw(1);
+}
+
+/* A long step with a known length (a window, the render): the bar moves inside it by the clock. */
+static void rpt_window(double len_s) { g_rpt_prog.win_t0 = r3_report_ms(); g_rpt_prog.win_len = len_s; }
+
+/* For the blocking parts (track_load's progress, the helper's output loop): redraw its own screen once a second. Never stops anything. */
+static int rpt_prog_cb(void *ud, double so_far) { (void)ud; (void)so_far; rpt_prog_draw(1); return 0; }
+
 /* One pass of the main loop as it runs while waiting or playing, minus input (a report in progress takes none). */
 static void rpt_turn(void *arg) {
     RptCtx *c = (RptCtx *)arg;
@@ -39,6 +119,7 @@ static void rpt_turn(void *arg) {
     r3_toast_poll(c->toast, now);
     compose(a, &c->cells);
     r3_toast_draw(c->toast, &c->cells);
+    if (g_rpt_prog.on) { rpt_prog_draw(0); rpt_prog_rows(&g_rpt_prog, &c->cells); }      /* the bar over the player's own screen: what is measured stays that screen */
     present(a, c->video, c->r, &c->cells, force);
 }
 
@@ -79,6 +160,7 @@ static void rpt_run(char *const argv[], R3Power *pw, RptRun *out) {
         if (errno == EINTR) continue;
         if (errno != EAGAIN) break;
         if (pw) r3_power_sample(pw);
+        rpt_prog_draw(1);
         usleep(100000);
         if (r3_report_ms() - t0 > 900000.0) { kill(pid, SIGKILL); break; }       /* fifteen minutes: something is wrong */
     }
@@ -119,7 +201,7 @@ static double rpt_open(R3Report *rep, const char *label, const char *path, doubl
     memset(&t, 0, sizeof t);
     char err[160] = "";
     double t0 = r3_report_ms();
-    int ok = track_load(&t, path, TRACK_MAX_SECONDS, NULL, NULL, err, sizeof err);
+    int ok = track_load(&t, path, TRACK_MAX_SECONDS, rpt_prog_cb, NULL, err, sizeof err);
     double ms = r3_report_ms() - t0;
     if (!ok) { r3_report_line(rep, R3_FAIL, label, "the app could not open it: %s", err[0] ? err : "unknown"); return 0; }
     double secs = track_seconds(&t), x = secs / (ms / 1000.0 + 1e-9);
@@ -165,6 +247,11 @@ static int musicue_report(App *a, SDL_Renderer *r, R3Video *video, R3Toast *toas
         fprintf(stderr, "musicue: cannot write the report in %s: %s\n", dir, strerror(errno));
         return 1;
     }
+    memset(&g_rpt_prog, 0, sizeof g_rpt_prog);
+    g_rpt_prog.app = a; g_rpt_prog.r = r; g_rpt_prog.video = video;
+    g_rpt_prog.t0 = r3_report_ms(); g_rpt_prog.on = 1; g_rpt_prog.shown_step = -1; g_rpt_prog.shown_s = -1;
+    snprintf(g_rpt_prog.file, sizeof g_rpt_prog.file, "%s/r36s-report.txt", dir);
+    rpt_at(1, "System, card and memory");
     save_cues(a);                                              /* the report plays its own song: the person's is saved and closed */
     close_song(a);
     r3_report_system(&rep);
@@ -178,6 +265,7 @@ static int musicue_report(App *a, SDL_Renderer *r, R3Video *video, R3Toast *toas
     const char *ffmpeg = getenv("R3I6NOS_FFMPEG") && *getenv("R3I6NOS_FFMPEG") ? getenv("R3I6NOS_FFMPEG") : "ffmpeg";
 
     /* ---- helpers ---- */
+    rpt_at(2, "Helpers: renderer, sync, ffmpeg");
     r3_report_section(&rep, "helpers");
     {
         RptRun run;
@@ -199,6 +287,7 @@ static int musicue_report(App *a, SDL_Renderer *r, R3Video *video, R3Toast *toas
     }
 
     /* ---- songs ---- */
+    rpt_at(3, "Songs: making a test song, opening a WAV");
     r3_report_section(&rep, "songs");
     scan_songs(a);
     int ncopies = 0;
@@ -209,14 +298,17 @@ static int musicue_report(App *a, SDL_Renderer *r, R3Video *video, R3Toast *toas
     else {
         rpt_open(&rep, "open a WAV", wav, RPT_OPEN_WAV_X, NULL);
         RptRun er;
+        rpt_at(4, "Songs: compressing the test song to AAC");
         char *const enc_argv[] = {(char *)ffmpeg, (char *)"-v", (char *)"error", (char *)"-nostdin", (char *)"-y", (char *)"-f", (char *)"wav", (char *)"-i", wav, (char *)"-vn",
                                   (char *)"-c:a", (char *)"aac", (char *)"-aac_coder", (char *)"fast", (char *)"-b:a", (char *)"192k", (char *)"-f", (char *)"ipod", m4a, NULL};
         rpt_run(enc_argv, NULL, &er);
         if (er.code == 0) {
             r3_report_line(&rep, R3_INFO, "compress the test song", "%.1f s for %.0f s of sound (%.1fx real time) into AAC 192 kbps", er.wall, song_s, song_s / (er.wall + 1e-9));
+            rpt_at(5, "Songs: opening the M4A");
             rpt_open(&rep, "open an M4A", m4a, RPT_OPEN_M4A_X, NULL);
         } else r3_report_line(&rep, R3_SKIP, "open an M4A", "ffmpeg could not make one (%s)", er.first[0] ? er.first : "see helpers");
     }
+    rpt_at(6, "Your songs: opening one of each kind");
     {   /* a few of the person's own songs, one of each kind of file */
         char seen[8][8];
         int nseen = 0;
@@ -235,6 +327,7 @@ static int musicue_report(App *a, SDL_Renderer *r, R3Video *video, R3Toast *toas
     }
 
     /* ---- sound ---- */
+    rpt_at(7, "Sound: the device and its clock");
     r3_report_section(&rep, "sound");
     open_demo(a);                                              /* the built-in demo song: the screen, the sound and the power windows below all use it */
     if (a->eng.noaudio) r3_report_line(&rep, R3_FAIL, "sound device", "the app could not open one: %s", SDL_GetError());
@@ -252,6 +345,7 @@ static int musicue_report(App *a, SDL_Renderer *r, R3Video *video, R3Toast *toas
     }
 
     /* ---- screen ---- */
+    rpt_at(8, "Screen: composing and drawing");
     r3_report_section(&rep, "screen");
     RptCtx c;
     memset(&c, 0, sizeof c);
@@ -274,8 +368,12 @@ static int musicue_report(App *a, SDL_Renderer *r, R3Video *video, R3Toast *toas
     r3_report_power_section(&rep);
     R3PowerResult idle, work, rendering;
     memset(&idle, 0, sizeof idle); memset(&work, 0, sizeof work); memset(&rendering, 0, sizeof rendering);
+    rpt_at(9, "Power: idle, nothing pressed");
+    rpt_window(window_s);
     c.last = SDL_GetTicks();
     r3_report_power_idle(&rep, window_s, rpt_turn, &c, &idle);
+    rpt_at(10, "Power: playing a song");
+    rpt_window(window_s);
     engine_play(&a->eng, 1);
     {
         R3Power p;
@@ -289,6 +387,8 @@ static int musicue_report(App *a, SDL_Renderer *r, R3Video *video, R3Toast *toas
     RptRun kt;
     memset(&kt, 0, sizeof kt);
     int kt_ran = 0;
+    rpt_at(11, "Power: rendering a Key and Tempo copy");
+    rpt_window(kt_estimate_s(song_s, 4, 0) + kt_encode_s(song_s / 0.8));
     if (made) {
         char *const argv[] = {(char *)render, (char *)"--in", wav, (char *)"--out", copy, (char *)"--ratio", (char *)"0.8", (char *)"--semitones", (char *)"3", (char *)"--workers", (char *)"4",
                               (char *)"--encode", (char *)"aac:192:fast", NULL};
@@ -301,6 +401,7 @@ static int musicue_report(App *a, SDL_Renderer *r, R3Video *video, R3Toast *toas
     r3_report_power_advice(&rep, &idle, &work);
 
     /* ---- key and tempo ---- */
+    rpt_at(12, "Key and Tempo: checking the copy");
     r3_report_section(&rep, "key and tempo");
     if (!kt_ran) r3_report_line(&rep, R3_SKIP, "copy", "not run");
     else {
@@ -319,12 +420,14 @@ static int musicue_report(App *a, SDL_Renderer *r, R3Video *video, R3Toast *toas
     }
 
     /* tidy up: the test files, the demo song, the screen */
+    rpt_at(RPT_STEPS, "Writing the report");
     const char *junk[] = {"test.wav", "test.m4a", "copy.m4a", "copy.m4a.part", "copy.m4a.journal", "copy.m4a.enc", "copy.m4a.in.wav", NULL};
     for (int i = 0; junk[i]; i++) { char p[PATH_MAX + 48]; snprintf(p, sizeof p, "%s/%s", wdir, junk[i]); unlink(p); }
     rmdir(wdir);
     close_song(a);
     a->mode = M_LIBRARY;
     scan_songs(a);
+    g_rpt_prog.on = 0;
     return r3_report_close(&rep);
 }
 
