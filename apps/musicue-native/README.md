@@ -95,7 +95,7 @@ The main menu's **Rec demo** asks first (a checklist of the hero features above:
 
 ## Still open (ROADMAP section 36)
 
-The hot-plug toast wiring in the sync, the on-screen keyboard for naming a marker or a cue's words freely (the presets, the pad's letter picker for metadata and a USB keyboard for now), and every number about the unit: decode time, memory, the sound device, the pad.
+The on-screen keyboard for naming a marker or a cue's words freely (the presets, the pad's letter picker for metadata and a USB keyboard for now), and every number about the unit: decode time, memory, the sound device, the pad.
 
 ## Build and test
 

@@ -11,7 +11,7 @@
  *
  * `--selftest` runs the checks and prints one R3I6NOS_SMOKE line; `--screenshot out.bmp [--screen library|player|player:N|menu] [--theme NAME]` draws a screen
  * with a synthetic demo song and no files; `--make-demo DIR` writes that song and its cue files; `--version`.
- * The R36S's rules still open for this app (device report with a power section, Rec demo, hot-plug toast wiring in the sync job): ROADMAP section 36.
+ * The R36S's rules still open for this app (none of the rules are missing; the unit has run none of them): ROADMAP section 36.
  * Nothing here has run on a real R36S. */
 
 #define _GNU_SOURCE
@@ -3153,6 +3153,28 @@ static void test_add_id(void) {
     a.idpos = 10;
     app_action(&a, R3_START);
     CHECK(a.mode == M_JOB, "online: the fetch starts at once");
+    {   /* rule 13: the toast shows over the sync, a failure waits for a key and that key is used up (the main loop's order: key first, poll, compose, draw) */
+        char hd[PATH_MAX], ev[PATH_MAX];
+        snprintf(hd, sizeof hd, "%s/hp-sync", g_tmp);
+        mkdir(hd, 0755);
+        snprintf(ev, sizeof ev, "%s/events", hd);
+        setenv("R3I6NOS_HOTPLUG_DIR", hd, 1);
+        R3Toast tt;
+        r3_toast_init(&tt);
+        FILE *ef = fopen(ev, "w");
+        if (ef) { fprintf(ef, "5\tinfo\tHeadphones in\n6\terror\tUSB device failed\n"); fclose(ef); }
+        r3_toast_poll(&tt, 1000);                                 /* a failure goes first and stays until a key */
+        R3Screen sc;
+        compose(&a, &sc);
+        r3_toast_draw(&tt, &sc);
+        CHECK(a.mode == M_JOB && tt.showing && tt.error && sc.ch[R3_TOP_ROW * R3_COLS + 1] == 'U', "the failure toast is drawn over the sync's top bar");
+        r3_toast_poll(&tt, 60000);
+        CHECK(tt.showing && tt.error, "it does not time out");
+        CHECK(r3_toast_key(&tt) && !tt.showing, "a key clears it and is used up");
+        r3_toast_poll(&tt, 61000);
+        CHECK(tt.showing && !tt.error && !r3_toast_key(&tt), "the change shows next, and a key does not touch it");
+        unsetenv("R3I6NOS_HOTPLUG_DIR");
+    }
     for (int i = 0; i < 300 && a.mode == M_JOB; i++) { app_tick(&a, 10); usleep(10000); }
     CHECK(a.mode == M_PLAYER && a.open >= 0 && !strcmp(a.songs[a.open].id, "dw4w9WgXcQs"), "the song it fetched is open (mode %d)", a.mode);
     app_free(&a);

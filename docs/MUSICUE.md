@@ -51,7 +51,7 @@ a recommendation to confirm or change; it is not legal advice, and what a person
 | | |
 |---|---|
 | **Anything on a real R36S** | decode time on the Cortex-A35, memory, the sound device, the pad, the sync over Wi-Fi: **blocked on the maintainer's unit** |
-| **The rules every R36S port has** | a device report with a `== power ==` section (rules 9, 14), Rec demo with a demo file (the synthetic song is already the demo file, `--make-demo`) and a hero list (in the README), the hot-plug toast wired into the sync (the toast is drawn in the main loop already), the app's own `docs/` pointer rule (the app never names a doc: checked) |
+| **The rules every R36S port has** | a device report with a `== power ==` section (rules 9, 14), Rec demo with a demo file (the synthetic song is already the demo file, `--make-demo`) and a hero list (in the README), the hot-plug toast (polled in the main loop, so it shows over the sync too; checked by `--selftest`), the app's own `docs/` pointer rule (the app never names a doc: checked) |
 | **Naming a marker freely** | an on-screen keyboard (the theme has none yet); ten preset names and a USB keyboard's `M` for now |
 | **A text of its own** | MusiCue's terms and privacy text (Cue's describe a YouTube API client with a play counter), and the name's clearance (`~/Coding/cue/docs/cue-store-name.md` is Cue's research) |
 | **Cue's Set List and versions** | a bundle is imported as one version of each video (the favourite, else "mine", else the first); the Set List's order and the other versions are not kept |
