@@ -29,6 +29,7 @@
 #include "r3i6nos_toast.h"
 
 #define R3_DEMO_FPS 30
+#define R3_DEMO_AUX_MAX 4096     /* the most bytes in one pixel-layer entry */
 
 typedef struct {
     char dir[PATH_MAX];
@@ -49,6 +50,15 @@ typedef struct {
     R3Toast watch;                  /* held: it only collects the hot-plug failures that arrive while recording (docs/HOTPLUG.md) */
     int n_failures;
     char failure[4][96];            /* what failed, for the log and for the screen after the recording is closed */
+    int no_video;                   /* finish keeps the files and makes no video (tests, --no-video) */
+    /* the pixel layer (an app that draws in pixels over the cells, as MusiCue's waveform): a sidecar demo-<stamp>-aux.bin holds one fixed-size entry for each
+     * record of the .r3f (so the .r3f stays as Commander reads it), and `paint` draws the pixels from an entry when the video is made */
+    FILE *aux;
+    char aux_path[PATH_MAX + 40];
+    size_t aux_entry;
+    unsigned char last_aux[R3_DEMO_AUX_MAX];
+    void (*paint)(void *ctx, uint32_t *px, const void *head, const void *entry);
+    void *paint_ctx;
 } R3Demo;
 
 /* ---- PNG: a screen as 4-bit or 8-bit indexed colour (16 VGA colours, so 150 KB), stored, no library -------------------------- */
@@ -82,12 +92,10 @@ static inline int r3_demo_chunk(FILE *f, const char *type, const unsigned char *
 }
 
 /* The screen as a PNG at `path` (written whole to a temporary name, then renamed). 0, or -1. */
-static inline int r3_demo_png(const char *path, const R3Screen *s) {
+static inline int r3_demo_png_px(const char *path, const uint32_t *px) {
     size_t npx = (size_t)R3_W * R3_H;
-    uint32_t *px = malloc(npx * sizeof *px);
     unsigned char *idx = malloc(npx);
-    if (!px || !idx) { free(px); free(idx); return -1; }
-    r3_render(s, px);
+    if (!idx) return -1;
     uint32_t pal[256];
     int np = 0, last = 0, paletted = 1;
     for (size_t i = 0; i < npx && paletted; i++) {
@@ -105,7 +113,7 @@ static inline int r3_demo_png(const char *path, const R3Screen *s) {
     size_t row = paletted ? (depth == 4 ? (R3_W + 1) / 2 : R3_W) : (size_t)R3_W * 3;
     size_t rawn = (row + 1) * R3_H;
     unsigned char *raw = calloc(1, rawn);
-    if (!raw) { free(px); free(idx); return -1; }
+    if (!raw) { free(idx); return -1; }
     for (int y = 0; y < R3_H; y++) {
         unsigned char *o = raw + (size_t)y * (row + 1);
         o[0] = 0; /* filter: none */
@@ -121,7 +129,7 @@ static inline int r3_demo_png(const char *path, const R3Screen *s) {
     size_t blocks = (rawn + 65534) / 65535;
     size_t zn = 2 + rawn + blocks * 5 + 4;
     unsigned char *z = malloc(zn);
-    if (!z) { free(px); free(idx); free(raw); return -1; }
+    if (!z) { free(idx); free(raw); return -1; }
     size_t zo = 0;
     z[zo++] = 0x78;
     z[zo++] = 0x01;
@@ -160,9 +168,28 @@ static inline int r3_demo_png(const char *path, const R3Screen *s) {
         ok = (fflush(f) == 0) && ok;
         ok = (fclose(f) == 0) && ok;
     }
-    free(px); free(idx); free(raw); free(z);
+    free(idx); free(raw); free(z);
     if (!ok || rename(tmp, path) != 0) { unlink(tmp); return -1; }
     return 0;
+}
+
+/* A screen of cells as a PNG. */
+static inline int r3_demo_png(const char *path, const R3Screen *s) {
+    uint32_t *px = malloc((size_t)R3_W * R3_H * sizeof *px);
+    if (!px) return -1;
+    r3_render(s, px);
+    int rc = r3_demo_png_px(path, px);
+    free(px);
+    return rc;
+}
+
+/* Rewrites `n` bytes of the pixel layer's head at `off` (the head was reserved at r3_demo_aux_open and is filled in as the tour learns it). */
+static inline int r3_demo_aux_patch(R3Demo *d, size_t off, const void *data, size_t n) {
+    if (!d->aux) return -1;
+    if (fflush(d->aux) != 0 || fseek(d->aux, (long)(16 + off), SEEK_SET) != 0) return -1;
+    size_t w = fwrite(data, 1, n, d->aux);
+    if (fflush(d->aux) != 0 || fseek(d->aux, 0, SEEK_END) != 0) return -1;
+    return w == n ? 0 : -1;
 }
 
 /* ---- the lock: while a recording runs, nothing else starts -------------------------------------------------------------------- */
@@ -304,7 +331,7 @@ static inline void r3_demo_clean(const char *dir) {
     while ((e = readdir(d))) {
         const char *n = e->d_name;
         size_t len = strlen(n);
-        int mine = (len > 4 && !strcmp(n + len - 4, ".png")) || (len > 8 && !strcmp(n + len - 8, ".png.tmp")) || (!strncmp(n, "demo-", 5) && (strstr(n, "-frames.r3f") || (len > 4 && !strcmp(n + len - 4, ".wav")))) ||
+        int mine = (len > 4 && !strcmp(n + len - 4, ".png")) || (len > 8 && !strcmp(n + len - 8, ".png.tmp")) || (!strncmp(n, "demo-", 5) && (strstr(n, "-frames.r3f") || strstr(n, "-aux.bin") || (len > 4 && !strcmp(n + len - 4, ".wav")))) ||
                    !strcmp(n, "demo-ffmpeg.log") || !strncmp(n, "demo-file.", 10) || !strncmp(n, "rec-demo.txt", 12);
         if (!mine) continue;
         char p[PATH_MAX + 300];
@@ -375,14 +402,42 @@ static inline void r3_demo_build(R3Demo *d, const char *build) { r3_report_line(
 static inline void r3_demo_flush_run(R3Demo *d) {
     if (!d->have_last || !d->run) return;
     if (fwrite(&d->run, sizeof d->run, 1, d->frames) != 1 || fwrite(&d->last, sizeof d->last, 1, d->frames) != 1) d->err = 1;
+    if (d->aux && fwrite(d->last_aux, 1, d->aux_entry, d->aux) != d->aux_entry) d->err = 1;
     d->run = 0;
 }
 
 /* One video frame (1/30 s) showing `s`. */
-static inline void r3_demo_frame(R3Demo *d, const R3Screen *s) {
-    if (d->have_last && !memcmp(&d->last, s, sizeof *s)) d->run++;
-    else { r3_demo_flush_run(d); d->last = *s; d->have_last = 1; d->run = 1; }
+static inline void r3_demo_frame_aux(R3Demo *d, const R3Screen *s, const void *aux) {
+    const int same_aux = !d->aux || !memcmp(d->last_aux, aux, d->aux_entry);
+    if (d->have_last && same_aux && !memcmp(&d->last, s, sizeof *s)) d->run++;
+    else {
+        r3_demo_flush_run(d);
+        d->last = *s;
+        if (d->aux) memcpy(d->last_aux, aux, d->aux_entry);
+        d->have_last = 1;
+        d->run = 1;
+    }
     d->n_frames++;
+}
+static inline void r3_demo_frame(R3Demo *d, const R3Screen *s) { r3_demo_frame_aux(d, s, NULL); }
+
+/* Turns the pixel layer on, right after r3_demo_open: `head` (head_size bytes, written once: the app's static data, such as a waveform's peaks) and an
+ * entry of `entry_size` bytes with each frame; `paint(ctx, px, head, entry)` draws the pixels over a rendered screen when the video or a screenshot is made.
+ * 0, or -1. */
+static inline int r3_demo_aux_open(R3Demo *d, const void *head, size_t head_size, size_t entry_size,
+                                   void (*paint)(void *, uint32_t *, const void *, const void *), void *ctx) {
+    if (entry_size == 0 || entry_size > R3_DEMO_AUX_MAX) { errno = EINVAL; return -1; }
+    snprintf(d->aux_path, sizeof d->aux_path, "%s/demo-%s-aux.bin", d->dir, d->stamp);
+    d->aux = fopen(d->aux_path, "wb");
+    if (!d->aux) return -1;
+    unsigned char h[16] = {'R', '3', 'A', 'U', 'X', '1', 0, 0};
+    h[8] = (unsigned char)(head_size); h[9] = (unsigned char)(head_size >> 8); h[10] = (unsigned char)(head_size >> 16); h[11] = (unsigned char)(head_size >> 24);
+    h[12] = (unsigned char)(entry_size); h[13] = (unsigned char)(entry_size >> 8); h[14] = (unsigned char)(entry_size >> 16); h[15] = (unsigned char)(entry_size >> 24);
+    if (fwrite(h, 1, 16, d->aux) != 16 || (head_size && fwrite(head, 1, head_size, d->aux) != head_size)) { fclose(d->aux); d->aux = NULL; return -1; }
+    d->aux_entry = entry_size;
+    d->paint = paint;
+    d->paint_ctx = ctx;
+    return 0;
 }
 
 /* `frames` of the app's audio (interleaved stereo float): rate / R3_DEMO_FPS of them with each video frame. */
@@ -417,20 +472,22 @@ static inline int r3_demo_failed(R3Demo *d) {
 static inline double r3_demo_seconds(const R3Demo *d) { return (double)d->n_frames / R3_DEMO_FPS; }
 
 /* The next numbered screenshot, "NN-name.png". Returns 0, or -1. */
-static inline int r3_demo_shot(R3Demo *d, const R3Screen *s, const char *name) {
+static inline int r3_demo_shot_px(R3Demo *d, const R3Screen *s, const uint32_t *px, const char *name) {
     char clean[64], p[PATH_MAX + 96];
     size_t n = 0;
     for (const char *c = name; *c && n + 1 < sizeof clean; c++) clean[n++] = (*c >= 'a' && *c <= 'z') || (*c >= 'A' && *c <= 'Z') || (*c >= '0' && *c <= '9') || *c == '-' ? *c : '-';
     clean[n] = 0;
     d->n_shots++;
     snprintf(p, sizeof p, "%s/%02d-%s.png", d->dir, d->n_shots, clean);
-    int rc = r3_demo_png(p, s);
+    int rc = px ? r3_demo_png_px(p, px) : r3_demo_png(p, s);
     char key[96];
     snprintf(key, sizeof key, "screenshot %02d-%s.png", d->n_shots, clean);
     if (rc == 0) r3_report_line(&d->log, R3_PASS, key, "at %.1f s", r3_demo_seconds(d));
     else r3_report_line(&d->log, R3_FAIL, key, "could not be written: %s", strerror(errno));
     return rc;
 }
+
+static inline int r3_demo_shot(R3Demo *d, const R3Screen *s, const char *name) { return r3_demo_shot_px(d, s, NULL, name); }
 
 /* What the tour is showing now and which hero feature it belongs to, into the log (an INFO line stamped with the time). */
 static inline void r3_demo_caption(R3Demo *d, const char *hero, const char *fmt, ...) {
@@ -473,7 +530,8 @@ static inline void r3_demo_quote(char *out, size_t cap, const char *s) {
 
 /* Makes dir/demo-<stamp>.mp4 from the newest dir/demo-<stamp>-frames.r3f and demo-<stamp>.wav. 0 when made; else -1 and `msg` says why. On success the
  * ffmpeg log is removed; the frames and the .wav are KEPT (until the next run), so a unit without ffmpeg can still play them. Also the port's `--encode-demo DIR`, for a card whose unit has no ffmpeg. */
-static inline int r3_demo_encode_p(const char *dir, char *msg, size_t cap, void (*on_progress)(void *, int), void *ctx) {
+static inline int r3_demo_encode_px(const char *dir, char *msg, size_t cap, void (*on_progress)(void *, int), void *ctx,
+                                    void (*paint)(void *, uint32_t *, const void *, const void *), void *paint_ctx) {
     char ff[PATH_MAX], qdir[PATH_MAX * 2], q1[PATH_MAX * 2], q2[PATH_MAX * 2], q3[PATH_MAX * 2], cmd[PATH_MAX * 9], p[PATH_MAX + 64], stamp[24] = "";
     {   /* the newest kept recording: the greatest demo-<stamp>-frames.r3f (the stamps sort) */
         DIR *dd = opendir(dir);
@@ -488,6 +546,24 @@ static inline int r3_demo_encode_p(const char *dir, char *msg, size_t cap, void 
     snprintf(p, sizeof p, "%s/demo-%s-frames.r3f", dir, stamp);
     FILE *fr = stamp[0] ? fopen(p, "rb") : NULL;
     if (!fr) { snprintf(msg, cap, "no demo-<time>-frames.r3f in %s", dir); return -1; }
+    FILE *ax = NULL;                    /* the pixel layer's sidecar, when the app has one and says how to paint it */
+    unsigned char *ax_head = NULL, *ax_entry = NULL;
+    size_t ax_es = 0;
+    if (paint) {
+        snprintf(p, sizeof p, "%s/demo-%s-aux.bin", dir, stamp);
+        ax = fopen(p, "rb");
+        unsigned char h[16];
+        size_t hs = 0, es = 0;
+        if (ax && fread(h, 1, 16, ax) == 16 && !memcmp(h, "R3AUX1\0\0", 8)) {
+            hs = (size_t)h[8] | (size_t)h[9] << 8 | (size_t)h[10] << 16 | (size_t)h[11] << 24;
+            es = (size_t)h[12] | (size_t)h[13] << 8 | (size_t)h[14] << 16 | (size_t)h[15] << 24;
+            ax_head = malloc(hs + 1);
+            ax_entry = malloc(es + 1);
+            ax_es = es;
+            if (!ax_head || !ax_entry || es == 0 || es > R3_DEMO_AUX_MAX || (hs && fread(ax_head, 1, hs, ax) != hs)) { fclose(ax); ax = NULL; }
+        } else if (ax) { fclose(ax); ax = NULL; }
+        if (!ax) { free(ax_head); free(ax_entry); fclose(fr); snprintf(msg, cap, "demo-%s-aux.bin is missing or damaged (the pixel layer)", stamp); return -1; }
+    }
     long records = 0;
     if (on_progress) { fseek(fr, 0, SEEK_END); records = ftell(fr) / (long)(sizeof(uint32_t) + sizeof(R3Screen)); rewind(fr); }
     r3_demo_quote(qdir, sizeof qdir, ff);
@@ -513,11 +589,18 @@ static inline int r3_demo_encode_p(const char *dir, char *msg, size_t cap, void 
         if (on_progress && records && rec_at % 8 == 0) on_progress(ctx, (int)(rec_at * 100 / records));
         rec_at++;
         r3_render(s, px);
+        if (ax) {
+            if (fread(ax_entry, 1, ax_es, ax) != ax_es) { ok = 0; break; }
+            paint(paint_ctx, px, ax_head, ax_entry);
+        }
         for (uint32_t i = 0; i < run && ok; i++) ok = fwrite(px, sizeof *px, (size_t)R3_W * R3_H, pipe) == (size_t)R3_W * R3_H;
     }
     free(px);
     free(s);
     fclose(fr);
+    if (ax) fclose(ax);
+    free(ax_head);
+    free(ax_entry);
     int st = pipe ? pclose(pipe) : -1;
     signal(SIGPIPE, old);
     if (on_progress) on_progress(ctx, 100);
@@ -538,6 +621,9 @@ static inline int r3_demo_encode_p(const char *dir, char *msg, size_t cap, void 
     return 0;
 }
 
+static inline int r3_demo_encode_p(const char *dir, char *msg, size_t cap, void (*on_progress)(void *, int), void *ctx) {
+    return r3_demo_encode_px(dir, msg, cap, on_progress, ctx, NULL, NULL);
+}
 static inline int r3_demo_encode(const char *dir, char *msg, size_t cap) { return r3_demo_encode_p(dir, msg, cap, NULL, NULL); }
 
 static inline int r3_demo_copy(const char *from, const char *to) {
@@ -558,6 +644,7 @@ static inline int r3_demo_finish(R3Demo *d, const char *demo_file, int audio) {
     char msg[400], p[PATH_MAX + 300];
     r3_demo_flush_run(d);
     if (d->frames) { if (fclose(d->frames) != 0) d->err = 1; d->frames = NULL; }
+    if (d->aux) { if (fclose(d->aux) != 0) d->err = 1; d->aux = NULL; }
     if (d->wav) {
         fflush(d->wav);
         rewind(d->wav);
@@ -583,15 +670,17 @@ static inline int r3_demo_finish(R3Demo *d, const char *demo_file, int audio) {
     }
     r3_demo_failed(d);   /* one last look: a failure in the final moments counts */
     for (int i = 0; i < d->n_failures; i++) r3_report_line(&d->log, R3_FAIL, "hotplug failure", "%s", d->failure[i]);
-    int enc = d->err || d->cancelled || d->n_failures ? -1 : r3_demo_encode_p(d->dir, msg, sizeof msg, d->on_progress, d->progress_ctx);
+    int enc = d->err || d->cancelled || d->n_failures || d->no_video ? -1 : r3_demo_encode_px(d->dir, msg, sizeof msg, d->on_progress, d->progress_ctx, d->paint, d->paint_ctx);
     if (d->n_failures) snprintf(msg, sizeof msg, "stopped by a failure: %s (the files so far are kept, no video was made)", d->failure[0]);
     else if (d->cancelled) snprintf(msg, sizeof msg, "cancelled: the files so far are kept, no video was made");
     else if (d->err) snprintf(msg, sizeof msg, "a write failed during the tour (is the card full?)");
+    else if (d->no_video) snprintf(msg, sizeof msg, "no video was asked for (--no-video): the frames and the sound are kept");
     if (enc == 0) r3_report_line(&d->log, R3_PASS, "video", "%s, H.264 and AAC, %dx%d", msg, R3_W, R3_H);
-    else r3_report_line(&d->log, R3_FAIL, d->cancelled ? "cancelled" : "video", "%s", msg);
+    else r3_report_line(&d->log, d->no_video && !d->cancelled && !d->err && !d->n_failures ? R3_SKIP : R3_FAIL, d->cancelled ? "cancelled" : "video", "%s", msg);
     r3_report_line(&d->log, R3_INFO, "took", "%.1f s to record and encode (on this machine)", (r3_report_ms() - d->t0) / 1000.0);
     int closed = r3_report_close(&d->log);
-    return enc == 0 && closed == 0 ? 0 : -1;
+    int good = d->no_video ? !d->err && !d->cancelled && !d->n_failures : enc == 0;     /* --no-video asked for no video: the files are the result */
+    return good && closed == 0 ? 0 : -1;
 }
 
 #endif /* R3I6NOS_DEMO_H */

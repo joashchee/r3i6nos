@@ -1,6 +1,6 @@
 #!/bin/bash
 # tests/test_musicue_docker.sh: the MusiCue package (build/native/MusiCue.deb, from scripts/build-native-local.sh musicue-native) unpacked in a clean Debian 12 arm64
-# container with the image's own libraries: the program finds the sync helper and the renderer packed beside it, the packed musicue-render makes a 20 s tone 1.25 times faster and 2 semitones up (its length is checked), makes and reads its demo song, draws a screenshot, and passes its own
+# container with the image's own libraries: the program finds the sync helper and the renderer packed beside it, the packed musicue-render makes a 20 s tone 1.25 times faster and 2 semitones up (its length is checked), makes and reads its demo song, draws a screenshot, records its Rec demo with the real renderer and the image's ffmpeg (the video decodes and its waveform rows carry the pixel layer), and passes its own
 # self-test. Needs Docker and the deb; says NOT RUN otherwise. Not a test of the unit (the sound device, the pad, the speed).
 set -eu
 cd "$(dirname "$0")/.."
@@ -40,6 +40,22 @@ mkdir -p /t/rep/media
 if [ -x /f/ffmpeg ]; then export R3I6NOS_FFMPEG=/f/ffmpeg; fi
 R3I6NOS_APP_DATA=/t/rep R3I6NOS_REPORT_POWER_S=2 R3I6NOS_REPORT_SONG_S=20 /p/usr/games/musicue --report > /t/report.out 2>&1 && echo "REPORT-RAN ok"
 sed "s/^/REPORT /" /t/rep/r36s-report.txt | grep -E "REPORT (== |PASS|FAIL|end)" | grep -E "helpers|songs|sound|screen|power|key and tempo|summary|FAIL|PASS (open|copy|render|the screen|musicue|ffmpeg|sound|idle|playing|rendering)|end$"
+if [ -x /f/ffmpeg ]; then
+  mkdir -p /t/rd
+  R3I6NOS_RUN=/t/rdrun R3I6NOS_APP_DATA=/t/rd /p/usr/games/musicue --rec-demo > /t/rd.out 2>&1 && echo "RECDEMO-RAN ok"
+  sed "s/^/RECDEMO /" /t/rd/Demo/rec-demo.txt | grep -E "RECDEMO (FAIL|PASS (length|video|audio in step|screenshots)|end)"
+  echo "RECDEMO-FILES $(ls /t/rd/Demo | tr "\n" " ")"
+  /f/ffmpeg -v error -y -ss 12 -i /t/rd/Demo/demo-*.mp4 -frames:v 1 -f rawvideo -pix_fmt rgb24 /t/rd/f.raw && [ -s /t/rd/f.raw ] && echo "RECDEMO-DECODES ok"
+  /f/ffmpeg -v error -y -i /t/rd/Demo/demo-*.mp4 -vn -f s16le -ar 44100 -ac 2 /t/rd/a.raw
+  python3 -c "
+import array
+a = array.array(\"h\"); a.frombytes(open(\"/t/rd/a.raw\", \"rb\").read())
+print(\"RECDEMO-AUDIO-SECONDS\", len(a) // 2 // 44100, \"LOUD\", max(abs(x) for x in a[::97]) > 3000)"
+  python3 -c "
+d = open(\"/t/rd/f.raw\", \"rb\").read()
+cols = set(d[(y * 640 + x) * 3:(y * 640 + x) * 3 + 3] for y in range(24, 136) for x in range(640))
+print(\"RECDEMO-WAVE-COLOURS\", len(cols))"
+fi
 /p/usr/games/musicue --selftest | sed "s/^/SELFTEST /"
 ' 2>&1)" || true
 printf '  %s\n' "${out//$'\n'/$'\n  '}"
@@ -69,6 +85,16 @@ if ! echo "$out" | grep -q "^REPORT-SKIPPED"; then :; fi
 if ! echo "$out" | grep -q "^AAC-SKIPPED"; then
     echo "$out" | grep -q "^REPORT PASS copy: DONE" || { echo "FAIL: the report's Key and Tempo copy did not pass with the packed helper" >&2; exit 1; }
     echo "$out" | grep -q "^REPORT PASS copy length" || { echo "FAIL: the report's copy has the wrong length" >&2; exit 1; }
+fi
+if ! echo "$out" | grep -q "^AAC-SKIPPED"; then
+    echo "$out" | grep -q "^RECDEMO-RAN ok" || { echo "FAIL: musicue --rec-demo did not finish in the clean Debian" >&2; exit 1; }
+    echo "$out" | grep -q "^RECDEMO end$" || { echo "FAIL: the Rec demo log does not end with end" >&2; exit 1; }
+    echo "$out" | grep -q "^RECDEMO FAIL" && { echo "FAIL: the Rec demo log has a FAIL line" >&2; exit 1; }
+    echo "$out" | grep -q "^RECDEMO PASS video: demo-.*\.mp4" || { echo "FAIL: Rec demo made no video" >&2; exit 1; }
+    echo "$out" | grep -q "^RECDEMO-DECODES ok" || { echo "FAIL: the Rec demo video does not decode" >&2; exit 1; }
+    echo "$out" | grep -q "^RECDEMO-AUDIO-SECONDS 8[0-9] LOUD True" || { echo "FAIL: the Rec demo video's sound is not the 82 seconds of the app's own mix" >&2; exit 1; }
+    wc="$(printf '%s\n' "$out" | sed -n 's/^RECDEMO-WAVE-COLOURS //p')"
+    [ "${wc:-0}" -ge 300 ] || { echo "FAIL: the video's waveform rows have only ${wc:-0} colours (the pixel layer is missing)" >&2; exit 1; }
 fi
 echo "$out" | grep -q "^SELFTEST R3I6NOS_SMOKE ok musicue=" || { echo "FAIL: the self-test" >&2; exit 1; }
 echo "musicue docker OK"

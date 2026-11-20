@@ -5,7 +5,7 @@ its menu has **Rec demo**: one action that runs the real app on the unit through
 saves **screenshots and a short video with sound** to a `Demo` folder. They are for the store page, the README and the maintainer's eyes. CLAUDE.md
 rule 11 makes this a rule.
 
-Status: **specified 2026-11-11; TinyNTT is the first port to have it** (2026-11-11, `theme/r3i6nos_demo.h`; ROADMAP section 18). TinyNTT's has run on the unit (2026-11-11); no other port's has.
+Status: **specified 2026-11-11; TinyNTT is the first port to have it** (MusiCue, the first with a pixel layer, 2026-11-20) (2026-11-11, `theme/r3i6nos_demo.h`; ROADMAP section 18). TinyNTT's has run on the unit (2026-11-11); no other port's has.
 
 ## What it makes
 
@@ -124,6 +124,7 @@ log says FAIL with why, and the frames (`demo-frames.r3f`) and the audio (`demo.
   sound engine by hand, pressing the pad's buttons through the app's own input path, and calling the recorder. It records the hero feature each moment
   shows (`rc_cap`) and the port checks every one on the list was named. **Anything that runs on a thread in real time (an export, a load) is waited for
   with no frames**, or two recordings would differ; a self-test records twice and compares every PNG, the audio and the frames byte for byte.
+- **The pixel layer** (2026-11-20, for an app that draws in pixels over the cells; MusiCue's waveform is the first). The recorder keeps cells, so the app turns the layer on right after `r3_demo_open`: `r3_demo_aux_open(&d, head, head_size, entry_size, paint, ctx)` makes the sidecar `demo-<stamp>-aux.bin` (`R3AUX1`, the head's size and the entry's, the head, then one fixed-size entry for each record of the `.r3f`, so **the `.r3f` stays as Commander reads it** and Commander plays the cells without the pixels); `r3_demo_frame_aux(&d, &screen, &entry)` replaces `r3_demo_frame` (a record is split when the screen **or** the entry changes, so an entry should hold columns and flags, not seconds); `r3_demo_aux_patch` fills a part of the head in later (the second song's peaks); `r3_demo_shot_px` saves a screenshot from pixels the app composed; the encode (`r3_demo_encode_px`, called by `finish` with the app's `paint`, and by `--encode-demo`) renders each record's cells and calls `paint(ctx, px, head, entry)` over them. An entry is at most `R3_DEMO_AUX_MAX` (4096) bytes. `--no-video` (`d.no_video`) keeps the files and logs SKIP for the video. Tests: `tests/test_demo.c` (a fake ffmpeg and painter) and MusiCue's `--selftest`.
 - **The shared pieces other ports use** (written 2026-11-11, tested by `tests/test_demo.c`): `r3_splash` in `theme/r3i6nos_ansiapps.h` (rule 12: the
   top bar, a framed box with the name, tagline, what is loading, a bar and the `v<version> <commit> <date>` line; TinyNTT's splash is one call) and,
   in `theme/r3i6nos_demo.h`, `R3Checklist` (`r3_checklist_init`, `_move`, `_toggle`, `_mask`, `_parse` for `--features`, `_draw`: the dialog and its
@@ -189,9 +190,11 @@ real ffmpeg is tested on a Mac only. The `.r3f` frames Commander plays are not w
 | KlamANSI | KlamANSI repo `r36s/host/recdemo.h` (the tour is `r36s/demo/tour.txt`, run by `host/demo.js` in a second QuickJS runtime on a drawing made in code) | Start > Rec demo (a checklist of six hero features first), `klamansi --rec-demo [--features a,b]` | `/roms/KlamANSI/Demo/` |
 | NoCoGaMa (LÖVE) | NoCoGaMa repo `app/demo/` (`rec.lua`, `tour.lua`, `heroes.lua`): its own recorder, since r3i6nos has none for LÖVE | Start > Rec demo (a checklist of eight hero features first), `love app --rec-demo [--features a,b]`, `--encode-demo DIR` | `/roms/NoCoGaMa/Demo/` |
 
+| MusiCue (native, C) | r3i6nos `apps/musicue-native/musicue_demo.h` (2026-11-20): a second copy of the app on a stepped clock, the engine's mixer rendering the sound, the pixel layer for the waveform; nine hero features; a real Key and Tempo copy | main menu > Rec demo (a checklist of the nine first), `musicue --rec-demo [--features a,b] [--no-video]`, `--encode-demo DIR` | `<data>/MusiCue/Demo/` (the data card first, rule 16) |
+
 | Composer, Painter (command-line tools) | r3i6nos `tools/qjs-node/demo.py`, tours in each repo's `r36s/commands.txt` (2026-11-12; Animator's list has none yet) | `compose-demo`, `sprites-demo` (`--features a,b`, `--no-video`), Settings > Rec demos | `/roms/Composer/Demo/`, `/roms/Painter/Demo/` |
 
-Ports still to add it to (checked in the repos 2026-11-12): Neumetik, Crunchy, Chordica, Animator, Commander and the IO Checker
+Ports still to add it to (checked in the repos 2026-11-12; MusiCue has it since 2026-11-20): Neumetik, Crunchy, Chordica, Animator, Commander and the IO Checker
 (r3i6nos's menu, being the system, has a Device report but no tour). The KlamANSI and NoCoGaMa rows come from those repos' own code and roadmaps (KlamANSI's
 Phase 10, NoCoGaMa's rule 11; NoCoGaMa's first recording on the unit, 2026-11-11 22:27, ran the whole tour in 87.8 s); this repo has not checked
 either against every point of rule 11. Any recording that writes the lock and status files in `/run/loveos/demo/` (both ports do) is seen by the menu (Settings > Rec demos shows its progress) and by the helpers (the report, the update check and the network helper refuse to run while it holds the lock): `menu/demos.lua`, `r3i6nos-report`, `r3i6nos-about`, `r3i6nos-net`. NoCoGaMa's roadmap still says the menu and helpers do not read its lock; that is out of date.

@@ -219,6 +219,7 @@ typedef struct {
     volatile int loop;                  /* 1: wrap from loop_b back to loop_a */
     volatile int64_t loop_a, loop_b;    /* frames; a < b when the loop is set */
     double carry;                       /* frames not yet whole, on the caller's clock */
+    int stepped;                        /* Rec demo: the caller renders the sound itself (engine_render) on a stepped clock, so engine_tick must not move the position */
     Voice voice[VOICES];                /* the Piano panel's notes, mixed over the song */
 } Engine;
 
@@ -264,15 +265,17 @@ static int64_t engine_step(Engine *e, int16_t *out, int64_t frames) {
     return done;
 }
 
-static void engine_callback(void *ud, Uint8 *stream, int len) {
-    Engine *e = (Engine *)ud;
-    int16_t *out = (int16_t *)stream;
-    int64_t frames = len / 4, done = 0;
+/* `frames` of sound into out (16-bit stereo): the song, the A/B loop's wrap and the piano's voices, exactly what the device gets. The sound device's callback is this,
+ * and so is Rec demo's tour on its stepped clock. */
+static void engine_render(Engine *e, int16_t *out, int64_t frames) {
+    int64_t done = 0;
     if (e->playing) done = engine_step(e, out, frames);
     if (done < frames) memset(out + done * 2, 0, (size_t)(frames - done) * 4);
     engine_mix_voices(e, out, frames);
     if (e->playing && e->pos >= e->t->frames) { e->playing = 0; e->ended = 1; }
 }
+
+static void engine_callback(void *ud, Uint8 *stream, int len) { engine_render((Engine *)ud, (int16_t *)stream, len / 4); }
 
 /* Open the sound device (unless there is none or R3I6NOS_MUSICUE_NOAUDIO=1). The track must outlive the engine. */
 /* Opens the sound device with the engine's own settings. 1 when it is open; 0 leaves noaudio set. */
@@ -392,7 +395,7 @@ static void engine_notes_off(Engine *e) {
 
 /* On the caller's clock: advance by ms when there is no sound device. A no-op when a device is feeding the position. */
 static void engine_tick(Engine *e, double ms) {
-    if (!e->noaudio || !e->playing) return;
+    if (!e->noaudio || !e->playing || e->stepped) return;
     e->carry += ms * TRACK_RATE / 1000.0;
     int64_t whole = (int64_t)e->carry;
     e->carry -= (double)whole;

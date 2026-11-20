@@ -25,7 +25,7 @@ with gradients and shades made from the chosen theme.
 
 ## The pad (the mapping of `docs/r3i6nos-mapping.md`, and the maintainer's map of 2026-11-20)
 
-The system parts are the same in every r3i6nos app: **L1 + R1 the main menu** (About, Colour theme, Device report, Rec demo, Quit, then Songs and sync / Song options; Benchmark is hidden, MusiCue
+The system parts are the same in every r3i6nos app: **L1 + R1 the main menu** (About, Colour theme, Keymap, Device report, Rec demo, Quit, then Songs and sync / Song options; Benchmark is hidden, MusiCue
 has nothing to measure yet), **L2 + R2 (or Y) the context menu** for what the cursor is on, **Fn the next panel, L1 + Fn the first, R1 + Fn the one before**, the right stick as the D-pad (past the dead
 zone 0.35, at most 6 steps a second), **R1 held is "increase"** (Page up and down, Home and End on lists). Quit is in the main menu; Select + Start no longer leaves. There is no virtual mouse or keyboard.
 
@@ -89,9 +89,13 @@ A WAV is read here; every other format is decoded by the image's one `/usr/bin/f
 
 Rows 1-6 are drawn in pixels, not cells (`wave.h`), so the screen mirror (`docs/SCREEN-MIRROR.md`) shows those rows as blank cells; the mirror carries the text and not the waveform. Nothing else leaves the grid.
 
+## Rec demo (rule 11, `docs/DEMO-RECORDINGS.md`)
+
+The main menu's **Rec demo** asks first (a checklist of the hero features above: waveform, markers, jumps, loops, cues, panels, piano, themes, key and tempo copy; all ticked, A toggles, Start records, B goes back), or `musicue --rec-demo [--features a,b] [--no-video]`; `--encode-demo DIR` remakes the video from the kept frames. It runs the app's own demo song (96 s, made in code by `--make-demo`) through a scripted tour of about 80 s on a stepped clock and writes `Demo/` in the app's data folder: numbered PNGs, `demo-<stamp>.mp4` (with the app's own sound, from the engine's mixer, never the device), the demo song's cue file and `rec-demo.txt`. The video opens on the splash with the version line and shows a real Key and Tempo copy made by `musicue-render` and played. While it runs the unit is locked (Select+Start held cancels). Sync and Offset are not shown (a SKIP line each). App data it makes: only `Demo/`; the tour works in a temporary `Demo/.work` that it removes.
+
 ## Still open (ROADMAP section 36)
 
-The device report with its power section (rule 9, 14), Rec demo (rule 11), the hot-plug toast wiring in the sync, the on-screen keyboard for naming a marker or a cue's words freely (the presets, the pad's letter picker for metadata and a USB keyboard for now), and every number about the unit: decode time, memory, the sound device, the pad.
+The hot-plug toast wiring in the sync, the on-screen keyboard for naming a marker or a cue's words freely (the presets, the pad's letter picker for metadata and a USB keyboard for now), and every number about the unit: decode time, memory, the sound device, the pad.
 
 ## Build and test
 

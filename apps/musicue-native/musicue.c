@@ -44,6 +44,7 @@
 #include "r3i6nos_keymap.h"
 #include "r3i6nos_toast.h"
 #include "r3i6nos_report.h"
+#include "r3i6nos_demo.h"
 #include "r3i6nos_appdata.h"
 #include "cuedata.h"
 #include "audio.h"
@@ -173,7 +174,7 @@ typedef struct { char path[PATH_MAX]; char name[96]; char id[16]; int has_cues; 
 
 enum { M_LIBRARY, M_PLAYER, M_MENU, M_JOB, M_NOTE, M_ID, M_TEXT, M_KT };
 enum { JOB_SYNC, JOB_RENDER, JOB_COMPRESS };                                                 /* what the job screen is running: the sync, or a Key and Tempo render */
-enum { OV_NONE, OV_MM, OV_ABOUT, OV_THEME, OV_KEYMAP, OV_REPORT };                                      /* what shows over a screen: the main menu (L1+R1), About, the colour theme picker */
+enum { OV_NONE, OV_MM, OV_ABOUT, OV_THEME, OV_KEYMAP, OV_REPORT, OV_DEMO };                                      /* what shows over a screen: the main menu (L1+R1), About, the colour theme picker */
 enum { MK_LIBRARY, MK_SONG, MK_CONTEXT };                                         /* the app's own menus: the songs' (Add, Sync ...), the song's (offset, save ...), the context menu (L2+R2) */
 enum { TF_KEY, TF_TEMPO, TF_SIG, TF_SCRIPTER, TF_SUFFIX = 10 };                  /* what M_TEXT edits: a metadata field, or the number or letter after a marker's name */
 #define JUMP_SLOTS 8                                                              /* the Jump panel's one-touch buttons: D-pad up, down, left, right, then A, B, X, Y */
@@ -235,8 +236,12 @@ typedef struct {
     char note[3][72];                       /* a message box (M_NOTE) */
     unsigned wave_sig;
     int pending_report;                     /* the Device report was asked for (and confirmed): the main loop runs it */
+    int pending_tour; unsigned tour_mask;   /* Rec demo was asked for (the checklist's Start): the main loop runs it with these hero features */
+    R3Checklist tour_ck;                    /* Rec demo's checklist of hero features (OV_DEMO) */
     double audio_idle_ms;                   /* how long nothing has sounded: the sound device is closed after 2 s (engine_sleep) */
 } App;
+static void demo_checklist_open(App *a);          /* Rec demo's checklist (musicue_demo.h) */
+static int make_demo(const char *dir);            /* the demo song and its cue file on disk */
 
 /* The Jump panel's button tags, and the Piano panel's keys: which button plays which note of the octave (C C# D D# E F F# G G# A A# B). */
 static const char *const JUMP_TAGS[JUMP_SLOTS] = {"[^]", "[v]", "[<]", "[>]", "[A]", "[B]", "[X]", "[Y]"};
@@ -1273,7 +1278,7 @@ static void compose_player(App *a, R3Screen *s) {
                      : a->rec && a->eng.playing ? "Down cue  Up undo  Left/Right cue  Start stop  Fn panels"
                      : "Start play  L1+Start rec  Left/Right cue  Fn panels  L1+R1 menu";
     R3Cmd cmd = {a->reply, a->reply_style, a->rec && a->eng.playing ? '*' : a->eng.playing ? '>' : '|', keys, 0, status,
-                 a->eng.noaudio && !a->demo ? "no sound device" : "", R3_ST_WARN};
+                 a->eng.noaudio && !a->demo && !a->eng.stepped ? "no sound device" : "", R3_ST_WARN};
     r3_command_line(s, &cmd);
 }
 
@@ -1288,7 +1293,7 @@ static void compose_job(App *a, R3Screen *s) {
         else r3_put(s, 4 + i, 6, 176, R3_ST(R3_ST_HINT));
     }
     for (int i = 0; i < a->job_nlines && i < 6; i++) r3_text_scroll(s, 4, 8 + i, a->job_lines[i], 56, R3_ST(i == a->job_nlines - 1 ? R3_ST_STRONG : R3_ST_BODY));
-    R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, a->job_kind == JOB_RENDER ? "B stops it and takes the half copy away" : a->job_kind == JOB_COMPRESS ? "B stops it; copies already done stay done" : "Your own list: MusiCue/inbox/urls.txt", "", R3_ST_HINT};
+    R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, a->job_done ? "A or B closes this list" : a->job_kind == JOB_RENDER ? "B stops it and takes the half copy away" : a->job_kind == JOB_COMPRESS ? "B stops it; copies already done stay done" : "Your own list: MusiCue/inbox/urls.txt", "", R3_ST_HINT};
     r3_command_line(s, &cmd);
 }
 
@@ -1448,6 +1453,7 @@ static void compose(App *a, R3Screen *s) {
         r3_about_draw(s, "MusiCue", VERSION, BUILD_LINE, lines);
     } else if (a->overlay == OV_THEME) r3_theme_pick_draw(s, a->theme_sel, a->theme);
     else if (a->overlay == OV_KEYMAP) r3_km_draw(s, &a->km);
+    else if (a->overlay == OV_DEMO) r3_checklist_draw(s, &a->tour_ck, 5);
     else if (a->overlay == OV_REPORT) {
         r3_box(s, 6, 6, 52, 12, &(R3Box){1, "Device report", NULL, "A run  B cancel", 0});
         r3_text_fit(s, 8, 8, "Writes r36s-report.txt in MusiCue's data folder.", 48, R3_ST(R3_ST_BODY));
@@ -1475,9 +1481,14 @@ static unsigned wave_signature(App *a) {
     return h | 1u;
 }
 
+/* The waveform's pixels are laid over the cells on the player and on a menu over it, but not under the two boxes that reach into its rows. */
+static int wave_visible(const App *a) {
+    return (a->mode == M_PLAYER || (a->mode == M_MENU && a->back_mode == M_PLAYER)) && a->overlay != OV_THEME && a->overlay != OV_ABOUT;
+}
+
 static void paint(App *a, uint32_t *px, const R3Screen *s) {
     r3_render(s, px);
-    if ((a->mode == M_PLAYER || (a->mode == M_MENU && a->back_mode == M_PLAYER)) && a->overlay != OV_THEME && a->overlay != OV_ABOUT) {      /* those two boxes reach into the waveform's rows */
+    if (wave_visible(a)) {
         WaveStyle st;
         WaveMark marks[WAVE_MAX_MARKS];
         wave_style(&st);
@@ -2572,6 +2583,13 @@ static void overlay_key(App *a, int act) {
     a->force = 1;
     if (a->overlay == OV_ABOUT) { a->overlay = OV_NONE; return; }
     if (a->overlay == OV_KEYMAP) { if (r3_km_key(&a->km, act)) a->overlay = OV_NONE; return; }
+    if (a->overlay == OV_DEMO) {                           /* Rec demo's checklist: A ticks, Start records, B goes back; one stays ticked */
+        if (act == R3_UP || act == R3_DOWN) r3_checklist_move(&a->tour_ck, act == R3_UP ? -1 : 1);
+        else if (act == R3_ACCEPT) { r3_checklist_toggle(&a->tour_ck); if (!r3_checklist_mask(&a->tour_ck)) a->tour_ck.on[a->tour_ck.sel] = 1; }
+        else if (act == R3_START) { a->tour_mask = r3_checklist_mask(&a->tour_ck); a->pending_tour = 1; a->overlay = OV_NONE; say(a, R3_ST_WARN, "Recording the demo (about two minutes; no input meanwhile)..."); }
+        else if (act == R3_BACK || act == R3_MENU) { a->overlay = OV_NONE; say(a, R3_ST_HINT, "Rec demo cancelled."); }
+        return;
+    }
     if (a->overlay == OV_REPORT) {                         /* it asks first: A runs it, B (or the menu key) does not */
         if (act == R3_ACCEPT) { a->pending_report = 1; a->overlay = OV_NONE; say(a, R3_ST_WARN, "Writing the device report (about two minutes; no input meanwhile)..."); }
         else if (act == R3_BACK || act == R3_MENU) { a->overlay = OV_NONE; say(a, R3_ST_HINT, "Device report cancelled."); }
@@ -2602,7 +2620,7 @@ static void overlay_key(App *a, int act) {
     case R3MM_THEME: a->overlay = OV_THEME; a->theme_sel = a->theme; break;
     case R3MM_KEYMAP: r3_km_open(&a->km, NULL, 0, 0); a->overlay = OV_KEYMAP; break;
     case R3MM_REPORT: a->overlay = OV_REPORT; break;
-    case R3MM_DEMO: say(a, R3_ST_WARN, "Rec demo is not built for MusiCue yet (Rec mode, L1+Start, is another thing)."); break;
+    case R3MM_DEMO: demo_checklist_open(a); break;
     case R3MM_QUIT: a->quit = 1; break;
     case R3MM_OWN0: open_menu(a, a->mode == M_PLAYER ? MK_SONG : MK_LIBRARY); break;
     default: break;
@@ -2833,6 +2851,7 @@ static int wait_event(SDL_Event *e, int ms, int step) {
 }
 
 #include "musicue_report.h"
+#include "musicue_demo.h"
 
 #define CHECK(cond, ...) do { if (!(cond)) { g_bad++; fprintf(stderr, "selftest FAIL (%s:%d): ", __FILE__, __LINE__); fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
 
@@ -4299,6 +4318,168 @@ static void test_screens(void) {
 }
 
 
+/* ---- Rec demo (musicue_demo.h): the tour on a stepped clock, with the real mixer and a fake render helper ------------------------------------------------ */
+
+static int same_file(const char *x, const char *y) {
+    FILE *fx = fopen(x, "rb"), *fy = fopen(y, "rb");
+    int same = fx && fy;
+    while (same) {
+        unsigned char bx[4096], by[4096];
+        size_t nx = fread(bx, 1, sizeof bx, fx), ny = fread(by, 1, sizeof by, fy);
+        if (nx != ny || memcmp(bx, by, nx)) same = 0;
+        if (nx < sizeof bx) break;
+    }
+    if (fx) fclose(fx);
+    if (fy) fclose(fy);
+    return same;
+}
+
+static int count_ext(const char *dir, const char *ext) {
+    DIR *d = opendir(dir);
+    struct dirent *e;
+    int n = 0;
+    size_t le = strlen(ext);
+    while (d && (e = readdir(d))) { size_t l = strlen(e->d_name); if (l > le && !strcmp(e->d_name + l - le, ext)) n++; }
+    if (d) closedir(d);
+    return n;
+}
+
+static void test_rec_demo(void) {
+    char run[PATH_MAX], d1[PATH_MAX], d2[PATH_MAX], d3[PATH_MAX], fake[PATH_MAX], p1[PATH_MAX], p2[PATH_MAX], fail[160];
+    snprintf(run, sizeof run, "%s/rdrun", g_tmp);
+    snprintf(d1, sizeof d1, "%s/rd1/Demo", g_tmp);
+    snprintf(d2, sizeof d2, "%s/rd2/Demo", g_tmp);
+    snprintf(d3, sizeof d3, "%s/rd3/Demo", g_tmp);
+    snprintf(fake, sizeof fake, "%s/rdfake", g_tmp);
+    setenv("R3I6NOS_RUN", run, 1);
+    setenv("R3I6NOS_DEMO_KT_WAV", "1", 1);
+    setenv("R3I6NOS_DEMO_STAMP", "20261120-120000", 1);
+    unsetenv("R3I6NOS_MUSICUE_BATTERY"); unsetenv("R3I6NOS_MUSICUE_FREE_MB");
+    write_script(fake, "#!/bin/sh\nout=; in=\nwhile [ $# -gt 0 ]; do case \"$1\" in --in) in=\"$2\";; --out) out=\"$2\";; esac; shift; done\n"
+                       "echo \"PROGRESS 0/2 Rendering...\"\ncp \"$in\" \"$out.part\"\necho \"PROGRESS 1/2 Segment 1 of 2 joined\"\necho \"PROGRESS 2/2 Segment 2 of 2 joined\"\nmv \"$out.part\" \"$out\"\necho \"DONE WAV, 16.2 MiB, 4233600 frames in 0.1 s, peak memory 9 MiB\"\n");
+    setenv("R3I6NOS_MUSICUE_RENDER", fake, 1);
+    const unsigned all = (1u << DF_COUNT) - 1;
+
+    int rc1 = musicue_demo(NULL, NULL, d1, all, 1, 1, fail, sizeof fail);
+    CHECK(rc1 == 0, "the tour records (rc %d)", rc1);
+    snprintf(p1, sizeof p1, "%s/rec-demo.txt", d1);
+    size_t n = 0;
+    char *log = cue_read_file(p1, &n);
+    CHECK(log != NULL, "rec-demo.txt is written");
+    if (log) {
+        CHECK(!strstr(log, "\nFAIL "), "the log has no FAIL line:%s", strstr(log, "\nFAIL ") ? strstr(log, "\nFAIL ") : "");
+        char *last = log + n;
+        while (last > log && (last[-1] == '\n' || last[-1] == ' ')) last--;
+        CHECK(last - log >= 3 && !strncmp(last - 3, "end", 3), "the log ends with `end`");
+        for (int f = 0; f < DF_COUNT; f++) {
+            char tag[32];
+            snprintf(tag, sizeof tag, "[%s]", DF_NAME[f]);
+            CHECK(strstr(log, tag) != NULL, "the tour shows the hero feature %s", DF_NAME[f]);
+        }
+        CHECK(strstr(log, "build: v" VERSION " ") != NULL, "the log has the build line");
+        CHECK(strstr(log, "PASS length") != NULL, "the video's length is between 30 and 90 s:%s", strstr(log, "length") ? strstr(log, "length") : " no length line");
+        free(log);
+    }
+    CHECK(count_ext(d1, ".png") >= 16, "screenshots: %d", count_ext(d1, ".png"));
+    {   /* the first frame is the splash, with the version line */
+        snprintf(p1, sizeof p1, "%s/demo-20261120-120000-frames.r3f", d1);
+        FILE *f = fopen(p1, "rb");
+        R3Screen *first = (R3Screen *)malloc(sizeof *first);
+        uint32_t runlen = 0;
+        CHECK(f && first && fread(&runlen, sizeof runlen, 1, f) == 1 && fread(first, sizeof *first, 1, f) == 1, "the frames file has a first screen");
+        if (f && first) {
+            CHECK(screen_has(first, "v" VERSION " "), "the video opens on the splash with its version line");
+            CHECK(screen_has(first, "Markers and cues on your songs"), "the splash has the tagline");
+        }
+        if (f) fclose(f);
+        free(first);
+    }
+    snprintf(p1, sizeof p1, "%s/demo-20261120-120000-aux.bin", d1);
+    struct stat sb;
+    CHECK(stat(p1, &sb) == 0 && sb.st_size > 5000, "the pixel layer is kept beside the frames");
+    snprintf(p1, sizeof p1, "%s/demo-file.json", d1);
+    CHECK(stat(p1, &sb) == 0 && sb.st_size > 100, "the demo song's cue file is copied");
+
+    /* the same tour again: every byte of the frames, the pixel layer, the sound and every picture is the same */
+    int rc2 = musicue_demo(NULL, NULL, d2, all, 1, 1, fail, sizeof fail);
+    CHECK(rc2 == 0, "the second recording");
+    const char *same[] = {"demo-20261120-120000-frames.r3f", "demo-20261120-120000-aux.bin", "demo-20261120-120000.wav"};
+    for (size_t i = 0; i < sizeof same / sizeof *same; i++) {
+        snprintf(p1, sizeof p1, "%s/%s", d1, same[i]);
+        snprintf(p2, sizeof p2, "%s/%s", d2, same[i]);
+        CHECK(same_file(p1, p2), "two recordings make the same %s", same[i]);
+    }
+    {
+        DIR *d = opendir(d1);
+        struct dirent *e;
+        int pngs = 0;
+        while (d && (e = readdir(d))) {
+            size_t l = strlen(e->d_name);
+            if (l < 5 || strcmp(e->d_name + l - 4, ".png")) continue;
+            snprintf(p1, sizeof p1, "%s/%s", d1, e->d_name);
+            snprintf(p2, sizeof p2, "%s/%s", d2, e->d_name);
+            pngs++;
+            CHECK(same_file(p1, p2), "two recordings make the same %s", e->d_name);
+        }
+        if (d) closedir(d);
+        CHECK(pngs >= 16, "pictures compared: %d", pngs);
+    }
+
+    /* one hero feature alone: the others are said to be left out, and its steps work from their own start */
+    int rc3 = musicue_demo(NULL, NULL, d3, 1u << DF_LOOPS, 1, 1, fail, sizeof fail);
+    CHECK(rc3 == 0, "a feature recorded alone");
+    snprintf(p1, sizeof p1, "%s/rec-demo.txt", d3);
+    log = cue_read_file(p1, &n);
+    if (log) {
+        CHECK(strstr(log, "SKIP markers: not chosen") != NULL && strstr(log, "[loops]") != NULL && !strstr(log, "[markers]") && !strstr(log, "[keytempo]"), "only the ticked feature is shown");
+        free(log);
+    }
+
+    /* the lock: a live holder refuses a second recording */
+    {
+        char lk[PATH_MAX];
+        snprintf(lk, sizeof lk, "%s/demo", run);
+        mkdirs(lk);
+        snprintf(lk, sizeof lk, "%s/demo/lock", run);
+        FILE *f = fopen(lk, "w");
+        if (f) { fprintf(f, "1\n"); fclose(f); }
+        CHECK(musicue_demo(NULL, NULL, d3, all, 1, 1, fail, sizeof fail) == 75, "a second recording is refused while another holds the lock");
+        unlink(lk);
+    }
+
+    /* the pixel layer paints what the app's own presenter paints */
+    {
+        setenv("R3I6NOS_MUSICUE_NOAUDIO", "1", 1);
+        App a;
+        app_init(&a, g_tmp);
+        open_demo(&a);
+        engine_seek(&a.eng, 31.3);
+        loop_set_a(&a);
+        engine_seek(&a.eng, 40.1);
+        loop_set_b(&a);
+        engine_seek(&a.eng, 44.7);
+        R3Screen s;
+        compose(&a, &s);
+        uint32_t *px1 = (uint32_t *)malloc((size_t)R3_W * R3_H * 4), *px2 = (uint32_t *)malloc((size_t)R3_W * R3_H * 4);
+        DemoHead *h = (DemoHead *)calloc(1, sizeof *h);
+        DemoAux x;
+        if (px1 && px2 && h) {
+            paint(&a, px1, &s);
+            h->pk[0] = a.peaks; h->dur[0] = dur_of(&a);
+            demo_aux_of(&a, &x, 0);
+            r3_render(&s, px2);
+            demo_paint(NULL, px2, h, &x);
+            CHECK(!memcmp(px1, px2, (size_t)R3_W * R3_H * 4), "the recorder's pixel layer is the pixels the presenter paints");
+        }
+        free(px1); free(px2); free(h);
+        close_song(&a);
+        free(a.songs); free(a.sl); free(a.hist);
+        unsetenv("R3I6NOS_MUSICUE_NOAUDIO");
+    }
+    unsetenv("R3I6NOS_RUN"); unsetenv("R3I6NOS_DEMO_KT_WAV"); unsetenv("R3I6NOS_DEMO_STAMP"); unsetenv("R3I6NOS_MUSICUE_RENDER");
+}
+
+
 static int selftest(void) {
     char tmpl[PATH_MAX];
     snprintf(tmpl, sizeof tmpl, "%s/musicue-selftest-XXXXXX", getenv("TMPDIR") && *getenv("TMPDIR") ? getenv("TMPDIR") : "/tmp");
@@ -4317,6 +4498,8 @@ static int selftest(void) {
     test_screens();
     test_add_id();
     test_kt();
+    if (trace) fprintf(stderr, "[rec demo]\n");
+    test_rec_demo();
     test_sound_sleep();
     test_report();
     test_marquee();
@@ -4468,11 +4651,16 @@ static void open_pads(void) { for (int i = 0; i < SDL_NumJoysticks(); i++) SDL_J
 
 
 int main(int argc, char **argv) {
-    int selftest_run = 0, theme = -1, report = 0;
+    int selftest_run = 0, theme = -1, report = 0, rec_demo = 0, no_video = 0;
+    const char *features = "all", *encode_dir = NULL;
     const char *shot = NULL, *screen = "player", *demo_dir = NULL;
     for (int i = 1; i < argc; i++) {
         if (!strcmp(argv[i], "--selftest")) selftest_run = 1;
         else if (!strcmp(argv[i], "--report")) report = 1;
+        else if (!strcmp(argv[i], "--rec-demo")) rec_demo = 1;
+        else if (!strcmp(argv[i], "--no-video")) no_video = 1;
+        else if (!strcmp(argv[i], "--features") && i + 1 < argc) features = argv[++i];
+        else if (!strcmp(argv[i], "--encode-demo") && i + 1 < argc) encode_dir = argv[++i];
         else if (!strcmp(argv[i], "--version")) { puts("musicue " VERSION); return 0; }
         else if (!strcmp(argv[i], "--sync-path")) { char hb[PATH_MAX + 40]; puts(helper_path(hb, sizeof hb)); return 0; }
         else if (!strcmp(argv[i], "--render-path")) { char hb[PATH_MAX + 40]; puts(render_helper_path(hb, sizeof hb)); return 0; }
@@ -4488,11 +4676,29 @@ int main(int argc, char **argv) {
                 return 2;
             }
         } else {
-            fprintf(stderr, "usage: %s [--selftest | --report | --version | --sync-path | --render-path | --make-demo DIR | [--theme NAME] [--screen library|player|menu|context|mainmenu|about|jump|rec|piano|suffix|kt] --screenshot out.bmp]\n", argv[0]);
+            fprintf(stderr, "usage: %s [--selftest | --report | --rec-demo [--features LIST] [--no-video] | --encode-demo DIR | --version | --sync-path | --render-path | --make-demo DIR | [--theme NAME] [--screen library|player|menu|context|mainmenu|about|jump|rec|piano|suffix|kt] --screenshot out.bmp]\n", argv[0]);
             return 2;
         }
     }
     if (demo_dir) return make_demo(demo_dir);
+    unsigned demo_mask = (1u << DF_COUNT) - 1;
+    if (rec_demo) {
+        R3Checklist ck;
+        r3_checklist_init(&ck, DF_COUNT, DF_NAME, DF_TITLE, DF_BLURB);
+        demo_mask = r3_checklist_parse(&ck, features);
+        if (!demo_mask) {
+            fprintf(stderr, "musicue: --features takes all, or some of:");
+            for (int f = 0; f < DF_COUNT; f++) fprintf(stderr, "%s %s", f ? "," : "", DF_NAME[f]);
+            fputc('\n', stderr);
+            return 2;
+        }
+    }
+    if (encode_dir) {                                           /* the video from the frames and the sound a run kept, on a computer that has ffmpeg */
+        char msg[400];
+        int rc = r3_demo_encode_px(encode_dir, msg, sizeof msg, NULL, NULL, demo_paint, NULL);
+        printf("%s: %s\n", rc == 0 ? "OK" : "FAIL", msg);
+        return rc == 0 ? 0 : 1;
+    }
     if (shot) return save_screenshot(shot, screen, theme);
     if (selftest_run) {
         setenv("SDL_AUDIODRIVER", "dummy", 0);
@@ -4521,13 +4727,13 @@ int main(int argc, char **argv) {
     if (theme >= 0) app.theme = theme;
     apply_theme(&app);
     R3Screen splash;
-    r3_splash(&splash, "MusiCue", VERSION, NULL, "Markers and cues on your songs", "Looking for your data", 50);
+    r3_splash(&splash, "MusiCue", VERSION, BUILD_LINE, "Markers and cues on your songs", "Looking for your data", 50);
     for (int i = 0; i < R3_VIDEO_SETTLE; i++) r3_video_draw(&video, r, &splash, i == 0);
     open_pads();
     R3AppData data;
     memset(&data, 0, sizeof data);
     R3AppDataUI adui = {r, &video, &toast, NULL, NULL, NULL};
-    if (report) r3_appdata_quiet(&data, "MusiCue");           /* an unattended run never asks and never moves anything (rule 16) */
+    if (report || rec_demo) r3_appdata_quiet(&data, "MusiCue");           /* an unattended run never asks and never moves anything (rule 16) */
     else {
         r3_appdata_init(&data, "MusiCue", &adui);
         if (data.quit) { r3_video_free(&video); SDL_DestroyRenderer(r); SDL_DestroyWindow(win); SDL_Quit(); return 0; }
@@ -4547,6 +4753,18 @@ int main(int argc, char **argv) {
 
     if (report) {                                              /* musicue --report: the real window, the report, and out */
         int rc = musicue_report(&app, r, &video, &toast, 0);
+        app_free(&app);
+        r3_video_free(&video);
+        SDL_DestroyRenderer(r);
+        SDL_DestroyWindow(win);
+        SDL_Quit();
+        return rc;
+    }
+    if (rec_demo) {                                            /* musicue --rec-demo: the real window, the tour, and out */
+        char dd[PATH_MAX + 8], fail[160];
+        snprintf(dd, sizeof dd, "%s/Demo", app.data);
+        int rc = musicue_demo(r, &video, dd, demo_mask, no_video, 0, fail, sizeof fail);
+        if (fail[0]) fprintf(stderr, "musicue: the recording was stopped: %s\n", fail);
         app_free(&app);
         r3_video_free(&video);
         SDL_DestroyRenderer(r);
@@ -4612,6 +4830,21 @@ int main(int argc, char **argv) {
             int rc = musicue_report(&app, r, &video, &toast, 1);
             if (rc == 0) say(&app, R3_ST_OK, "Report written: %s/r36s-report.txt", app.data);
             else say(&app, R3_ST_ERROR, "The report could not be written in %s", app.data);
+            last = SDL_GetTicks();
+            force = 1;
+        }
+        if (app.pending_tour) {                                /* Rec demo: the unit is the tour's until it ends (rule 11) */
+            app.pending_tour = 0;
+            engine_play(&app.eng, 0);
+            engine_sleep(&app.eng);
+            char dd[PATH_MAX + 8], fail[160];
+            snprintf(dd, sizeof dd, "%s/Demo", app.data);
+            int rc = musicue_demo(r, &video, dd, app.tour_mask, 0, 1, fail, sizeof fail);
+            apply_theme(&app);
+            if (fail[0]) say(&app, R3_ST_ERROR, "Rec demo stopped: %s. The files so far are in %s.", fail, dd);
+            else if (rc == 75) say(&app, R3_ST_WARN, "Another Rec demo is recording.");
+            else if (rc == 0) say(&app, R3_ST_OK, "Rec demo done: %s/", dd);
+            else say(&app, R3_ST_ERROR, "Rec demo did not finish: see %s/rec-demo.txt", dd);
             last = SDL_GetTicks();
             force = 1;
         }

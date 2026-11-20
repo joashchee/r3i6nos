@@ -93,6 +93,12 @@ static int log_ok(const char *path, const char *must_have, int *fails_in_log) {
     return f && bad == 0 && !strcmp(last, "end") && (!must_have || found);
 }
 
+/* the pixel layer's painter: the first pixel becomes 0x00AA00BB when the entry's first byte is 1 (and the head's is 9) */
+static void test_paint(void *ctx, uint32_t *px, const void *head, const void *entry) {
+    (void)ctx;
+    if (((const unsigned char *)entry)[0] == 1 && ((const unsigned char *)head)[0] == 9) px[0] = 0x00AA00BBu;
+}
+
 static void tour(R3Demo *d, int seconds, R3Screen *shown) {
     float buf[2 * (44100 / R3_DEMO_FPS)];
     for (int i = 0; i < seconds * R3_DEMO_FPS; i++) {
@@ -329,6 +335,52 @@ int main(void) {
         int bar = 0, ver = 0, name = 0;
         for (int r = 0; r < R3_ROWS; r++) { if (strstr(dump[r], "v1.2.3 a1b2c3d 2026-11-11")) ver = 1; if (strstr(dump[r], "Opening")) bar = 1; if (strstr(dump[r], "A tagline")) name = 1; }
         CHECK(ver && bar && name, "the splash shows the tagline, what is loading and the version line");
+    }
+    /* the pixel layer: a sidecar with one entry for each record of the frames, the head patched later, and the painter called for each frame of the video */
+    {
+        char adir[PATH_MAX], fake[PATH_MAX], raw[PATH_MAX], ap[PATH_MAX];
+        snprintf(adir, sizeof adir, "%s/Aux App/Demo", base);
+        snprintf(fake, sizeof fake, "%s/fake-ffmpeg", base);
+        FILE *ff = fopen(fake, "w");
+        fputs("#!/bin/sh\nfor a; do last=$a; done\ncat > \"$last.raw\"\nhead -c 4000 /dev/zero > \"$last\"\n", ff);
+        fclose(ff);
+        chmod(fake, 0755);
+        setenv("R3I6NOS_FFMPEG", fake, 1);
+        setenv("R3I6NOS_DEMO_STAMP", "20261111-150000", 1);
+        R3Demo ad;
+        memset(&ad, 0, sizeof ad);
+        ad.log.quiet = 1;
+        CHECK(r3_demo_open(&ad, adir, "Aux App", "1.0", "r36s-aux", "--rec-demo", NULL, 44100) == 0, "open with a pixel layer");
+        unsigned char head[8] = {0};
+        CHECK(r3_demo_aux_open(&ad, head, sizeof head, 4, test_paint, NULL) == 0, "the pixel layer opens");
+        head[0] = 9;
+        CHECK(r3_demo_aux_patch(&ad, 0, head, 1) == 0, "the head is patched after the open");
+        float silence[2 * (44100 / R3_DEMO_FPS)] = {0};
+        R3Screen sc;
+        r3_clear(&sc);
+        for (int i = 0; i < 20; i++) {
+            unsigned char entry[4] = {(unsigned char)(i < 10), 0, 0, (unsigned char)(i / 5)};      /* changes at 5, 10, 15: four records, with the screen the same */
+            r3_demo_audio(&ad, silence, 44100 / R3_DEMO_FPS);
+            r3_demo_frame_aux(&ad, &sc, entry);
+        }
+        r3_demo_shot(&ad, &sc, "x");
+        CHECK(r3_demo_finish(&ad, NULL, 0) == 0, "a video with a pixel layer is made (by a fake ffmpeg)");
+        snprintf(ap, sizeof ap, "%s/demo-20261111-150000-aux.bin", adir);
+        CHECK(file_size(ap) == 16 + 8 + 4 * 4, "the sidecar is the header, the head and one entry for each of the four records");
+        snprintf(raw, sizeof raw, "%s/demo-20261111-150000.mp4.raw", adir);
+        CHECK(file_size(raw) == 20L * R3_W * R3_H * 4, "the encoder got every frame");
+        FILE *rf = fopen(raw, "rb");
+        uint32_t first = 0, later = 0;
+        if (rf) {
+            if (fread(&first, 4, 1, rf) != 1) first = 0;
+            fseek(rf, 12L * R3_W * R3_H * 4, SEEK_SET);
+            if (fread(&later, 4, 1, rf) != 1) later = 0;
+            fclose(rf);
+        }
+        CHECK(first == 0x00AA00BBu, "the painter drew over the first frames");
+        CHECK(later != 0x00AA00BBu, "and not over the frames whose entry says no");
+        unsetenv("R3I6NOS_FFMPEG");
+        unsetenv("R3I6NOS_DEMO_STAMP");
     }
     snprintf(p, sizeof p, "rm -rf '%s'", base);
     if (system(p) != 0) fprintf(stderr, "test_demo: could not remove %s\n", base);

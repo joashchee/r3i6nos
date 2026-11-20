@@ -264,11 +264,16 @@ static inline int r3_text_fit(R3Screen *s, int col, int row, const char *str, in
 static int r3_marq_on, r3_marq_tick;
 static struct { int key; unsigned hash; int t0; } r3_marq_slot[R3_MARQUEE_SLOTS];
 
+static double r3_marq_acc;
 static inline void r3_marquee_clock(double ms) {
-    static double acc;
     r3_marq_on = 1;
-    acc += ms;
-    while (acc >= R3_MARQUEE_TICK_MS) { acc -= R3_MARQUEE_TICK_MS; r3_marq_tick++; }
+    r3_marq_acc += ms;
+    while (r3_marq_acc >= R3_MARQUEE_TICK_MS) { r3_marq_acc -= R3_MARQUEE_TICK_MS; r3_marq_tick++; }
+}
+/* Back to the start (clock at 0, no text remembered): Rec demo calls it so two recordings scroll alike. */
+static inline void r3_marquee_reset(void) {
+    r3_marq_on = 0; r3_marq_tick = 0; r3_marq_acc = 0;
+    memset(r3_marq_slot, 0, sizeof r3_marq_slot);
 }
 
 /* The cells of str to show in max cells at (col, row): fills out[0..max) and mark[] (1 for a cell of the loop's diamond mark) and returns the count.
