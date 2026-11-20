@@ -54,6 +54,12 @@ typedef struct {
     char path[PATH_MAX], tmp[PATH_MAX + 8];
     int pass, fail, info, skip;
     int quiet;              /* 1: not to stdout (tests) */
+    /* Progress (CLAUDE.md rule 18, docs/DEVICE-REPORTS.md "Progress"): zero until r3_report_steps. */
+    int steps, step, step_missed, last_secs;   /* milestones in all, the one running, how many were never reached when the report closed, the last second drawn */
+    double t0;                                /* r3_report_ms at r3_report_steps */
+    char doing[96];
+    void (*on_step)(void *ctx, int step, int steps, const char *doing, int secs);   /* draws the bar: at each milestone and once a second from r3_report_tick */
+    void *step_ctx;
 } R3Report;
 
 /* Milliseconds on a steady clock, for timing a check. */
@@ -137,7 +143,48 @@ static inline int r3_report_open(R3Report *r, const char *dir, const char *app, 
 }
 
 /* The summary, "end", and the file renamed into place. 0 when the report is on the card. */
+/* ---- progress: a report is a wait, so it says how far it has got ($R3I6NOS_REPORT_PROGRESS for Settings > Device reports, and on_step for its own screen) ---- */
+static inline void r3_report_prog_write(const R3Report *r) {
+    const char *pf = getenv("R3I6NOS_REPORT_PROGRESS");
+    if (!pf || !*pf) return;
+    char tmp[PATH_MAX + 8];
+    snprintf(tmp, sizeof tmp, "%s.tmp", pf);
+    FILE *f = fopen(tmp, "w");
+    if (!f) return;
+    fprintf(f, "step=%d\nsteps=%d\ndoing=%s\nfile=%s\n", r->step, r->steps, r->doing, r->path);
+    if (fclose(f) == 0) rename(tmp, pf); else unlink(tmp);
+}
+/* Call once after r3_report_open: n milestones, fn (may be NULL) draws them. */
+static inline void r3_report_steps(R3Report *r, int n, void (*fn)(void *, int, int, const char *, int), void *ctx) {
+    r->steps = n; r->step = 0; r->step_missed = 0; r->last_secs = -1;
+    r->t0 = r3_report_ms(); r->on_step = fn; r->step_ctx = ctx;
+}
+/* Milestone n (1..steps) has started; skipping ahead is fine (a skipped part still moves the bar on), going back is not. */
+static inline void r3_report_at(R3Report *r, int n, const char *doing) {
+    if (r->steps <= 0 || n < r->step) return;
+    if (n > r->steps) n = r->steps;
+    r->step = n;
+    snprintf(r->doing, sizeof r->doing, "%s", doing);
+    r->last_secs = (int)((r3_report_ms() - r->t0) / 1000.0);
+    r3_report_prog_write(r);
+    if (r->on_step) r->on_step(r->step_ctx, r->step, r->steps, r->doing, r->last_secs);
+}
+/* Inside a long milestone: redraws when the second changes, so the time moves. Cheap to call often. */
+static inline void r3_report_tick(R3Report *r) {
+    if (r->steps <= 0 || !r->on_step) return;
+    int secs = (int)((r3_report_ms() - r->t0) / 1000.0);
+    if (secs == r->last_secs) return;
+    r->last_secs = secs;
+    r->on_step(r->step_ctx, r->step, r->steps, r->doing, secs);
+}
+
 static inline int r3_report_close(R3Report *r) {
+    if (r->steps > 0) {                     /* a report that claims steps must have reached the last one before it closes: the self-test reads step_missed */
+        r->step_missed = r->step < r->steps ? r->steps - r->step : 0;
+        r->step = r->steps;
+        snprintf(r->doing, sizeof r->doing, "Done");
+        r3_report_prog_write(r);
+    }
     char line[160];
     r3_report_section(r, "summary");
     snprintf(line, sizeof line, "PASS %d  FAIL %d  INFO %d  SKIP %d\nend\n", r->pass, r->fail, r->info, r->skip);

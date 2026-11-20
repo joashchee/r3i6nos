@@ -50,6 +50,7 @@
 #include "r3i6nos_keymap.h"
 #include "r3i6nos_appdata.h"
 #include "r3i6nos_report.h"
+#include "r3i6nos_reportbar.h"
 #include "filekind.h"
 #include "formats.h"
 #include "ansiart.h"
@@ -3838,6 +3839,7 @@ static void report_idle_turn(void *arg) {
     r3_toast_poll(c->toast, SDL_GetTicks());
     app_compose(c->app, &c->screen);
     r3_toast_draw(c->toast, &c->screen);
+    r3_reportbar_overlay(&c->screen);           /* only while a report runs (rule 18) */
     app_video_draw(c->video, c->r, &c->screen, c->app, 0);
 }
 
@@ -3985,6 +3987,7 @@ static void pb_report_player(R3Report *rep, ReportCtx *c, const char *clip, doub
 }
 
 static void report_playback(R3Report *rep, ReportCtx *c, char **list, int n) {
+    r3_report_at(rep, 4, "Playback: the machine");
     r3_report_section(rep, "playback");
     const char *bench = getenv("R3I6NOS_PLAYBACK_BENCH");
     if (bench && !strcmp(bench, "0")) { r3_report_line(rep, R3_SKIP, "playback", "R3I6NOS_PLAYBACK_BENCH=0"); return; }
@@ -3992,6 +3995,7 @@ static void report_playback(R3Report *rep, ReportCtx *c, char **list, int n) {
     int have_ff = pl_find_ffmpeg(ff, sizeof ff), has_audio = 0;
     if (!have_ff) snprintf(ff, sizeof ff, "ffmpeg");
     pb_report_machine(rep, ff);
+    r3_report_at(rep, 5, "Playback: ffmpeg's own speed");
     double secs = 0;
     char work[PATH_MAX] = "";
     if (have_ff) {
@@ -4000,9 +4004,11 @@ static void report_playback(R3Report *rep, ReportCtx *c, char **list, int n) {
         if (work[0]) secs = pb_report_ffmpeg(rep, ff, work, clip, sizeof clip, &has_audio);
         if (secs > 0) pb_report_sound(rep, ff, clip, secs, has_audio);
     }
+    r3_report_at(rep, 6, "Playback: nttplay, the sound device and the screen");
     pb_report_ntt(rep, list, n);
     pb_report_audio_device(rep);
     pb_report_screen(rep, c);
+    r3_report_at(rep, 7, "Playback: the whole player on a clip");
     double play = getenv("R3I6NOS_PLAYBACK_PLAY_S") && atof(getenv("R3I6NOS_PLAYBACK_PLAY_S")) > 0 ? atof(getenv("R3I6NOS_PLAYBACK_PLAY_S")) : (secs < 6 ? secs : 6);
     if (secs > 0) pb_report_player(rep, c, clip, play);
     if (work[0]) {
@@ -4014,6 +4020,8 @@ static void report_playback(R3Report *rep, ReportCtx *c, char **list, int n) {
     r3_report_line(rep, R3_INFO, "reading this", "the app path must beat 1.5x real time with room for the menu and the sound; what each 'advice' line says is a change to try in player.h, measured here before and after. Cores: one busy core and three idle means the decode is serial and the rest are free; the GPU lines say whether SDL can take the scaling. The VPU needs the nodes above and a decoder in ffmpeg that uses them (docs/VIDEO-DECODE.md)");
 }
 
+static int g_report_missed = -1;   /* the milestones the last report never reached (the self-test wants 0: rule 18) */
+#define CMD_REPORT_STEPS 8   /* the milestones of commander_report, for its progress bar (rule 18) */
 #define REPORT_IDENTIFY_PER_S 20.0   /* files a second the viewer's identify and info may take: a first guess, set before any measurement */
 
 static int commander_report(App *app, SDL_Renderer *r, R3Video *video, R3Toast *toast, int quiet) {
@@ -4026,6 +4034,9 @@ static int commander_report(App *app, SDL_Renderer *r, R3Video *video, R3Toast *
         fprintf(stderr, "commander: cannot write the report in %s: %s\n", dir, strerror(errno));
         return 1;
     }
+    R3ReportBar bar = {video, r, "Commander"};
+    r3_reportbar_begin(&bar, &rep, CMD_REPORT_STEPS);          /* rule 18: the bar, from the first check to the last */
+    r3_report_at(&rep, 1, "System, card and memory");
     r3_report_system(&rep);
     r3_report_card(&rep, dir);
     r3_report_memory(&rep);
@@ -4038,7 +4049,9 @@ static int commander_report(App *app, SDL_Renderer *r, R3Video *video, R3Toast *
     c.toast = toast;
     R3PowerResult idle, work;
     memset(&work, 0, sizeof work);
+    r3_report_at(&rep, 2, "Power: idle, nothing pressed");
     r3_report_power_idle(&rep, r3_report_power_seconds(10), report_idle_turn, &c, &idle);
+    r3_report_at(&rep, 3, "Power: identifying the test files");
     /* working: identify the files of the test corpus as the viewer's Info page does, as fast as it will, for a few seconds */
     const char *corpus = getenv("R3I6NOS_TEST_FILES") && *getenv("R3I6NOS_TEST_FILES") ? getenv("R3I6NOS_TEST_FILES") : "/opt/loveos/test-files";
     char **list = calloc(600, sizeof *list);
@@ -4060,7 +4073,7 @@ static int commander_report(App *app, SDL_Renderer *r, R3Video *video, R3Toast *
                 ff_close(&f);
                 done++;
             }
-            if ((done & 15) == 0) r3_power_sample(&p);
+            if ((done & 15) == 0) { r3_power_sample(&p); r3_report_tick(&rep); }
         }
         double wall = (r3_report_ms() - t0) / 1000.0;
         r3_report_power_end(&rep, &p, "working", 0, 0, &work);
@@ -4069,10 +4082,14 @@ static int commander_report(App *app, SDL_Renderer *r, R3Video *video, R3Toast *
     }
     r3_report_power_advice(&rep, &idle, &work);
     report_playback(&rep, &c, list, n);
+    r3_report_at(&rep, CMD_REPORT_STEPS, "Writing the report");
+    r3_reportbar_end(&rep);
     for (int i = 0; i < n; i++) free(list[i]);
     free(list);
     int pass = rep.pass, fail = rep.fail, skip = rep.skip;
-    if (r3_report_close(&rep) != 0) { fprintf(stderr, "commander: cannot write the report in %s\n", dir); return 1; }
+    int closed = r3_report_close(&rep);
+    g_report_missed = rep.step_missed;
+    if (closed != 0) { fprintf(stderr, "commander: cannot write the report in %s\n", dir); return 1; }
     if (!quiet) printf("Written: %s/r36s-report.txt (PASS %d FAIL %d SKIP %d)\n", dir, pass, fail, skip);
     return 0;
 }
@@ -4180,6 +4197,9 @@ int main(int argc, char **argv) {
             snprintf(adir, sizeof adir, "%s/Commander", tdir);
             setenv("R3I6NOS_APP_DATA", adir, 1);
             setenv("R3I6NOS_REPORT_POWER_S", "0.2", 1);
+            char pfile[PATH_MAX + 24];
+            snprintf(pfile, sizeof pfile, "%s/progress", tdir);
+            setenv("R3I6NOS_REPORT_PROGRESS", pfile, 1);
             R3Toast ttoast;
             r3_toast_init(&ttoast);
             char path[PATH_MAX + 64], text[24576] = "";
@@ -4189,9 +4209,15 @@ int main(int argc, char **argv) {
                 size_t got = f ? fread(text, 1, sizeof text - 1, f) : 0;
                 text[got] = 0;
                 if (f) fclose(f);
-                rbad = !(strstr(text, "== power ==") && strstr(text, "idle cpu: ") && strstr(text, "cut first: ") && strstr(text, "\nend\n"));
+                char pg[256] = "";
+                FILE *pf = fopen(pfile, "r");
+                if (pf) { size_t pn = fread(pg, 1, sizeof pg - 1, pf); pg[pn] = 0; fclose(pf); }
+                int prog_ok = g_report_missed == 0 && strstr(pg, "step=8\nsteps=8\n") != NULL;      /* rule 18: the bar reached its last step */
+                if (!prog_ok) fprintf(stderr, "commander: the report's progress did not reach its last step (missed %d, file: %s)\n", g_report_missed, pg);
+                rbad = !prog_ok || !(strstr(text, "== power ==") && strstr(text, "idle cpu: ") && strstr(text, "cut first: ") && strstr(text, "\nend\n"));
             }
             unsetenv("R3I6NOS_APP_DATA");
+            unsetenv("R3I6NOS_REPORT_PROGRESS");
             char cmd[PATH_MAX + 16];
             snprintf(cmd, sizeof cmd, "rm -rf '%s'", tdir);
             if (system(cmd) != 0) fprintf(stderr, "could not remove %s\n", tdir);

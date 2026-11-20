@@ -163,6 +163,46 @@ static void power_test(const char *base) {
     unsetenv("R3I6NOS_SYS");
 }
 
+/* ---- progress (rule 18): milestones, the progress file, the tick, skipped steps, and a report that stops short ---- */
+static int draws, last_step, last_steps;
+static void count_draw(void *ctx, int step, int steps, const char *doing, int secs) { (void)ctx; (void)doing; (void)secs; draws++; last_step = step; last_steps = steps; }
+static void progress_test(const char *base) {
+    char dir[PATH_MAX + 16], pf[PATH_MAX + 32];
+    snprintf(dir, sizeof dir, "%s/prog", base);
+    snprintf(pf, sizeof pf, "%s/progress", base);
+    setenv("R3I6NOS_REPORT_PROGRESS", pf, 1);
+    R3Report r;
+    memset(&r, 0, sizeof r);
+    r.quiet = 1;
+    CHECK(r3_report_open(&r, dir, "P", "1", "p", "test") == 0, "progress: the report opens");
+    r3_report_steps(&r, 4, count_draw, NULL);
+    r3_report_at(&r, 1, "one");
+    CHECK(draws == 1 && last_step == 1 && last_steps == 4, "progress: a milestone draws");
+    CHECK(strstr(slurp(pf), "step=1\nsteps=4\ndoing=one\n") != NULL, "progress: the file has step, steps and doing");
+    r3_report_at(&r, 3, "three");                       /* skipping two is fine */
+    r3_report_at(&r, 2, "back");                        /* going back is ignored */
+    CHECK(r.step == 3 && strstr(slurp(pf), "step=3\n") != NULL, "progress: skips ahead, never back");
+    r3_report_at(&r, 4, "four");
+    r3_report_tick(&r);                                 /* the same second as the milestone: no redraw */
+    int d = draws;
+    r3_report_tick(&r);
+    CHECK(draws == d, "progress: a tick in the same second does not redraw");
+    r.last_secs = -5;
+    r3_report_tick(&r);
+    CHECK(draws == d + 1, "progress: a tick in a new second redraws");
+    CHECK(r3_report_close(&r) == 0 && r.step_missed == 0 && r.step == 4, "progress: a report that reached the last step closes with none missed");
+    CHECK(strstr(slurp(pf), "step=4\nsteps=4\ndoing=Done") != NULL, "progress: the file ends at step=steps");
+    R3Report q;
+    memset(&q, 0, sizeof q);
+    q.quiet = 1;
+    CHECK(r3_report_open(&q, dir, "P", "1", "p", "test") == 0, "progress: a second report opens");
+    r3_report_steps(&q, 5, NULL, NULL);
+    r3_report_at(&q, 2, "two");
+    r3_report_close(&q);
+    CHECK(q.step_missed == 3 && q.step == 5, "progress: a report that stops short counts the steps it never reached");
+    unsetenv("R3I6NOS_REPORT_PROGRESS");
+}
+
 int main(void) {
     char tmpl[PATH_MAX];
     const char *t = getenv("TMPDIR");
@@ -238,6 +278,7 @@ int main(void) {
     r2.quiet = 1;
     CHECK(r3_report_open(&r2, "/dev/null/nowhere", "X", "1", "x", "test") != 0, "an unwritable folder is an error, not a crash");
     power_test(base);
+    progress_test(base);
     char cmd[PATH_MAX + 16];
     snprintf(cmd, sizeof cmd, "rm -rf '%s'", base);
     if (system(cmd) != 0) fprintf(stderr, "could not remove %s\n", base);

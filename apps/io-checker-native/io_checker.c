@@ -32,6 +32,7 @@
 #include "r3i6nos_mainmenu.h"
 #include "r3i6nos_keymap.h"
 #include "r3i6nos_report.h"
+#include "r3i6nos_reportbar.h"
 #include "r3i6nos_toast.h"
 #include "r3i6nos_appdata.h"
 #include "usb_io.h"
@@ -780,6 +781,7 @@ static void report_input(App *a, R3Report *r) {
 }
 
 static void power_windows(App *a, R3Report *r);
+#define IO_REPORT_STEPS 10   /* the milestones of write_report, for its progress bar (rule 18) */
 static void report_usb(App *a, R3Report *r);
 static void report_mapping(App *a, R3Report *r);
 static void run_files(App *a);
@@ -799,6 +801,9 @@ static const char *report_card(void) {
     return d && c && *c && !strncmp(d, c, strlen(c)) ? "Data card" : "EASYROMS";
 }
 
+static void report_bar_window(App *a, R3ReportBar *bar);   /* defined with the loop, below */
+static int g_report_missed = -1;   /* the milestones the last report never reached (the self-test wants 0: rule 18) */
+
 static void write_report(App *a, const char *how) {
     char dir[PATH_MAX];
     app_data_dir(dir, sizeof dir);
@@ -809,13 +814,20 @@ static void write_report(App *a, const char *how) {
         say(a, R3_ST_ERROR, "Could not write the report in %s", dir);
         return;
     }
+    R3ReportBar bar;
+    report_bar_window(a, &bar);
+    r3_reportbar_begin(&bar, &r, IO_REPORT_STEPS);              /* rule 18: the bar, from the first check to the last */
+    r3_report_at(&r, 1, "System");
     sound_status(a);
     system_rows(a);
     r3_report_system(&r);
     for (int i = 0; i < a->nsys; i++) r3_report_line(&r, R3_INFO, a->sys[i].label, "%s", a->sys[i].value);
+    r3_report_at(&r, 2, "Input: the pad and the keyboard");
     report_input(a, &r);
+    r3_report_at(&r, 3, "Mapping");
     report_mapping(a, &r);
 
+    r3_report_at(&r, 4, "Video");
     r3_report_section(&r, "video");
     r3_report_line(&r, R3_INFO, "mode", "%s", a->mode);
     r3_report_line(&r, R3_INFO, "renderer", "%s, video driver %s", a->renderer, a->vdriver);
@@ -833,6 +845,7 @@ static void write_report(App *a, const char *how) {
     r3_report_line(&r, R3_INFO, "how they looked", "not judged by a program: say in words what was wrong, if anything");
     r3_report_line(&r, R3_INFO, "backlight", "%s", a->backlight);
 
+    r3_report_at(&r, 5, "Sound");
     r3_report_section(&r, "sound");
     r3_report_line(&r, R3_INFO, "card", "%s", a->snd_card);
     if (a->snd_path[0]) r3_report_line(&r, strcmp(a->snd_path, "OFF") ? R3_PASS : R3_FAIL, "speaker path", "%s%s", a->snd_path,
@@ -859,17 +872,22 @@ static void write_report(App *a, const char *how) {
         }
     }
 
+    r3_report_at(&r, 6, "Files: testing the cards");
     r3_report_section(&r, "files");
     run_files(a);
     for (int i = 0; i < a->nfiles; i++) {
         snprintf(key, sizeof key, "%s %s", a->files[i].card, a->files[i].item);
         r3_report_line(&r, a->files[i].status, key, "%s", a->files[i].value);
     }
+    r3_report_at(&r, 7, "USB and OTG");
     report_usb(a, &r);
     r3_report_memory(&r);
     power_windows(a, &r);
+    r3_reportbar_end(&r);
     int pass = r.pass, fail = r.fail, skip = r.skip;
-    if (r3_report_close(&r) == 0) {
+    int closed = r3_report_close(&r);
+    g_report_missed = r.step_missed;
+    if (closed == 0) {
         snprintf(a->report_file, sizeof a->report_file, "%s/IO_Checker/r36s-report-native.txt", report_card());
         a->report_written = 1;
         say(a, fail ? R3_ST_WARN : R3_ST_OK, "Written: %s (PASS %d FAIL %d SKIP %d)", a->report_file, pass, fail, skip);
@@ -2367,8 +2385,16 @@ struct Loop { SDL_Renderer *r; R3Video *video; R3Screen screen; };
 static void draw_frame(App *a, Uint32 now) {
     compose(a, &a->loop->screen, now);
     r3_toast_draw(&a->toast, &a->loop->screen);
+    r3_reportbar_overlay(&a->loop->screen);     /* only while a report runs (rule 18) */
     r3_video_draw(a->loop->video, a->loop->r, &a->loop->screen, a->force);
     a->force = 0;
+}
+
+/* The window the bar is drawn in: the app's own, or none (--report has no window; the progress file is still written). */
+static void report_bar_window(App *a, R3ReportBar *bar) {
+    bar->video = a->loop ? a->loop->video : NULL;
+    bar->r = a->loop ? a->loop->r : NULL;
+    bar->app = "IO Checker";
 }
 
 static void drain_events(void) {
@@ -2392,13 +2418,17 @@ static void idle_turn(void *arg) {
 
 /* idle: the app open on its list, nothing pressed. working: the Motion pattern, its heaviest page (a frame every vsync). */
 static void power_windows(App *a, R3Report *r) {
+    r3_report_at(r, 8, "Memory and power");
     r3_report_power_section(r);
     if (!a->loop) {
+        r3_report_at(r, 10, "Power: no window");
         r3_report_line(r, R3_SKIP, "idle", "no window (--report): open Device report in the app to measure the app itself");
         return;
     }
     R3PowerResult idle, work;
+    r3_report_at(r, 9, "Power: idle, nothing pressed");
     r3_report_power_idle(r, r3_report_power_seconds(10), idle_turn, a, &idle);
+    r3_report_at(r, 10, "Power: the Motion pattern");
     int was = a->sel[P_VIDEO];
     a->sel[P_VIDEO] = PAT_MOTION;
     R3Power p;
@@ -2971,6 +3001,7 @@ static int selftest_logic(void) {
         a->js = NULL; /* the report asks SDL about real pads; this pretend one must not reach it */
         write_report(a, "selftest");
         a->js = fake;
+        CHECK(g_report_missed == 0, "the report's progress reached its last step (rule 18; missed %d of %d)", g_report_missed, IO_REPORT_STEPS);
         char path[PATH_MAX + 64], line[512], last[512] = "";
         snprintf(path, sizeof path, "%s/IO_Checker/r36s-report-native.txt", root);
         FILE *fp = fopen(path, "r");
