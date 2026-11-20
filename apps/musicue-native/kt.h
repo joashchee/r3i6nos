@@ -80,9 +80,9 @@ static const char *kt_update(KtPlan *p) {
     return NULL;
 }
 
-/* The unit's measured speed (stretch-proto-report, 2026-11-20, 60 s of audio, four Cortex-A35): times real time for 2 and 4 workers and each preset. */
+/* The unit's measured speed (stretch-proto-report, 2026-11-20, the second and third reports, 60 s of audio, four Cortex-A35): times real time for 2 and 4 workers and each preset. */
 static double kt_speed(int workers, int cheaper) {
-    static const double X[2][2] = {{6.26, 9.33}, {9.15, 13.3}};     /* [cheaper][workers == 4] */
+    static const double X[2][2] = {{6.78, 10.63}, {10.70, 16.38}};   /* [cheaper][workers == 4] */
     return X[cheaper ? 1 : 0][workers >= 4 ? 1 : 0];
 }
 /* Seconds the render takes for a song of `song_s` seconds, with 25% over for reading, joining and writing. */
@@ -90,9 +90,9 @@ static double kt_estimate_s(double song_s, int workers, int cheaper) { return so
 /* Bytes the copy takes: 16-bit stereo 44.1 kHz of song_s / ratio seconds as a WAV (10 MB a minute), or as AAC at 192 kbps in an M4A (1.4 MB a minute). */
 #define KT_AAC_KBPS 192
 static double kt_copy_bytes(double song_s, double ratio, int aac) { return aac ? song_s / ratio * (KT_AAC_KBPS * 125.0) + 4096 : song_s / ratio * 176400.0 + 44; }
-/* Seconds the AAC encode after the render takes for a copy of copy_s seconds. The image's ffmpeg encodes at 68x real time on a Mac under Docker; the unit's own speed is what
- * stretch-proto-report's == encode == section measures, and until that is read this is a guess of 2.5x with a second added. */
-#define KT_ENCODE_X 2.5
+/* Seconds the AAC encode after the render takes for a copy of copy_s seconds: the image's ffmpeg with the fast coder at 192 kbps ran at 4.7x real time on the unit
+ * (stretch-proto-report's == encode == section, 2026-11-20; twoloop 1.5x, 128 kbps 5.9x, 256 kbps 1.1x), on one core, with a second added. */
+#define KT_ENCODE_X 4.7
 static double kt_encode_s(double copy_s) { return copy_s / KT_ENCODE_X + 1; }
 
 /* The copy's id: "kt-" and eight hex digits made from the base id, the shift and the ratio (to a thousandth), so the same ask is the same copy. */

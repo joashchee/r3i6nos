@@ -3147,10 +3147,10 @@ static void test_kt(void) {
     kt_copy_name("Some Song [dQw4w9WgXcQ]", &tk, "104", i1, name, sizeof name);
     CHECK(!strncmp(name, "Some Song (A 104bpm) [kt-", 25), "the copy's name drops the base's id and says what it is: %s", name);
     CHECK(kt_estimate_s(240, 4, 0) > kt_estimate_s(240, 4, 1) && kt_estimate_s(240, 2, 0) > kt_estimate_s(240, 4, 0), "the estimate: faster with 4 workers and the cheaper preset");
-    CHECK(kt_estimate_s(240, 4, 0) > 30 && kt_estimate_s(240, 4, 0) < 50, "a 4-minute song takes about 30-50 s with 4 workers (the unit's 9.3x plus the margin): %.0f", kt_estimate_s(240, 4, 0));
+    CHECK(kt_estimate_s(240, 4, 0) > 25 && kt_estimate_s(240, 4, 0) < 40, "a 4-minute song renders in about 25-40 s with 4 workers (the unit's 10.6x plus the margin): %.0f", kt_estimate_s(240, 4, 0));
     CHECK(fabs(kt_copy_bytes(60, 1.0, 0) - 60 * 176400.0) < 100, "a minute is 10 MB as a WAV");
     CHECK(kt_copy_bytes(60, 1.0, 1) < kt_copy_bytes(60, 1.0, 0) / 6 && kt_copy_bytes(60, 1.0, 1) > 1.2e6 && kt_copy_bytes(60, 1.0, 1) < 1.7e6, "and about 1.4 MB as AAC 192 kbps: %.0f", kt_copy_bytes(60, 1.0, 1));
-    CHECK(kt_encode_s(240) > 60 && kt_encode_s(240) < 130, "compressing a 4-minute copy is estimated at about a minute and a half: %.0f s", kt_encode_s(240));
+    CHECK(kt_encode_s(240) > 45 && kt_encode_s(240) < 65, "compressing a 4-minute copy is estimated at about 50 s (the unit's 4.7x): %.0f s", kt_encode_s(240));
 
     /* the app: a song with a Key and a Tempo and cues, a fake render helper */
     App a;
