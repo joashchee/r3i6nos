@@ -468,7 +468,9 @@ static inline void r3_list_dialog(R3Screen *s, const R3List *o) {
 
 enum {
     R3_NONE, R3_UP, R3_DOWN, R3_LEFT, R3_RIGHT, R3_PAGEUP, R3_PAGEDOWN, R3_HOME, R3_END, R3_ACCEPT, R3_BACK, R3_MORE,
-    R3_X, R3_Y, R3_SELECT
+    R3_X, R3_Y, R3_SELECT,
+    /* added 2026-11-20 for the input mapping (docs/r3i6nos-mapping.md), read by theme/r3i6nos_input.h; the values above never change */
+    R3_START, R3_MENU, R3_CONTEXT, R3_PANEL_NEXT, R3_PANEL_FIRST, R3_PANEL_PREV, R3_L3, R3_R3, R3_ACTION_COUNT
 };
 
 /* An SDL joystick button (0-based; LÖVE's number minus one) as an action. Raw buttons, not SDL's gamepad mapping, which

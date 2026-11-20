@@ -70,8 +70,9 @@ the selected row **black on cyan**, a foot of keys in the bottom edge (`theme.li
 Dialogs (Settings, Shut down?) are the same list in a smaller box centred in the display view. The rule every list follows
 (`theme.listKey`; KlamANSI's gesture table with the pad's buttons for the swipes):
 
-**Standardised 2026-11-19 on the input mapping (`docs/r3i6nos-mapping.md`); the code (`theme.listKey`, `T.PAD`, `r3_list_key`, `r3_pad_action`) still has the
-old keys until ROADMAP section 39 step 2.**
+**Standardised 2026-11-19 on the input mapping (`docs/r3i6nos-mapping.md`). Built in the C theme on 2026-11-20 as `theme/r3i6nos_input.h`
+(`r3_input_button`, `r3_input_tick`, `r3_list_step`; the IO Checker uses it). The old `r3_list_key`, `r3_pad_action` and the Lua `theme.listKey` / `T.PAD`
+still have the old keys: Commander, MusiCue and the menu move onto the new reader one by one (ROADMAP section 39 step 2).**
 
 | Action | R36S | Keyboard | Does |
 |---|---|---|---|
@@ -119,7 +120,7 @@ The font data it builds on: `theme/r3i6nos_vga8x16.h` has the 256 glyphs (`r3i6n
 (`r3i6nos_cp437[i]`). Use the same 64x24 grid of 10x20 cells, the same row roles, colours and mapping from 8x16 to 10x20 as above.
 (The C header includes it; the app's `.deb` carries `NOTICE` and the font licence in its doc folder.)
 
-## The main menu (rule 17; **specified 2026-11-19, not built in either theme yet**)
+## The main menu (rule 17; **specified 2026-11-19; built in the C theme on 2026-11-20, not yet in the Lua theme**)
 
 Every app made for r3i6nos has a main menu, opened by **L1 + R1** (keyboard: F10 is proposed), drawn as the standard list dialog above (a box centred in
 the display view, `Page x/y` when it needs it). The input map it belongs to is `docs/r3i6nos-mapping.md`.
@@ -138,10 +139,17 @@ the display view, `Page x/y` when it needs it). The input map it belongs to is `
 An app never renames, reorders or drops one of the five, or puts Quit anywhere but last of these six places (its own items come after Quit only if
 they are a separate group, which the theme draws below a rule; none is expected yet).
 
-**What the theme will provide** (to build, ROADMAP section 39 step 1b): one menu structure for LÖVE (`theme.mainMenu(app_items, hooks)`) and for C
-(`r3_main_menu`), taking the app's own items and the hooks for the five (About's text, the theme change, the report, the demo, the benchmark or `NULL`
-for none, quit). It owns the order, hides Benchmark when its hook is `NULL`, and has a self-test that an app calls from its own, so "the items are
-there and in this order" is checked once. Until then an app builds the list itself and the order above is a manual check.
+**What the C theme provides** (`theme/r3i6nos_mainmenu.h`, with `theme/r3i6nos_input.h`; tested by `tests/test_input.c`): `R3MainMenu` with the
+fixed ids (`R3MM_ABOUT` ... `R3MM_QUIT`) and the app's own items after Quit (`R3MM_OWN0 + i`); `r3_mm_init(&m, has_bench)` hides Benchmark when the app has nothing to
+measure; `r3_mm_open`, `r3_mm_key(&m, action)` (returns the chosen id, `R3MM_CLOSED` or `R3MM_NOTHING`) and `r3_mm_draw`; `r3_about_draw` and
+`r3_theme_pick_draw` (the picker over `r3_themes`: the app applies the theme as the selection moves, keeps it on A and reverts on B); and
+**`r3_mm_selftest`, which an app calls from its own self-test** so "the items are there and in this order" is checked once. The app does what each item means.
+**The Lua theme still has none** (`theme.mainMenu` is to build; the menu and the LÖVE apps follow later).
+
+**The reader** (`theme/r3i6nos_input.h`): `R3Input` and `r3_input_button(in, raw_button, down)` give the action for a raw button with R1 held as "increase" and the chords
+(L1+R1 `R3_MENU`, L2+R2 `R3_CONTEXT`, Fn `R3_PANEL_NEXT`, L1+Fn `R3_PANEL_FIRST`, R1+Fn `R3_PANEL_PREV`); `r3_input_axis` and `r3_input_tick` turn the right stick into steps
+(dead zone `R3_STICK_DEAD` 0.35, top rate `R3_STICK_RATE` 6 a second, Page up/down with R1, Home/End once a push); `r3_input_pointer` gives the left stick's pointer
+movement (`R3_POINTER_PPS` 120, `R3_R1_POINTER_X` 3); `r3_list_step` is the list rule (left and right do not page). The four numbers are constants in that header only.
 
 **The list keys the menu uses are the standardised ones above:** up and down, A to accept, B to back, Y for More, R1 held for Page up/down and Home/End.
 

@@ -12,9 +12,17 @@ renderer and plays through SDL's audio (ALSA underneath). A tone heard in one an
 ## The screen
 
 The r3i6nos-ansiapps theme (`docs/R3I6NOS-ANSIAPPS-THEME.md`): 64x24 cells, the top bar (`IO Checker`, and the runtime at the right), the
-display view, the three-row command line (the reply, what A does, where you are). Every list follows the theme's keys: D-pad up and down
-move, A opens, B goes back, L1/R1 turn a page, L2/R2 jump to the top or end. **Hold Select+Start for a second** to go back to the list from
-any page, or to leave from the list. A keyboard works too (arrows, Enter, Esc; H and N for heard and not heard).
+display view, the three-row command line (the reply, what A does, where you are). **The native build follows the input mapping**
+(`docs/r3i6nos-mapping.md`, rule 17; since 2026-11-20): every list uses the mapping's keys, D-pad or right stick up and down move,
+A opens, B goes back, **R1 held** with up/down pages and with left/right goes to the top or end (L1, R1, L2 and R2 alone no longer page or jump).
+**L1 + R1 opens the main menu** (below) on every list page. **On the two test pages (Buttons and sticks, R3i6nos Mapping) every input is a test,
+so nothing navigates and no chord opens a menu: hold Select+Start for a second to go back to the list.** Select+Start no longer leaves the
+app: Quit in the main menu does (B on the list still quits too). A keyboard works too (arrows, Enter, Esc; H and N for heard and not heard; **F10 is the main menu**).
+
+**What the app does not have, and says so on screen when asked** (rule 17 allows an app to differ for its function): no virtual mouse (L3) and no
+virtual keyboard (R3); no contextual menu (L2 + R2); **no panels except on R3i6nos Mapping** (Fn there turns its two panels: Fn the next, L1 + Fn
+the first, R1 + Fn the one before). Sound's **X (heard) and Y (silent)** are the app's own one-touch buttons, as the mapping allows. The LÖVE
+builds are **not** moved onto the mapping yet (the Lua theme has no reader or main menu).
 
 **Two departures from the theme, and why:**
 
@@ -32,8 +40,22 @@ any page, or to leave from the list. A keyboard works too (arrows, Enter, Esc; H
 | **Sound** | Six tones, each faded in and out: 1 kHz on the left channel, the right, both; 440 Hz on both (the low one); a sweep from 100 Hz to 8 kHz; 1 kHz at 10%. They were 440 Hz until the first native report from the unit (2026-11-09) had every 440 Hz tone silent from the speaker and the sweep heard (`docs/hardware-findings.md`). A plays the selected one, **X marks it heard, Y silent**; the answers go in the report. The lower box shows the card, the RK817's speaker path from `r3i6nos-sound status` (in red if `OFF`), the headphone jack and the output device. |
 | **Files** | On the games card (`/roms`) and, when one is mounted, the data card (`/roms2`), in their `IO_Checker` folder: write a file, write a second and rename it over the first, read it back, delete it; then write 8 MB with sync and read it back byte for byte, and the free space. The read speed is of a file just written, so it may come from memory; it says so. |
 | **USB and OTG** (native build) | What the OTG port can bring, from `/sys`, `/proc` and `/dev` (`apps/io-checker-native/usb_io.h`; nothing needs root). A list of eight checks, each with what it found beside it; the page behind each rescans every 2 s, so a device shows up as it is plugged in. **Devices:** every USB device (a hub or dock lists the things behind it), what it is (keyboard, mouse, pad, storage, MIDI, audio, network, Wi-Fi, camera, serial, Bluetooth, hub: from its interface classes and the driver bound to each), its vendor:product, speed, drivers; one with **no driver** says `NO DRIVER` (a FAIL in the report: the kernel cannot use it). **Video out:** every video connector the kernel has (`/sys/class/drm`): this unit's own screen, an HDMI or DisplayLink dock when connected, with its first mode, and how many displays SDL sees. **MIDI:** the ALSA raw MIDI ports; the selected one is opened, what comes in is shown in words (`ch1 note on C4 vel 100`), and **A sends middle C** (note on, then off 300 ms later): a cable from the out to the in loops it back. **Storage:** USB drives (model, size, whether mounted); **A tests a mounted one like a card** (write, rename, read, delete, 8 MB speed; its rows also appear on Files and in the report). **Network:** Ethernet and Wi-Fi adapters, link, speed, address, bytes. **Keyboard:** each different key counts once, the last six are shown, modifiers live; every key is a test here, so **Esc, or B on the pad, goes back**. **Mouse:** movement, which buttons were pressed, the wheel. **Game controllers:** each pad other than the built-in one, opened while the page is up: shape, buttons held now, how many of them have been pressed, the axes; its events never reach the built-in pad's record on Buttons and sticks. |
+| **R3i6nos Mapping** (native build, 2026-11-20) | Tests the input mapping on the unit (`docs/r3i6nos-mapping.md`). **Panel 1, inputs:** all 17 default inputs (B, A, X, Y, L1, R1, L2, R2, the D-pad, Select, Start, L3, R3, Fn) with **the action each would make right now** (hold R1 and Up reads "Page up"; hold L1 and R1 reads "Main menu"), a count of presses, and the row lit while held; below, the **system chords** (L1+R1 main menu, L2+R2 context menu, Fn next panel, L1+Fn first panel, R1+Fn previous panel) and **R1 as "increase"** (R1+Up Page up, R1+Down Page down, R1+Left Home, R1+Right End), each marked "seen" once made, and the last action. The chords are recorded here, not obeyed. **Panel 2, sticks and speed (the speed of the R1 modifier):** R1 held or not; the **right stick** (selection): its push, the steps a second it asks for against the 6 at full, the steps it really made in the last second and the most in one, and the counts of Up, Down, Page up/down, Home, End it made (with R1 held it pages and Home/End fire once a push); the **left stick** (pointer): a pointer in a 380x100 px test area, its speed now in px/s smoothed over 0.4 s, the highest **plain** and the highest **with R1** and their ratio (the mapping says 120 px/s at full and 3 times that with R1: 360), and how long the area takes to cross at each speed. Fn turns the two panels (L1+Fn the first, R1+Fn the one before). Select+Start held a second, or 15 s with no input, goes back. |
 | **System** | The r3i6nos build, kernel, board, CPU, memory, battery, backlight, the runtime, screen and renderer, the pad's name, GUID and shape, whether SDL maps it, the sound card and speaker path. |
 | **Device report** | Runs the file checks again and writes everything, below. |
+
+## The main menu (rule 17; native build, 2026-11-20)
+
+**L1 + R1** (keyboard: F10) on any list page opens the main menu, from `theme/r3i6nos_mainmenu.h`, in the rule's order:
+
+| Item | Does here |
+|---|---|
+| **About** | Name, `v<version> <commit> <date>` (the commit comes from `scripts/build_native_app.sh`; `dev` when built by hand), the font credit (VileR, CC BY-SA 4.0), MIT, no network or telemetry. Any key closes. |
+| **Colour theme** | The theme picker (VGA Classic by default, the 13 bundled themes; moving shows the theme at once, A keeps it, B goes back). **The choice is saved** in `<app data folder>/settings.conf` (`theme=<name>`) and read at the next start. The video test patterns are pixels and do not change. |
+| **Device report** | The device report below. |
+| **Rec demo** | **Not built yet:** the item is there (rule 17: never missing), and answers "Rec demo is not built for IO Checker yet." (rule 11 is open for this app; ROADMAP section 39.) |
+| **Benchmark** | The Motion pattern for 4 s (the frame rate against the 55 fps goal, under 1% late frames), then the card tests (write, read and rename speeds); B cancels. Writes **`<app data folder>/benchmark-native.txt`** in the report grammar and shows the summary on the command line. |
+| **Quit** | Leaves the app. |
 
 ## The device report
 
@@ -44,6 +66,7 @@ so they never overwrite each other. The grammar is `docs/DEVICE-REPORTS.md`'s. T
 | Section | Checks (PASS or FAIL) | Facts (INFO) and SKIPs |
 |---|---|---|
 | system | | the System page's rows; the native build adds SDL's drivers and output devices |
+| mapping (native) | **each chord and R1 move made** on R3i6nos Mapping (PASS), **the right stick's steps** at a full push (PASS at 4-7 in the busiest second, 6 expected) | the highest step rate asked for, the highest pointer speed plain and with R1, and R1's gain (INFO); **SKIP for what was not tried**, with how to try it |
 | input | the pad's shape (17 buttons, 4 axes); **every button pressed** (or which never were); **no chatter** (a press within 30 ms of the same button's release); **each axis's range** past -0.90 and +0.90; **each axis at rest** within 0.10 when the report runs (hands off); the power and volume keys arriving | presses a button, keys seen, hat directions; SKIP for what was never tried |
 | video | the window is 640x480; **the motion test** at 55 fps or more with under 1% late frames | mode, renderer, the patterns shown, the backlight; how they looked is for the person to say in words |
 | sound | the speaker path is not `OFF`; the output opened; **each tone heard** (FAIL if marked silent) | the card, the jack; SKIP for a tone not played or not answered |
@@ -69,8 +92,8 @@ second feeding it silence, until the app quit). Not yet measured on a unit.
 
 ## Leaving
 
-From the list: B, Quit, or Select+Start held for a second. Esc on a keyboard. Nobody can be trapped: the input page goes back by itself
-after 15 s with no input, and the list needs only B.
+From the list: B, or Quit in the main menu (the native build; **Select+Start held no longer leaves the app**, it only goes back from the two test pages). Esc on a keyboard.
+Nobody can be trapped: the two test pages go back by themselves after 15 s with no input, and the list needs only B.
 
 ## Tested here, and not
 
@@ -85,6 +108,7 @@ after 15 s with no input, and the list needs only B.
   AddressSanitizer and UBSan. **No real USB device has been plugged into a unit**: whether the kernel on the unit has the drivers (USB MIDI,
   Ethernet, storage, a DisplayLink adapter), whether the OTG port can host and power a device, what `/sys/class/drm` shows, and whether the
   app's user may open the MIDI nodes are all untested. **The two LÖVE builds have no USB pages yet.**
+- **The input mapping and the main menu** (native build): `tests/test_input.c` (the reader: every plain input, the modifiers, each chord in both orders, R1 held on the D-pad and the right stick, the dead zone, 6 steps a second at full, the pointer's 120 and 360 px/s, a stalled frame not bursting, the list rule, the menu's order with and without Benchmark, every theme's contrast on the menu, About and picker) and the app's `--selftest` (the home list on the new order, every one of the 17 buttons on the mapping page, every chord and R1 move through the real event handler, the panels and their history, the stick's measured step rate and the pointer's measured speeds against 120 and 360, the report's mapping section, the menu's items and the theme saved and read back, the benchmark's start and cancel, Select+Start not leaving). **Not run on a unit:** the real pad's buttons 14-16 (L3, R3, Fn) and axes 2-3 are from the measured mapping and have not been checked in this app; the 6 steps a second, 120 px/s and the factor 3 are guesses to try (`R3_STICK_RATE`, `R3_POINTER_PPS`, `R3_R1_POINTER_X` in `theme/r3i6nos_input.h`); the benchmark's whole run (it needs the window's vsync) and the saved theme on a card are untried.
 - **Not run on a real R36S:** none of it. Not under a real LÖVE either (`scripts/preview_io_checker.sh` draws it on a Mac with a desktop;
   the session that wrote it had none). Untested: that the tones are heard, the patterns' look on the panel, the measured frame rate, the
   backlight reading, the jack reading, and whether the power and volume keys reach apps at all.

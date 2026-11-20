@@ -66,6 +66,7 @@ mkdir -p "$pkgdir/DEBIAN" "$pkgdir/usr/games" "$pkgdir/usr/share/doc/$BIN"
 
 extra=()
 [ "$THEME" = 1 ] && extra=(-I "$REPO/theme")
+[ -n "${R3I6NOS_BUILD_COMMIT:-}" ] && extra+=("-DR3_BUILD_COMMIT=\"$R3I6NOS_BUILD_COMMIT\"")   # the About box and the splash say which commit built the app
 
 echo "[*] Compiling $BIN (arm64)..."
 # shellcheck disable=SC2046  # pkg-config prints separate flags

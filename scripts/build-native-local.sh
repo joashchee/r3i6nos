@@ -54,7 +54,8 @@ fi
 DEB="$REPO/build/native/$NAME.deb"
 rm -f "$DEB"
 echo "[*] Building $NAME $R3I6NOS_NATIVE_VERSION in Debian 12 (arm64) under Docker ..."
-docker run --rm --platform linux/arm64 -v "$REPO":/src -w /src -e R3I6NOS_NATIVE_VERSION="$R3I6NOS_NATIVE_VERSION" debian:bookworm \
+R3I6NOS_BUILD_COMMIT="${R3I6NOS_BUILD_COMMIT:-$(git -C "$REPO" rev-parse --short HEAD 2>/dev/null || echo dev)}"
+docker run --rm --platform linux/arm64 -v "$REPO":/src -w /src -e R3I6NOS_NATIVE_VERSION="$R3I6NOS_NATIVE_VERSION" -e R3I6NOS_BUILD_COMMIT="$R3I6NOS_BUILD_COMMIT" debian:bookworm \
     scripts/build_native_app.sh "$APP" $SMOKE
 [ -s "$DEB" ] || die "the build finished but there is no build/native/$NAME.deb"
 echo "[*] Built: $DEB ($(du -h "$DEB" | cut -f1), version $R3I6NOS_NATIVE_VERSION)"

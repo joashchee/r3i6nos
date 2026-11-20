@@ -170,6 +170,16 @@ if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     rm -f "$toast_bin"
 else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
 
+step "input mapping reader and main menu (theme/r3i6nos_input.h, theme/r3i6nos_mainmenu.h)"
+if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
+    input_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-input.XXXXXX")"
+    # shellcheck disable=SC2046,SC2086  # sdl2-config prints separate flags; $werror is empty or one flag
+    if cc -std=c11 -Wall -Wextra $werror -O2 -I theme $(sdl2-config --cflags) -o "$input_bin" tests/test_input.c $(sdl2-config --libs) -lm; then
+        "$input_bin" || fail=1
+    else echo "FAIL: tests/test_input.c does not compile"; fail=1; fi
+    rm -f "$input_bin"
+else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
+
 step "screen mirror tap (theme/r3i6nos_mirror.h)"
 if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     mirror_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-mirror.XXXXXX")"

@@ -10,7 +10,7 @@
  *   io-checker-native                         run it
  *   io-checker-native --report                write the device report without a window (over SSH; nothing is played or pressed)
  *   io-checker-native --selftest              check the logic and the screens, draw one frame, print one R3I6NOS_SMOKE line (CI, qemu)
- *   io-checker-native --screenshot out.bmp [page]   draw a page (home, input, video, sound, files, system) to a file
+ *   io-checker-native --screenshot out.bmp [page]   draw a page (home, input, mapping, video, sound, files, system, usb) to a file
  *
  * Overrides, for tests: R3I6NOS_APP_DATA (the app's data folder), R3I6NOS_ROMS (/roms), R3I6NOS_ROMS2 (/roms2), R3I6NOS_SOUND (r3i6nos-sound), R3I6NOS_IO_MB (8).
  * Build: scripts/build_native_apps.sh (cross-compiles for arm64 and packs the .deb). */
@@ -27,6 +27,9 @@
 #include <unistd.h>
 
 #include "r3i6nos_ansiapps.h"
+#include "r3i6nos_themes.h"
+#include "r3i6nos_input.h"
+#include "r3i6nos_mainmenu.h"
 #include "r3i6nos_report.h"
 #include "r3i6nos_toast.h"
 #include "r3i6nos_appdata.h"
@@ -36,8 +39,12 @@
 #define M_PI 3.14159265358979323846
 #endif
 
-#define VERSION "2.0"
+#define VERSION "2.1"
 #define EXIT_HOLD_MS 1000
+#ifndef R3_BUILD_COMMIT
+#define R3_BUILD_COMMIT "dev"           /* scripts/build_native_app.sh passes the git commit */
+#endif
+#define BUILD_LINE R3_BUILD_COMMIT " " __DATE__
 #define IDLE_LIMIT_MS 15000
 #define IDLE_WARN_MS 10000
 #define CHATTER_MS 30
@@ -55,14 +62,19 @@
 enum { L_B = 1, L_A, L_X, L_Y, L_L1, L_R1, L_L2, L_R2, L_UP, L_DOWN, L_LEFT, L_RIGHT, L_SELECT, L_START, L_L3, L_R3, L_FN };
 static const char *NAMES[18] = {"", "B", "A", "X", "Y", "L1", "R1", "L2", "R2", "Up", "Down", "Left", "Right", "Select", "Start", "L3", "R3", "Fn"};
 
-enum { P_HOME, P_INPUT, P_VIDEO, P_PATTERN, P_SOUND, P_FILES, P_SYSTEM, P_USB, P_USBSUB, P_COUNT };
-enum { H_INPUT, H_VIDEO, H_SOUND, H_FILES, H_USB, H_SYSTEM, H_REPORT, H_QUIT, H_COUNT };
-static const char *HOME_LABEL[H_COUNT] = {"Buttons and sticks", "Video", "Sound", "Files", "USB and OTG", "System", "Device report", "Quit"};
+enum { P_HOME, P_INPUT, P_VIDEO, P_PATTERN, P_SOUND, P_FILES, P_SYSTEM, P_USB, P_USBSUB, P_MAPPING, P_COUNT };
+enum { H_INPUT, H_MAPPING, H_VIDEO, H_SOUND, H_FILES, H_USB, H_SYSTEM, H_REPORT, H_QUIT, H_COUNT, H_BENCH = 100 };   /* H_BENCH is a job, not a list row */
+static const char *HOME_LABEL[H_COUNT] = {"Buttons and sticks", "R3i6nos Mapping", "Video", "Sound", "Files", "USB and OTG", "System", "Device report", "Quit"};
+/* The pages where every button, stick and chord is a test: nothing navigates on them (the mapping's chords are recorded, not obeyed). Select + Start
+ * held for a second, or 15 s with no input, goes back to the list. */
+#define TEST_PAGE(p) ((p) == P_INPUT || (p) == P_MAPPING)
 /* The checks behind "USB and OTG": what the OTG port can bring (usb_io.h). */
 enum { U_DEVICES, U_VIDEO, U_MIDI, U_STORAGE, U_NETWORK, U_KEYBOARD, U_MOUSE, U_PADS, U_COUNT };
 static const char *HOME_ABOUT[H_COUNT][4] = {
     {"Every button, both sticks, the D-pad, and the power and", "volume keys, as the pad reports them. Press each one:",
      "the list of buttons never pressed shrinks to nothing.", "Hold SELECT+START for a second to come back."},
+    {"Tests the r3i6nos input mapping: press every default input", "and see the action it makes, try the chords (L1+R1, L2+R2,",
+     "Fn) and R1 as the increase key, and measure the sticks'", "step rate and the pointer's speed with and without R1."},
     {"Full-screen test patterns: colour bars, solid colours for", "stuck pixels, ramps for colour depth, a pixel grid for",
      "scaling and edges, and a moving bar that measures the", "frame rate."},
     {"Test tones on the left, the right and both channels, a", "low tone, a sweep, a quiet one. After each, press X if heard",
@@ -194,7 +206,31 @@ typedef struct {
     ExtPad ext[4];
     int n_ext;
     struct Loop *loop;              /* what a pass of the main loop draws with; NULL with no window (--report) */
+    /* the input mapping (docs/r3i6nos-mapping.md): the reader, the main menu over the page, the colour theme */
+    R3Input in;
+    R3MainMenu mm;
+    int overlay, theme, theme_sel;  /* OV_*; the theme in use and the one the picker is on (indexes of r3_themes) */
+    /* the R3i6nos Mapping page */
+    int map_panel, map_prev;                        /* the panel showing and the one before it (R1 + Fn goes back to it) */
+    int map_btn[R3_BTN_COUNT];                      /* presses of each raw button */
+    int map_act[R3_ACTION_COUNT];                   /* times each action was made by a button */
+    int map_stick[R3_ACTION_COUNT];                 /* ... by the right stick */
+    int map_last;                                   /* the last action made, and what made it, for the foot of panel 1 */
+    char map_last_by[24];
+    Uint32 map_stick_t[16];                         /* when the right stick's last steps came (a ring), for steps in the last second */
+    int map_stick_n, map_stick_max;
+    float map_rate_max;                             /* the highest step rate the stick's deflection asked for */
+    float map_px, map_py;                           /* the pointer in the test area, pixels */
+    float map_speed;                                /* the pointer's speed now (px/s, smoothed over about 0.4 s) */
+    float map_speed_max[2];                         /* the highest speed seen without R1 [0] and with R1 held [1] */
+    Uint32 map_ptr_t;
+    int map_ptr_have;
+    /* benchmark */
+    Uint32 bench_end;                               /* when the motion run ends (0: no benchmark running) */
+    char bench_file[96];
 } App;
+
+enum { OV_NONE, OV_MENU, OV_ABOUT, OV_THEME };
 
 static const char *env_or(const char *name, const char *dflt) {
     const char *v = getenv(name);
@@ -743,6 +779,8 @@ static void report_input(App *a, R3Report *r) {
 
 static void power_windows(App *a, R3Report *r);
 static void report_usb(App *a, R3Report *r);
+static void report_mapping(App *a, R3Report *r);
+static void run_files(App *a);
 
 /* The app's data folder (rule 16): where r3_appdata_init settled, $R3I6NOS_APP_DATA. A run that did not settle one (--selftest,
  * --screenshot) keeps the old place under the games card. The per-card checks (card_check) make their own IO_Checker folder on every card
@@ -774,6 +812,7 @@ static void write_report(App *a, const char *how) {
     r3_report_system(&r);
     for (int i = 0; i < a->nsys; i++) r3_report_line(&r, R3_INFO, a->sys[i].label, "%s", a->sys[i].value);
     report_input(a, &r);
+    report_mapping(a, &r);
 
     r3_report_section(&r, "video");
     r3_report_line(&r, R3_INFO, "mode", "%s", a->mode);
@@ -1627,11 +1666,194 @@ static void report_usb(App *a, R3Report *r) {
     }
 }
 
+
+/* ---- the R3i6nos Mapping page: every default input, the chords, and R1 as the increase key ------------------------------------ */
+
+#define MAP_AREA_W 380.0f   /* the pointer's test area: 38 cells by 5 rows of 10x20 pixels */
+#define MAP_AREA_H 100.0f
+#define MAP_SPEED_TAU 0.4f  /* seconds over which the pointer's speed is smoothed for the reading */
+
+/* What button b (0-based) would do if pressed now, with the modifiers as held. */
+static int map_decode(const App *a, int b) {
+    R3Input t = a->in;
+    t.held[b] = 0;
+    return r3_input_button(&t, b, 1);
+}
+
+/* A button went down on the Mapping page: count it, remember what the reader made of it, and obey Fn (the page's panels). */
+static void map_press(App *a, int b0, int action) {
+    if (b0 < 0 || b0 >= R3_BTN_COUNT) return;
+    a->map_btn[b0]++;
+    if (action > R3_NONE && action < R3_ACTION_COUNT) {
+        a->map_act[action]++;
+        a->map_last = action;
+        const char *by = action == R3_MENU ? "L1 + R1" : action == R3_CONTEXT ? "L2 + R2" : action == R3_PANEL_FIRST ? "L1 + Fn" : action == R3_PANEL_PREV ? "R1 + Fn" : NULL;
+        if (by) snprintf(a->map_last_by, sizeof a->map_last_by, "%s", by);
+        else snprintf(a->map_last_by, sizeof a->map_last_by, "%s%s", a->in.held[R3_BTN_R1] && b0 >= R3_BTN_UP && b0 <= R3_BTN_RIGHT ? "R1 + " : "", r3_button_name(b0));
+    }
+    /* the panels turn in a carousel: Fn next, L1 + Fn the first, R1 + Fn the one before (a history of two, so pressed twice it comes back) */
+    int np = a->map_panel;
+    if (action == R3_PANEL_NEXT) np = (a->map_panel + 1) % 2;
+    else if (action == R3_PANEL_FIRST) np = 0;
+    else if (action == R3_PANEL_PREV) np = a->map_prev;
+    if (np != a->map_panel) { a->map_prev = a->map_panel; a->map_panel = np; }
+}
+
+/* The right stick made a step (the reader's output), at time t. */
+static void map_stick_step(App *a, int action, Uint32 t) {
+    if (action <= R3_NONE || action >= R3_ACTION_COUNT) return;
+    a->map_stick[action]++;
+    a->map_last = action;
+    snprintf(a->map_last_by, sizeof a->map_last_by, "%sright stick", a->in.held[R3_BTN_R1] ? "R1 + " : "");
+    memmove(a->map_stick_t + 1, a->map_stick_t, sizeof a->map_stick_t[0] * (sizeof a->map_stick_t / sizeof a->map_stick_t[0] - 1));
+    a->map_stick_t[0] = t;
+}
+
+/* Steps the right stick made in the last second. */
+static int map_steps_now(const App *a, Uint32 now) {
+    int n = 0;
+    for (size_t i = 0; i < sizeof a->map_stick_t / sizeof a->map_stick_t[0]; i++) if (a->map_stick_t[i] && now - a->map_stick_t[i] <= 1000) n++;
+    return n;
+}
+
+/* The pointer test, once a pass: the left stick moves the pointer (with R1 held, 3 times as fast) and its speed is measured. */
+static void map_pointer_tick(App *a, Uint32 now) {
+    float dt = a->map_ptr_have ? (float)(now - a->map_ptr_t) / 1000.0f : 0;
+    a->map_ptr_t = now;
+    a->map_ptr_have = 1;
+    if (dt > 0.25f) dt = 0.25f;
+    if (dt <= 0) return;
+    float dx, dy;
+    r3_input_pointer(&a->in, dt, &dx, &dy);
+    a->map_px += dx; a->map_py += dy;
+    if (a->map_px < 0) a->map_px = 0;
+    if (a->map_px > MAP_AREA_W - 1) a->map_px = MAP_AREA_W - 1;
+    if (a->map_py < 0) a->map_py = 0;
+    if (a->map_py > MAP_AREA_H - 1) a->map_py = MAP_AREA_H - 1;
+    float inst = sqrtf(dx * dx + dy * dy) / dt, k = dt / MAP_SPEED_TAU > 1 ? 1 : dt / MAP_SPEED_TAU;
+    a->map_speed += (inst - a->map_speed) * k;
+    int r1 = a->in.held[R3_BTN_R1];
+    if (a->map_speed > a->map_speed_max[r1]) a->map_speed_max[r1] = a->map_speed;
+}
+
+static void map_sticks_tick(App *a, Uint32 now) {
+    int acts[8], n = r3_input_tick(&a->in, now, acts, 8);
+    for (int i = 0; i < n; i++) map_stick_step(a, acts[i], now);
+    float d = fmaxf(fabsf(a->in.axis[R3_AXIS_RX]), fabsf(a->in.axis[R3_AXIS_RY]));
+    if (r3_stick_rate(d) > a->map_rate_max) a->map_rate_max = r3_stick_rate(d);
+    int steps = map_steps_now(a, now);
+    if (steps > a->map_stick_max) a->map_stick_max = steps;
+    map_pointer_tick(a, now);
+}
+
+static void map_line(R3Screen *s, int col, int row, int width, int lit, int style, const char *fmt, ...) {
+    char buf[96];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(buf, sizeof buf, fmt, ap);
+    va_end(ap);
+    if (lit) { r3_fill(s, col, row, width, 1, 32, LIT_FG, LIT_BG); r3_text_fit(s, col, row, buf, width, LIT_FG, LIT_BG); }
+    else r3_text_fit(s, col, row, buf, width, R3_ST(style));
+}
+
+static void map_chord(R3Screen *s, const App *a, int col, int row, const char *keys, const char *does, int action) {
+    char b[48];
+    snprintf(b, sizeof b, "%-10s %s", keys, does);
+    r3_text_fit(s, col, row, b, 23, R3_ST(R3_ST_BODY));
+    int seen = a->map_act[action] > 0;
+    r3_text_fit(s, col + 23, row, seen ? "seen" : "not yet", 7, R3_ST(seen ? R3_ST_OK : R3_ST_BODY));
+}
+
+static void map_panel1(R3Screen *s, const App *a) {
+    r3_box(s, 0, R3_DISPLAY_TOP, R3_COLS, 12, &(R3Box){1, "R3i6nos Mapping", "Panel 1/2", "Fn next panel", 0});
+    r3_text_fit(s, 2, 2, "Input  Action now      Count", 29, R3_ST(R3_ST_HINT));
+    r3_text_fit(s, 33, 2, "Input  Action now      Count", 29, R3_ST(R3_ST_HINT));
+    static const int order[R3_BTN_COUNT] = {R3_BTN_B, R3_BTN_A, R3_BTN_X, R3_BTN_Y, R3_BTN_L1, R3_BTN_R1, R3_BTN_L2, R3_BTN_R2,
+                                            R3_BTN_UP, R3_BTN_DOWN, R3_BTN_LEFT, R3_BTN_RIGHT, R3_BTN_SELECT, R3_BTN_START, R3_BTN_L3, R3_BTN_R3, R3_BTN_FN};
+    for (int i = 0; i < R3_BTN_COUNT; i++) {
+        int b = order[i], col = i < 8 ? 2 : 33, row = 3 + (i < 8 ? i : i - 8), act = map_decode(a, b);
+        const char *what = act ? r3_action_name(act) : "(modifier)";
+        map_line(s, col, row, 29, down(a, b + 1), R3_ST_BODY, "%-6s %-14s %5d", r3_button_name(b), what, a->map_btn[b]);
+    }
+    r3_box(s, 0, 13, R3_COLS, 8, &(R3Box){0, "Chords and R1", NULL, NULL, 0});
+    map_chord(s, a, 2, 14, "L1 + R1", "Main menu", R3_MENU);
+    map_chord(s, a, 2, 15, "L2 + R2", "Context menu", R3_CONTEXT);
+    map_chord(s, a, 2, 16, "Fn", "Next panel", R3_PANEL_NEXT);
+    map_chord(s, a, 2, 17, "L1 + Fn", "First panel", R3_PANEL_FIRST);
+    map_chord(s, a, 2, 18, "R1 + Fn", "Prev. panel", R3_PANEL_PREV);
+    map_chord(s, a, 33, 14, "R1 + Up", "Page up", R3_PAGEUP);
+    map_chord(s, a, 33, 15, "R1 + Down", "Page down", R3_PAGEDOWN);
+    map_chord(s, a, 33, 16, "R1 + Left", "Home", R3_HOME);
+    map_chord(s, a, 33, 17, "R1 + Right", "End", R3_END);
+    if (a->map_last) map_line(s, 2, 19, R3_COLS - 4, 0, R3_ST_STRONG, "last: %s -> %s", a->map_last_by, r3_action_name(a->map_last));
+    else r3_text_fit(s, 2, 19, "last: nothing pressed yet", R3_COLS - 4, R3_ST(R3_ST_BODY));
+}
+
+static void map_panel2(R3Screen *s, const App *a, Uint32 now) {
+    r3_box(s, 0, R3_DISPLAY_TOP, R3_COLS, R3_DISPLAY_ROWS, &(R3Box){1, "R3i6nos Mapping", "Panel 2/2", "Fn next panel", 0});
+    int r1 = a->in.held[R3_BTN_R1];
+    if (r1) map_line(s, 2, 2, R3_COLS - 4, 1, R3_ST_BODY, "R1 now: HELD   increase: pages, Home/End, pointer x%.0f", R3_R1_POINTER_X);
+    else map_line(s, 2, 2, R3_COLS - 4, 0, R3_ST_BODY, "R1 now: not held   hold it and move: more of the same");
+    float rx = a->in.axis[R3_AXIS_RX], ry = a->in.axis[R3_AXIS_RY], d = fmaxf(fabsf(rx), fabsf(ry));
+    r3_text_fit(s, 2, 4, "RIGHT STICK  (moves the selection like the D-pad)", R3_COLS - 4, R3_ST(R3_ST_STRONG));
+    map_line(s, 2, 5, R3_COLS - 4, 0, R3_ST_BODY, "  push x %+.2f  y %+.2f   dead zone %.2f: %s", rx, ry, R3_STICK_DEAD, d > R3_STICK_DEAD ? "past it" : "inside");
+    map_line(s, 2, 6, R3_COLS - 4, 0, R3_ST_BODY, "  asks for %.1f steps/s now   full %.1f   highest %.1f", r3_stick_rate(d), R3_STICK_RATE, a->map_rate_max);
+    map_line(s, 2, 7, R3_COLS - 4, 0, R3_ST_BODY, "  steps in the last second: %d   most in one: %d", map_steps_now(a, now), a->map_stick_max);
+    map_line(s, 2, 8, R3_COLS - 4, 0, R3_ST_BODY, "  made: Up %d Down %d  Page up %d down %d  Home %d End %d", a->map_stick[R3_UP], a->map_stick[R3_DOWN],
+             a->map_stick[R3_PAGEUP], a->map_stick[R3_PAGEDOWN], a->map_stick[R3_HOME], a->map_stick[R3_END]);
+    r3_text_fit(s, 2, 9, "LEFT STICK  (the pointer)", R3_COLS - 4, R3_ST(R3_ST_STRONG));
+    map_line(s, 2, 10, R3_COLS - 4, 0, R3_ST_BODY, "  speed now %.0f px/s   full %.0f, with R1 %.0f", a->map_speed, R3_POINTER_PPS, R3_POINTER_PPS * R3_R1_POINTER_X);
+    if (a->map_speed_max[0] > 1 && a->map_speed_max[1] > 1)
+        map_line(s, 2, 11, R3_COLS - 4, 0, R3_ST_BODY, "  highest: plain %.0f, R1 %.0f px/s  (R1 is x%.1f)", a->map_speed_max[0], a->map_speed_max[1], a->map_speed_max[1] / a->map_speed_max[0]);
+    else map_line(s, 2, 11, R3_COLS - 4, 0, R3_ST_BODY, "  highest: plain %.0f, R1 %.0f px/s  (push once with each)", a->map_speed_max[0], a->map_speed_max[1]);
+    r3_box(s, 2, 12, 40, 7, &(R3Box){0, "Pointer", NULL, NULL, 0});
+    int pc = 3 + (int)(a->map_px / 10), pr = 13 + (int)(a->map_py / 20);
+    r3_put(s, pc, pr, 254, R3_ST(R3_ST_STRONG));
+    map_line(s, 44, 13, 18, 0, R3_ST_BODY, "x %3.0f  y %3.0f", a->map_px, a->map_py);
+    map_line(s, 44, 14, 18, 0, R3_ST_BODY, "1 cell: 10x20 px");
+    map_line(s, 44, 15, 18, 0, R3_ST_BODY, "across: %.1f s", MAP_AREA_W / R3_POINTER_PPS);
+    map_line(s, 44, 16, 18, 0, R3_ST_BODY, "with R1: %.1f s", MAP_AREA_W / (R3_POINTER_PPS * R3_R1_POINTER_X));
+    r3_text_fit(s, 44, 17, "L3 centres it", 18, R3_ST(R3_ST_HINT));
+}
+
+static void page_mapping(R3Screen *s, const App *a, Uint32 now) {
+    if (a->map_panel == 0) map_panel1(s, a); else map_panel2(s, a, now);
+    cmdline(s, a, "hold SELECT+START 1 s: back  Fn: next panel", a->js ? a->pad_name : "no pad found");
+}
+
+/* The device report's mapping section: what was tried, and the speeds measured against the constants. */
+static void report_mapping(App *a, R3Report *r) {
+    r3_report_section(r, "mapping");
+    static const struct { int action; const char *key; } want[] = {
+        {R3_MENU, "L1 + R1 main menu"}, {R3_CONTEXT, "L2 + R2 context menu"}, {R3_PANEL_NEXT, "Fn next panel"}, {R3_PANEL_FIRST, "L1 + Fn first panel"},
+        {R3_PANEL_PREV, "R1 + Fn previous panel"}, {R3_PAGEUP, "R1 + Up page up"}, {R3_PAGEDOWN, "R1 + Down page down"}, {R3_HOME, "R1 + Left home"},
+        {R3_END, "R1 + Right end"}};
+    for (size_t i = 0; i < sizeof want / sizeof want[0]; i++) {
+        if (a->map_act[want[i].action] > 0) r3_report_line(r, R3_PASS, want[i].key, "made %d time%s", a->map_act[want[i].action], a->map_act[want[i].action] == 1 ? "" : "s");
+        else r3_report_line(r, R3_SKIP, want[i].key, "not tried (open R3i6nos Mapping and press it)");
+    }
+    if (a->map_rate_max > 0) {
+        r3_report_line(r, R3_INFO, "right stick rate", "asked for up to %.1f steps/s (full is %.1f; dead zone %.2f)", a->map_rate_max, R3_STICK_RATE, R3_STICK_DEAD);
+        if (a->map_rate_max >= R3_STICK_RATE * 0.98f) {
+            char v[64];
+            snprintf(v, sizeof v, "most steps in one second at full push: %d (goal 4-7)", a->map_stick_max);
+            r3_report_check(r, a->map_stick_max >= 4 && a->map_stick_max <= 7, "right stick steps", v);
+        }
+        else r3_report_line(r, R3_SKIP, "right stick steps", "the stick was not pushed to the end (highest rate %.1f of %.1f)", a->map_rate_max, R3_STICK_RATE);
+    } else r3_report_line(r, R3_SKIP, "right stick rate", "the right stick was not pushed past the dead zone");
+    if (a->map_speed_max[0] > 1) r3_report_line(r, R3_INFO, "pointer speed", "highest %.0f px/s without R1 (full is %.0f)", a->map_speed_max[0], R3_POINTER_PPS);
+    else r3_report_line(r, R3_SKIP, "pointer speed", "the left stick was not pushed");
+    if (a->map_speed_max[1] > 1) r3_report_line(r, R3_INFO, "pointer speed R1", "highest %.0f px/s with R1 held (full is %.0f)", a->map_speed_max[1], R3_POINTER_PPS * R3_R1_POINTER_X);
+    else r3_report_line(r, R3_SKIP, "pointer speed R1", "the left stick was not pushed with R1 held");
+    if (a->map_speed_max[0] > 1 && a->map_speed_max[1] > 1) r3_report_line(r, R3_INFO, "R1 gain", "x%.2f (the mapping says x%.1f at the same push)", a->map_speed_max[1] / a->map_speed_max[0], R3_R1_POINTER_X);
+}
+
 static void compose(App *a, R3Screen *s, Uint32 now) {
     r3_clear(s);
     r3_top_bar(s, "IO Checker", runtime());
     switch (a->page) {
     case P_INPUT: page_input(s, a, now); break;
+    case P_MAPPING: page_mapping(s, a, now); break;
     case P_VIDEO: page_video(s, a); break;
     case P_SOUND: page_sound(s, a); break;
     case P_FILES: page_files(s, a); break;
@@ -1644,6 +1866,12 @@ static void compose(App *a, R3Screen *s, Uint32 now) {
         break;
     default: page_home(s, a);
     }
+    if (a->overlay == OV_MENU) r3_mm_draw(s, &a->mm, r3_themes[a->theme].name);
+    else if (a->overlay == OV_ABOUT) {
+        static const char *const lines[] = {"The R36S's hardware check: buttons, sticks, video,", "sound, files and the OTG port, and a device report.",
+                                            "Font: IBM VGA 8x16 by VileR, CC BY-SA 4.0.", "Code: MIT. No network, no telemetry.", NULL};
+        r3_about_draw(s, "IO Checker", VERSION, BUILD_LINE, lines);
+    } else if (a->overlay == OV_THEME) r3_theme_pick_draw(s, a->theme_sel, a->theme);
 }
 
 /* ---- the video patterns (pixels, not cells) --------------------------------------------------------------------------------- */
@@ -1708,6 +1936,7 @@ static void go(App *a, int page, Uint32 now) {
     a->idle_since = now;
     a->force = 1;
     if (page == P_INPUT) say(a, R3_ST_HINT, "Press every button. Hold SELECT+START to go back.");
+    if (page == P_MAPPING) { a->map_panel = a->map_prev = 0; a->map_ptr_have = 0; say(a, R3_ST_HINT, "Press every input. Hold SELECT+START to go back."); }
     if (page == P_SYSTEM) system_rows(a);
     if (page == P_SOUND) sound_status(a);
     if (page == P_USB || page == P_USBSUB) usb_scan(a, now);
@@ -1745,9 +1974,12 @@ static int per_of(int page) { return page == P_HOME ? H_COUNT : page == P_VIDEO 
 static void act(App *a, int act_, Uint32 now) {
     int page = a->page;
     if (page == P_PATTERN) {
+        if (a->bench_end && act_ != R3_BACK && act_ != R3_ACCEPT) return;     /* the benchmark's motion run is on one pattern */
         if (act_ == R3_LEFT || act_ == R3_PAGEUP || act_ == R3_UP) show_pattern(a, a->sel[P_VIDEO] - 1);
         else if (act_ == R3_RIGHT || act_ == R3_PAGEDOWN || act_ == R3_DOWN) show_pattern(a, a->sel[P_VIDEO] + 1);
         else if (act_ == R3_BACK || act_ == R3_ACCEPT) {
+            int was_bench = a->bench_end != 0;
+            a->bench_end = 0;
             a->page = P_VIDEO;
             a->force = 1;
             if (a->sel[P_VIDEO] == PAT_MOTION) {
@@ -1755,11 +1987,12 @@ static void act(App *a, int act_, Uint32 now) {
                 Frames f;
                 say(a, frames_stats(a, &f) ? R3_ST_OK : R3_ST_WARN, "Measured: %s", frames_line(a, fl, sizeof fl));
             }
+            if (was_bench) say(a, R3_ST_WARN, "Benchmark cancelled.");
         }
         return;
     }
-    if (page == P_INPUT || page < 0 || page >= P_COUNT) return;
-    a->sel[page] = r3_list_key(a->sel[page], count_of(a, page), per_of(page), act_);
+    if (TEST_PAGE(page) || page < 0 || page >= P_COUNT) return;
+    a->sel[page] = r3_list_step(a->sel[page], count_of(a, page), per_of(page), act_);
     int sel = a->sel[page];
     switch (page) {
     case P_HOME:
@@ -1769,7 +2002,7 @@ static void act(App *a, int act_, Uint32 now) {
             else if (sel == H_REPORT) { a->pending = H_REPORT; say(a, R3_ST_WARN, "Writing the device report (the card test takes a few seconds)..."); }
             else if (sel == H_USB) go(a, P_USB, now);
             else if (sel == H_FILES) { go(a, P_FILES, now); if (!a->files_run) { a->pending = H_FILES; say(a, R3_ST_WARN, "Testing the cards..."); } }
-            else go(a, sel == H_INPUT ? P_INPUT : sel == H_VIDEO ? P_VIDEO : sel == H_SOUND ? P_SOUND : P_SYSTEM, now);
+            else go(a, sel == H_INPUT ? P_INPUT : sel == H_MAPPING ? P_MAPPING : sel == H_VIDEO ? P_VIDEO : sel == H_SOUND ? P_SOUND : P_SYSTEM, now);
         }
         break;
     case P_VIDEO:
@@ -1804,6 +2037,132 @@ static void act(App *a, int act_, Uint32 now) {
         break;
     default:
         if (act_ == R3_BACK) go(a, P_HOME, now);
+    }
+}
+
+
+/* ---- the main menu (rule 17), its items, the colour theme and the benchmark ----------------------------------------------------- */
+
+#define BENCH_MS 4000           /* the benchmark's motion run */
+
+static void settings_path(char *out, size_t cap) {
+    char dir[PATH_MAX];
+    app_data_dir(dir, sizeof dir);
+    snprintf(out, cap, "%s/settings.conf", dir);
+}
+
+/* The saved colour theme (theme=<name>) in the app's data folder; a missing file or an unknown name leaves VGA Classic. */
+static void settings_load(App *a) {
+    char path[PATH_MAX + 32], line[128];
+    settings_path(path, sizeof path);
+    FILE *f = fopen(path, "r");
+    if (!f) return;
+    while (fgets(line, sizeof line, f)) {
+        line[strcspn(line, "\r\n")] = 0;
+        if (!strncmp(line, "theme=", 6)) { int t = r3_theme_find(line + 6); if (t >= 0) a->theme = t; }
+    }
+    fclose(f);
+    r3_theme_apply(a->theme);
+}
+
+static int settings_save(const App *a) {
+    char dir[PATH_MAX], path[PATH_MAX + 32];
+    app_data_dir(dir, sizeof dir);
+    settings_path(path, sizeof path);
+    if (r3_report_mkdirs(dir) != 0) return -1;
+    FILE *f = fopen(path, "w");
+    if (!f) return -1;
+    int ok = fprintf(f, "theme=%s\n", r3_themes[a->theme].name) > 0;
+    return fclose(f) == 0 && ok ? 0 : -1;
+}
+
+/* Benchmark: the Motion pattern for BENCH_MS (the frame rate against the 55 fps goal), then the cards' speed (a pending job after the first
+ * pass of the loop has shown "testing"), and benchmark-native.txt in the app's data folder, in the report grammar. */
+static void bench_start(App *a, Uint32 now) {
+    show_pattern(a, PAT_MOTION);
+    a->bench_end = now + BENCH_MS;
+    a->idle_since = now;
+    a->force = 1;
+}
+
+static void bench_finish(App *a) {
+    char dir[PATH_MAX], fl[128], key[64];
+    Frames f;
+    int have = frames_stats(a, &f);
+    run_files(a);
+    app_data_dir(dir, sizeof dir);
+    R3Report r;
+    memset(&r, 0, sizeof r);
+    r.quiet = 1;
+    if (r3_report_open_named(&r, dir, "benchmark-native.txt", "IO Checker", VERSION, "r36s-io-checker-native", "Benchmark (main menu)", "r3i6nos") != 0) {
+        say(a, R3_ST_ERROR, "Could not write the benchmark in %s", dir);
+        return;
+    }
+    r3_report_section(&r, "benchmark");
+    if (have) r3_report_line(&r, f.fps >= 55 && f.late <= f.frames / 100 ? R3_PASS : R3_FAIL, "motion", "%s (goal 55+ fps, under 1%% late)", frames_line(a, fl, sizeof fl));
+    else r3_report_line(&r, R3_SKIP, "motion", "too short to measure");
+    for (int i = 0; i < a->nfiles; i++) {
+        snprintf(key, sizeof key, "%s %s", a->files[i].card, a->files[i].item);
+        r3_report_line(&r, a->files[i].status, key, "%s", a->files[i].value);
+    }
+    int pass = r.pass, fail = r.fail;
+    if (r3_report_close(&r) == 0) {
+        snprintf(a->bench_file, sizeof a->bench_file, "%s/IO_Checker/benchmark-native.txt", report_card());
+        say(a, fail ? R3_ST_WARN : R3_ST_OK, "%.1f fps. Written: %s (PASS %d FAIL %d)", have ? f.fps : 0.0, a->bench_file, pass, fail);
+    } else say(a, R3_ST_ERROR, "Could not write the benchmark in %s", dir);
+}
+
+/* One action while an overlay (the main menu, About, the colour theme picker) is up. */
+static void overlay_key(App *a, int action, Uint32 now) {
+    if (action == R3_NONE) return;
+    if (a->overlay == OV_ABOUT) { a->overlay = OV_NONE; return; }
+    if (a->overlay == OV_THEME) {
+        if (action == R3_ACCEPT) {
+            a->theme = a->theme_sel;
+            r3_theme_apply(a->theme);
+            if (settings_save(a) == 0) say(a, R3_ST_OK, "Colour theme: %s", r3_themes[a->theme].name);
+            else say(a, R3_ST_WARN, "Colour theme: %s (not saved: cannot write the settings)", r3_themes[a->theme].name);
+            a->overlay = OV_NONE;
+        } else if (action == R3_BACK || action == R3_MENU) {
+            r3_theme_apply(a->theme);
+            a->overlay = OV_NONE;
+        } else {
+            a->theme_sel = r3_list_step(a->theme_sel, R3_THEME_COUNT, r3_list_rows(R3_DISPLAY_ROWS - 2), action);
+            r3_theme_apply(a->theme_sel);
+        }
+        a->force = 1;
+        return;
+    }
+    int id = r3_mm_key(&a->mm, action);
+    if (id == R3MM_NOTHING) return;
+    a->overlay = OV_NONE;
+    a->force = 1;
+    switch (id) {
+    case R3MM_ABOUT: a->overlay = OV_ABOUT; break;
+    case R3MM_THEME: a->overlay = OV_THEME; a->theme_sel = a->theme; break;
+    case R3MM_REPORT: a->pending = H_REPORT; say(a, R3_ST_WARN, "Writing the device report (the card test takes a few seconds)..."); break;
+    case R3MM_DEMO: say(a, R3_ST_WARN, "Rec demo is not built for IO Checker yet."); break;
+    case R3MM_BENCH: bench_start(a, now); break;
+    case R3MM_QUIT: a->quit = 1; break;
+    default: break;
+    }
+}
+
+/* One action from the pad (through the mapping's reader), a stick step or a key. The system chords are the same on every list page; on the pages
+ * that test inputs (TEST_PAGE) and on the pixel patterns nothing navigates, so every input can be tried. */
+static void dispatch(App *a, int action, Uint32 now) {
+    if (action == R3_NONE) return;
+    if (a->overlay) { overlay_key(a, action, now); return; }
+    if (TEST_PAGE(a->page)) return;
+    if (a->page == P_PATTERN) { act(a, action, now); return; }
+    switch (action) {
+    case R3_MENU: r3_mm_open(&a->mm); a->overlay = OV_MENU; a->force = 1; return;
+    case R3_CONTEXT: say(a, R3_ST_HINT, "No contextual menu here: A opens the selected check."); return;
+    case R3_PANEL_NEXT: case R3_PANEL_FIRST: case R3_PANEL_PREV: say(a, R3_ST_HINT, "No panels here: Fn turns them on R3i6nos Mapping."); return;
+    case R3_L3: say(a, R3_ST_HINT, "IO Checker has no virtual mouse."); return;
+    case R3_R3: say(a, R3_ST_HINT, "IO Checker has no virtual keyboard."); return;
+    case R3_START: return;
+    default: act(a, action, now);
     }
 }
 
@@ -1842,6 +2201,9 @@ static void app_init(App *a) {
     snprintf(a->renderer, sizeof a->renderer, "?");
     snprintf(a->backlight, sizeof a->backlight, "?");
     snprintf(a->snd_card, sizeof a->snd_card, "?");
+    r3_input_init(&a->in);
+    r3_mm_init(&a->mm, 1);          /* Benchmark is there: the motion frame rate and the cards' speed are what this app measures */
+    a->map_px = 190; a->map_py = 50;
 }
 
 /* Whether a pad event is from a pad that is not the built-in one: it belongs to the Game controllers page, never to the built-in pad's record. */
@@ -1878,9 +2240,10 @@ static void handle(App *a, const SDL_Event *e, Uint32 now) {
         else rec_release(a, b, now);
         event(a, a->js && SDL_JoystickGetButton(a->js, e->jbutton.button), "btn %d %s", b, isdown ? "DOWN" : "UP");
         a->idle_since = now;
+        int ac = r3_input_button(&a->in, e->jbutton.button, isdown);     /* the mapping's reader: modifiers, chords, R1 held as increase */
         if (isdown) {
-            int ac = r3_pad_action(e->jbutton.button);
-            if (ac != R3_NONE) act(a, ac, now);
+            if (a->page == P_MAPPING && !a->overlay) map_press(a, e->jbutton.button, ac);
+            else dispatch(a, ac, now);
         }
         break;
     }
@@ -1898,6 +2261,7 @@ static void handle(App *a, const SDL_Event *e, Uint32 now) {
         if (i >= MAX_A) break;
         float v = e->jaxis.value / 32768.0f;
         a->axis[i] = v;
+        r3_input_axis(&a->in, e->jaxis.axis, v);
         rec_axis(a, i, v);
         int z = v <= -ZONE ? -1 : (v >= ZONE ? 1 : 0);
         if (z != a->zone[i]) {
@@ -1935,36 +2299,42 @@ static void handle(App *a, const SDL_Event *e, Uint32 now) {
         a->idle_since = now;
         if (!isdown) break;
         rec_key(a, lname);
-        if (a->page == P_INPUT) { if (k == SDLK_ESCAPE) go(a, P_HOME, now); break; }
+        if (TEST_PAGE(a->page)) { if (k == SDLK_ESCAPE) go(a, P_HOME, now); break; }
         if (a->page == P_USBSUB && a->usb_sub == U_KEYBOARD) {    /* every key is a test here; Esc, or B on the pad, goes back */
             kb_press(a, (int)e->key.keysym.scancode, SDL_GetKeyName(k));
             if (k == SDLK_ESCAPE) act(a, R3_BACK, now);
             break;
         }
-        if (k == SDLK_h) act(a, R3_X, now);
-        else if (k == SDLK_n) act(a, R3_Y, now);
-        else { int ac = r3_key_action(k); if (ac != R3_NONE) act(a, ac, now); }
+        if (k == SDLK_h) dispatch(a, R3_X, now);
+        else if (k == SDLK_n) dispatch(a, R3_Y, now);
+        else dispatch(a, r3_input_key(k), now);
         break;
     }
     }
 }
 
-/* Once a frame: the exit chord (back to the list, or out from the list), the input page's idle timer. */
+/* Once a frame: the test pages' way back (Select + Start held a second; Select + Start no longer leaves the app, Quit in the main menu does),
+ * their idle timer, and the right stick's steps (on the Mapping page they are measured, elsewhere they are the D-pad's). */
 static void tick(App *a, Uint32 now) {
-    int held = a->js && exit_held(a);
+    int held = a->js && TEST_PAGE(a->page) && exit_held(a);
     if (!held) { a->latch = 0; a->chord_since = 0; }
     else if (!a->latch) {
         if (!a->chord_since) a->chord_since = now;
         if (now - a->chord_since >= EXIT_HOLD_MS) {
             a->latch = 1;
             a->chord_since = 0;
-            if (a->page == P_HOME) a->quit = 1;
-            else { go(a, P_HOME, now); say(a, R3_ST_HINT, "Back."); }
+            go(a, P_HOME, now);
+            say(a, R3_ST_HINT, "Back.");
         }
+    }
+    if (a->page == P_MAPPING && !a->overlay) map_sticks_tick(a, now);
+    else {
+        int acts[8], n = r3_input_tick(&a->in, now, acts, 8);
+        for (int i = 0; i < n; i++) { a->idle_since = now; dispatch(a, acts[i], now); }
     }
     usb_tick(a, now);
     if (a->dev && a->audio_close_at && now >= a->audio_close_at) audio_close(a);      /* the tone is over */
-    if (a->page == P_INPUT && now - a->idle_since >= IDLE_LIMIT_MS) {
+    if (TEST_PAGE(a->page) && now - a->idle_since >= IDLE_LIMIT_MS) {
         go(a, P_HOME, now);
         say(a, R3_ST_WARN, "No input for 15 s: back to the list.");
     }
@@ -1977,7 +2347,7 @@ static void tick(App *a, Uint32 now) {
  * SDL_WaitEventTimeout: on a video driver without a native wait SDL turns it into a 1 ms polling loop (docs/POWER.md). */
 static unsigned nap_ms(App *a, const R3Video *v) {
     /* the pages where a person is pressing things and wants to see them at once keep the frame: the button test, the live USB checks */
-    if (a->page == P_INPUT || (a->page == P_USBSUB && (a->usb_sub == U_KEYBOARD || a->usb_sub == U_MOUSE || a->usb_sub == U_PADS || a->usb_sub == U_MIDI))) return 16;
+    if (TEST_PAGE(a->page) || r3_input_stick_active(&a->in) || (a->page == P_USBSUB && (a->usb_sub == U_KEYBOARD || a->usb_sub == U_MOUSE || a->usb_sub == U_PADS || a->usb_sub == U_MIDI))) return 16;
     if (a->force || v->settle > 0 || r3_toast_active(&a->toast) || a->chord_since || a->pending || a->midi_off_at) return 16;
     return IDLE_NAP_MS;
 }
@@ -2042,7 +2412,7 @@ static void power_windows(App *a, R3Report *r) {
 /* ---- self-test, screenshot, headless report ----------------------------------------------------------------------------- */
 
 static int bad;
-#define CHECK(cond, what) do { if (!(cond)) { fprintf(stderr, "io-checker selftest: %s\n", what); bad++; } } while (0)
+#define CHECK(cond, ...) do { if (!(cond)) { fprintf(stderr, "io-checker selftest: "); fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); bad++; } } while (0)
 
 static int screen_has(const R3Screen *s, const char *want) {
     char rows[R3_ROWS][R3_COLS + 1];
@@ -2364,14 +2734,14 @@ static void selftest_usb(void) {
     CHECK(ut_rows_have(u, "x 10  y -6") && ut_rows_have(u, "left") && ut_rows_have(u, "Optical Mouse"), "usb: mouse rows");
     u->usb_sub = U_MOUSE; u->page = P_USBSUB;
 
-    /* the home list reaches it: Down x4 and A (USB and OTG), A (Devices), B, B */
+    /* the home list reaches it: Down x5 and A (USB and OTG), A (Devices), B, B */
     u->page = P_HOME;
     u->sel[P_HOME] = 0;
     Uint32 t = 1000;
     SDL_Event e2;
 #define UPRESS(btn) do { e2 = joy(SDL_JOYBUTTONDOWN, btn); handle(u, &e2, t); e2 = joy(SDL_JOYBUTTONUP, btn); handle(u, &e2, t); t += 100; } while (0)
-    UPRESS(L_DOWN); UPRESS(L_DOWN); UPRESS(L_DOWN); UPRESS(L_DOWN);
-    CHECK(u->sel[P_HOME] == H_USB && !strcmp(HOME_LABEL[u->sel[P_HOME]], "USB and OTG"), "usb: USB and OTG is the fifth entry");
+    UPRESS(L_DOWN); UPRESS(L_DOWN); UPRESS(L_DOWN); UPRESS(L_DOWN); UPRESS(L_DOWN);
+    CHECK(u->sel[P_HOME] == H_USB && !strcmp(HOME_LABEL[u->sel[P_HOME]], "USB and OTG"), "usb: USB and OTG is the sixth entry");
     UPRESS(L_A);
     CHECK(u->page == P_USB, "usb: A opens the USB list");
     UPRESS(L_DOWN); UPRESS(L_DOWN); UPRESS(L_A);
@@ -2438,7 +2808,7 @@ static void selftest_usb(void) {
     for (size_t i = 0; i < sizeof want / sizeof *want; i++) {
         char m[200];
         snprintf(m, sizeof m, "usb report says: %s", want[i]);
-        CHECK(strstr(text, want[i]) != NULL, m);
+        CHECK(strstr(text, want[i]) != NULL, "%s", m);
     }
     /* DisplayLink probes against other kernels: built in (modules.builtin and a plain /boot config), udl off, and nothing readable at all */
     {
@@ -2637,16 +3007,16 @@ static int selftest_logic(void) {
     SDL_Event e;
 #define PRESS(btn) do { e = joy(SDL_JOYBUTTONDOWN, btn); handle(a, &e, t); e = joy(SDL_JOYBUTTONUP, btn); handle(a, &e, t); t += 100; } while (0)
     Uint32 t = 1000;
-    PRESS(L_DOWN); PRESS(L_A);
-    CHECK(a->page == P_VIDEO, "D-pad down and A open Video");
+    PRESS(L_DOWN); PRESS(L_DOWN); PRESS(L_A);
+    CHECK(a->page == P_VIDEO, "D-pad down twice and A open Video");
     PRESS(L_A); CHECK(a->page == P_PATTERN && a->sel[P_VIDEO] == 0, "A shows the first pattern");
     PRESS(L_RIGHT); PRESS(L_RIGHT); CHECK(a->sel[P_VIDEO] == 2 && a->pattern_seen[2], "right turns the pattern");
     PRESS(L_LEFT); PRESS(L_LEFT); PRESS(L_LEFT); CHECK(a->sel[P_VIDEO] == NPAT - 1, "left wraps to the last pattern");
     PRESS(L_B); CHECK(a->page == P_VIDEO, "B leaves the pattern");
     PRESS(L_B); CHECK(a->page == P_HOME, "B goes home");
-    PRESS(L_UP); PRESS(L_A); CHECK(a->page == P_INPUT, "Buttons and sticks");
+    PRESS(L_UP); PRESS(L_UP); PRESS(L_A); CHECK(a->page == P_INPUT, "Buttons and sticks");
     for (int b = 1; b <= 17; b++) PRESS(b);
-    CHECK(a->page == P_INPUT && missing(a, m) == 0 && !a->quit, "every button recorded; none of them navigates here");
+    CHECK(a->page == P_INPUT && missing(a, m) == 0 && !a->quit && a->overlay == OV_NONE, "every button recorded; none of them navigates here, and L1 + R1 does not open the menu");
     a->js = (SDL_Joystick *)1; /* tick() only asks down(); this pointer never reaches SDL */
     a->down[L_SELECT] = a->down[L_START] = 1;
     tick(a, t); tick(a, t + 1001);
@@ -2657,14 +3027,192 @@ static int selftest_logic(void) {
     tick(a, t + 4100);
     a->down[L_SELECT] = a->down[L_START] = 1;
     tick(a, t + 4200); tick(a, t + 5300);
-    CHECK(a->quit, "Select+Start on the list quits");
+    CHECK(!a->quit && a->page == P_HOME, "Select+Start on the list no longer leaves the app (Quit in the main menu does)");
     a->down[L_SELECT] = a->down[L_START] = 0;
-    a->quit = 0;
+    tick(a, t + 5400);
     go(a, P_INPUT, t);
     tick(a, t + IDLE_LIMIT_MS + 1);
     CHECK(a->page == P_HOME, "15 s idle on the input page goes back to the list");
+    a->js = NULL;   /* the presses below reach SDL_JoystickGetButton through handle(): never with the fake pad */
+    /* R3i6nos Mapping: the second entry; every input is a test and nothing navigates */
+    a->sel[P_HOME] = 0;
+    PRESS(L_DOWN); PRESS(L_A);
+    CHECK(a->page == P_MAPPING && !strcmp(HOME_LABEL[H_MAPPING], "R3i6nos Mapping"), "R3i6nos Mapping is the second entry and A opens it");
+    {
+        int rows_ok = 0;
+        compose(a, &s, t);
+        rows_ok = screen_has(&s, "R3i6nos Mapping") && screen_has(&s, "Action now") && screen_has(&s, "Prev. panel") && screen_has(&s, "Panel 1/2");
+        CHECK(rows_ok, "the mapping page's first panel");
+    }
+    for (int b = 1; b <= 17; b++) { PRESS(b); }
+    CHECK(a->page == P_MAPPING && a->overlay == OV_NONE && !a->quit, "no input navigates or opens the menu on the mapping page");
+    CHECK(a->map_btn[R3_BTN_A] == 1 && a->map_btn[R3_BTN_FN] == 1 && a->map_act[R3_ACCEPT] == 1 && a->map_act[R3_BACK] == 1, "each press is counted and made into its action");
+    CHECK(a->map_act[R3_PANEL_NEXT] == 1 && a->map_panel == 1 && a->map_prev == 0, "Fn (button 17) turned to panel 2");
+    {
+        /* every chord and the R1 table, made by holding the modifier the way the pad does */
+        a->map_panel = 0;
+#define HOLD(btn) do { e = joy(SDL_JOYBUTTONDOWN, btn); handle(a, &e, t); t += 50; } while (0)
+#define LET(btn) do { e = joy(SDL_JOYBUTTONUP, btn); handle(a, &e, t); t += 50; } while (0)
+        HOLD(L_L1); PRESS(L_R1); LET(L_L1);
+        HOLD(L_L2); PRESS(L_R2); LET(L_L2);
+        HOLD(L_L1); PRESS(L_FN); LET(L_L1);
+        CHECK(a->map_act[R3_MENU] == 1 && a->map_act[R3_CONTEXT] == 1 && a->map_act[R3_PANEL_FIRST] == 1, "L1+R1, L2+R2 and L1+Fn are recorded as chords, not obeyed");
+        CHECK(a->page == P_MAPPING && a->overlay == OV_NONE && a->map_panel == 0, "...L1+Fn is the first panel");
+        PRESS(L_FN); CHECK(a->map_panel == 1, "Fn turns to panel 2");
+        HOLD(L_R1); PRESS(L_FN);
+        CHECK(a->map_act[R3_PANEL_PREV] == 1 && a->map_panel == 0, "R1+Fn goes back to the panel shown before");
+        PRESS(L_FN); CHECK(a->map_panel == 1 && a->map_act[R3_PANEL_PREV] == 2, "R1+Fn again comes back (a history of two)");
+        PRESS(L_UP); PRESS(L_DOWN); PRESS(L_LEFT); PRESS(L_RIGHT);
+        LET(L_R1);
+        CHECK(a->map_act[R3_PAGEUP] == 1 && a->map_act[R3_PAGEDOWN] == 1 && a->map_act[R3_HOME] == 1 && a->map_act[R3_END] == 1, "R1 + the D-pad is Page up, Page down, Home, End");
+        CHECK(a->in.held[R3_BTN_R1] == 0, "R1 released");
+        /* the right stick, measured: full push is about 6 steps a second, with R1 pages */
+        a->map_panel = 1;
+        SDL_Event ax;
+        memset(&ax, 0, sizeof ax);
+        ax.type = SDL_JOYAXISMOTION; ax.jaxis.axis = 3; ax.jaxis.value = 32767;
+        handle(a, &ax, t);
+        tick(a, t);
+        for (Uint32 k = 16; k <= 1100; k += 16) tick(a, t + k);
+        CHECK(a->map_stick[R3_DOWN] >= 5 && a->map_stick[R3_DOWN] <= 8 && a->map_stick_max >= 5 && a->map_stick_max <= 8, "a full push steps about 6 times a second (%d steps, most in a second %d)", a->map_stick[R3_DOWN], a->map_stick_max);
+        CHECK(a->map_rate_max > 5.9f, "the highest rate asked for is the full rate");
+        ax.jaxis.value = 0; handle(a, &ax, t + 1200); tick(a, t + 1216);
+        t += 2000;
+        HOLD(L_R1);
+        ax.jaxis.value = 32767; handle(a, &ax, t); tick(a, t); tick(a, t + 16);
+        CHECK(a->map_stick[R3_PAGEDOWN] >= 1, "R1 held and the stick down makes Page down");
+        ax.jaxis.value = 0; handle(a, &ax, t + 40); tick(a, t + 50);
+        /* the pointer: 120 px/s, 3 times that with R1 */
+        float x0;
+        ax.jaxis.axis = 0; ax.jaxis.value = -32768; handle(a, &ax, t);
+        a->map_px = 370; a->map_ptr_have = 0; x0 = a->map_px;
+        LET(L_R1);
+        tick(a, t + 100);
+        for (Uint32 k = 116; k <= 1100; k += 16) tick(a, t + k);
+        CHECK(a->map_px < x0 - 100 && a->map_px > x0 - 140, "the pointer moves about 120 px in a second at full (%.1f)", x0 - a->map_px);
+        CHECK(a->map_speed_max[0] > 100 && a->map_speed_max[0] <= 121, "the plain speed is measured near 120 px/s (%.1f)", a->map_speed_max[0]);
+        HOLD(L_R1);
+        for (Uint32 k = 1116; k <= 2500; k += 16) tick(a, t + k);
+        CHECK(a->map_speed_max[1] > 330 && a->map_speed_max[1] <= 361, "with R1 it is measured near 360 px/s (%.1f)", a->map_speed_max[1]);
+        CHECK(a->map_speed_max[1] / a->map_speed_max[0] > 2.7f && a->map_speed_max[1] / a->map_speed_max[0] < 3.4f, "R1 is about three times as fast");
+        LET(L_R1);
+        ax.jaxis.value = 0; handle(a, &ax, t + 2600); tick(a, t + 2616);
+        compose(a, &s, t);
+        CHECK(screen_has(&s, "Panel 2/2") && screen_has(&s, "RIGHT STICK") && screen_has(&s, "LEFT STICK") && screen_has(&s, "R1 is x"), "panel 2 shows the sticks and R1's measured gain");
+        t += 3000;
+        char rep[64 * 1024];
+        {
+            char tmpl2[PATH_MAX];
+            snprintf(tmpl2, sizeof tmpl2, "%s/io-checker-map-XXXXXX", env_or("TMPDIR", "/tmp"));
+            char *d2 = mkdtemp(tmpl2);
+            if (d2) {
+                R3Report rr;
+                memset(&rr, 0, sizeof rr);
+                rr.quiet = 1;
+                char path2[PATH_MAX + 32];
+                if (r3_report_open_named(&rr, d2, "map.txt", "IO Checker", VERSION, "x", "selftest", "r3i6nos") == 0) {
+                    report_mapping(a, &rr);
+                    r3_report_close(&rr);
+                    snprintf(path2, sizeof path2, "%s/map.txt", d2);
+                    FILE *f = fopen(path2, "r");
+                    size_t n2 = f ? fread(rep, 1, sizeof rep - 1, f) : 0;
+                    rep[n2] = 0;
+                    if (f) fclose(f);
+                    CHECK(strstr(rep, "== mapping ==") && strstr(rep, "PASS L1 + R1 main menu") && strstr(rep, "PASS R1 + Right end") && strstr(rep, "R1 gain"), "the report's mapping section");
+                    CHECK(strstr(rep, "PASS right stick steps"), "the report passes the stick's step rate");
+                }
+                char cmd2[PATH_MAX + 16];
+                snprintf(cmd2, sizeof cmd2, "rm -rf '%s'", d2);
+                if (system(cmd2) != 0) fprintf(stderr, "could not remove %s\n", d2);
+            }
+        }
+#undef HOLD
+#undef LET
+    }
+    a->js = (SDL_Joystick *)1;      /* only exit_held() looks at it here: no event reaches SDL while it is set */
+    tick(a, t); a->down[L_SELECT] = a->down[L_START] = 1;
+    tick(a, t + 100); tick(a, t + 1200);
+    CHECK(a->page == P_HOME, "Select+Start held a second leaves the mapping page");
+    a->down[L_SELECT] = a->down[L_START] = 0;
+    tick(a, t + 1300);
     a->js = NULL;
-    PRESS(L_DOWN); PRESS(L_DOWN); PRESS(L_A);
+    /* the main menu on a list page: L1 + R1 opens it; the order is the rule's; B closes; Quit quits */
+    {
+        SDL_Event le;
+        a->in.held[R3_BTN_L1] = a->in.held[R3_BTN_R1] = 0;
+        le = joy(SDL_JOYBUTTONDOWN, L_L1); handle(a, &le, t);
+        le = joy(SDL_JOYBUTTONDOWN, L_R1); handle(a, &le, t);
+        CHECK(a->overlay == OV_MENU && a->mm.open, "L1 + R1 opens the main menu");
+        le = joy(SDL_JOYBUTTONUP, L_R1); handle(a, &le, t); le = joy(SDL_JOYBUTTONUP, L_L1); handle(a, &le, t);
+        compose(a, &s, t);
+        CHECK(screen_has(&s, "About") && screen_has(&s, "Colour theme") && screen_has(&s, "Device report") && screen_has(&s, "Rec demo") && screen_has(&s, "Benchmark") && screen_has(&s, "Quit"), "the menu has the six items");
+        char mm[160];
+        CHECK(r3_mm_selftest(&a->mm, mm, sizeof mm) == 0, "%s", mm);
+        PRESS(L_B); CHECK(a->overlay == OV_NONE && !a->quit, "B closes the menu");
+        PRESS(L_B); CHECK(a->quit, "B on the list still quits");
+        a->quit = 0;
+        r3_mm_open(&a->mm); a->overlay = OV_MENU;
+        PRESS(L_A); CHECK(a->overlay == OV_ABOUT, "About");
+        compose(a, &s, t);
+        CHECK(screen_has(&s, "About") && screen_has(&s, "v" VERSION) && screen_has(&s, "CC BY-SA 4.0"), "the About box has the version and the font credit");
+        PRESS(L_B); CHECK(a->overlay == OV_NONE, "a key closes About");
+        r3_mm_open(&a->mm); a->overlay = OV_MENU; PRESS(L_DOWN); PRESS(L_A);
+        CHECK(a->overlay == OV_THEME && a->theme_sel == 0, "Colour theme opens the picker");
+        PRESS(L_DOWN); CHECK(a->theme_sel == 1 && !memcmp(&r3_pal[R3_BLACK], &(uint32_t){r3_themes[1].vga[0] | 0xFF000000u}, 4) , "moving shows the theme at once");
+        PRESS(L_B); CHECK(a->overlay == OV_NONE && a->theme == 0 && r3_pal[R3_BLACK] == (0xFF000000u | r3_themes[0].vga[0]), "B goes back to the theme in use");
+        char tmpl3[PATH_MAX];
+        snprintf(tmpl3, sizeof tmpl3, "%s/io-checker-theme-XXXXXX", env_or("TMPDIR", "/tmp"));
+        char *d3 = mkdtemp(tmpl3);
+        if (d3) {
+            setenv("R3I6NOS_APP_DATA", d3, 1);
+            r3_mm_open(&a->mm); a->overlay = OV_MENU; PRESS(L_DOWN); PRESS(L_A); PRESS(L_DOWN); PRESS(L_DOWN); PRESS(L_A);
+            CHECK(a->overlay == OV_NONE && a->theme == 2 && strstr(a->reply, "Colour theme: Light"), "A keeps the theme and says so");
+            App *b = calloc(1, sizeof(App));
+            app_init(b);
+            settings_load(b);
+            CHECK(b->theme == 2, "the theme is saved in the data folder and read back");
+            free(b);
+            r3_theme_apply(0); a->theme = 0;
+            unsetenv("R3I6NOS_APP_DATA");
+            char cmd3[PATH_MAX + 16];
+            snprintf(cmd3, sizeof cmd3, "rm -rf '%s'", d3);
+            if (system(cmd3) != 0) fprintf(stderr, "could not remove %s\n", d3);
+        }
+        r3_mm_open(&a->mm); a->overlay = OV_MENU; PRESS(L_DOWN); PRESS(L_DOWN); PRESS(L_A);
+        CHECK(a->pending == H_REPORT, "Device report from the menu runs the report");
+        a->pending = 0;
+        r3_mm_open(&a->mm); a->overlay = OV_MENU; PRESS(L_DOWN); PRESS(L_DOWN); PRESS(L_DOWN); PRESS(L_A);
+        CHECK(a->overlay == OV_NONE && strstr(a->reply, "Rec demo is not built"), "Rec demo says plainly that it is not built yet");
+        r3_mm_open(&a->mm); a->overlay = OV_MENU; for (int k = 0; k < 4; k++) PRESS(L_DOWN); PRESS(L_A);
+        CHECK(a->page == P_PATTERN && a->sel[P_VIDEO] == PAT_MOTION && a->bench_end != 0, "Benchmark starts the Motion pattern");
+        PRESS(L_B); CHECK(a->page == P_VIDEO && a->bench_end == 0 && strstr(a->reply, "Benchmark cancelled"), "B cancels the benchmark");
+        PRESS(L_B);
+        r3_mm_open(&a->mm); a->overlay = OV_MENU; for (int k = 0; k < 5; k++) PRESS(L_DOWN); PRESS(L_A);
+        CHECK(a->quit, "Quit in the menu quits");
+        a->quit = 0;
+        /* the menu is not offered where the screen is pixels, and a stick step moves a list like the D-pad */
+        go(a, P_HOME, t);
+        a->sel[P_HOME] = 0;
+        SDL_Event sx;
+        memset(&sx, 0, sizeof sx);
+        sx.type = SDL_JOYAXISMOTION; sx.jaxis.axis = 3; sx.jaxis.value = 32767;
+        handle(a, &sx, t); tick(a, t + 16);
+        CHECK(a->sel[P_HOME] == 1, "the right stick pushed down moves the list one row");
+        sx.jaxis.value = 0; handle(a, &sx, t + 20); tick(a, t + 30);
+        SDL_Event r1d = joy(SDL_JOYBUTTONDOWN, L_R1);
+        handle(a, &r1d, t + 40);
+        PRESS(L_DOWN);
+        CHECK(a->sel[P_HOME] == H_COUNT - 1, "R1 held + down is Page down: the end of a one-page list");
+        PRESS(L_UP);
+        CHECK(a->sel[P_HOME] == 0, "R1 held + up is Page up");
+        PRESS(L_RIGHT); CHECK(a->sel[P_HOME] == H_COUNT - 1, "R1 held + right is End");
+        PRESS(L_LEFT); CHECK(a->sel[P_HOME] == 0, "R1 held + left is Home");
+        r1d = joy(SDL_JOYBUTTONUP, L_R1); handle(a, &r1d, t + 60);
+        go(a, P_HOME, t);
+    }
+    a->js = NULL;
+    a->sel[P_HOME] = 0;
+    PRESS(L_DOWN); PRESS(L_DOWN); PRESS(L_DOWN); PRESS(L_A);
     CHECK(a->page == P_SOUND, "Sound");
     PRESS(L_X); CHECK(a->answers[0] == A_HEARD, "X marks heard");
     PRESS(L_DOWN); PRESS(L_Y); CHECK(a->answers[1] == A_SILENT, "Y marks silent");
@@ -2720,8 +3268,10 @@ static int save_screenshot(const char *path, const char *page) {
     snprintf(a->snd_hp, sizeof a->snd_hp, "out");
     snprintf(a->snd_jack, sizeof a->snd_jack, "rk817-sound Headphone Jack");
     a->answers[0] = A_HEARD; a->answers[1] = A_PLAYED;
-    const char *names[] = {"home", "input", "video", "pattern", "sound", "files", "system", "usb", "usbsub"};
+    const char *names[] = {"home", "input", "video", "pattern", "sound", "files", "system", "usb", "usbsub", "mapping"};
     for (int i = 0; i < P_COUNT; i++) if (page && !strcmp(page, names[i])) a->page = i;
+    if (page && !strcmp(page, "mapping2")) { a->page = P_MAPPING; a->map_panel = 1; a->map_speed = 96; a->map_speed_max[0] = 119; a->map_speed_max[1] = 355; a->map_rate_max = 6; a->map_stick_max = 6; a->map_px = 240; a->map_py = 40; }
+    if (page && !strcmp(page, "menu")) { a->overlay = OV_MENU; r3_mm_open(&a->mm); }
     if (a->page == P_SYSTEM) system_rows(a);
     if (a->page == P_FILES) run_files(a);
     if (a->page == P_USB || a->page == P_USBSUB) usb_scan(a, 0);
@@ -2808,6 +3358,7 @@ int main(int argc, char **argv) {
         r3_appdata_init(&data, "IO_Checker", &adui);
         if (data.quit) { r3_video_free(&video); SDL_DestroyRenderer(r); SDL_DestroyWindow(win); close_pad(a); free(a); SDL_Quit(); return 0; }
         if (data.notice[0]) say(a, R3_ST_WARN, "%s", data.notice);
+        settings_load(a);       /* the saved colour theme (the menu's Colour theme) */
     }
     video_info(a, win, r);
     sound_status(a);
@@ -2868,6 +3419,13 @@ int main(int argc, char **argv) {
             Uint64 t = SDL_GetPerformanceCounter();
             if (a->sel[P_VIDEO] == PAT_MOTION) frames_add(a, (double)(t - last) / (double)freq);
             last = t;
+            if (a->bench_end && SDL_GetTicks() >= a->bench_end) {      /* the benchmark's motion run is over: the cards next, after "testing" is on screen */
+                a->bench_end = 0;
+                a->page = P_FILES;
+                a->force = 1;
+                a->pending = H_BENCH;
+                say(a, R3_ST_WARN, "Benchmark: motion measured, testing the cards...");
+            }
             continue;
         }
         draw_frame(a, now);
@@ -2875,6 +3433,7 @@ int main(int argc, char **argv) {
             int job = a->pending;
             a->pending = 0;
             if (job == H_FILES) run_files(a);
+            else if (job == H_BENCH) bench_finish(a);
             else write_report(a, "Device report (native)");
             continue;
         }

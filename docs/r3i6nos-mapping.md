@@ -155,19 +155,22 @@ layers (abc, ABC, #+=), the text shown, optionally hidden. The map above drives 
 
 ## Where today's code differs
 
-- **The list dialog's keys** (`theme.listKey`, `T.PAD`, `r3_list_key`, `r3_pad_action`, every app's list) still page with L1 and R1, jump with L2 and R2 and use Start for
+- **Built so far (2026-11-20): the C theme's reader and main menu** (`theme/r3i6nos_input.h`, `theme/r3i6nos_mainmenu.h`, `tests/test_input.c`) and **the native IO Checker**, which
+  uses them (the six-item menu, R1 held for pages and Home/End, the chords, the right stick's rate, **R3i6nos Mapping** to try every input on the unit, Select+Start no longer leaving). Nothing here
+  has run on a unit. Everything else below is still as written.
+- **The list dialog's keys** (`theme.listKey`, `T.PAD`, `r3_list_key`, `r3_pad_action`, every other app's list) still page with L1 and R1, jump with L2 and R2 and use Start for
   More. The theme doc's table ("List dialogs") is standardised on this map (R1 held for pages and home/end, Y for More); the code follows in ROADMAP section 39 step 2,
   which needs the reader to know R1 is held.
 
 - **Select + Start leaves the app today** in the theme's apps, `run_app.sh` and every app's docs; it is to be removed from r3i6nos apps once each has
   Quit (third-party ports keep `r3i6nos-portquit`).
-- **No app has the six compulsory menu items yet.** The menu has About and Device reports in Settings, not as one list; MusiCue's L1 + R1 menu
+- **Only the native IO Checker has the six compulsory menu items** (its Rec demo item says it is not built yet; its Benchmark is the Motion frame rate and the cards' speed). No other app does. The menu has About and Device reports in Settings, not as one list; MusiCue's L1 + R1 menu
   has its own items; none has Colour theme, Rec demo and Benchmark together, and no app has a Benchmark item at all.
 - **FM1-NTT** (`fm1ntt/README.md`, "The pad on MACHINE") already has L1 + R1 for the menu, Fn for the panels, the sticks as knobs and L1, L2 and R2 as modifiers, the dead zone this map takes. It differs in one place: **L1 + Fn there is "next scale" and the panel stays**, where this map's L1 + Fn is "first panel"; and its Select + Start are OCT- and OCT+, which this map allows (per-app buttons).
 - **MusiCue** has its own pad map (`docs/MUSICUE.md`, "The pad, the panels and Tempo"): L1 + R1 is the menu and Fn turns the panels, as here, and
   Start, Select and D-pad Down are its own, which this map allows. L2 + R2, L1 + Fn and R1 + Fn do not exist in it yet, and its Select + Start still leaves.
 - **The menu's Wi-Fi keyboard** (`menu/osk.lua`) is opened by choosing an item, not by R3.
-- **Commander, the IO Checker, KlamANSI, NoCoGaMa and the others** have their own maps, none of them with the pointer, the carousel or the chords;
+- **Commander, KlamANSI, NoCoGaMa and the others** (the IO Checker's native build now follows the mapping; its LÖVE builds do not) have their own maps, none of them with the pointer, the carousel or the chords;
   the theme's `r3_pad_action` (`theme/`) is where one shared reading of the pad would live.
 
 ## Open items for the maintainer
