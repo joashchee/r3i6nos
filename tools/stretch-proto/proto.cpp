@@ -4,6 +4,7 @@
 //   stretch-proto selftest      the checks (length, pitch, seams, determinism); exit 1 on a failure
 //   stretch-proto bench [SECS] [--cheaper] [--workers N]   the same synthetic song with 1, 2, 3 and 4 workers: wall time, CPU time, speed against real time
 #include "stretch_render.hpp"
+#include "stream_render.hpp"
 #include <cstdlib>
 #include <sys/resource.h>
 #include <unistd.h>
@@ -119,6 +120,41 @@ static void test_wav() {
     remove(path);
 }
 
+// The limiter alone: a lone spike costs a short dip and nothing far from it, a sustained overload is held steadily, a quiet piece is untouched.
+static void test_limiter() {
+    const int rate = 44100;
+    auto sine = [&](double secs, double amp) {
+        std::vector<std::vector<float>> ch(2, std::vector<float>((size_t)(secs * rate)));
+        for (size_t i = 0; i < ch[0].size(); i++) ch[0][i] = ch[1][i] = (float)(amp * std::sin(2 * M_PI * 440.0 * (double)i / rate));
+        return ch;
+    };
+    auto peak_of = [](const std::vector<std::vector<float>> &ch) { float m = 0; for (auto &c : ch) for (float v : c) m = std::max(m, std::fabs(v)); return m; };
+    {   // a lone spike of 1.8
+        auto orig = sine(2.0, 0.5), ch = orig;
+        for (int i = rate - 2; i <= rate + 2; i++) ch[0][(size_t)i] = ch[1][(size_t)i] = (i % 2 ? 1.8f : -1.8f);
+        LimitStats st = sr::limit_piece(ch, sr::LIMIT_CEILING, rate);
+        CHECK(std::fabs(st.peak - 1.8) < 1e-6 && peak_of(ch) <= sr::LIMIT_CEILING + 1e-6, "a lone 1.8 spike is held under the ceiling (peak %.4f)", peak_of(ch));
+        bool same = true;
+        for (size_t i = 0; i < ch[0].size(); i++) if ((i < (size_t)rate - 4000 || i > (size_t)rate + (size_t)(0.12 * rate)) && ch[0][i] != orig[0][i]) same = false;
+        CHECK(same, "nothing more than 4000 frames before it or 120 ms after it is touched, bit for bit");
+        const size_t at = (size_t)rate + (size_t)(0.06 * rate);
+        double ratio = std::fabs(orig[0][at]) > 0.1 ? ch[0][at] / orig[0][at] : 1.0;
+        CHECK(ratio > 0.99, "60 ms after a brief spike the gain is back (%.3f): the release is fast for a lone peak", ratio);
+        CHECK(st.min_gain < 0.6 && st.min_gain > 0.5 && (double)st.ducked / (double)st.frames < 0.05, "it ducked to %.2f for %.2f%% of the piece", st.min_gain, 100.0 * (double)st.ducked / (double)st.frames);
+    }
+    {   // a sustained 1.6: held steadily, not pumping
+        auto ch = sine(2.0, 1.6);
+        LimitStats st = sr::limit_piece(ch, sr::LIMIT_CEILING, rate);
+        CHECK(peak_of(ch) <= sr::LIMIT_CEILING + 1e-6 && peak_of(ch) > 0.95, "a sustained 1.6 sine ends at %.4f: under the ceiling and not turned down for nothing", peak_of(ch));
+        CHECK((double)st.ducked / (double)st.frames > 0.9, "and it is ducked nearly all the time (%.0f%%)", 100.0 * (double)st.ducked / (double)st.frames);
+    }
+    {   // under the ceiling: not a bit changed
+        auto orig = sine(1.0, 0.9), ch = orig;
+        LimitStats st = sr::limit_piece(ch, sr::LIMIT_CEILING, rate);
+        CHECK(ch == orig && st.ducked == 0, "a piece under the ceiling is not touched");
+    }
+}
+
 static long peak_kib() { struct rusage ru; getrusage(RUSAGE_SELF, &ru); return ru.ru_maxrss; }
 
 // Times 1 to 4 workers on the same synthetic song. One line a worker count, in the device report's words:
@@ -145,6 +181,7 @@ int main(int argc, char **argv) {
         test_sine(0.8, 0.0, 1);
         test_music();
         test_wav();
+        test_limiter();
         printf(g_fail ? "stretch-proto: %d FAILED\n" : "stretch-proto: all passed\n", g_fail);
         return g_fail ? 1 : 0;
     }

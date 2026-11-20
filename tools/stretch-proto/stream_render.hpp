@@ -41,7 +41,8 @@ struct Params {
     double chunk_s = 20.0, overlap_s = 1.0, seam_s = 0.05, align_ms = 15.0;
 };
 
-struct Piece { std::vector<std::vector<float>> ch; int64_t base = 0; double peak = 0; };      // peak: the loudest sample before the limiter      // planar floats; base = the output frame of ch[c][0]
+struct LimitStats { double peak = 0, min_gain = 1.0; int64_t frames = 0, ducked = 0; };      // the loudest sample before the limiter, the deepest gain, frames seen and frames pulled down by more than 0.1 dB
+struct Piece { std::vector<std::vector<float>> ch; int64_t base = 0; LimitStats lim; };      // planar floats; base = the output frame of ch[c][0]
 
 inline int64_t opos(int64_t in, double ratio) { return (int64_t)std::llround((double)in / ratio); }
 
@@ -102,19 +103,22 @@ inline Geometry geometry(const Song16 &s, const Params &p) {
 //   need[i]  the gain that would bring frame i to the ceiling (1 when it is under it)
 //   m[i]     the smallest need within +-N frames   (the duck starts N frames before a peak and holds N after)
 //   g[i]     the average of m over +-N frames       (so the gain glides in and out, and g[i] <= need[i] for every i: no frame passes the ceiling)
-//   release  g can come back up no faster than 1/release_s a second, so it does not pump
-// N is 1.5 ms (64 frames at 44.1 kHz), the release 200 ms for a full swing (a 3 dB duck is back in about 60 ms).
-inline double limit_piece(std::vector<std::vector<float>> &ch, double ceiling, int rate) {
+//   release  g comes back up no faster than a step a frame, and the step depends on the program: after a brief spike (under 30 ms of ducking since the gain was
+//            last at rest) it is fast, a full swing in 40 ms, so a lone peak costs a dip of a few milliseconds and not a hundred; while the music keeps asking for
+//            more than that, it is slow, a full swing in 300 ms, so it does not pump on a loud passage.
+// N is 1.5 ms (64 frames at 44.1 kHz). The release only ever holds g below the average, never above it, so the ceiling is kept whatever the step.
+inline LimitStats limit_piece(std::vector<std::vector<float>> &ch, double ceiling, int rate) {
     const size_t n = ch[0].size();
-    double peak = 0;
+    LimitStats st;
+    st.frames = (int64_t)n;
     std::vector<float> need(n, 1.f);
     for (size_t i = 0; i < n; i++) {
         float a = 0;
         for (auto &c : ch) a = std::max(a, std::fabs(c[i]));
-        peak = std::max(peak, (double)a);
+        st.peak = std::max(st.peak, (double)a);
         if (a > ceiling) need[i] = (float)(ceiling / a);
     }
-    if (peak <= ceiling) return peak;
+    if (st.peak <= ceiling) return st;
     const int64_t N = std::max(1, (int)std::lround(0.0015 * rate)), nn = (int64_t)n;
     std::vector<float> m(n);
     {   // sliding minimum over [i-N, i+N]: a monotonic deque of indices
@@ -131,16 +135,22 @@ inline double limit_piece(std::vector<std::vector<float>> &ch, double ceiling, i
     }
     std::vector<double> pre(n + 1, 0.0);
     for (size_t i = 0; i < n; i++) pre[i + 1] = pre[i] + m[i];
-    const double step = 1.0 / (0.2 * rate);
+    const double fast = 1.0 / (0.04 * rate), slow = 1.0 / (0.3 * rate);
+    const int64_t brief = (int64_t)(0.03 * rate);
     double prev = 1.0;
+    int64_t asked = 0;                                  // frames since the gain was last at rest that the average asked for a duck
     for (int64_t i = 0; i < nn; i++) {
         const int64_t lo = std::max<int64_t>(0, i - N), hi = std::min(nn - 1, i + N);
-        double g = (pre[(size_t)hi + 1] - pre[(size_t)lo]) / (double)(hi - lo + 1);
-        g = std::min(g, prev + step);                  // the release: up no faster than the step, down as fast as g goes (it glides: it is an average)
+        const double avg = (pre[(size_t)hi + 1] - pre[(size_t)lo]) / (double)(hi - lo + 1);
+        if (avg < 0.995) asked++;
+        double g = std::min(avg, prev + (asked < brief ? fast : slow));
+        if (g >= 0.9999 && avg >= 0.9999) { g = 1.0; asked = 0; }       // back at rest: the next duck is judged afresh
         prev = g;
+        if (g < st.min_gain) st.min_gain = g;
+        if (g < 0.9886) st.ducked++;                    // more than 0.1 dB down
         for (auto &c : ch) c[(size_t)i] = (float)(c[(size_t)i] * g);
     }
-    return peak;
+    return st;
 }
 const double LIMIT_CEILING = 0.985;                     // a little under full scale: the rounding to 16 bits and the sum of two pieces in a crossfade stay under 1
 
@@ -166,7 +176,7 @@ inline Piece render_segment(const Song16 &s, const Params &p, const Geometry &g,
     const int64_t c0 = opos(g.ia[k], p.ratio) - y0, c1 = opos(g.ib[k], p.ratio) - y0;
     pc.ch.resize(C);
     for (int c = 0; c < C; c++) pc.ch[c].assign(out[c].begin() + c0, out[c].begin() + c1);
-    pc.peak = limit_piece(pc.ch, LIMIT_CEILING, s.rate);
+    pc.lim = limit_piece(pc.ch, LIMIT_CEILING, s.rate);
     return pc;
 }
 
@@ -336,7 +346,7 @@ struct Journal {
 };
 
 // ---- the job -------------------------------------------------------------------------------------------------------------------------------
-struct Result { bool ok = false; std::string error; bool cancelled = false; int segments = 0, resumed_from = 0; int clipped = 0; double peak = 0; int64_t frames = 0; double wall_s = 0; };
+struct Result { bool ok = false; std::string error; bool cancelled = false; int segments = 0, resumed_from = 0; int clipped = 0; LimitStats lim; int64_t frames = 0; double wall_s = 0; };
 
 // Renders `song` into `out_part`, journalling to `journal`; the caller renames the part to the final name. `resume` lets a valid journal continue.
 // progress(done_segments, total_segments) is called after each segment is joined. `cancel` is polled between segments. `die_after`, if > 0, makes the
@@ -376,7 +386,7 @@ inline Result render_song(const Song16 &song, const Params &p, const std::string
                 k = next++;
             }
             Piece pc = render_segment(song, p, g, k);
-            { std::lock_guard<std::mutex> lk(mu); r.peak = std::max(r.peak, pc.peak); done[k] = std::move(pc); }
+            { std::lock_guard<std::mutex> lk(mu); r.lim.peak = std::max(r.lim.peak, pc.lim.peak); r.lim.min_gain = std::min(r.lim.min_gain, pc.lim.min_gain); r.lim.frames += pc.lim.frames; r.lim.ducked += pc.lim.ducked; done[k] = std::move(pc); }
             cv.notify_all();
         }
     };

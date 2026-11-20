@@ -64,6 +64,7 @@ else bad "SIGTERM exits 130 and leaves the part and the journal (exit $rc)"; fi
 loudinfo="$("$S" info "$T/loud.wav")"; loudpeak="${loudinfo##*peak=}"; loudpeak="${loudpeak%% *}"
 out="$("$R" --in "$T/loud.wav" --out "$T/loud-copy.wav" --ratio 1.25 --semitones 2 --workers 4)"
 if grep -q 'clipped' <<<"$out"; then bad "a loud master is not clipped: $out"; else ok "a loud master (peak $loudpeak) is not clipped"; fi
+echo "INFO the loud master's DONE line: $(grep '^DONE' <<<"$out")"
 copyinfo="$("$S" info "$T/loud-copy.wav")"; copypeak="${copyinfo##*peak=}"; copypeak="${copypeak%% *}"
 if awk "BEGIN{exit !($copypeak <= 0.9855 && $copypeak > 0.9)}"; then ok "its loudest sample is $copypeak: under full scale, not turned down for nothing"; else bad "its loudest sample is $copypeak (wanted 0.9 to 0.9855)"; fi
 "$R" --in "$T/loud.wav" --out "$T/loud-1.wav" --ratio 1.25 --semitones 2 --workers 1 > /dev/null

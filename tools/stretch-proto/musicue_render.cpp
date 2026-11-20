@@ -161,9 +161,10 @@ int main(int argc, char **argv) {
     if (rename(part.c_str(), out.c_str()) != 0) { say("ERROR cannot rename the copy into place"); return 1; }
     if (r.resumed_from) say("PROGRESS %d/%d Resumed from segment %d", r.segments, r.segments, r.resumed_from);
     struct rusage ru; getrusage(RUSAGE_SELF, &ru);
-    char note[96] = "";
-    if (r.clipped) snprintf(note, sizeof note, " (%d samples clipped)", r.clipped);
-    else if (r.peak > LIMIT_CEILING) snprintf(note, sizeof note, " (limited a %.2f peak)", r.peak);
-    say("DONE %lld frames in %.1f s, peak memory %ld MiB%s", (long long)r.frames, r.wall_s, ru.ru_maxrss / 1024, note);
+    char note[160] = "";
+    if (r.clipped) snprintf(note, sizeof note, "%d samples clipped; ", r.clipped);
+    else if (r.lim.peak > LIMIT_CEILING)
+        snprintf(note, sizeof note, "limited a %.2f peak: ducked %.1f%% of the time, deepest %.1f dB; ", r.lim.peak, 100.0 * (double)r.lim.ducked / (double)std::max<int64_t>(1, r.lim.frames), 20 * std::log10(r.lim.min_gain));
+    say("DONE %s%lld frames in %.1f s, peak memory %ld MiB", note, (long long)r.frames, r.wall_s, ru.ru_maxrss / 1024);
     return 0;
 }
