@@ -8,7 +8,9 @@
 #   5. a SIGTERM leaves the part and the journal and exits 130, and the next run finishes the copy;
 #   6. a song that is too short, one that is not audio and a ratio out of range are refused;
 #   7. a loud, hard-clipped master is held under full scale by the limiter (no clipped samples), the same bytes for any worker count and after a resume;
-#   8. a song that is not a WAV is decoded through an ffmpeg that, like the unit's, has no wav muxer (raw s16le on a pipe), and gives the same bytes;
+#   8. --encode: the copy compressed to AAC in an M4A by the image's real ffmpeg (under a fifth of the WAV, the right length and pitch, nothing left behind; a power cut between
+#      the render and the encode is not rendered again; a copy WAV compressed in place by --compress-dir; an ffmpeg that cannot compress keeps the copy as a WAV);
+#   9. a song that is not a WAV is decoded through an ffmpeg that, like the unit's, has no wav muxer (raw s16le on a pipe), and gives the same bytes;
 #      ffmpeg failing shows its own line; a song over the limit is refused.
 set -u
 B="$1"; T="$(mktemp -d)"; fail=0
@@ -94,6 +96,43 @@ if [ "$rc" = 1 ] && grep -q '^ERROR ffmpeg could not read the song' <<<"$out" &&
 out="$(R3I6NOS_RENDER_MAX_S=30 R3I6NOS_FFMPEG="$T/fakeffmpeg" FAKE_SRC="$T/song.wav" "$R" --in "$T/song.m4a" --out "$T/long.m4a.wav" --ratio 1.25 --semitones -2)"; rc=$?
 if [ "$rc" = 1 ] && grep -q '^ERROR the song is longer than 30 seconds' <<<"$out"; then ok "a song over the limit is refused, not cut"; else bad "a song over the limit is refused ($rc): $out"; fi
 if [ -e "$T/long.m4a.wav.part" ]; then bad "a refused song leaves no part"; else ok "a refused song leaves no part"; fi
+
+# AAC: the copy compressed into an M4A by the image's real ffmpeg (build/ffmpeg-min, mounted by build-proto.sh at /f); without it these are NOT RUN
+FFMIN="${FFMIN:-/f/ffmpeg}"
+if [ -x "$FFMIN" ]; then
+    export R3I6NOS_FFMPEG="$FFMIN"
+    out="$("$R" --in "$T/sine.wav" --out "$T/a.m4a" --ratio 0.8 --semitones 3 --workers 4 --encode aac:192:fast)"; rc=$?
+    if [ "$rc" = 0 ] && grep -q '^DONE .*AAC 192k' <<<"$out"; then ok "--encode aac:192:fast makes an M4A and says so"; else bad "--encode makes an M4A ($rc): $out"; fi
+    wavsize="$(wc -c < "$T/a.wav")"; m4asize="$(wc -c < "$T/a.m4a")"
+    if [ "$m4asize" -gt 0 ] && [ $(( m4asize * 5 )) -lt "$wavsize" ]; then ok "the M4A is under a fifth of the WAV ($m4asize against $wavsize bytes)"; else bad "the M4A is not under a fifth of the WAV ($m4asize against $wavsize)"; fi
+    left=""; for x in part journal enc; do [ -e "$T/a.m4a.$x" ] && left="$left $x"; done
+    if [ -z "$left" ]; then ok "nothing is left behind but the M4A"; else bad "left behind:$left"; fi
+    "$FFMIN" -v error -y -i "$T/a.m4a" -vn -f s16le -ar 44100 -ac 2 "$T/a-dec.raw"
+    info="$("$S" info "$T/a-dec.raw")"; frames="${info#frames=}"; frames="${frames%% *}"; hz="${info##*hz=}"
+    if [ "$frames" -ge "$want" ] && [ "$frames" -le $(( want + 4000 )) ]; then ok "decoded, it is $frames frames ($want wanted, up to 4000 of encoder padding)"; else bad "decoded length $frames, wanted $want to $(( want + 4000 ))"; fi
+    if awk "BEGIN{d=$hz-523.25; if (d<0) d=-d; exit !(d/523.25 < 0.01)}"; then ok "and it is still 523 Hz ($hz)"; else bad "decoded pitch $hz, wanted 523.25"; fi
+
+    R3I6NOS_RENDER_DIE_AFTER_RENDER=1 "$R" --in "$T/sine.wav" --out "$T/cutenc.m4a" --ratio 0.8 --semitones 3 --workers 4 --encode aac:192:fast > /dev/null; rc=$?
+    if [ "$rc" = 9 ] && [ -e "$T/cutenc.m4a.part" ] && [ -e "$T/cutenc.m4a.journal" ] && [ ! -e "$T/cutenc.m4a" ]; then ok "a power cut between the render and the encode leaves the rendered part and the journal"; else bad "a cut between the render and the encode (exit $rc)"; fi
+    start=$(date +%s)
+    out="$("$R" --in "$T/sine.wav" --out "$T/cutenc.m4a" --ratio 0.8 --semitones 3 --workers 4 --encode aac:192:fast)"
+    if grep -q 'Resumed from segment' <<<"$out" && cmp -s "$T/cutenc.m4a" "$T/a.m4a"; then ok "the next run only encodes, and the M4A is the same bytes as an uninterrupted one"; else bad "the run after a cut between render and encode: $out"; fi
+    echo "INFO the encode-only run took $(( $(date +%s) - start )) s"
+
+    mkdir -p "$T/media"
+    cp "$T/w1.wav" "$T/media/Some Song (A 104bpm) [kt-0a1b2c3d].wav"
+    cp "$T/w1.wav" "$T/media/Plain Song.wav"
+    out="$("$R" --compress-dir "$T/media" --encode aac:192:fast)"; rc=$?
+    if [ "$rc" = 0 ] && grep -q '^DONE 1 copies compressed' <<<"$out" && [ -e "$T/media/Some Song (A 104bpm) [kt-0a1b2c3d].m4a" ] && [ ! -e "$T/media/Some Song (A 104bpm) [kt-0a1b2c3d].wav" ] && [ -e "$T/media/Plain Song.wav" ]; then ok "--compress-dir turns a copy's WAV into an M4A, deletes it and leaves other WAVs alone"; else bad "--compress-dir ($rc): $out"; fi
+    unset R3I6NOS_FFMPEG
+else echo "NOT RUN: the AAC checks need the image's ffmpeg (build/ffmpeg-min/ffmpeg, scripts/build-ffmpeg-min.sh)"; fi
+
+# when ffmpeg cannot compress, the copy is kept as a WAV and the run still succeeds
+out="$(R3I6NOS_FFMPEG="$T/badffmpeg" "$R" --in "$T/song.wav" --out "$T/fallback.m4a" --ratio 1.25 --semitones -2 --workers 4 --encode aac 2>&1)"; rc=$?
+if [ "$rc" = 0 ] && [ -e "$T/fallback.wav" ] && [ ! -e "$T/fallback.m4a" ] && [ ! -e "$T/fallback.m4a.part" ] && [ ! -e "$T/fallback.m4a.journal" ] && grep -q 'kept as a WAV' <<<"$out" && grep -q '^DONE .*WAV' <<<"$out"; then ok "an ffmpeg that cannot compress: the copy is kept as a WAV and the run succeeds"; else bad "the fallback to a WAV ($rc): $out"; fi
+if cmp -s "$T/fallback.wav" "$T/w1.wav"; then ok "and that WAV is the same bytes as a plain render"; else bad "the fallback WAV differs from a plain render"; fi
+"$R" --in "$T/song.wav" --out "$T/x.m4a" --ratio 1.25 --semitones 0 --encode mp3 2>/dev/null; rc=$?
+if [ "$rc" = 2 ]; then ok "an encoding that is not aac is a usage error"; else bad "an encoding that is not aac is a usage error ($rc)"; fi
 
 "$S" make-sine "$T/short.wav" 5 440
 out="$("$R" --in "$T/short.wav" --out "$T/short.out.wav" --ratio 1.1 --semitones 0)"; rc=$?

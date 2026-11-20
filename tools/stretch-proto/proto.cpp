@@ -202,7 +202,21 @@ int main(int argc, char **argv) {
     }
     if (argc >= 3 && !strcmp(argv[1], "info")) {                 // info FILE.wav: frames, rate, channels, and the tone's frequency over 2 s in the middle
         Pcm q; std::string err;
-        if (!read_wav(argv[2], q, err)) { fprintf(stderr, "%s\n", err.c_str()); return 1; }
+        {   // a file that is not a WAV is raw 16-bit 44.1 kHz stereo (what ffmpeg -f s16le writes)
+            FILE *rf = fopen(argv[2], "rb");
+            char magic[4] = {0, 0, 0, 0};
+            if (rf && fread(magic, 1, 4, rf) == 4 && memcmp(magic, "RIFF", 4) != 0) {
+                fseek(rf, 0, SEEK_END); long bytes = ftell(rf); fseek(rf, 0, SEEK_SET);
+                std::vector<int16_t> raw((size_t)bytes / 2);
+                size_t got = fread(raw.data(), 2, raw.size(), rf);
+                (void)got;
+                q.channels = 2; q.rate = 44100; q.ch.assign(2, std::vector<float>(raw.size() / 2));
+                for (size_t i = 0; i + 1 < raw.size(); i += 2) { q.ch[0][i / 2] = raw[i] / 32768.f; q.ch[1][i / 2] = raw[i + 1] / 32768.f; }
+                fclose(rf);
+                err = "raw";
+            } else if (rf) fclose(rf);
+        }
+        if (err != "raw" && !read_wav(argv[2], q, err)) { fprintf(stderr, "%s\n", err.c_str()); return 1; }
         int64_t mid = q.frames() / 2;
         float pk = 0;
         for (auto &c : q.ch) for (float v : c) pk = std::max(pk, std::fabs(v));

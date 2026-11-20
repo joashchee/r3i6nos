@@ -1,9 +1,13 @@
 // musicue_render.cpp: MusiCue's Key-and-Tempo render, run by the app as a child process (the way it runs musicue-sync). MIT.
 //
-//   musicue-render --in SONG --out COPY.wav --ratio R --semitones S [--workers N] [--cheaper] [--no-resume]
+//   musicue-render --in SONG --out COPY.wav|COPY.m4a --ratio R --semitones S [--workers N] [--cheaper] [--no-resume] [--encode aac[:KBPS[:CODER]]]
+//   musicue-render --compress-dir DIR [--encode aac[:KBPS[:CODER]]]
 //
 // SONG is a 16-bit 44.1 kHz stereo WAV, or anything ffmpeg ($R3I6NOS_FFMPEG, else `ffmpeg` on the PATH) can read. The copy is written to COPY.wav.part
-// with COPY.wav.journal beside it and renamed to COPY.wav when it is whole. Run again with the same arguments, it continues from the journal (a
+// with COPY.wav.journal beside it and renamed to COPY.wav when it is whole. With --encode the copy is then compressed to AAC in an M4A (ffmpeg's native aac
+// encoder, default 192 kbps with the fast coder: the image's ffmpeg has the encoder and the `ipod` muxer and nothing else for audio) as COPY.m4a: the WAV is
+// COPY.m4a.part until then, a power cut during the encode is not rendered again, and if the encode fails the copy is kept as a WAV beside where the M4A would
+// have been. --compress-dir turns every copy WAV in a folder (a name with " [kt-" in it) into an M4A the same way and deletes the WAV. Run again with the same arguments, it continues from the journal (a
 // power cut, a cancel); --no-resume starts again. Says what it is doing on stdout in the lines the app's job screen reads:
 //   PROGRESS x/y text     a step done (x of y) and what is next
 //   BAR x/y               the bar only
@@ -16,6 +20,7 @@
 #include <csignal>
 #include <cstdarg>
 #include <cstdlib>
+#include <dirent.h>
 #include <sys/resource.h>
 #include <sys/statvfs.h>
 #include <sys/wait.h>
@@ -109,8 +114,100 @@ static bool decode_with_ffmpeg(const std::string &in, double max_s, Song16 &song
     return true;
 }
 
+struct Encode { bool on = false; int kbps = 192; std::string coder = "fast"; };
+static bool parse_encode(const std::string &spec, Encode &e) {         // aac[:KBPS[:CODER]]
+    e = Encode();
+    if (spec.compare(0, 3, "aac") != 0) return false;
+    size_t p = spec.find(':');
+    if (p != std::string::npos) {
+        std::string rest = spec.substr(p + 1);
+        e.kbps = atoi(rest.c_str());
+        size_t q = rest.find(':');
+        if (q != std::string::npos) e.coder = rest.substr(q + 1);
+    }
+    if (e.kbps < 64 || e.kbps > 320) return false;
+    if (e.coder != "fast" && e.coder != "twoloop" && e.coder != "anmr") return false;
+    e.on = true;
+    return true;
+}
+
+// WAV in, AAC in an M4A out, through ffmpeg: -progress on a pipe says how far it is (a BAR line each time). `total_frames` is the WAV's length.
+static bool encode_aac(const std::string &wav, const std::string &out, const Encode &e, int64_t total_frames, std::string &err) {
+    const char *ff = getenv("R3I6NOS_FFMPEG");
+    if (!ff || !*ff) ff = "ffmpeg";
+    int fd[2];
+    if (pipe(fd) != 0) { err = "no pipe"; return false; }
+    pid_t pid = fork();
+    if (pid < 0) { close(fd[0]); close(fd[1]); err = "cannot start ffmpeg"; return false; }
+    if (pid == 0) {
+        dup2(fd[1], 1);
+        close(fd[0]); close(fd[1]);
+        const std::string kb = std::to_string(e.kbps) + "k";
+        execlp(ff, ff, "-v", "error", "-nostdin", "-nostats", "-y", "-progress", "pipe:1", "-f", "wav", "-i", wav.c_str(), "-vn", "-c:a", "aac", "-aac_coder", e.coder.c_str(),
+               "-b:a", kb.c_str(), "-f", "ipod", out.c_str(), (char *)nullptr);
+        _exit(127);
+    }
+    close(fd[1]);
+    std::string buf;
+    int last = -1;
+    char chunk[512];
+    for (;;) {
+        if (g_cancel.load()) { kill(pid, SIGTERM); break; }
+        ssize_t got = read(fd[0], chunk, sizeof chunk);
+        if (got < 0 && errno == EINTR) continue;
+        if (got <= 0) break;
+        buf.append(chunk, (size_t)got);
+        size_t nl;
+        while ((nl = buf.find('\n')) != std::string::npos) {
+            std::string line = buf.substr(0, nl); buf.erase(0, nl + 1);
+            if (line.compare(0, 12, "out_time_us=") == 0 && total_frames > 0) {
+                int pct = (int)std::min(100.0, atof(line.c_str() + 12) / ((double)total_frames / 44100.0 * 1e6) * 100.0);
+                if (pct != last && pct >= 0) { last = pct; say("BAR %d/100", pct); }
+            }
+        }
+    }
+    close(fd[0]);
+    int st = 0;
+    while (waitpid(pid, &st, 0) < 0 && errno == EINTR) {}
+    if (g_cancel.load()) { err = "cancelled"; return false; }
+    if (!WIFEXITED(st) || WEXITSTATUS(st) != 0) { err = WIFEXITED(st) && WEXITSTATUS(st) == 127 ? "ffmpeg is not installed" : "ffmpeg could not compress the copy"; return false; }
+    return true;
+}
+
+static int64_t file_size(const std::string &p) { struct stat st; return stat(p.c_str(), &st) == 0 ? (int64_t)st.st_size : -1; }
+
+// Every copy WAV in a folder (its name has " [kt-") becomes an M4A and the WAV is deleted; a copy that already has its M4A keeps both until the WAV is removed by hand.
+static int compress_dir(const std::string &dir, const Encode &e) {
+    std::vector<std::string> names;
+    if (DIR *d = opendir(dir.c_str())) {
+        while (struct dirent *de = readdir(d)) {
+            std::string n = de->d_name;
+            if (n.size() > 4 && n.compare(n.size() - 4, 4, ".wav") == 0 && n.find(" [kt-") != std::string::npos) names.push_back(n);
+        }
+        closedir(d);
+    }
+    std::sort(names.begin(), names.end());
+    int done = 0; int64_t saved = 0;
+    for (size_t i = 0; i < names.size(); i++) {
+        const std::string wav = dir + "/" + names[i], m4a = wav.substr(0, wav.size() - 4) + ".m4a", tmp = m4a + ".enc";
+        if (file_size(m4a) >= 0) continue;
+        say("PROGRESS %zu/%zu %s", i, names.size(), names[i].c_str());
+        const int64_t before = file_size(wav);
+        std::string err;
+        Song16 probe;
+        int64_t frames = (before - 44) / 4;
+        if (!encode_aac(wav, tmp, e, frames, err)) { unlink(tmp.c_str()); if (g_cancel.load()) return 130; say("ERROR %s: %s", names[i].c_str(), err.c_str()); return 1; }
+        if (rename(tmp.c_str(), m4a.c_str()) != 0) { say("ERROR cannot rename %s into place", names[i].c_str()); return 1; }
+        saved += before - file_size(m4a);
+        unlink(wav.c_str());
+        done++;
+    }
+    say("DONE %d copies compressed, %.1f MiB saved", done, (double)saved / 1048576.0);
+    return 0;
+}
+
 int main(int argc, char **argv) {
-    std::string in, out;
+    std::string in, out, compress, enc_spec;
     Params p; bool resume = true;
     for (int i = 1; i < argc; i++) {
         std::string a = argv[i];
@@ -122,7 +219,16 @@ int main(int argc, char **argv) {
         else if (a == "--workers") p.workers = atoi(val());
         else if (a == "--cheaper") p.cheaper = true;
         else if (a == "--no-resume") resume = false;
+        else if (a == "--encode") enc_spec = val();
+        else if (a == "--compress-dir") compress = val();
         else { fprintf(stderr, "musicue-render: unknown option %s\n", a.c_str()); return 2; }
+    }
+    Encode enc;
+    if (!enc_spec.empty() && !parse_encode(enc_spec, enc)) { fprintf(stderr, "musicue-render: --encode wants aac[:64-320[:fast|twoloop|anmr]]\n"); return 2; }
+    if (!compress.empty()) {
+        if (!enc.on) parse_encode("aac", enc);
+        struct sigaction sc; memset(&sc, 0, sizeof sc); sc.sa_handler = on_term; sigaction(SIGTERM, &sc, nullptr); sigaction(SIGINT, &sc, nullptr);
+        return compress_dir(compress, enc);
     }
     if (in.empty() || out.empty() || !(p.ratio >= 0.25 && p.ratio <= 4) || !(std::fabs(p.semitones) <= 24) || p.workers < 1 || p.workers > 16) {
         fprintf(stderr, "usage: musicue-render --in SONG --out COPY.wav --ratio R(0.25-4) --semitones S(-24..24) [--workers N] [--cheaper] [--no-resume]\n");
@@ -146,7 +252,7 @@ int main(int argc, char **argv) {
     {
         std::string dir = out.find('/') == std::string::npos ? "." : out.substr(0, out.rfind('/'));
         struct statvfs sv;
-        const double need = (double)song.frames() / p.ratio * 4.0 * 1.02 + 16.0 * 1048576.0;
+        const double need = (double)song.frames() / p.ratio * 4.0 * 1.02 + 16.0 * 1048576.0 + (enc.on ? (double)song.frames() / 44100.0 / p.ratio * enc.kbps * 125.0 : 0.0);
         if (statvfs(dir.c_str(), &sv) == 0 && (double)sv.f_bavail * (double)sv.f_frsize < need) { say("ERROR not enough room for the copy (%.0f MiB needed)", need / 1048576.0); return 1; }
     }
 
@@ -158,13 +264,39 @@ int main(int argc, char **argv) {
     }, g_cancel, die);
     if (r.cancelled || (!r.ok && g_cancel.load())) return 130;
     if (!r.ok) { say("ERROR %s", r.error.c_str()); return 1; }
-    if (rename(part.c_str(), out.c_str()) != 0) { say("ERROR cannot rename the copy into place"); return 1; }
     if (r.resumed_from) say("PROGRESS %d/%d Resumed from segment %d", r.segments, r.segments, r.resumed_from);
+    std::string format = "WAV";
+    int64_t final_bytes = 0;
+    if (!enc.on) {
+        if (rename(part.c_str(), out.c_str()) != 0) { say("ERROR cannot rename the copy into place"); return 1; }
+        unlink(journal.c_str());
+        final_bytes = file_size(out);
+    } else {
+        if (getenv("R3I6NOS_RENDER_DIE_AFTER_RENDER")) _exit(9);                 // the tests: a power cut between the render and the encode
+        say("PROGRESS 0/100 Compressing to AAC %dk...", enc.kbps);
+        std::string err;
+        const std::string tmp = out + ".enc";
+        if (encode_aac(part, tmp, enc, r.frames, err)) {
+            if (rename(tmp.c_str(), out.c_str()) != 0) { say("ERROR cannot rename the copy into place"); return 1; }
+            unlink(part.c_str()); unlink(journal.c_str());
+            final_bytes = file_size(out);
+            char f[48]; snprintf(f, sizeof f, "AAC %dk", enc.kbps);
+            format = f;
+        } else {
+            unlink(tmp.c_str());
+            if (g_cancel.load()) return 130;                                      // the WAV and the done journal stay: the next run only encodes
+            say("PROGRESS 0/1 Could not compress (%s): the copy is kept as a WAV", err.c_str());
+            const std::string wav = (out.size() > 4 && out.compare(out.size() - 4, 4, ".m4a") == 0 ? out.substr(0, out.size() - 4) : out) + ".wav";
+            if (rename(part.c_str(), wav.c_str()) != 0) { say("ERROR cannot keep the WAV"); return 1; }
+            unlink(journal.c_str());
+            final_bytes = file_size(wav);
+        }
+    }
     struct rusage ru; getrusage(RUSAGE_SELF, &ru);
     char note[160] = "";
     if (r.clipped) snprintf(note, sizeof note, "%d samples clipped; ", r.clipped);
     else if (r.lim.peak > LIMIT_CEILING)
         snprintf(note, sizeof note, "limited a %.2f peak: ducked %.1f%% of the time, deepest %.1f dB; ", r.lim.peak, 100.0 * (double)r.lim.ducked / (double)std::max<int64_t>(1, r.lim.frames), 20 * std::log10(r.lim.min_gain));
-    say("DONE %s%lld frames in %.1f s, peak memory %ld MiB", note, (long long)r.frames, r.wall_s, ru.ru_maxrss / 1024);
+    say("DONE %s%s, %.1f MiB, %lld frames in %.1f s, peak memory %ld MiB", note, format.c_str(), (double)final_bytes / 1048576.0, (long long)r.frames, r.wall_s, ru.ru_maxrss / 1024);
     return 0;
 }

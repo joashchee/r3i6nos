@@ -305,6 +305,7 @@ struct Journal {
     int64_t frames_in = 0;                             // the song's length: a different song starts again
     double ratio = 0, semitones = 0;
     int cheaper = 0, n = 0;
+    int done = 0;                                      // 1: the whole song is rendered into the part (the encode that follows is what a power cut interrupts)
     int c = 0;                                         // pieces 0..c-1 are mixed and written as far as `emitted`; piece c is joined next
     int64_t emitted = 0;                               // output frames in the file
     std::vector<int64_t> shifts;                       // shifts[0..c]
@@ -313,8 +314,8 @@ struct Journal {
         std::string tmp = path + ".tmp";
         FILE *f = fopen(tmp.c_str(), "w");
         if (!f) return false;
-        fprintf(f, "musicue-render-journal 1\nframes_in=%lld\nratio=%.17g\nsemitones=%.17g\ncheaper=%d\nn=%d\nc=%d\nemitted=%lld\nshifts=",
-                (long long)frames_in, ratio, semitones, cheaper, n, c, (long long)emitted);
+        fprintf(f, "musicue-render-journal 1\nframes_in=%lld\nratio=%.17g\nsemitones=%.17g\ncheaper=%d\nn=%d\ndone=%d\nc=%d\nemitted=%lld\nshifts=",
+                (long long)frames_in, ratio, semitones, cheaper, n, done, c, (long long)emitted);
         for (size_t i = 0; i < shifts.size(); i++) fprintf(f, "%s%lld", i ? "," : "", (long long)shifts[i]);
         fprintf(f, "\nend\n");
         bool ok = fflush(f) == 0 && fsync(fileno(f)) == 0;
@@ -333,6 +334,7 @@ struct Journal {
             else if (sscanf(line, "semitones=%lf", &semitones) == 1) {}
             else if (sscanf(line, "cheaper=%d", &cheaper) == 1) {}
             else if (sscanf(line, "n=%d", &n) == 1) {}
+            else if (sscanf(line, "done=%d", &done) == 1) {}
             else if (sscanf(line, "c=%d", &c) == 1) {}
             else if (sscanf(line, "emitted=%lld", &e) == 1) emitted = e;
             else if (!strncmp(line, "shifts=", 7)) {
@@ -341,6 +343,7 @@ struct Journal {
             } else if (!strncmp(line, "end", 3)) endl_ = true;
         }
         fclose(f);
+        if (head && endl_ && done) return emitted >= 0;
         return head && endl_ && c >= 1 && c < n && (int)shifts.size() == c + 1 && emitted >= 0;
     }
 };
@@ -360,9 +363,14 @@ inline Result render_song(const Song16 &song, const Params &p, const std::string
     const int C = song.channels;
     Journal want; want.frames_in = song.frames(); want.ratio = p.ratio; want.semitones = p.semitones; want.cheaper = p.cheaper; want.n = g.n;
     Journal j; Out out; Window win; win.ch.assign(C, {});
+    if (resume && j.load(journal_path) && j.done && j.same_job(want)) {            // rendered already: only what came after it (the encode) was cut short
+        struct stat st;
+        if (stat(out_part.c_str(), &st) == 0 && (int64_t)st.st_size == 44 + g.M * C * 2) { r.ok = true; r.frames = g.M; r.resumed_from = g.n; return r; }
+    }
+    j = Journal();
     int start = 0;                                      // the first segment to render
     bool resumed = false;
-    if (resume && j.load(journal_path) && j.same_job(want) && out.open_resume(out_part, C, song.rate, j.emitted)) { resumed = true; start = std::max(0, j.c - 1); r.resumed_from = j.c; }
+    if (resume && j.load(journal_path) && !j.done && j.same_job(want) && out.open_resume(out_part, C, song.rate, j.emitted)) { resumed = true; start = std::max(0, j.c - 1); r.resumed_from = j.c; }
     if (!resumed) {
         if (out.f) { fclose(out.f); out.f = nullptr; }
         j = want; j.c = 0; j.emitted = 0; j.shifts.clear();
@@ -442,7 +450,8 @@ inline Result render_song(const Song16 &song, const Params &p, const std::string
     mix_piece(g, p, win, prev, g.n - 1, shift[g.n - 1]);
     if (!out.write(win, g.M)) { r.error = "cannot write " + out_part + " (is the card full?)"; if (out.f) fclose(out.f); return r; }
     if (!out.finish()) { r.error = "cannot finish " + out_part; return r; }
-    unlink(journal_path.c_str());
+    j.done = 1; j.c = g.n; j.emitted = g.M;                                             // the caller deletes the journal when it has finished with the part
+    if (!j.save(journal_path)) { r.error = "cannot write " + journal_path; return r; }
     r.ok = true; r.frames = out.frames; r.clipped = out.clipped;
     r.wall_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
     return r;

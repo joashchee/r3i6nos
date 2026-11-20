@@ -87,8 +87,13 @@ static double kt_speed(int workers, int cheaper) {
 }
 /* Seconds the render takes for a song of `song_s` seconds, with 25% over for reading, joining and writing. */
 static double kt_estimate_s(double song_s, int workers, int cheaper) { return song_s / kt_speed(workers, cheaper) * 1.25 + 2; }
-/* Bytes the copy takes: 16-bit stereo 44.1 kHz of song_s / ratio seconds. */
-static double kt_copy_bytes(double song_s, double ratio) { return song_s / ratio * 176400.0 + 44; }
+/* Bytes the copy takes: 16-bit stereo 44.1 kHz of song_s / ratio seconds as a WAV (10 MB a minute), or as AAC at 192 kbps in an M4A (1.4 MB a minute). */
+#define KT_AAC_KBPS 192
+static double kt_copy_bytes(double song_s, double ratio, int aac) { return aac ? song_s / ratio * (KT_AAC_KBPS * 125.0) + 4096 : song_s / ratio * 176400.0 + 44; }
+/* Seconds the AAC encode after the render takes for a copy of copy_s seconds. The image's ffmpeg encodes at 68x real time on a Mac under Docker; the unit's own speed is what
+ * stretch-proto-report's == encode == section measures, and until that is read this is a guess of 2.5x with a second added. */
+#define KT_ENCODE_X 2.5
+static double kt_encode_s(double copy_s) { return copy_s / KT_ENCODE_X + 1; }
 
 /* The copy's id: "kt-" and eight hex digits made from the base id, the shift and the ratio (to a thousandth), so the same ask is the same copy. */
 static void kt_copy_id(const char *base_id, int semis, double ratio, char *out, size_t cap) {

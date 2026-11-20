@@ -21,7 +21,7 @@ elif [ -d /roms2 ] && [ -w /roms2 ]; then DIR=/roms2/StretchProto
 else DIR=/roms/StretchProto; fi
 mkdir -p "$DIR" || { echo "cannot make $DIR" >&2; exit 1; }
 OUT="$DIR/r36s-report.txt"; TMP="$OUT.tmp"
-STEPS=9; STEP=0
+STEPS=10; STEP=0
 prog() {   # the menu's progress bar (docs/DEVICE-REPORTS.md, "Progress"): step, steps, what is being done, and where the file goes
     STEP=$((STEP+1))
     [ -n "${R3I6NOS_REPORT_PROGRESS:-}" ] || return 0
@@ -106,6 +106,36 @@ if [ -n "$best" ]; then
 else line SKIP "render speed" "no benchmark ran"; fi
 
 emit ""
+prog "AAC encode speed"
+emit ""
+emit "== encode =="
+# The copy is compressed to AAC after it is rendered (musicue-render --encode): how fast the image's ffmpeg does that decides the wait. 60 s of the test song as a WAV,
+# encoded with ffmpeg's native aac encoder at the settings MusiCue offers; x_realtime = audio seconds / wall seconds.
+FF="${R3I6NOS_FFMPEG:-ffmpeg}"
+ETMP="${TMPDIR:-/tmp}/stretch-proto-enc.$$"; mkdir -p "$ETMP"
+if ! command -v "$FF" > /dev/null 2>&1 && [ ! -x "$FF" ]; then line SKIP "aac encode" "no ffmpeg ($FF)"
+elif ! "$BIN/stretch-proto" make-song "$ETMP/song.wav" "$SECS"; then line SKIP "aac encode" "could not make the test song"
+else
+    wavbytes="$(wc -c < "$ETMP/song.wav")"
+    best_fast=0
+    for setting in "fast 192" "twoloop 192" "fast 128" "fast 256"; do
+        coder="${setting% *}"; kb="${setting#* }"
+        t0="$EPOCHREALTIME"
+        if "$FF" -v error -nostdin -y -f wav -i "$ETMP/song.wav" -vn -c:a aac -aac_coder "$coder" -b:a "${kb}k" -f ipod "$ETMP/out.m4a" 2> "$ETMP/err.txt"; then
+            t1="$EPOCHREALTIME"
+            secs="$(awk "BEGIN{printf \"%.2f\", $t1 - $t0}")"; x="$(awk "BEGIN{printf \"%.1f\", $SECS / ($secs + 0.001)}")"
+            bytes="$(wc -c < "$ETMP/out.m4a")"
+            line INFO "aac $kb kbps, $coder coder" "$secs s for $SECS s of audio ($x x real time), $bytes bytes ($(awk "BEGIN{printf \"%.0f\", 100 * $bytes / $wavbytes}") % of the WAV), a 4-minute copy would take about $(awk "BEGIN{printf \"%.0f\", 240 / ($x + 0.001)}") s"
+            [ "$coder $kb" = "fast 192" ] && best_fast="$x"
+        else line FAIL "aac $kb kbps, $coder coder" "ffmpeg failed: $(head -n 2 "$ETMP/err.txt" | tr '\n' ' ')"; fi
+    done
+    # a first guess, set before any measurement: MusiCue's default (fast, 192 kbps) should run at 1.5 x real time or better, so a 4-minute copy compresses in under 3 minutes
+    if awk "BEGIN{exit !($best_fast > 0)}"; then
+        if awk "BEGIN{exit !($best_fast >= 1.5)}"; then line PASS "aac default speed (goal 1.5 x real time)" "$best_fast x"; else line FAIL "aac default speed (goal 1.5 x real time)" "$best_fast x: too slow for the default; offer WAV, or encode in parallel"; fi
+    fi
+fi
+rm -rf "$ETMP"
+
 prog "the power draw"
 emit "== power =="
 if [ -n "$bat" ] && [ "$(rd "$bat/status")" = Discharging ] && [ -r "$bat/current_now" ] && [ -r "$bat/voltage_now" ]; then

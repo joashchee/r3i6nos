@@ -26,7 +26,9 @@ for a in "$@"; do
         *) echo "build-proto: unknown option: $a (try --help)" >&2; exit 2 ;;
     esac
 done
-docker run --rm --platform linux/arm64 -e STRETCH_COMMIT="$STRETCH_COMMIT" -e LINEAR_COMMIT="$LINEAR_COMMIT" -e PFFFT_COMMIT="$PFFFT_COMMIT" \
+# the image's own ffmpeg (scripts/build-ffmpeg-min.sh), when it has been built, for the AAC checks: mounted read-only at /f
+FFMOUNT=(); [ -x "$root/build/ffmpeg-min/ffmpeg" ] && FFMOUNT=(-v "$root/build/ffmpeg-min":/f:ro)
+docker run --rm --platform linux/arm64 "${FFMOUNT[@]}" -e STRETCH_COMMIT="$STRETCH_COMMIT" -e LINEAR_COMMIT="$LINEAR_COMMIT" -e PFFFT_COMMIT="$PFFFT_COMMIT" \
     -e MODE="$MODE" -e VERSION="$VERSION" -v "$root/build/stretchproto":/o -v "$here":/src:ro -v "$root/LICENSE":/LICENSE:ro debian:12 bash -c '
 set -eu
 echo "options no-aaaa" >> /etc/resolv.conf
@@ -86,7 +88,7 @@ case "$MODE" in *--package*)
     # a fake battery (discharging, the current negative as the unit reports it, 1.5 A at 4 V is 6 W) so the power section runs too
     B=$T/sys/class/power_supply/battery; mkdir -p $B
     echo Discharging > $B/status; echo 90 > $B/capacity; echo -300000 > $B/current_now; echo 4000000 > $B/voltage_now
-    R3I6NOS_SYS=$T/sys R3I6NOS_APP_DATA=$T/data R3I6NOS_STRETCH_SECS=8 TMPDIR=$T $T/usr/bin/stretch-proto-report > /tmp/report.out || { cat /tmp/report.out; echo "REPORT FAILED"; exit 1; }
+    R3I6NOS_FFMPEG=$([ -x /f/ffmpeg ] && echo /f/ffmpeg || echo ffmpeg) R3I6NOS_SYS=$T/sys R3I6NOS_APP_DATA=$T/data R3I6NOS_STRETCH_SECS=8 TMPDIR=$T $T/usr/bin/stretch-proto-report > /tmp/report.out || { cat /tmp/report.out; echo "REPORT FAILED"; exit 1; }
     tail -n 22 $T/data/r36s-report.txt
     grep -q "draw 4 workers, default preset: 1200 mW" $T/data/r36s-report.txt || { echo "the power section did not read 1200 mW (0.3 A x 4 V, sign dropped)"; exit 1; }
     [ "$(tail -n 1 $T/data/r36s-report.txt)" = end ] || { echo "report does not end with end"; exit 1; }

@@ -171,7 +171,7 @@ static int hue_of(const char *label) {
 typedef struct { char path[PATH_MAX]; char name[96]; char id[16]; int has_cues; int nmarkers; } Song;
 
 enum { M_LIBRARY, M_PLAYER, M_MENU, M_JOB, M_NOTE, M_ID, M_TEXT, M_KT };
-enum { JOB_SYNC, JOB_RENDER };                                                 /* what the job screen is running: the sync, or a Key and Tempo render */
+enum { JOB_SYNC, JOB_RENDER, JOB_COMPRESS };                                                 /* what the job screen is running: the sync, or a Key and Tempo render */
 enum { OV_NONE, OV_MM, OV_ABOUT, OV_THEME, OV_KEYMAP };                                      /* what shows over a screen: the main menu (L1+R1), About, the colour theme picker */
 enum { MK_LIBRARY, MK_SONG, MK_CONTEXT };                                         /* the app's own menus: the songs' (Add, Sync ...), the song's (offset, save ...), the context menu (L2+R2) */
 enum { TF_KEY, TF_TEMPO, TF_SIG, TF_SCRIPTER, TF_SUFFIX = 10 };                  /* what M_TEXT edits: a metadata field, or the number or letter after a marker's name */
@@ -193,6 +193,7 @@ typedef struct { char title[40]; MItem it[16]; int n, sel; } Menu;
 typedef struct {
     char data[PATH_MAX];                    /* <app data>: media/, cues/, inbox/, export/, settings.conf */
     int theme, any_license, save_video;
+    int kt_aac;                             /* the copy's format: 1 AAC 192 kbps in an M4A (the default), 0 a WAV; settings.conf copy_format */
     Song *songs; int nsongs, lsel;
     int mode, back_mode;
     /* the open song */
@@ -316,6 +317,17 @@ static void scan_songs(App *a) {
     if (a->nsongs > 1) qsort(a->songs, (size_t)a->nsongs, sizeof *a->songs, song_cmp);
 }
 
+/* How many of the songs are Key and Tempo copies still stored as WAV (their id is kt-..., their file ends .wav): what Compress copies to AAC would turn into M4A. */
+static int wav_copies(const App *a) {
+    int n = 0;
+    for (int i = 0; i < a->nsongs; i++) {
+        const char *dot = strrchr(a->songs[i].path, '.');
+        if (kt_is_copy_id(a->songs[i].id) && dot && !strcasecmp(dot, ".wav")) n++;
+    }
+    return n;
+}
+
+
 /* ---- settings ------------------------------------------------------------------------------------------------------------------------------ */
 
 static void settings_path(const App *a, char *out, size_t cap) {
@@ -332,6 +344,7 @@ static void load_settings(App *a) {
         if (!strncmp(line, "theme=", 6)) { int i = r3_theme_find(line + 6); if (i >= 0) a->theme = i; }
         else if (!strncmp(line, "any_license=", 12)) a->any_license = atoi(line + 12) ? 1 : 0;
         else if (!strncmp(line, "save_video=", 11)) a->save_video = atoi(line + 11) ? 1 : 0;
+        else if (!strncmp(line, "copy_format=", 12)) a->kt_aac = strncmp(line + 12, "wav", 3) != 0;
     }
     free(t);
 }
@@ -339,7 +352,7 @@ static void load_settings(App *a) {
 static void save_settings(const App *a) {
     char p[PATH_MAX], buf[256];
     settings_path(a, p, sizeof p);
-    snprintf(buf, sizeof buf, "theme=%s\nany_license=%d\nsave_video=%d\n", r3_themes[a->theme].name, a->any_license, a->save_video);
+    snprintf(buf, sizeof buf, "theme=%s\nany_license=%d\nsave_video=%d\ncopy_format=%s\n", r3_themes[a->theme].name, a->any_license, a->save_video, a->kt_aac ? "aac" : "wav");
     cue_write_file(p, buf, strlen(buf));
 }
 
@@ -1263,8 +1276,8 @@ static void compose_player(App *a, R3Screen *s) {
 
 static void compose_job(App *a, R3Screen *s) {
     r3_clear(s);
-    compose_topbar(a, s, "MusiCue", a->job_kind == JOB_RENDER ? "Copy" : "Sync");
-    R3Box b = {1, a->job_kind == JOB_RENDER ? "Making a copy at the new Key and Tempo" : "Getting songs and cues", NULL, a->job_done ? "B close" : "B stop", 0};
+    compose_topbar(a, s, "MusiCue", a->job_kind == JOB_RENDER ? "Copy" : a->job_kind == JOB_COMPRESS ? "Compress" : "Sync");
+    R3Box b = {1, a->job_kind == JOB_RENDER ? "Making a copy at the new Key and Tempo" : a->job_kind == JOB_COMPRESS ? "Compressing copies to AAC" : "Getting songs and cues", NULL, a->job_done ? "B close" : "B stop", 0};
     r3_box(s, 2, 4, 60, 14, &b);
     int full = (int)(56 * a->job_frac + 0.5);
     for (int i = 0; i < 56; i++) {
@@ -1272,7 +1285,7 @@ static void compose_job(App *a, R3Screen *s) {
         else r3_put(s, 4 + i, 6, 176, R3_ST(R3_ST_HINT));
     }
     for (int i = 0; i < a->job_nlines && i < 6; i++) r3_text_scroll(s, 4, 8 + i, a->job_lines[i], 56, R3_ST(i == a->job_nlines - 1 ? R3_ST_STRONG : R3_ST_BODY));
-    R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, a->job_kind == JOB_RENDER ? "B stops it and takes the half copy away" : "Your own list: MusiCue/inbox/urls.txt", "", R3_ST_HINT};
+    R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, a->job_kind == JOB_RENDER ? "B stops it and takes the half copy away" : a->job_kind == JOB_COMPRESS ? "B stops it; copies already done stay done" : "Your own list: MusiCue/inbox/urls.txt", "", R3_ST_HINT};
     r3_command_line(s, &cmd);
 }
 
@@ -1300,12 +1313,12 @@ static void compose_kt(App *a, R3Screen *s) {
     r3_text_fit(s, 5, 11, line, 54, R3_ST(R3_ST_BODY));
     if (why) r3_text_fit(s, 5, 12, why, 54, R3_ST(R3_ST_WARN));
     else if (a->kt.ratio < 0.75 || a->kt.ratio > 1.5) r3_text_fit(s, 5, 12, "It sounds best between 75% and 150% of the tempo.", 54, R3_ST(R3_ST_WARN));
-    snprintf(line, sizeof line, "About %.0f s with %d workers, %s quality.", kt_estimate_s(dur_of(a), a->kt_workers, a->kt_cheaper), a->kt_workers, a->kt_cheaper ? "faster" : "best");
+    snprintf(line, sizeof line, "About %.0f s: %d workers, %s quality%s.", kt_estimate_s(dur_of(a), a->kt_workers, a->kt_cheaper) + (a->kt_aac ? kt_encode_s(dur_of(a) / a->kt.ratio) : 0), a->kt_workers, a->kt_cheaper ? "faster" : "best", a->kt_aac ? ", then AAC" : "");
     r3_text_fit(s, 5, 14, line, 54, R3_ST(R3_ST_BODY));
-    snprintf(line, sizeof line, "The copy is about %.1f MiB and goes in with the songs.", kt_copy_bytes(dur_of(a), a->kt.ratio) / 1048576.0);
+    snprintf(line, sizeof line, "The copy: %s, about %.1f MiB.", a->kt_aac ? "AAC 192 kbps" : "WAV (lossless)", kt_copy_bytes(dur_of(a), a->kt.ratio, a->kt_aac) / 1048576.0);
     r3_text_fit(s, 5, 15, line, 54, R3_ST(R3_ST_BODY));
     r3_text_fit(s, 5, 17, "Left/Right Key  Up/Down Tempo  R1+Up/Down 5 bpm", 54, R3_ST(R3_ST_HINT));
-    r3_text_fit(s, 5, 18, "X workers (2, 4)  Y quality  R1+Left the song's own", 54, R3_ST(R3_ST_HINT));
+    r3_text_fit(s, 5, 18, "X workers  Y quality  Select format  R1+Left own", 54, R3_ST(R3_ST_HINT));
     R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, "All four cores for a minute; the song stays as it is", "", R3_ST_HINT};
     r3_command_line(s, &cmd);
 }
@@ -1484,7 +1497,7 @@ static void present(App *a, R3Video *v, SDL_Renderer *r, const R3Screen *s, int 
 
 /* ---- actions ------------------------------------------------------------------------------------------------------------------------------- */
 
-enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_VIDEO, A_ADD, A_CUE, A_BOOKMARK, A_CUEDEL, A_RECALC, A_SLADD, A_SLDEL, A_SLUP, A_SLDOWN, A_QUIT, A_CLOSE, A_JUMPCLEAR, A_KT, A_LABELPICK };
+enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_VIDEO, A_ADD, A_CUE, A_BOOKMARK, A_CUEDEL, A_RECALC, A_SLADD, A_SLDEL, A_SLUP, A_SLDOWN, A_QUIT, A_CLOSE, A_JUMPCLEAR, A_KT, A_COMPRESS, A_LABELPICK };
 
 static const char *const PRESET_LABELS[] = {"Intro", "Verse", "Pre-Chorus", "Chorus", "Bridge", "Solo", "Instrumental", "Outro", "End", "Tag"};
 #define NPRESET ((int)(sizeof PRESET_LABELS / sizeof *PRESET_LABELS))
@@ -1925,6 +1938,7 @@ static void build_menu(App *a, int kind) {
         menu_add(&a->menu, A_DEMO, "Demo song", "");
         menu_add(&a->menu, A_LICENSE, "Fetch from YouTube", a->any_license ? "any video" : "Creative Commons only");
         menu_add(&a->menu, A_VIDEO, "Also save the video (480p)", a->save_video ? "[x]" : "[ ]");
+        { int nwav = wav_copies(a); char cv[24]; snprintf(cv, sizeof cv, "%d WAV cop%s", nwav, nwav == 1 ? "y" : "ies"); menu_add(&a->menu, A_COMPRESS, "Compress copies to AAC (M4A)", nwav ? cv : "none to do"); }
     } else if (kind == MK_SONG) {
         menu_clear(&a->menu, "Song options");
         snprintf(v, sizeof v, "%+.2f s", a->offset);
@@ -2192,7 +2206,7 @@ static void kt_paths(App *a, const Song *base) {
     kt_copy_id(base->id, a->kt.semis, a->kt.ratio, a->kt_copy_id, sizeof a->kt_copy_id);
     kt_copy_name(base->name, &a->kt.target, a->kt_tempo_txt, a->kt_copy_id, a->kt_title, sizeof a->kt_title);
     char file[PATH_MAX];
-    snprintf(file, sizeof file, "%s.wav", a->kt_title);
+    snprintf(file, sizeof file, "%s.%s", a->kt_title, a->kt_aac ? "m4a" : "wav");
     sub_path(a, "media", file, a->kt_out, sizeof a->kt_out);
     snprintf(a->kt_base_id, sizeof a->kt_base_id, "%s", base->id);
     a->kt_ratio = a->kt.ratio; a->kt_semis = a->kt.semis;
@@ -2203,6 +2217,7 @@ static void kt_cleanup(App *a) {            /* a render stopped on purpose: the 
     snprintf(p, sizeof p, "%s.part", a->kt_out); unlink(p);
     snprintf(p, sizeof p, "%s.journal", a->kt_out); unlink(p);
     snprintf(p, sizeof p, "%s.in.wav", a->kt_out); unlink(p);
+    snprintf(p, sizeof p, "%s.enc", a->kt_out); unlink(p);
 }
 
 /* Checks, then starts the render (the confirmation was the screen: A on it). */
@@ -2213,14 +2228,16 @@ static void kt_start(App *a) {
     const double song_s = dur_of(a);
     int charging = 0, pct = battery_state(&charging);
     if (pct >= 0 && pct < 20 && !charging) { say(a, R3_ST_WARN, "The battery is at %d%%: plug in the charger first, or wait. A render uses all four cores.", pct); return; }
-    if (free_bytes(a->data) < kt_copy_bytes(song_s, a->kt.ratio) * 1.05 + 16.0 * 1048576.0) {
-        say(a, R3_ST_WARN, "Not enough room for the copy (%.0f MiB).", kt_copy_bytes(song_s, a->kt.ratio) / 1048576.0);
+    /* the room: the WAV it is rendered into (which is deleted once compressed) and, for AAC, the M4A beside it */
+    const double need = kt_copy_bytes(song_s, a->kt.ratio, 0) * 1.05 + 16.0 * 1048576.0 + (a->kt_aac ? kt_copy_bytes(song_s, a->kt.ratio, 1) : 0);
+    if (free_bytes(a->data) < need) {
+        say(a, R3_ST_WARN, "Not enough room for the copy (%.0f MiB while it is made).", need / 1048576.0);
         return;
     }
     kt_paths(a, &base);
-    if (access(a->kt_out, F_OK) == 0) {                      /* the same ask again: the copy is there */
-        scan_songs(a);
-        for (int i = 0; i < a->nsongs; i++) if (!strcmp(a->songs[i].id, a->kt_copy_id)) a->lsel = i;
+    scan_songs(a);
+    if (song_by_id(a, a->kt_copy_id) >= 0) {                 /* the same ask again: the copy is there (as a WAV or an M4A) */
+        a->lsel = song_by_id(a, a->kt_copy_id);
         save_cues(a); close_song(a);
         a->mode = M_LIBRARY;
         say(a, R3_ST_OK, "That copy is already made: it is selected in the songs.");
@@ -2228,16 +2245,17 @@ static void kt_start(App *a) {
     }
     save_cues(a);                                              /* the copy's cues are made from the saved ones */
     close_song(a);                                             /* frees the song's memory for the render */
-    char hbuf[PATH_MAX + 40], ratio[32], semis[16], workers[16];
+    char hbuf[PATH_MAX + 40], ratio[32], semis[16], workers[16], enc[24];
     snprintf(ratio, sizeof ratio, "%.10g", a->kt_ratio);
     snprintf(semis, sizeof semis, "%d", a->kt_semis);
     snprintf(workers, sizeof workers, "%d", a->kt_workers);
     const char *helper = render_helper_path(hbuf, sizeof hbuf);
-    const char *argv[16];
+    const char *argv[20];
     int n = 0;
     argv[n++] = helper; argv[n++] = "--in"; argv[n++] = base.path; argv[n++] = "--out"; argv[n++] = a->kt_out;
     argv[n++] = "--ratio"; argv[n++] = ratio; argv[n++] = "--semitones"; argv[n++] = semis; argv[n++] = "--workers"; argv[n++] = workers;
     if (a->kt_cheaper) argv[n++] = "--cheaper";
+    if (a->kt_aac) { argv[n++] = "--encode"; snprintf(enc, sizeof enc, "aac:%d:fast", KT_AAC_KBPS); argv[n++] = enc; }
     argv[n] = NULL;
     a->job_want[0] = 0;
     if (!job_spawn(a, argv, JOB_RENDER)) { say(a, R3_ST_ERROR, "Cannot start the render."); a->mode = M_LIBRARY; return; }
@@ -2288,6 +2306,43 @@ static int kt_finish(App *a) {
     return ok;
 }
 
+/* Library menu > Compress copies to AAC (M4A): every copy still stored as a WAV becomes an M4A (the same id, so its cues stay) and the WAV is deleted. */
+static void compress_start(App *a) {
+    a->mode = M_LIBRARY;
+    if (!wav_copies(a)) { say(a, R3_ST_WARN, "No WAV copies to compress."); return; }
+    int charging = 0, pct = battery_state(&charging);
+    if (pct >= 0 && pct < 20 && !charging) { say(a, R3_ST_WARN, "The battery is at %d%%: plug in the charger first, or wait.", pct); return; }
+    char hbuf[PATH_MAX + 40], media[PATH_MAX], enc[24];
+    const char *helper = render_helper_path(hbuf, sizeof hbuf);
+    sub_path(a, "media", NULL, media, sizeof media);
+    snprintf(enc, sizeof enc, "aac:%d:fast", KT_AAC_KBPS);
+    const char *argv[] = {helper, "--compress-dir", media, "--encode", enc, NULL};
+    a->job_want[0] = 0;
+    if (!job_spawn(a, argv, JOB_COMPRESS)) { say(a, R3_ST_ERROR, "Cannot start the compressing."); return; }
+    say(a, R3_ST_HINT, "Compressing %d cop%s to AAC. B stops it.", wav_copies(a), wav_copies(a) == 1 ? "y" : "ies");
+}
+
+static void compress_cleanup(App *a) {       /* a stopped compress leaves the half-written M4A of the copy it was on */
+    char dir[PATH_MAX], p[PATH_MAX + 300];
+    sub_path(a, "media", NULL, dir, sizeof dir);
+    DIR *d = opendir(dir);
+    if (!d) return;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        size_t n = strlen(e->d_name);
+        if (n > 4 && !strcmp(e->d_name + n - 4, ".enc")) { snprintf(p, sizeof p, "%s/%s", dir, e->d_name); unlink(p); }
+    }
+    closedir(d);
+}
+
+static void compress_job_ended(App *a, int status) {
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 127) { job_line(a, "musicue-render is not installed."); say(a, R3_ST_ERROR, "The render helper is missing."); }
+    else if (a->job_done) say(a, R3_ST_OK, "The copies are compressed. A closes.");
+    else say(a, R3_ST_WARN, "The compressing stopped before it was done. Run it again: copies already done stay done.");
+    a->job_done = 1;
+    scan_songs(a);
+}
+
 static void render_job_ended(App *a, int status) {
     if (WIFEXITED(status) && WEXITSTATUS(status) == 127) { job_line(a, "musicue-render is not installed."); say(a, R3_ST_ERROR, "The render helper is missing."); }
     else if (a->job_done) {
@@ -2296,7 +2351,7 @@ static void render_job_ended(App *a, int status) {
     } else say(a, R3_ST_WARN, "The render stopped before it was done. Make the same copy again to continue it.");
     a->job_done = 1;
     scan_songs(a);
-    for (int i = 0; i < a->nsongs; i++) if (!strcmp(a->songs[i].id, a->kt_copy_id)) a->lsel = i;
+    if (song_by_id(a, a->kt_copy_id) >= 0) a->lsel = song_by_id(a, a->kt_copy_id);
 }
 
 static void job_poll(App *a) {
@@ -2328,6 +2383,7 @@ static void job_poll(App *a) {
         close(a->job_fd);
         a->job_fd = -1;
         if (a->job_kind == JOB_RENDER) { render_job_ended(a, status); return; }
+        if (a->job_kind == JOB_COMPRESS) { compress_job_ended(a, status); return; }
         if (WIFEXITED(status) && WEXITSTATUS(status) == 127) { job_line(a, "musicue-sync is not installed."); say(a, R3_ST_ERROR, "The sync helper is missing."); }
         else if (!a->job_done) say(a, R3_ST_WARN, "The sync ended before it said it was done.");
         else say(a, R3_ST_OK, "Sync finished.");
@@ -2462,6 +2518,7 @@ static void menu_choose(App *a) {
     case A_CUEDEL: cue_delete(a, a->csel); a->mode = M_PLAYER; break;
     case A_RECALC: recalc_tempo(a); a->mode = M_PLAYER; break;
     case A_KT: kt_open(a); break;
+    case A_COMPRESS: compress_start(a); break;
     case A_SLADD:
         if (a->open < 0) say(a, R3_ST_WARN, "Open a song from the card to add it (the demo is not a file).");
         else { int r = setlist_add(a, a->songs[a->open].id, a->songs[a->open].name); say(a, r < 0 ? R3_ST_ERROR : R3_ST_OK, r < 0 ? "The Set List is full." : r ? "Added to the Set List." : "Set List entry updated."); }
@@ -2557,6 +2614,7 @@ static void app_action(App *a, int act) {
             int running = a->job_pid > 0;
             job_stop(a);
             if (running && a->job_kind == JOB_RENDER) { kt_cleanup(a); say(a, R3_ST_HINT, "The render was stopped; nothing was added."); }
+            if (running && a->job_kind == JOB_COMPRESS) { compress_cleanup(a); say(a, R3_ST_HINT, "The compressing was stopped; copies already done stay done."); }
             a->mode = M_LIBRARY; scan_songs(a);
         }
         break;
@@ -2572,6 +2630,7 @@ static void app_action(App *a, int act) {
         case R3_HOME: a->kt.target = a->kt.base; a->kt.target_tempo = a->kt.base_tempo; kt_update(&a->kt); break;
         case R3_X: a->kt_workers = a->kt_workers == 4 ? 2 : 4; break;
         case R3_Y: a->kt_cheaper = !a->kt_cheaper; break;
+        case R3_SELECT: a->kt_aac = !a->kt_aac; save_settings(a); break;
         case R3_ACCEPT: case R3_START: kt_start(a); break;
         default: break;
         }
@@ -2710,6 +2769,7 @@ static void app_init(App *a, const char *data) {
     memset(a, 0, sizeof *a);
     a->open = -1;
     a->theme = r3_theme_find("Nord");
+    a->kt_aac = 1;
     snprintf(a->data, sizeof a->data, "%s", data);
     a->job_fd = -1;
     a->sl = (SetItem *)calloc(SETLIST_MAX, sizeof *a->sl);
@@ -3088,7 +3148,9 @@ static void test_kt(void) {
     CHECK(!strncmp(name, "Some Song (A 104bpm) [kt-", 25), "the copy's name drops the base's id and says what it is: %s", name);
     CHECK(kt_estimate_s(240, 4, 0) > kt_estimate_s(240, 4, 1) && kt_estimate_s(240, 2, 0) > kt_estimate_s(240, 4, 0), "the estimate: faster with 4 workers and the cheaper preset");
     CHECK(kt_estimate_s(240, 4, 0) > 30 && kt_estimate_s(240, 4, 0) < 50, "a 4-minute song takes about 30-50 s with 4 workers (the unit's 9.3x plus the margin): %.0f", kt_estimate_s(240, 4, 0));
-    CHECK(fabs(kt_copy_bytes(60, 1.0) - 60 * 176400.0) < 100, "a minute is 10 MB");
+    CHECK(fabs(kt_copy_bytes(60, 1.0, 0) - 60 * 176400.0) < 100, "a minute is 10 MB as a WAV");
+    CHECK(kt_copy_bytes(60, 1.0, 1) < kt_copy_bytes(60, 1.0, 0) / 6 && kt_copy_bytes(60, 1.0, 1) > 1.2e6 && kt_copy_bytes(60, 1.0, 1) < 1.7e6, "and about 1.4 MB as AAC 192 kbps: %.0f", kt_copy_bytes(60, 1.0, 1));
+    CHECK(kt_encode_s(240) > 60 && kt_encode_s(240) < 130, "compressing a 4-minute copy is estimated at about a minute and a half: %.0f s", kt_encode_s(240));
 
     /* the app: a song with a Key and a Tempo and cues, a fake render helper */
     App a;
@@ -3183,8 +3245,8 @@ static void test_kt(void) {
     for (int i = 0; i < 400 && !(a.job_pid == 0 && a.job_fd < 0); i++) { app_tick(&a, 10); usleep(10000); }
     CHECK(a.job_done && a.job_frac == 1, "the job finishes with the bar full");
     char *argt = cue_read_file(args, NULL);
-    CHECK(argt && strstr(argt, "--ratio 1.0833333") && strstr(argt, "--semitones 2") && strstr(argt, "--workers 2") && strstr(argt, "--cheaper") && strstr(argt, "--in") && strstr(argt, "Song One.wav"),
-          "the helper got the ratio, the shift, the workers, the preset and the song: %s", argt ? argt : "(none)");
+    CHECK(argt && strstr(argt, "--ratio 1.0833333") && strstr(argt, "--semitones 2") && strstr(argt, "--workers 2") && strstr(argt, "--cheaper") && strstr(argt, "--in") && strstr(argt, "Song One.wav") && strstr(argt, "--encode aac:192:fast") && strstr(argt, ".m4a"),
+          "the helper got the ratio, the shift, the workers, the preset, the song and AAC into an M4A: %s", argt ? argt : "(none)");
     free(argt);
     int ci = song_with_id(&a, a.kt_copy_id);
     CHECK(ci >= 0 && strstr(a.songs[ci].name, "Song One (A 104bpm) [kt-") && a.lsel == ci, "the copy is in the songs, named for its Key and Tempo, and selected: %s", ci >= 0 ? a.songs[ci].name : "(missing)");
@@ -3225,6 +3287,89 @@ static void test_kt(void) {
     kt_open(&a);
     CHECK(a.mode == M_PLAYER && strstr(a.reply, "already a copy"), "a copy is not copied again: %s", a.reply);
     close_song(&a);
+
+    /* the format: AAC is the default, Select makes it a WAV, and the choice is kept in settings.conf */
+    CHECK(strstr(a.kt_out, ".m4a") != NULL, "the first copy was an M4A: %s", a.kt_out);
+    char conf[PATH_MAX];
+    snprintf(conf, sizeof conf, "%s/kt-settings.conf", g_tmp);
+    setenv("R3I6NOS_MUSICUE_CONF", conf, 1);
+    CHECK(open_song(&a, song_with_id(&a, one_id)), "Song One for the WAV choice");
+    kt_open(&a);
+    CHECK(a.kt_aac == 1, "AAC is the default format");
+    app_action(&a, R3_SELECT);
+    CHECK(a.kt_aac == 0, "Select makes the copy a WAV");
+    {
+        App b;
+        app_init(&b, g_tmp);
+        CHECK(b.kt_aac == 1, "a fresh app starts on AAC");
+        load_settings(&b);
+        CHECK(b.kt_aac == 0, "and the choice is kept in settings.conf");
+        app_free(&b);
+    }
+    for (int th = 0; th < R3_THEME_COUNT; th++) { a.theme = th; apply_theme(&a); check_contrast(&a, "key and tempo (WAV)"); }
+    a.theme = r3_theme_find("Nord"); apply_theme(&a);
+    for (int i = 0; i < 3; i++) app_action(&a, R3_RIGHT);
+    unlink(args);
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_JOB && a.job_pid > 0, "a WAV copy starts");
+    for (int i = 0; i < 400 && !(a.job_pid == 0 && a.job_fd < 0); i++) { app_tick(&a, 10); usleep(10000); }
+    argt = cue_read_file(args, NULL);
+    CHECK(argt && !strstr(argt, "--encode") && strstr(argt, ".wav") && strstr(argt, "--semitones 3"), "a WAV copy asks the helper for no encoding and a .wav: %s", argt ? argt : "(none)");
+    free(argt);
+    CHECK(wav_copies(&a) == 1, "it is the one WAV copy");
+    app_action(&a, R3_ACCEPT);
+
+    /* Compress copies to AAC: the library menu counts the WAV copies, the helper turns them into M4A files with the same id, so their cues stay */
+    build_menu(&a, MK_LIBRARY);
+    int ci2 = -1; for (int i = 0; i < a.menu.n; i++) if (a.menu.it[i].id == A_COMPRESS) ci2 = i;
+    CHECK(ci2 >= 0 && strstr(a.menu.it[ci2].value, "1 WAV copy"), "the library menu offers it and counts 1 WAV copy: %s", ci2 >= 0 ? a.menu.it[ci2].value : "(no item)");
+    char cargs[PATH_MAX];
+    snprintf(cargs, sizeof cargs, "%s/kt-cargs.txt", g_tmp);
+    snprintf(script, sizeof script, "#!/bin/sh\necho \"$@\" > %s\ndir=\nwhile [ $# -gt 0 ]; do case \"$1\" in --compress-dir) dir=\"$2\";; esac; shift; done\n"
+             "for f in \"$dir\"/*\\ \\[kt-*.wav; do [ -e \"$f\" ] || continue; echo \"PROGRESS 0/1 $f\"; cp \"$f\" \"${f%%.wav}.m4a\"; rm \"$f\"; done\necho \"DONE 1 copies compressed, 0.0 MiB saved\"\n", cargs);
+    write_script(fake, script);
+    char copy_id[16];
+    snprintf(copy_id, sizeof copy_id, "%s", a.songs[0].id);
+    for (int i = 0; i < a.nsongs; i++) if (kt_is_copy_id(a.songs[i].id) && strstr(a.songs[i].path, ".wav")) snprintf(copy_id, sizeof copy_id, "%s", a.songs[i].id);
+    compress_start(&a);
+    CHECK(a.mode == M_JOB && a.job_kind == JOB_COMPRESS && a.job_pid > 0, "Compress starts a job");
+    for (int i = 0; i < 400 && !(a.job_pid == 0 && a.job_fd < 0); i++) { app_tick(&a, 10); usleep(10000); }
+    argt = cue_read_file(cargs, NULL);
+    CHECK(argt && strstr(argt, "--compress-dir") && strstr(argt, "/media") && strstr(argt, "--encode aac:192:fast"), "the helper was asked to compress the media folder as AAC 192: %s", argt ? argt : "(none)");
+    free(argt);
+    CHECK(a.job_done && wav_copies(&a) == 0, "afterwards no copy is a WAV");
+    {
+        int ix = song_with_id(&a, copy_id);
+        CHECK(ix >= 0 && strstr(a.songs[ix].path, ".m4a"), "the same copy, same id, is an M4A now: %s", ix >= 0 ? a.songs[ix].path : "(gone)");
+        cue_path(&a, copy_id, "json", p2, sizeof p2);
+        CHECK(access(p2, R_OK) == 0, "and its cue file is still there");
+    }
+    app_action(&a, R3_ACCEPT);
+    compress_start(&a);
+    CHECK(a.mode == M_LIBRARY && a.job_pid == 0 && strstr(a.reply, "No WAV copies"), "with none left it says so: %s", a.reply);
+    /* B stops a compress and removes the half-written M4A */
+    sub_path(&a, "media", "Dummy copy [kt-deadbeef].wav", p2, sizeof p2);
+    write_wav(p2, 44100, 2, 16, 44100 * 2, 0);
+    scan_songs(&a);
+    snprintf(script, sizeof script, "#!/bin/sh\ndir=\nwhile [ $# -gt 0 ]; do case \"$1\" in --compress-dir) dir=\"$2\";; esac; shift; done\necho half > \"$dir/Dummy copy [kt-deadbeef].m4a.enc\"\necho \"PROGRESS 0/1 working\"\nsleep 20\n");
+    write_script(fake, script);
+    compress_start(&a);
+    char encp[PATH_MAX];
+    sub_path(&a, "media", "Dummy copy [kt-deadbeef].m4a.enc", encp, sizeof encp);
+    for (int i = 0; i < 100 && access(encp, F_OK) != 0; i++) { app_tick(&a, 10); usleep(10000); }
+    CHECK(a.mode == M_JOB && access(encp, F_OK) == 0, "a compress is running with its half-written file");
+    app_action(&a, R3_BACK);
+    CHECK(a.mode == M_LIBRARY && a.job_pid == 0 && access(encp, F_OK) != 0, "B stops it and removes the half-written file");
+    unlink(p2);
+    scan_songs(&a);
+    snprintf(conf, sizeof conf, "%s/kt-settings.conf", g_tmp);
+    unlink(conf);
+    unsetenv("R3I6NOS_MUSICUE_CONF");
+    /* put the AAC default and the first fake helper back for what follows */
+    a.kt_aac = 1;
+    snprintf(script, sizeof script, "#!/bin/sh\necho \"$@\" > %s\nout=; in=\nwhile [ $# -gt 0 ]; do case \"$1\" in --in) in=\"$2\";; --out) out=\"$2\";; esac; shift; done\n"
+             "echo \"PROGRESS 0/2 Rendering...\"\ncp \"$in\" \"$out.part\"\necho \"PROGRESS 2/2 Segment 2 of 2 joined\"\nmv \"$out.part\" \"$out\"\necho \"DONE 132300 frames in 0.1 s\"\n", args);
+    write_script(fake, script);
 
     /* B stops a render and takes the half copy away */
     snprintf(script, sizeof script, "#!/bin/sh\nout=\nwhile [ $# -gt 0 ]; do case \"$1\" in --out) out=\"$2\";; esac; shift; done\necho \"PROGRESS 0/4 Rendering...\"\necho half > \"$out.part\"\necho half > \"$out.journal\"\nsleep 20\n");
