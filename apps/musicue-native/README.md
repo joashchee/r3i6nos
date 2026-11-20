@@ -98,3 +98,7 @@ The device report with its power section (rule 9, 14), Rec demo (rule 11), the h
 `scripts/build-native-local.sh musicue-native` (Docker; builds the `.deb` and runs `--selftest` under qemu), or on a Mac with SDL2: `cc -std=c11 -Wall -Wextra -O2 -I theme $(sdl2-config --cflags) apps/musicue-native/musicue.c
 $(sdl2-config --libs) -lm`, then `SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy ./a.out --selftest`. `--screenshot out.bmp [--screen library|player|player:N|menu|context|mainmenu|about|jump|rec|piano|suffix] [--theme NAME]` draws a screen with a synthetic demo
 song; `--make-demo DIR` writes that song and its cue file. `tests/test_musicue_sync.py` tests the sync helper (a local server and a fake yt-dlp).
+
+## Key and Tempo: a copy at another Key and Tempo (2026-11-20)
+
+Song options > **Key and Tempo: make a copy** renders a copy of the song in another Key and/or Tempo on all four cores (docs/MUSICUE.md, "Key and Tempo: render a copy"). The song needs a Key and a Tempo in Metadata. App data it adds: the copy (`media/Title (A 104bpm) [kt-xxxxxxxx].wav`, about 10 MiB a minute), its cue file and `.offset`, and `cues/<id>.kt`; while it runs `<copy>.wav.part` and `<copy>.wav.journal` sit beside it. The renderer is `usr/lib/musicue/musicue-render`, packed with the app (Signalsmith Stretch and Linear, MIT; their licences are in the package's doc folder).

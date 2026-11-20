@@ -154,6 +154,16 @@ int main(int argc, char **argv) {
         bench(secs, cheaper, only);
         return 0;
     }
+    if (argc >= 5 && !strcmp(argv[1], "make-sine")) {            // make-sine OUT.wav SECS HZ
+        return write_wav(argv[2], make_sine(atof(argv[3]), atof(argv[4]))) ? 0 : 1;
+    }
+    if (argc >= 3 && !strcmp(argv[1], "info")) {                 // info FILE.wav: frames, rate, channels, and the tone's frequency over 2 s in the middle
+        Pcm q; std::string err;
+        if (!read_wav(argv[2], q, err)) { fprintf(stderr, "%s\n", err.c_str()); return 1; }
+        int64_t mid = q.frames() / 2;
+        printf("frames=%lld rate=%d channels=%d hz=%.2f\n", (long long)q.frames(), q.rate, q.channels, tone_hz(q, mid - q.rate, mid + q.rate));
+        return 0;
+    }
     if (argc >= 4 && !strcmp(argv[1], "make-song")) {            // the synthetic test song as a WAV, so a measurement can time the render alone
         double secs = atof(argv[3]);
         if (secs < 5 || secs > 3600) { fprintf(stderr, "seconds 5-3600\n"); return 2; }

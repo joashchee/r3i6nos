@@ -32,6 +32,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <sys/stat.h>
+#include <sys/statvfs.h>
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
@@ -46,6 +47,7 @@
 #include "cuedata.h"
 #include "audio.h"
 #include "wave.h"
+#include "kt.h"
 
 /* ---- colours: a palette made from the theme ---------------------------------------------------------------------------------------------- */
 
@@ -168,7 +170,8 @@ static int hue_of(const char *label) {
 
 typedef struct { char path[PATH_MAX]; char name[96]; char id[16]; int has_cues; int nmarkers; } Song;
 
-enum { M_LIBRARY, M_PLAYER, M_MENU, M_JOB, M_NOTE, M_ID, M_TEXT };
+enum { M_LIBRARY, M_PLAYER, M_MENU, M_JOB, M_NOTE, M_ID, M_TEXT, M_KT };
+enum { JOB_SYNC, JOB_RENDER };                                                 /* what the job screen is running: the sync, or a Key and Tempo render */
 enum { OV_NONE, OV_MM, OV_ABOUT, OV_THEME, OV_KEYMAP };                                      /* what shows over a screen: the main menu (L1+R1), About, the colour theme picker */
 enum { MK_LIBRARY, MK_SONG, MK_CONTEXT };                                         /* the app's own menus: the songs' (Add, Sync ...), the song's (offset, save ...), the context menu (L2+R2) */
 enum { TF_KEY, TF_TEMPO, TF_SIG, TF_SCRIPTER, TF_SUFFIX = 10 };                  /* what M_TEXT edits: a metadata field, or the number or letter after a marker's name */
@@ -224,6 +227,9 @@ typedef struct {
     pid_t job_pid; int job_fd; char job_buf[512]; int job_len; char job_lines[6][96]; int job_nlines; double job_frac; int job_done;
     char idbuf[12]; int idpos, idgx, idgy;            /* Start > Add: the 11 characters of a YouTube id, 0 for an empty slot */
     char job_want[16];                      /* a sync for one id: open that song when it is done */
+    KtPlan kt; int kt_workers, kt_cheaper;  /* M_KT: the Key and Tempo being asked for, and its two choices (2 or 4 workers; best or faster) */
+    int job_kind;                           /* JOB_SYNC or JOB_RENDER */
+    char kt_base_id[16], kt_copy_id[16], kt_out[PATH_MAX], kt_title[112], kt_key_txt[16], kt_tempo_txt[16]; double kt_ratio; int kt_semis;   /* the render in progress */
     char note[3][72];                       /* a message box (M_NOTE) */
     unsigned wave_sig;
 } App;
@@ -1257,8 +1263,8 @@ static void compose_player(App *a, R3Screen *s) {
 
 static void compose_job(App *a, R3Screen *s) {
     r3_clear(s);
-    compose_topbar(a, s, "MusiCue", "Sync");
-    R3Box b = {1, "Getting songs and cues", NULL, a->job_done ? "B close" : "B stop", 0};
+    compose_topbar(a, s, "MusiCue", a->job_kind == JOB_RENDER ? "Copy" : "Sync");
+    R3Box b = {1, a->job_kind == JOB_RENDER ? "Making a copy at the new Key and Tempo" : "Getting songs and cues", NULL, a->job_done ? "B close" : "B stop", 0};
     r3_box(s, 2, 4, 60, 14, &b);
     int full = (int)(56 * a->job_frac + 0.5);
     for (int i = 0; i < 56; i++) {
@@ -1266,7 +1272,41 @@ static void compose_job(App *a, R3Screen *s) {
         else r3_put(s, 4 + i, 6, 176, R3_ST(R3_ST_HINT));
     }
     for (int i = 0; i < a->job_nlines && i < 6; i++) r3_text_scroll(s, 4, 8 + i, a->job_lines[i], 56, R3_ST(i == a->job_nlines - 1 ? R3_ST_STRONG : R3_ST_BODY));
-    R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, "Your own list: MusiCue/inbox/urls.txt", "", R3_ST_HINT};
+    R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, a->job_kind == JOB_RENDER ? "B stops it and takes the half copy away" : "Your own list: MusiCue/inbox/urls.txt", "", R3_ST_HINT};
+    r3_command_line(s, &cmd);
+}
+
+static void compose_kt(App *a, R3Screen *s) {
+    r3_clear(s);
+    compose_topbar(a, s, "MusiCue", "Key and Tempo");
+    R3Box b = {1, "A copy at another Key and Tempo", NULL, "A make it   B back", 0};
+    r3_box(s, 3, 3, 58, 17, &b);
+    const Song *sg = &a->songs[a->open];
+    char line[96], bk[16], tk[16], base_t[16], tgt_t[16];
+    r3_text_fit(s, 5, 5, sg->name, 54, R3_ST(R3_ST_STRONG));
+    kt_key_name(&a->kt.base, bk, sizeof bk);
+    kt_key_name(&a->kt.target, tk, sizeof tk);
+    fmt_tempo(a->kt.base_tempo, base_t, sizeof base_t);
+    fmt_tempo(a->kt.target_tempo, tgt_t, sizeof tgt_t);
+    r3_text_fit(s, 5, 7, "              Key          Tempo", 54, R3_ST(R3_ST_HINT));
+    snprintf(line, sizeof line, "The song      %-12s %s bpm", bk, base_t);
+    r3_text_fit(s, 5, 8, line, 54, R3_ST(R3_ST_BODY));
+    snprintf(line, sizeof line, "The copy    < %-3s >      ^ %s bpm v", tk, tgt_t);
+    int bg = P_ACC0 + RAMP / 2;
+    r3_text_fit(s, 5, 9, line, 54, R3_ST(R3_ST_STRONG));
+    for (int i = 0; i < 7; i++) r3_put(s, 17 + i, 9, (unsigned char)line[12 + i], pick_fg(bg), bg);   /* the Key being set */
+    const char *why = kt_update(&a->kt);
+    snprintf(line, sizeof line, "%+d semitone%s, tempo x%.3f (%.1f%%)", a->kt.semis, a->kt.semis == 1 || a->kt.semis == -1 ? "" : "s", a->kt.ratio, a->kt.ratio * 100);
+    r3_text_fit(s, 5, 11, line, 54, R3_ST(R3_ST_BODY));
+    if (why) r3_text_fit(s, 5, 12, why, 54, R3_ST(R3_ST_WARN));
+    else if (a->kt.ratio < 0.75 || a->kt.ratio > 1.5) r3_text_fit(s, 5, 12, "It sounds best between 75% and 150% of the tempo.", 54, R3_ST(R3_ST_WARN));
+    snprintf(line, sizeof line, "About %.0f s with %d workers, %s quality.", kt_estimate_s(dur_of(a), a->kt_workers, a->kt_cheaper), a->kt_workers, a->kt_cheaper ? "faster" : "best");
+    r3_text_fit(s, 5, 14, line, 54, R3_ST(R3_ST_BODY));
+    snprintf(line, sizeof line, "The copy is about %.1f MiB and goes in with the songs.", kt_copy_bytes(dur_of(a), a->kt.ratio) / 1048576.0);
+    r3_text_fit(s, 5, 15, line, 54, R3_ST(R3_ST_BODY));
+    r3_text_fit(s, 5, 17, "Left/Right Key  Up/Down Tempo  R1+Up/Down 5 bpm", 54, R3_ST(R3_ST_HINT));
+    r3_text_fit(s, 5, 18, "X workers (2, 4)  Y quality  R1+Left the song's own", 54, R3_ST(R3_ST_HINT));
+    R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, "All four cores for a minute; the song stays as it is", "", R3_ST_HINT};
     r3_command_line(s, &cmd);
 }
 
@@ -1380,6 +1420,7 @@ static void compose(App *a, R3Screen *s) {
         compose_menu_box(&a->menu, s, a->back_mode == M_PLAYER ? 7 : 5);      /* below the waveform when there is one */
         break;
     case M_JOB: compose_job(a, s); break;
+    case M_KT: compose_kt(a, s); break;
     case M_NOTE: compose_note(a, s); break;
     case M_ID: compose_id(a, s); break;
     case M_TEXT: compose_text(a, s); break;
@@ -1443,7 +1484,7 @@ static void present(App *a, R3Video *v, SDL_Renderer *r, const R3Screen *s, int 
 
 /* ---- actions ------------------------------------------------------------------------------------------------------------------------------- */
 
-enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_VIDEO, A_ADD, A_CUE, A_BOOKMARK, A_CUEDEL, A_RECALC, A_SLADD, A_SLDEL, A_SLUP, A_SLDOWN, A_QUIT, A_CLOSE, A_JUMPCLEAR, A_LABELPICK };
+enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_VIDEO, A_ADD, A_CUE, A_BOOKMARK, A_CUEDEL, A_RECALC, A_SLADD, A_SLDEL, A_SLUP, A_SLDOWN, A_QUIT, A_CLOSE, A_JUMPCLEAR, A_KT, A_LABELPICK };
 
 static const char *const PRESET_LABELS[] = {"Intro", "Verse", "Pre-Chorus", "Chorus", "Bridge", "Solo", "Instrumental", "Outro", "End", "Tag"};
 #define NPRESET ((int)(sizeof PRESET_LABELS / sizeof *PRESET_LABELS))
@@ -1892,6 +1933,7 @@ static void build_menu(App *a, int kind) {
         menu_add(&a->menu, A_EXPORT, "Export for Cue (json, srt, bundle)", "");
         menu_add(&a->menu, A_SLADD, "Add this song to the Set List", a->open >= 0 && setlist_find(a, a->songs[a->open].id) >= 0 ? "in list" : "");
         menu_add(&a->menu, A_RECALC, "Recalculate tempo", "");
+        menu_add(&a->menu, A_KT, "Key and Tempo: make a copy", "");
         menu_add(&a->menu, A_QUIT, "Back to the songs", "");
     } else {
         menu_clear(&a->menu, a->jump_view ? "Jump" : PANEL_NAMES[panel_at(a, a->pan_focus)]);
@@ -2042,33 +2084,219 @@ static const char *helper_path(char *buf, size_t cap) {
     return "musicue-sync";
 }
 
-static void job_start(App *a, const char *one_id) {
-    char hbuf[PATH_MAX + 40];
-    const char *helper = helper_path(hbuf, sizeof hbuf);
+/* Starts argv as the job: its output, lines of PROGRESS, BAR, DONE or text, is read by job_poll and shown on the job screen. */
+static int job_spawn(App *a, const char *const *argv, int kind) {
     int fd[2];
     memset(a->job_lines, 0, sizeof a->job_lines);
     a->job_nlines = 0; a->job_frac = 0; a->job_done = 0; a->job_len = 0;
-    snprintf(a->job_want, sizeof a->job_want, "%s", one_id ? one_id : "");
-    if (pipe(fd) != 0) { say(a, R3_ST_ERROR, "Cannot start the sync."); return; }
+    if (pipe(fd) != 0) return 0;
     pid_t pid = fork();
-    if (pid < 0) { close(fd[0]); close(fd[1]); say(a, R3_ST_ERROR, "Cannot start the sync."); return; }
+    if (pid < 0) { close(fd[0]); close(fd[1]); return 0; }
     if (pid == 0) {
         dup2(fd[1], 1);
         dup2(fd[1], 2);
         close(fd[0]); close(fd[1]);
         setenv("R3I6NOS_APP_DATA", a->data, 1);
-        const char *lic = a->any_license ? "--any-license" : "--cc-only", *vid = a->save_video ? "--video" : "--cc-only";   /* a repeated --cc-only is harmless */
-        if (one_id) execlp(helper, helper, "--data", a->data, lic, vid, "--id", one_id, (char *)NULL);
-        else execlp(helper, helper, "--data", a->data, lic, vid, (char *)NULL);
+        execvp(argv[0], (char *const *)argv);
         _exit(127);
     }
     close(fd[1]);
     fcntl(fd[0], F_SETFL, fcntl(fd[0], F_GETFL) | O_NONBLOCK);
     a->job_fd = fd[0];
     a->job_pid = pid;
+    a->job_kind = kind;
     a->mode = M_JOB;
     job_line(a, "Starting...");
+    return 1;
+}
+
+static void job_start(App *a, const char *one_id) {
+    char hbuf[PATH_MAX + 40];
+    const char *helper = helper_path(hbuf, sizeof hbuf);
+    snprintf(a->job_want, sizeof a->job_want, "%s", one_id ? one_id : "");
+    const char *lic = a->any_license ? "--any-license" : "--cc-only", *vid = a->save_video ? "--video" : "--cc-only";   /* a repeated --cc-only is harmless */
+    const char *argv_id[] = {helper, "--data", a->data, lic, vid, "--id", one_id, NULL};
+    const char *argv_all[] = {helper, "--data", a->data, lic, vid, NULL};
+    if (!job_spawn(a, one_id ? argv_id : argv_all, JOB_SYNC)) { say(a, R3_ST_ERROR, "Cannot start the sync."); return; }
     say(a, R3_ST_HINT, one_id ? "Fetching %s." : "Reading MusiCue/inbox/urls.txt.", one_id ? one_id : "");
+}
+
+/* ---- Key and Tempo: a copy of the song at another Key and Tempo, rendered by musicue-render (docs/MUSICUE.md, ROADMAP section 40) ------------------- */
+
+/* musicue-render: $R3I6NOS_MUSICUE_RENDER, else the copy packed beside this program (usr/lib/musicue/), else the PATH's. */
+static const char *render_helper_path(char *buf, size_t cap) {
+    const char *o = getenv("R3I6NOS_MUSICUE_RENDER");
+    if (o && *o) return o;
+    char exe[PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (n > 0) {
+        exe[n] = 0;
+        char *slash = strrchr(exe, '/');
+        if (slash) {
+            *slash = 0;
+            snprintf(buf, cap, "%s/../lib/musicue/musicue-render", exe);
+            if (access(buf, X_OK) == 0) return buf;
+        }
+    }
+    return "musicue-render";
+}
+
+/* The battery: charge in percent and whether it is charging, from $R3I6NOS_MUSICUE_BATTERY (a folder, for tests) or /sys/class/power_supply/battery.
+ * -1 when there is none to read (a laptop, a test): then nothing is refused for it. */
+static int battery_state(int *charging) {
+    const char *d = getenv("R3I6NOS_MUSICUE_BATTERY");
+    char p[PATH_MAX], v[32] = "";
+    snprintf(p, sizeof p, "%s/capacity", d && *d ? d : "/sys/class/power_supply/battery");
+    FILE *f = fopen(p, "r");
+    if (!f) return -1;
+    int pct = fgets(v, sizeof v, f) ? atoi(v) : -1;
+    fclose(f);
+    snprintf(p, sizeof p, "%s/status", d && *d ? d : "/sys/class/power_supply/battery");
+    *charging = 0;
+    if ((f = fopen(p, "r"))) { if (fgets(v, sizeof v, f)) *charging = !strncmp(v, "Charging", 8) || !strncmp(v, "Full", 4); fclose(f); }
+    return pct;
+}
+
+static double free_bytes(const char *dir) {
+    const char *o = getenv("R3I6NOS_MUSICUE_FREE_MB");
+    if (o && *o) return atof(o) * 1048576.0;
+    struct statvfs sv;
+    return statvfs(dir, &sv) == 0 ? (double)sv.f_bavail * (double)sv.f_frsize : 1e18;
+}
+
+/* Song options > Key and Tempo: the song's own Key and Tempo are the starting point. */
+static void kt_open(App *a) {
+    a->mode = M_PLAYER;
+    if (a->open < 0) { say(a, R3_ST_WARN, "Open a song from the card first (the demo is not a file)."); return; }
+    if (kt_is_copy_id(a->songs[a->open].id)) { say(a, R3_ST_WARN, "This is already a copy: make the new one from the original song."); return; }
+    const char *why = kt_plan(&a->kt, a->cues.meta.key, a->cues.meta.tempo);
+    if (why) { say(a, R3_ST_WARN, "%s", why); return; }
+    a->kt_workers = 4; a->kt_cheaper = 0;
+    a->mode = M_KT;
+    say(a, R3_ST_HINT, "Left/Right the Key, Up/Down the Tempo, A makes the copy.");
+}
+
+static void kt_move(App *a, int dkey, double dtempo) {
+    a->kt.target.root = ((a->kt.target.root + dkey) % 12 + 12) % 12;
+    double t = a->kt.target_tempo + dtempo;
+    if (t < a->kt.base_tempo * 0.5) t = a->kt.base_tempo * 0.5;
+    if (t > a->kt.base_tempo * 2) t = a->kt.base_tempo * 2;
+    a->kt.target_tempo = floor(t * 100 + 0.5) / 100;
+    kt_update(&a->kt);
+}
+
+/* The copy's paths are made from the plan: media/<title>.wav, and the job's part and journal beside it. */
+static void kt_paths(App *a, const Song *base) {
+    fmt_tempo(a->kt.target_tempo, a->kt_tempo_txt, sizeof a->kt_tempo_txt);
+    kt_key_name(&a->kt.target, a->kt_key_txt, sizeof a->kt_key_txt);
+    kt_copy_id(base->id, a->kt.semis, a->kt.ratio, a->kt_copy_id, sizeof a->kt_copy_id);
+    kt_copy_name(base->name, &a->kt.target, a->kt_tempo_txt, a->kt_copy_id, a->kt_title, sizeof a->kt_title);
+    char file[PATH_MAX];
+    snprintf(file, sizeof file, "%s.wav", a->kt_title);
+    sub_path(a, "media", file, a->kt_out, sizeof a->kt_out);
+    snprintf(a->kt_base_id, sizeof a->kt_base_id, "%s", base->id);
+    a->kt_ratio = a->kt.ratio; a->kt_semis = a->kt.semis;
+}
+
+static void kt_cleanup(App *a) {            /* a render stopped on purpose: the half-written copy and its journal go (a power cut keeps them, to continue) */
+    char p[PATH_MAX + 16];
+    snprintf(p, sizeof p, "%s.part", a->kt_out); unlink(p);
+    snprintf(p, sizeof p, "%s.journal", a->kt_out); unlink(p);
+    snprintf(p, sizeof p, "%s.in.wav", a->kt_out); unlink(p);
+}
+
+/* Checks, then starts the render (the confirmation was the screen: A on it). */
+static void kt_start(App *a) {
+    const char *why = kt_update(&a->kt);
+    if (why) { say(a, R3_ST_WARN, "%s", why); return; }
+    const Song base = a->songs[a->open];
+    const double song_s = dur_of(a);
+    int charging = 0, pct = battery_state(&charging);
+    if (pct >= 0 && pct < 20 && !charging) { say(a, R3_ST_WARN, "The battery is at %d%%: plug in the charger first, or wait. A render uses all four cores.", pct); return; }
+    if (free_bytes(a->data) < kt_copy_bytes(song_s, a->kt.ratio) * 1.05 + 16.0 * 1048576.0) {
+        say(a, R3_ST_WARN, "Not enough room for the copy (%.0f MiB).", kt_copy_bytes(song_s, a->kt.ratio) / 1048576.0);
+        return;
+    }
+    kt_paths(a, &base);
+    if (access(a->kt_out, F_OK) == 0) {                      /* the same ask again: the copy is there */
+        scan_songs(a);
+        for (int i = 0; i < a->nsongs; i++) if (!strcmp(a->songs[i].id, a->kt_copy_id)) a->lsel = i;
+        save_cues(a); close_song(a);
+        a->mode = M_LIBRARY;
+        say(a, R3_ST_OK, "That copy is already made: it is selected in the songs.");
+        return;
+    }
+    save_cues(a);                                              /* the copy's cues are made from the saved ones */
+    close_song(a);                                             /* frees the song's memory for the render */
+    char hbuf[PATH_MAX + 40], ratio[32], semis[16], workers[16];
+    snprintf(ratio, sizeof ratio, "%.10g", a->kt_ratio);
+    snprintf(semis, sizeof semis, "%d", a->kt_semis);
+    snprintf(workers, sizeof workers, "%d", a->kt_workers);
+    const char *helper = render_helper_path(hbuf, sizeof hbuf);
+    const char *argv[16];
+    int n = 0;
+    argv[n++] = helper; argv[n++] = "--in"; argv[n++] = base.path; argv[n++] = "--out"; argv[n++] = a->kt_out;
+    argv[n++] = "--ratio"; argv[n++] = ratio; argv[n++] = "--semitones"; argv[n++] = semis; argv[n++] = "--workers"; argv[n++] = workers;
+    if (a->kt_cheaper) argv[n++] = "--cheaper";
+    argv[n] = NULL;
+    a->job_want[0] = 0;
+    if (!job_spawn(a, argv, JOB_RENDER)) { say(a, R3_ST_ERROR, "Cannot start the render."); a->mode = M_LIBRARY; return; }
+    say(a, R3_ST_HINT, "A copy of %.40s at %s and %s bpm. B stops it.", base.name, a->kt_key_txt, a->kt_tempo_txt);
+}
+
+/* The render is done: the copy's cue file is the base's with every time divided by the ratio and the Key and Tempo set, its offset is scaled the same,
+ * and a sidecar names what it is a copy of. 1 when all of it was written. */
+static int kt_finish(App *a) {
+    char path[PATH_MAX], dir[PATH_MAX];
+    sub_path(a, "cues", NULL, dir, sizeof dir);
+    mkdirs(dir);
+    CueSet cs;
+    cue_init(&cs);
+    size_t n;
+    char e2[96];
+    cue_path(a, a->kt_base_id, "json", path, sizeof path);
+    char *t = cue_read_file(path, &n);
+    if (t) { cue_load_json(&cs, t, n, 1, e2); free(t); }
+    if (!cs.nc) {
+        cue_path(a, a->kt_base_id, "srt", path, sizeof path);
+        t = cue_read_file(path, &n);
+        if (t) { cue_load_srt(&cs, t, n, e2); free(t); }
+    }
+    kt_scale_cues(&cs, a->kt_ratio);
+    snprintf(cs.videoid, sizeof cs.videoid, "%s", a->kt_copy_id);
+    cue_meta_set(&cs, "key", a->kt_key_txt);
+    cue_meta_set(&cs, "tempo", a->kt_tempo_txt);
+    CueBuf b = {0};
+    cue_write_version(&cs, &b, time(NULL));
+    cue_path(a, a->kt_copy_id, "json", path, sizeof path);
+    int ok = !b.bad && cue_write_file(path, b.p, b.n) == 0;
+    free(b.p);
+    cue_free(&cs);
+    cue_path(a, a->kt_base_id, "offset", path, sizeof path);
+    if ((t = cue_read_file(path, NULL))) {
+        double off = atof(t) / a->kt_ratio;
+        free(t);
+        char buf[32];
+        snprintf(buf, sizeof buf, "%.3f\n", off);
+        cue_path(a, a->kt_copy_id, "offset", path, sizeof path);
+        cue_write_file(path, buf, strlen(buf));
+    }
+    char side[256];
+    snprintf(side, sizeof side, "base=%s\nratio=%.10g\nsemitones=%d\nkey=%s\ntempo=%s\n", a->kt_base_id, a->kt_ratio, a->kt_semis, a->kt_key_txt, a->kt_tempo_txt);
+    cue_path(a, a->kt_copy_id, "kt", path, sizeof path);
+    ok = cue_write_file(path, side, strlen(side)) == 0 && ok;
+    return ok;
+}
+
+static void render_job_ended(App *a, int status) {
+    if (WIFEXITED(status) && WEXITSTATUS(status) == 127) { job_line(a, "musicue-render is not installed."); say(a, R3_ST_ERROR, "The render helper is missing."); }
+    else if (a->job_done) {
+        if (kt_finish(a)) say(a, R3_ST_OK, "The copy is ready: %s. A closes.", a->kt_title);
+        else say(a, R3_ST_ERROR, "The copy was made but its cue file could not be saved.");
+    } else say(a, R3_ST_WARN, "The render stopped before it was done. Make the same copy again to continue it.");
+    a->job_done = 1;
+    scan_songs(a);
+    for (int i = 0; i < a->nsongs; i++) if (!strcmp(a->songs[i].id, a->kt_copy_id)) a->lsel = i;
 }
 
 static void job_poll(App *a) {
@@ -2099,6 +2327,7 @@ static void job_poll(App *a) {
         a->job_pid = 0;
         close(a->job_fd);
         a->job_fd = -1;
+        if (a->job_kind == JOB_RENDER) { render_job_ended(a, status); return; }
         if (WIFEXITED(status) && WEXITSTATUS(status) == 127) { job_line(a, "musicue-sync is not installed."); say(a, R3_ST_ERROR, "The sync helper is missing."); }
         else if (!a->job_done) say(a, R3_ST_WARN, "The sync ended before it said it was done.");
         else say(a, R3_ST_OK, "Sync finished.");
@@ -2232,6 +2461,7 @@ static void menu_choose(App *a) {
     case A_BOOKMARK: cue_bookmark(a, a->csel); a->mode = M_PLAYER; break;
     case A_CUEDEL: cue_delete(a, a->csel); a->mode = M_PLAYER; break;
     case A_RECALC: recalc_tempo(a); a->mode = M_PLAYER; break;
+    case A_KT: kt_open(a); break;
     case A_SLADD:
         if (a->open < 0) say(a, R3_ST_WARN, "Open a song from the card to add it (the demo is not a file).");
         else { int r = setlist_add(a, a->songs[a->open].id, a->songs[a->open].name); say(a, r < 0 ? R3_ST_ERROR : R3_ST_OK, r < 0 ? "The Set List is full." : r ? "Added to the Set List." : "Set List entry updated."); }
@@ -2323,7 +2553,28 @@ static void app_action(App *a, int act) {
         else a->menu.sel = r3_list_step(a->menu.sel, a->menu.n, 12, act);
         break;
     case M_JOB:
-        if (act == R3_BACK || act == R3_ACCEPT) { job_stop(a); a->mode = M_LIBRARY; scan_songs(a); }
+        if (act == R3_BACK || act == R3_ACCEPT) {
+            int running = a->job_pid > 0;
+            job_stop(a);
+            if (running && a->job_kind == JOB_RENDER) { kt_cleanup(a); say(a, R3_ST_HINT, "The render was stopped; nothing was added."); }
+            a->mode = M_LIBRARY; scan_songs(a);
+        }
+        break;
+    case M_KT:
+        switch (act) {
+        case R3_BACK: a->mode = M_PLAYER; say(a, R3_ST_HINT, "No copy made."); break;
+        case R3_LEFT: kt_move(a, -1, 0); break;
+        case R3_RIGHT: kt_move(a, 1, 0); break;
+        case R3_UP: kt_move(a, 0, 1); break;
+        case R3_DOWN: kt_move(a, 0, -1); break;
+        case R3_PAGEUP: kt_move(a, 0, 5); break;
+        case R3_PAGEDOWN: kt_move(a, 0, -5); break;
+        case R3_HOME: a->kt.target = a->kt.base; a->kt.target_tempo = a->kt.base_tempo; kt_update(&a->kt); break;
+        case R3_X: a->kt_workers = a->kt_workers == 4 ? 2 : 4; break;
+        case R3_Y: a->kt_cheaper = !a->kt_cheaper; break;
+        case R3_ACCEPT: case R3_START: kt_start(a); break;
+        default: break;
+        }
         break;
     case M_NOTE:
         if (act == R3_BACK || act == R3_ACCEPT) a->mode = M_LIBRARY;
@@ -2789,6 +3040,223 @@ static void test_add_id(void) {
 }
 
 /* A line too long for its cells scrolls in a closed loop after a hold, the way KlamANSI's does; one that fits, or with the clock off, does not. */
+/* ---- Key and Tempo: the arithmetic, the screen, and the job against a fake musicue-render --------------------------------------------------------- */
+
+static int song_with_id(const App *a, const char *id) { for (int i = 0; i < a->nsongs; i++) if (!strcmp(a->songs[i].id, id)) return i; return -1; }
+
+static void write_script(const char *path, const char *body) {
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+    fputs(body, f);
+    fclose(f);
+    chmod(path, 0755);
+}
+
+static void test_kt(void) {
+    /* the arithmetic */
+    KtKey k;
+    CHECK(kt_parse_key("G", &k) && k.root == 7 && !k.minor, "G is root 7, major");
+    CHECK(kt_parse_key("F#m", &k) && k.root == 6 && k.minor, "F#m is root 6, minor");
+    CHECK(kt_parse_key("Bb", &k) && k.root == 10 && k.flat && !k.minor, "Bb is root 10, major, written flat");
+    CHECK(kt_parse_key("Gm7", &k) && k.root == 7 && k.minor, "Gm7 is G minor");
+    CHECK(kt_parse_key("Cmaj7", &k) && k.root == 0 && !k.minor, "Cmaj7 is C major (maj is not m)");
+    CHECK(kt_parse_key("e minor", &k) && k.root == 4 && k.minor, "e minor is E minor");
+    CHECK(kt_parse_key("Abm", &k) && k.root == 8 && k.minor && k.flat, "Abm is G# minor written flat");
+    CHECK(!kt_parse_key("H", &k) && !kt_parse_key("", &k) && !kt_parse_key("?", &k), "H, nothing and ? are not keys");
+    char nm[16];
+    kt_key_name(&k, nm, sizeof nm);
+    CHECK(kt_semitones(7, 9) == 2 && kt_semitones(9, 7) == -2 && kt_semitones(0, 6) == 6 && kt_semitones(0, 7) == -5 && kt_semitones(11, 0) == 1 && kt_semitones(3, 3) == 0, "the shift goes the nearer way: G to A +2, A to G -2, C to F# +6, C to G -5, B to C +1");
+    CHECK(kt_tempo("96") == 96 && kt_tempo("104.5") == 104.5 && kt_tempo("") == 0 && kt_tempo("?") == 0 && kt_tempo("-3") == 0 && kt_tempo("fast") == 0, "a Tempo is a positive number or nothing");
+    KtPlan p;
+    CHECK(kt_plan(&p, "", "96") && kt_plan(&p, "G", "") && kt_plan(&p, "G", "?") && kt_plan(&p, "H", "96"), "no Key, no Tempo or a Key that is not a note is refused, saying what to fix");
+    CHECK(kt_plan(&p, "Gm", "96") == NULL && p.base.minor && p.base_tempo == 96 && p.ratio == 1, "a plan starts as the song itself");
+    CHECK(kt_update(&p) != NULL, "nothing to change is refused");
+    p.target.root = 9; p.target_tempo = 104;
+    CHECK(kt_update(&p) == NULL && p.semis == 2 && fabs(p.ratio - 104.0 / 96) < 1e-9, "G minor to A minor and 96 to 104: +2 and x1.0833");
+    p.target_tempo = 200;
+    CHECK(kt_update(&p) != NULL, "more than double is refused");
+    p.target_tempo = 96; p.target.root = 7; p.target_tempo = 48;
+    CHECK(kt_update(&p) == NULL && fabs(p.ratio - 0.5) < 1e-9, "half the tempo is the limit and is allowed");
+    char i1[16], i2[16], i3[16];
+    kt_copy_id("abc123", 2, 1.0833, i1, sizeof i1);
+    kt_copy_id("abc123", 2, 1.0833, i2, sizeof i2);
+    kt_copy_id("abc123", 3, 1.0833, i3, sizeof i3);
+    CHECK(!strcmp(i1, i2) && strcmp(i1, i3) && strlen(i1) == 11 && kt_is_copy_id(i1) && cue_videoid_ok(i1), "a copy's id is the same for the same ask, different for another, 11 characters and a valid id");
+    KtKey tk = {9, 0, 0};
+    char name[128];
+    kt_copy_name("Some Song [dQw4w9WgXcQ]", &tk, "104", i1, name, sizeof name);
+    CHECK(!strncmp(name, "Some Song (A 104bpm) [kt-", 25), "the copy's name drops the base's id and says what it is: %s", name);
+    CHECK(kt_estimate_s(240, 4, 0) > kt_estimate_s(240, 4, 1) && kt_estimate_s(240, 2, 0) > kt_estimate_s(240, 4, 0), "the estimate: faster with 4 workers and the cheaper preset");
+    CHECK(kt_estimate_s(240, 4, 0) > 30 && kt_estimate_s(240, 4, 0) < 50, "a 4-minute song takes about 30-50 s with 4 workers (the unit's 9.3x plus the margin): %.0f", kt_estimate_s(240, 4, 0));
+    CHECK(fabs(kt_copy_bytes(60, 1.0) - 60 * 176400.0) < 100, "a minute is 10 MB");
+
+    /* the app: a song with a Key and a Tempo and cues, a fake render helper */
+    App a;
+    app_init(&a, g_tmp);
+    char d[PATH_MAX], p2[PATH_MAX], fake[PATH_MAX], args[PATH_MAX], bat[PATH_MAX];
+    snprintf(d, sizeof d, "%s/kt", g_tmp);
+    snprintf(a.data, sizeof a.data, "%s", d);
+    const char *sub[] = {"media", "cues", "inbox"};
+    for (int i = 0; i < 3; i++) { sub_path(&a, sub[i], NULL, p2, sizeof p2); mkdirs(p2); }
+    sub_path(&a, "media", "Song One.wav", p2, sizeof p2);
+    write_wav(p2, 44100, 2, 16, 44100 * 3, 0);
+    sub_path(&a, "media", "Song Two.wav", p2, sizeof p2);
+    write_wav(p2, 44100, 2, 16, 44100 * 3, 0);
+    scan_songs(&a);
+    CHECK(a.nsongs == 2, "two songs");
+    char one_id[16], two_id[16];
+    snprintf(one_id, sizeof one_id, "%s", a.songs[0].id);
+    snprintf(two_id, sizeof two_id, "%s", a.songs[1].id);
+    {   /* Song One: Key G, Tempo 96, two markers, a caption, an offset of 0.5 s */
+        CueSet cs; cue_init(&cs);
+        snprintf(cs.videoid, sizeof cs.videoid, "%s", one_id);
+        cue_add_marker(&cs, 1.0, "Verse", 0);
+        cue_add_marker(&cs, 2.0, "Chorus", 0);
+        cue_add_caption(&cs, 0.5, 1, 1.5, "hello");
+        cue_meta_set(&cs, "key", "G"); cue_meta_set(&cs, "tempo", "96");
+        CueBuf b = {0}; cue_write_version(&cs, &b, 1000000000);
+        cue_path(&a, one_id, "json", p2, sizeof p2); cue_write_file(p2, b.p, b.n); free(b.p); cue_free(&cs);
+        cue_path(&a, one_id, "offset", p2, sizeof p2); cue_write_file(p2, "0.500\n", 6);
+    }
+    snprintf(args, sizeof args, "%s/kt-args.txt", g_tmp);
+    snprintf(fake, sizeof fake, "%s/fakerender", g_tmp);
+    char script[2048];
+    snprintf(script, sizeof script, "#!/bin/sh\necho \"$@\" > %s\nout=; in=\nwhile [ $# -gt 0 ]; do case \"$1\" in --in) in=\"$2\";; --out) out=\"$2\";; esac; shift; done\n"
+             "echo \"PROGRESS 0/2 Rendering...\"\ncp \"$in\" \"$out.part\"\necho \"PROGRESS 1/2 Segment 1 of 2 joined\"\necho \"PROGRESS 2/2 Segment 2 of 2 joined\"\nmv \"$out.part\" \"$out\"\necho \"DONE 132300 frames in 0.1 s\"\n", args);
+    write_script(fake, script);
+    setenv("R3I6NOS_MUSICUE_RENDER", fake, 1);
+    unsetenv("R3I6NOS_MUSICUE_BATTERY"); unsetenv("R3I6NOS_MUSICUE_FREE_MB");
+
+    int i1x = song_with_id(&a, one_id), i2x = song_with_id(&a, two_id);
+    CHECK(open_song(&a, i2x) && a.cues.meta.key[0] == 0, "Song Two opens with no Key");
+    open_menu(&a, MK_SONG);
+    int has = 0; for (int i = 0; i < a.menu.n; i++) if (a.menu.it[i].id == A_KT) has = 1;
+    CHECK(has, "the song's options have Key and Tempo");
+    kt_open(&a);
+    CHECK(a.mode == M_PLAYER && strstr(a.reply, "no Key"), "a song with no Key says so and stays: %s", a.reply);
+    close_song(&a);
+
+    CHECK(open_song(&a, i1x) && !strcmp(a.cues.meta.key, "G") && !strcmp(a.cues.meta.tempo, "96"), "Song One opens with Key G and Tempo 96");
+    kt_open(&a);
+    CHECK(a.mode == M_KT && a.kt.base.root == 7 && a.kt.base_tempo == 96 && a.kt_workers == 4 && !a.kt_cheaper, "Key and Tempo opens on the song's own values, 4 workers, best quality");
+    for (int th = 0; th < R3_THEME_COUNT; th++) { a.theme = th; apply_theme(&a); check_contrast(&a, "key and tempo"); }
+    a.theme = r3_theme_find("Nord"); apply_theme(&a);
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_KT && a.job_pid == 0 && strstr(a.reply, "Nothing to change"), "A with nothing changed does not start: %s", a.reply);
+    app_action(&a, R3_RIGHT); app_action(&a, R3_RIGHT);
+    for (int i = 0; i < 8; i++) app_action(&a, R3_UP);
+    CHECK(a.kt.target.root == 9 && a.kt.semis == 2 && a.kt.target_tempo == 104, "Right twice is A (+2) and Up eight times is 104");
+    app_action(&a, R3_PAGEDOWN);
+    CHECK(a.kt.target_tempo == 99, "R1+Down is 5 bpm");
+    app_action(&a, R3_HOME);
+    CHECK(a.kt.target.root == 7 && a.kt.target_tempo == 96, "R1+Left puts back the song's own");
+    app_action(&a, R3_LEFT); app_action(&a, R3_LEFT); app_action(&a, R3_LEFT); app_action(&a, R3_RIGHT); app_action(&a, R3_RIGHT); app_action(&a, R3_RIGHT);
+    for (int i = 0; i < 8; i++) app_action(&a, R3_DOWN);
+    CHECK(a.kt.target_tempo == 88, "tempo can go down: 88");
+    for (int i = 0; i < 100; i++) app_action(&a, R3_PAGEUP);
+    CHECK(a.kt.target_tempo == 192, "and stops at double the song's: %g", a.kt.target_tempo);
+    app_action(&a, R3_HOME);
+    app_action(&a, R3_RIGHT); app_action(&a, R3_RIGHT);
+    for (int i = 0; i < 8; i++) app_action(&a, R3_UP);
+    app_action(&a, R3_X);
+    CHECK(a.kt_workers == 2, "X makes it 2 workers");
+    app_action(&a, R3_Y);
+    CHECK(a.kt_cheaper == 1, "Y makes it the cheaper preset");
+
+    /* refused before anything starts: a low battery, no room */
+    snprintf(bat, sizeof bat, "%s/battery", g_tmp);
+    mkdirs(bat);
+    snprintf(p2, sizeof p2, "%s/capacity", bat); cue_write_file(p2, "12\n", 3);
+    snprintf(p2, sizeof p2, "%s/status", bat); cue_write_file(p2, "Discharging\n", 12);
+    setenv("R3I6NOS_MUSICUE_BATTERY", bat, 1);
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_KT && a.job_pid == 0 && strstr(a.reply, "battery"), "12%% and not charging: no render, and it says why: %s", a.reply);
+    unsetenv("R3I6NOS_MUSICUE_BATTERY");
+    setenv("R3I6NOS_MUSICUE_FREE_MB", "1", 1);
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_KT && a.job_pid == 0 && strstr(a.reply, "room"), "no room: no render, and it says so: %s", a.reply);
+    unsetenv("R3I6NOS_MUSICUE_FREE_MB");
+
+    /* the render */
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_JOB && a.job_kind == JOB_RENDER && a.job_pid > 0 && a.open < 0, "A starts the render on the job screen and frees the song");
+    for (int i = 0; i < 400 && !(a.job_pid == 0 && a.job_fd < 0); i++) { app_tick(&a, 10); usleep(10000); }
+    CHECK(a.job_done && a.job_frac == 1, "the job finishes with the bar full");
+    char *argt = cue_read_file(args, NULL);
+    CHECK(argt && strstr(argt, "--ratio 1.0833333") && strstr(argt, "--semitones 2") && strstr(argt, "--workers 2") && strstr(argt, "--cheaper") && strstr(argt, "--in") && strstr(argt, "Song One.wav"),
+          "the helper got the ratio, the shift, the workers, the preset and the song: %s", argt ? argt : "(none)");
+    free(argt);
+    int ci = song_with_id(&a, a.kt_copy_id);
+    CHECK(ci >= 0 && strstr(a.songs[ci].name, "Song One (A 104bpm) [kt-") && a.lsel == ci, "the copy is in the songs, named for its Key and Tempo, and selected: %s", ci >= 0 ? a.songs[ci].name : "(missing)");
+    {
+        char *t = NULL; size_t n; CueSet c2; cue_init(&c2); char e2[96];
+        cue_path(&a, a.kt_copy_id, "json", p2, sizeof p2);
+        t = cue_read_file(p2, &n);
+        CHECK(t && cue_load_json(&c2, t, n, 1, e2), "the copy has its own cue file");
+        free(t);
+        CHECK(c2.nm == 2 && fabs(c2.m[0].time - 1.0 / (104.0 / 96)) < 1e-3 && fabs(c2.m[1].time - 2.0 / (104.0 / 96)) < 1e-3, "its markers are the song's divided by the ratio: %.4f %.4f", c2.nm > 1 ? c2.m[0].time : -1, c2.nm > 1 ? c2.m[1].time : -1);
+        CHECK(!strcmp(c2.meta.key, "A") && !strcmp(c2.meta.tempo, "104"), "its Key is A and its Tempo 104: %s %s", c2.meta.key, c2.meta.tempo);
+        cue_free(&c2);
+        cue_path(&a, a.kt_copy_id, "offset", p2, sizeof p2);
+        t = cue_read_file(p2, NULL);
+        CHECK(t && fabs(atof(t) - 0.5 / (104.0 / 96)) < 0.002, "its offset is scaled too: %s", t ? t : "(none)");
+        free(t);
+        cue_path(&a, a.kt_copy_id, "kt", p2, sizeof p2);
+        t = cue_read_file(p2, NULL);
+        CHECK(t && strstr(t, one_id) && strstr(t, "semitones=2") && strstr(t, "tempo=104"), "its sidecar names what it is a copy of");
+        free(t);
+        cue_path(&a, one_id, "json", p2, sizeof p2);
+        t = cue_read_file(p2, &n);
+        cue_init(&c2);
+        CHECK(t && cue_load_json(&c2, t, n, 1, e2) && c2.nm == 2 && fabs(c2.m[0].time - 1.0) < 1e-9 && !strcmp(c2.meta.key, "G"), "the song's own cues are untouched");
+        free(t); cue_free(&c2);
+    }
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_LIBRARY, "A closes the job screen");
+
+    /* the same ask again finds the copy; a copy cannot be copied */
+    CHECK(open_song(&a, song_with_id(&a, one_id)), "Song One again");
+    kt_open(&a);
+    app_action(&a, R3_RIGHT); app_action(&a, R3_RIGHT);
+    for (int i = 0; i < 8; i++) app_action(&a, R3_UP);
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_LIBRARY && a.job_pid == 0 && strstr(a.reply, "already made"), "the same Key and Tempo again starts nothing: %s", a.reply);
+    CHECK(open_song(&a, song_with_id(&a, a.kt_copy_id)), "the copy opens");
+    kt_open(&a);
+    CHECK(a.mode == M_PLAYER && strstr(a.reply, "already a copy"), "a copy is not copied again: %s", a.reply);
+    close_song(&a);
+
+    /* B stops a render and takes the half copy away */
+    snprintf(script, sizeof script, "#!/bin/sh\nout=\nwhile [ $# -gt 0 ]; do case \"$1\" in --out) out=\"$2\";; esac; shift; done\necho \"PROGRESS 0/4 Rendering...\"\necho half > \"$out.part\"\necho half > \"$out.journal\"\nsleep 20\n");
+    write_script(fake, script);
+    CHECK(open_song(&a, song_with_id(&a, one_id)), "Song One a third time");
+    kt_open(&a);
+    app_action(&a, R3_LEFT);
+    app_action(&a, R3_ACCEPT);
+    CHECK(a.mode == M_JOB && a.job_pid > 0, "another ask starts a render");
+    for (int i = 0; i < 100; i++) { app_tick(&a, 10); usleep(10000); char pp[PATH_MAX + 8]; snprintf(pp, sizeof pp, "%s.part", a.kt_out); if (access(pp, F_OK) == 0) break; }
+    char pp[PATH_MAX + 16];
+    snprintf(pp, sizeof pp, "%s.part", a.kt_out);
+    CHECK(access(pp, F_OK) == 0, "the half copy is there while it runs");
+    app_action(&a, R3_BACK);
+    snprintf(pp, sizeof pp, "%s.part", a.kt_out);
+    char pj[PATH_MAX + 16];
+    snprintf(pj, sizeof pj, "%s.journal", a.kt_out);
+    CHECK(a.mode == M_LIBRARY && a.job_pid == 0 && access(pp, F_OK) != 0 && access(pj, F_OK) != 0, "B stops it and removes the part and the journal");
+    CHECK(access(a.kt_out, F_OK) != 0, "and there is no copy");
+
+    /* the helper is missing */
+    setenv("R3I6NOS_MUSICUE_RENDER", "/nonexistent/musicue-render", 1);
+    CHECK(open_song(&a, song_with_id(&a, one_id)), "Song One a fourth time");
+    kt_open(&a);
+    app_action(&a, R3_RIGHT);
+    app_action(&a, R3_ACCEPT);
+    for (int i = 0; i < 300 && !(a.job_pid == 0 && a.job_fd < 0); i++) { app_tick(&a, 10); usleep(10000); }
+    CHECK(a.job_done && strstr(a.reply, "missing") && a.job_nlines > 0 && strstr(a.job_lines[a.job_nlines - 1], "not installed"), "no helper: it says so on the job screen and the line: %s", a.reply);
+    unsetenv("R3I6NOS_MUSICUE_RENDER");
+    app_free(&a);
+}
+
 static void test_marquee(void) {
     unsigned char o[40], m[40];
     const char *t = "A long title that cannot fit";           /* 28 cells */
@@ -3516,6 +3984,7 @@ static int selftest(void) {
     if (trace) fprintf(stderr, "[screens]\n");
     test_screens();
     test_add_id();
+    test_kt();
     test_marquee();
     test_cue_panel();
     test_panels_and_tempo();
@@ -3579,6 +4048,13 @@ static int save_screenshot(const char *file, const char *screen, int theme) {
     } else if (!strcmp(screen, "piano")) {
         a.mode = M_TEXT; a.tfield = TF_KEY; a.talpha = "ABCDEFG#bm7 ?"; a.tmax = 40; snprintf(a.tbuf, sizeof a.tbuf, "Am"); a.tlen = a.tpos = 2;
         a.piano = 1; a.piano_oct = 3; a.piano_now[4] = 1; a.piano_now[1] = 1;
+    } else if (!strcmp(screen, "kt")) {                       /* Key and Tempo, on the demo song with a pretend entry in the library */
+        a.songs = (Song *)calloc(1, sizeof *a.songs); a.nsongs = 1; a.open = 0;
+        snprintf(a.songs[0].name, sizeof a.songs[0].name, "Slow Burn (live) [dQw4w9WgXcQ]"); snprintf(a.songs[0].id, sizeof a.songs[0].id, "dQw4w9WgXcQ");
+        kt_plan(&a.kt, "G", "96");
+        a.kt.target.root = 9; a.kt.target_tempo = 104; kt_update(&a.kt);
+        a.kt_workers = 4; a.mode = M_KT;
+        say(&a, R3_ST_HINT, "Left/Right the Key, Up/Down the Tempo, A makes the copy.");
     } else if (!strcmp(screen, "suffix")) {
         a.mode = M_TEXT; a.tfield = TF_SUFFIX; snprintf(a.suffix_base, sizeof a.suffix_base, "Chorus"); a.talpha = SUFFIX_ALPHA; a.tmax = 8; snprintf(a.tbuf, sizeof a.tbuf, "1a"); a.tlen = 2; a.tpos = 2;
     }
@@ -3673,6 +4149,7 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[i], "--selftest")) selftest_run = 1;
         else if (!strcmp(argv[i], "--version")) { puts("musicue " VERSION); return 0; }
         else if (!strcmp(argv[i], "--sync-path")) { char hb[PATH_MAX + 40]; puts(helper_path(hb, sizeof hb)); return 0; }
+        else if (!strcmp(argv[i], "--render-path")) { char hb[PATH_MAX + 40]; puts(render_helper_path(hb, sizeof hb)); return 0; }
         else if (!strcmp(argv[i], "--screenshot") && i + 1 < argc) shot = argv[++i];
         else if (!strcmp(argv[i], "--screen") && i + 1 < argc) screen = argv[++i];
         else if (!strcmp(argv[i], "--make-demo") && i + 1 < argc) demo_dir = argv[++i];
@@ -3685,7 +4162,7 @@ int main(int argc, char **argv) {
                 return 2;
             }
         } else {
-            fprintf(stderr, "usage: %s [--selftest | --version | --sync-path | --make-demo DIR | [--theme NAME] [--screen library|player|menu|context|mainmenu|about|jump|rec|piano|suffix] --screenshot out.bmp]\n", argv[0]);
+            fprintf(stderr, "usage: %s [--selftest | --version | --sync-path | --render-path | --make-demo DIR | [--theme NAME] [--screen library|player|menu|context|mainmenu|about|jump|rec|piano|suffix|kt] --screenshot out.bmp]\n", argv[0]);
             return 2;
         }
     }

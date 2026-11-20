@@ -11,9 +11,8 @@
 #                stretch-proto-report, for step 2 on the unit: scripts/push-packages.sh UNIT build/stretchproto/r3i6nos-stretch-proto.deb),
 #                then installs it into an empty folder and runs the report there (a short song) to check the package works
 set -eu
-STRETCH_COMMIT=88061fd4eda56a2353c5d65c74aa3f4ccf76f9da   # Signalsmith-Audio/signalsmith-stretch 1.3.2, 2026-10-22, MIT
-LINEAR_COMMIT=7bb1c8f36794d6980080ce817c91f8da8fe56a66    # Signalsmith-Audio/linear, 2026-10-21, MIT
-PFFFT_COMMIT=efc1dd2de6c3562fc464f905d37d9281f08a20dd     # marton78/pffft (Julien Pommier's PFFFT with FFTPACK), 2026-11-11, BSD-like (see its pffft.h)
+# shellcheck disable=SC1091  # the pins
+. "$(dirname "$0")/pins.conf"
 VERSION=0.1
 here=$(cd "$(dirname "$0")" && pwd)
 root=$(cd "$here/../.." && pwd)
@@ -50,8 +49,10 @@ for f in pffft pffft_common fftpack; do gcc -O3 -mcpu=cortex-a35 -DPFFFT_ENABLE_
 STATIC="-static-libstdc++ -static-libgcc"
 g++ $FLAGS $STATIC -o stretch-proto /src/proto.cpp
 g++ $FLAGS $STATIC -DSIGNALSMITH_USE_PFFFT $PF -o stretch-proto-pffft /src/proto.cpp pf_pffft.o pf_pffft_common.o pf_fftpack.o
+g++ $FLAGS $STATIC -o musicue-render /src/musicue_render.cpp
 echo "--- default FFT"; ./stretch-proto selftest
 echo "--- PFFFT"; ./stretch-proto-pffft selftest
+echo "--- musicue-render"; bash /src/test-render.sh /o
 case "$MODE" in *--bench*)
     ./stretch-proto bench 60; ./stretch-proto-pffft bench 60; ./stretch-proto-pffft bench 60 --cheaper ;;
 esac
