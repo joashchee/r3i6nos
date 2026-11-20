@@ -8,7 +8,10 @@
  *                not open) runs the same logic on the caller's clock (engine_tick), which is also what the tests use.
  *
  * 44.1 kHz stereo 16-bit is 176,400 bytes a second: a 4-minute song is 42 MB, 12 minutes 127 MB, on a 1 GB unit. Include SDL.h first. Every figure about
- * how long a decode takes on the unit is untested. */
+ * how long a decode takes on the unit is untested.
+ *
+ * The Engine also holds a few synth voices for the Piano panel (engine_note_on / engine_note_off): a soft sine with two overtones and a decay, mixed over the
+ * song in the same callback, so a person can find a song's key by ear while it plays. */
 #ifndef MUSICUE_AUDIO_H
 #define MUSICUE_AUDIO_H
 
@@ -23,6 +26,9 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 #define TRACK_RATE 44100
 #define TRACK_MAX_SECONDS (12 * 60)
 
@@ -200,6 +206,9 @@ static int track_load(Track *t, const char *path, double max_seconds, TrackProgr
 
 /* ---- the engine ------------------------------------------------------------------------------------------------------------------------ */
 
+#define VOICES 12
+typedef struct { int active, held, key; double freq, phase, age, rel; } Voice;      /* a piano note: key 0-11 within the octave shown, age and release time in seconds */
+
 typedef struct {
     const Track *t;
     SDL_AudioDeviceID dev;
@@ -209,7 +218,32 @@ typedef struct {
     volatile int loop;                  /* 1: wrap from loop_b back to loop_a */
     volatile int64_t loop_a, loop_b;    /* frames; a < b when the loop is set */
     double carry;                       /* frames not yet whole, on the caller's clock */
+    Voice voice[VOICES];                /* the Piano panel's notes, mixed over the song */
 } Engine;
+
+/* Add the sounding voices to out (frames x 2, 16-bit), and drop the ones that have faded. */
+static void engine_mix_voices(Engine *e, int16_t *out, int64_t frames) {
+    for (int v = 0; v < VOICES; v++) {
+        Voice *p = &e->voice[v];
+        if (!p->active) continue;
+        const double dt = 1.0 / TRACK_RATE, w = 2 * M_PI * p->freq;
+        for (int64_t i = 0; i < frames; i++) {
+            double att = p->age < 0.004 ? p->age / 0.004 : 1.0;
+            double env = att * exp(-p->age / 1.1);
+            if (!p->held) env *= exp(-(p->age - p->rel) / 0.05);
+            double ph = p->phase;
+            double smp = (sin(ph) + 0.35 * sin(2 * ph) + 0.12 * sin(3 * ph)) * env * 7000.0;
+            p->phase += w * dt;
+            if (p->phase > 2 * M_PI * 64) p->phase = fmod(p->phase, 2 * M_PI);
+            p->age += dt;
+            for (int c = 0; c < 2; c++) {
+                int x = out[i * 2 + c] + (int)smp;
+                out[i * 2 + c] = (int16_t)(x > 32767 ? 32767 : x < -32768 ? -32768 : x);
+            }
+            if ((p->age > 0.02 && env < 0.0008) || p->age > 8.0) { p->active = 0; break; }
+        }
+    }
+}
 
 /* Move the position on by up to `frames`, copying them to out when it is not NULL, wrapping an A/B loop with no gap. Returns the frames moved. */
 static int64_t engine_step(Engine *e, int16_t *out, int64_t frames) {
@@ -235,6 +269,7 @@ static void engine_callback(void *ud, Uint8 *stream, int len) {
     int64_t frames = len / 4, done = 0;
     if (e->playing) done = engine_step(e, out, frames);
     if (done < frames) memset(out + done * 2, 0, (size_t)(frames - done) * 4);
+    engine_mix_voices(e, out, frames);
     if (e->playing && e->pos >= e->t->frames) { e->playing = 0; e->ended = 1; }
 }
 
@@ -302,6 +337,30 @@ static int engine_loop_set(Engine *e, double a, double b) {
 static void engine_loop_clear(Engine *e) {
     ENGINE_LOCK(e);
     e->loop = 0; e->loop_a = e->loop_b = 0;
+    ENGINE_UNLOCK(e);
+}
+
+/* A piano note on: freq in Hz, key 0-11 names it so engine_note_off finds it (a held note decays slowly, a released one fades in 50 ms). */
+static void engine_note_on(Engine *e, int key, double freq) {
+    ENGINE_LOCK(e);
+    int slot = -1;
+    for (int v = 0; v < VOICES; v++) if (e->voice[v].active && e->voice[v].key == key) slot = v;       /* the same key again restarts its voice */
+    for (int v = 0; v < VOICES && slot < 0; v++) if (!e->voice[v].active) slot = v;
+    if (slot < 0) { slot = 0; for (int v = 1; v < VOICES; v++) if (e->voice[v].age > e->voice[slot].age) slot = v; }   /* all busy: the oldest goes */
+    Voice *p = &e->voice[slot];
+    p->active = 1; p->held = 1; p->key = key; p->freq = freq; p->phase = 0; p->age = 0; p->rel = 0;
+    ENGINE_UNLOCK(e);
+}
+
+static void engine_note_off(Engine *e, int key) {
+    ENGINE_LOCK(e);
+    for (int v = 0; v < VOICES; v++) if (e->voice[v].active && e->voice[v].key == key && e->voice[v].held) { e->voice[v].held = 0; e->voice[v].rel = e->voice[v].age; }
+    ENGINE_UNLOCK(e);
+}
+
+static void engine_notes_off(Engine *e) {
+    ENGINE_LOCK(e);
+    for (int v = 0; v < VOICES; v++) if (e->voice[v].active && e->voice[v].held) { e->voice[v].held = 0; e->voice[v].rel = e->voice[v].age; }
     ENGINE_UNLOCK(e);
 }
 

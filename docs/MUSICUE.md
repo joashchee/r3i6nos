@@ -60,9 +60,12 @@ a recommendation to confirm or change; it is not legal advice, and what a person
 
 ## The pad, the panels and Tempo (2026-11-19, maintainer's map)
 
-**Buttons:** D-pad Down = Cue; Select = back to 0:00; Start = play/stop; **L1+R1 together = the menu** (always; Start is not the menu); Fn = turn the panels; the right stick moves in a panel and hops between the two on display;
-A (and X) act on the selection; Y loops; L1/R1 alone step a marker (on release, so the chord does not step); D-pad left/right seek 1 s, L2/R2 10 s; Select+Start leaves. Markers have no button: a marker is a bookmarked cue (the menu).
-**Panels (rows 9-20, two at a time, Fn turns the carousel one place, the one with the stick has the double frame):** Markers, Cues (time, a tempo dot, a marker flag, the words), Metadata (key, tempo, sig, scripter, created; A edits, Sig toggles 4/4 and 6/8,
+**Buttons (the map of 2026-11-20, replacing the first one of 2026-11-19; the full table is in `apps/musicue-native/README.md`, "The pad"):** MusiCue follows `docs/r3i6nos-mapping.md` through `theme/r3i6nos_input.h` and `theme/r3i6nos_mainmenu.h`:
+**L1+R1 the main menu** (About, Colour theme, Device report, Rec demo, Quit, then Songs and sync or Song options; Benchmark hidden), **L2+R2 or Y the context menu**, **Fn the next panel, L1+Fn the first, R1+Fn the one before**, the right stick through the reader's dead zone and rate,
+R1 held for pages and Home/End. **Start plays (Play mode); L1+Start plays in Rec mode; playing, Start stops and ends Rec mode.** **Rec mode:** D-pad Down adds a cue, Up takes the last cue of the take back, Left and Right go to the cue before and after.
+**Play mode:** Up and Down go to the first and last cue, Left and Right to the cue before and after. **R1+Up/Down set A and B, R1+Start switches the A-B loop (A and B are kept), R1+Select goes to A.** Select alone is 0:00. L1, R1, L2 and R2 alone do nothing, and the old
+L1/R1 marker steps, L2/R2 10 s and Y loop cycle are gone (R1+Left/Right is 10 s). Quit is in the main menu and Select+Start no longer leaves. Markers have no button: a marker is a bookmarked cue (the context menu).
+**Panels (rows 9-20, two at a time, Fn turns the carousel one place, and a seventh place is the Jump panel on the whole width, the one with the stick has the double frame):** Markers, Cues (time, a tempo dot, a marker flag, the words), Metadata (key, tempo, sig, scripter, created; A edits, Sig toggles 4/4 and 6/8,
 a number or a letter picker for the rest, a USB keyboard types), Set List, **Last 10 cued**, **Top 10 cued**.
 **Set List** is Cue's: an ordered list of songs (add this song, move up and down, remove, A opens), in `setlist.tsv`. **Last and Top 10 cued are local**: Cue's are server lists across all users (its `VIDEO_LOG_ENDPOINT`, not deployed), which MusiCue
 cannot have under rule 6 (no telemetry), so these are the songs *opened on this unit* (`history.tsv`: newest first; most opened first). Cue's versions of a song are not in MusiCue yet, so a Set List entry is a song and not a song-and-version.
@@ -70,6 +73,23 @@ cannot have under rule 6 (no telemetry), so these are the songs *opened on this 
 so it has its own tempo, `60 / (length / beats)`; against the Tempo it is **green within 2 BPM, yellow within 5, red beyond** (the last cue has no dot). A Tempo that is blank or `?` is **suggested**: the largest group of cues within 2 BPM of one of them (the first found on a tie), averaged to two
 decimals, those cues green. It runs when a cue is added or deleted, when a song with cues opens and when the Sig changes, and **never overwrites a Tempo that was typed**; Metadata > Tempo with the number erased, or the menu's Recalculate, asks for it again. As in Cue, once suggested it
 is a number like any other, so later cues do not move it until it is erased. The Assisted Cue entry's bars use the green cues only.
+
+## The Jump panel, the Piano and numbered marker names (2026-11-20, maintainer's request)
+
+**Jump panel** (rows 9-20, the whole width; the carousel's seventh place): every marker, a page at a time, with **Cue's playback-progress fill** (`updateMarkerProgressFills` in Cue's source): the marker's own section, from its time to the next
+marker's, fills left to right in the marker's colour while the playhead is in it, one section at a time, and **the last marker has no section** (Cue's rule: no next marker to bound it), so it never fills. A triangle marks the marker last passed, an `L` the sections inside a running A-B
+loop. The bottom row is **Cue's A-B progress** (`updateTempLoopCProgress`): A, a bar, B, filling only while the loop is on (empty when it is off or B is not set yet). The **eight buttons** (D-pad up, down, left, right, then A, B, X, Y) are **one-touch**:
+the right stick picks a marker, **stopped** a press binds it (again on the same marker frees it), **playing** a press moves the playhead there; each row shows the tags of its buttons. Bindings are kept by the marker's time in `cues/<id>.jump`. R1+Up/Down/Start/Select
+keep their A-B meaning there. The Jump panel overrides Rec mode's D-pad (record on another panel). **Fn while Play mode plays goes straight to the Jump panel, wherever the carousel is; when the music stops, the panels that were showing come back** (a manual Fn or L1/R1+Fn in between cancels the restore; Rec mode does not do this). **Not decided by the request, so chosen here:** the Jump panel is the last place of the carousel (after Top 10 cued); B does not leave the song on it (a face button is a jump button).
+
+**Piano.** Editing the **Key** in Metadata opens a floating Piano panel (the field's box shrinks to the upper half): one octave, **C3 to B3** (C3 is 130.81 Hz, scientific naming), played through the same audio callback over the song (a sine with two overtones and a decay, up to 12 voices, a released note fades in 50 ms), so a person finds the
+key by ear while the song plays. D-pad Up C3, Left D3, Down E3, Right F3; Y G3, B A3, A B3, X A#3; L1 C#3, L2 D#3, R2 F#3, R1 G#3 (shoulders are notes there, not modifiers, so L1+R1 together is two notes and not the menu); **Select Oct-, Start Oct+** (octaves 1-5); **Fn closes it**
+(and opens it again). **A note writes the key's root** (sharps: C#, not Db) and keeps what follows it, so Am7 played G is Gm7; A keeps the key once the piano is closed (A is B3 while it is open), B cancels. Tested for the notes, the voices (no clipping) and every theme's contrast; **never heard on a unit.**
+
+**Numbered names.** In "Name the selected marker", **Right on a preset** (Intro, Verse, Pre-Chorus, Chorus ...) asks for a **number or letter after it**: Up and Down walk 1-9, A-Z, a-z, 0; Right moves to a next place (so Verse A, Chorus 1a); A keeps "Verse 1a", B cancels; A on the preset alone keeps the plain name.
+
+**What this changed:** Device report and Rec demo in the main menu say they are not built yet (Rec demo is the video of rule 11, nothing to do with Rec mode); the old Theme menu item is the main menu's Colour theme; the old menu's items are now Songs and sync (Add, Sync, Import, Demo song, Fetch from YouTube)
+and Song options (Offset, Save, Export, Add to the Set List, Recalculate tempo, Back to the songs); the context menu has Cue here, Mark here and what the focused panel can do. **Untested on a unit:** every press (the pad, the shoulders as notes, the chord feel), the piano's sound and latency.
 
 ## The cue panel (2026-11-19)
 

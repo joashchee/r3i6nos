@@ -144,7 +144,7 @@ is blocked and on what.
    FM1-NTT's stick dead zone (0.35) and a conservative top rate (6 steps a second, the pointer 120 px/s); **R1 held is "increase": up/down become Page up/down, left/right Home/End, the pointer 3 times as fast**. **The virtual mouse (L3) and virtual keyboard (R3) are per app: an app says whether it has them. While one shows it
    overrides Select and Start (and, for the keyboard, the D-pad and the face buttons).** A new app is not done until it has the menu with these items and a
    self-test that checks them; an app that cannot follow the mapping says why in its README. A third-party game or port is exempt and keeps
-   `r3i6nos-portquit`. **Built so far (2026-11-20):** the C theme has the reader and the menu (`theme/r3i6nos_input.h`, `theme/r3i6nos_mainmenu.h`) and the native IO Checker follows them; the Lua theme does not, and the other apps still leave with Select + Start until each has Quit.
+   `r3i6nos-portquit`. **Built so far (2026-11-20):** the C theme has the reader and the menu (`theme/r3i6nos_input.h`, `theme/r3i6nos_mainmenu.h`) and the native IO Checker and (2026-11-20) MusiCue follow them; the Lua theme does not, and the other apps still leave with Select + Start until each has Quit.
 
 ## Check before committing
 

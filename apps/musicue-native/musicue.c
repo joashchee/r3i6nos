@@ -15,7 +15,11 @@
  * Nothing here has run on a real R36S. */
 
 #define _GNU_SOURCE
-#define VERSION "0.1"
+#define VERSION "0.2"
+#ifndef R3_BUILD_COMMIT
+#define R3_BUILD_COMMIT "dev"           /* scripts/build_native_app.sh passes the git commit */
+#endif
+#define BUILD_LINE R3_BUILD_COMMIT " " __DATE__
 
 /* GCC warns that a path built from two long parts could be cut at PATH_MAX. Every such snprintf here feeds fopen, stat or opendir, and a cut path
  * simply fails to open (nothing is ever written to a different file by it), so the warning is silenced for that one case. */
@@ -34,6 +38,8 @@
 
 #include "r3i6nos_ansiapps.h"
 #include "r3i6nos_themes.h"
+#include "r3i6nos_input.h"
+#include "r3i6nos_mainmenu.h"
 #include "r3i6nos_toast.h"
 #include "r3i6nos_appdata.h"
 #include "cuedata.h"
@@ -162,6 +168,12 @@ static int hue_of(const char *label) {
 typedef struct { char path[PATH_MAX]; char name[96]; char id[16]; int has_cues; int nmarkers; } Song;
 
 enum { M_LIBRARY, M_PLAYER, M_MENU, M_JOB, M_NOTE, M_ID, M_TEXT };
+enum { OV_NONE, OV_MM, OV_ABOUT, OV_THEME };                                      /* what shows over a screen: the main menu (L1+R1), About, the colour theme picker */
+enum { MK_LIBRARY, MK_SONG, MK_CONTEXT };                                         /* the app's own menus: the songs' (Add, Sync ...), the song's (offset, save ...), the context menu (L2+R2) */
+enum { TF_KEY, TF_TEMPO, TF_SIG, TF_SCRIPTER, TF_SUFFIX = 10 };                  /* what M_TEXT edits: a metadata field, or the number or letter after a marker's name */
+#define JUMP_SLOTS 8                                                              /* the Jump panel's one-touch buttons: D-pad up, down, left, right, then A, B, X, Y */
+#define REC_UNDO 64
+#define JUMP_ROWS 9                                                               /* markers a page on the Jump panel (the tenth inner row is the A-B bar) */
 
 /* The panels of rows 9-20: two show at a time, and Fn turns the carousel one place. */
 enum { P_MARKERS, P_CUES, P_META, P_SETLIST, P_LAST, P_TOP, P_COUNT };
@@ -187,8 +199,16 @@ typedef struct {
     int csel;                               /* the cue the cursor is on (follows the cue playing unless the stick moved lately) */
     int pan_first, pan_focus, psel[P_COUNT];   /* the carousel: panel pan_first on the left, the next on the right; which of the two the stick is in; each panel's selection */
     double stick_idle_ms;                   /* since the right stick last moved a selection */
-    int stick_x, stick_y; double stick_rep_ms;   /* the right stick: -1, 0 or 1 on each axis, and the time to its next repeat */
-    int pad_l1, pad_r1, chord;              /* L1 and R1 held; both were: the menu opened, so neither steps a marker on release */
+    R3Input in;                             /* the mapping's reader (theme/r3i6nos_input.h): held modifiers, chords, the right stick */
+    R3MainMenu mm; int overlay, theme_sel;  /* L1+R1's menu and what shows over a screen */
+    int menu_kind;                          /* MK_*: which of the app's own menus M_MENU shows */
+    int jump_view, prev_view;               /* the carousel's seventh place: the Jump panel on the whole width; and the view before this one, for R1+Fn (0-5 the pair starting there, 6 Jump) */
+    int jsel; double jump_t[JUMP_SLOTS]; int jump_on[JUMP_SLOTS];   /* the Jump panel's marker selection; the marker (by time) each button jumps to */
+    int rec, nrec; double rec_t[REC_UNDO];  /* Rec mode (L1+Start): D-pad Down adds a cue, Up takes the last one back; the cues added in this take */
+    int auto_jump, auto_prev;               /* Fn while Play mode plays went to the Jump panel by itself; the view to give back when the music stops */
+    int loop_off;                           /* an A-B loop is set (loop_state 2) but switched off (R1+Start) */
+    int piano, piano_oct, piano_now[12], piano_vis;   /* the Piano panel over the Key field: octave, the notes held, and which keys show pressed */
+    char suffix_base[48];                   /* TF_SUFFIX: the marker name the number or letter goes after */
     SetItem *sl; int nsl;                   /* the Set List (setlist.tsv) */
     HistItem *hist; int nhist; long hist_clock;   /* songs opened here (history.tsv): Last 10 and Top 10 cued */
     char tbuf[72]; int tlen, tpos, tmax, tfield; const char *talpha;   /* M_TEXT: a metadata field being typed */
@@ -197,7 +217,7 @@ typedef struct {
     int demo;                               /* the synthetic demo song (no files) */
     Menu menu;
     char reply[160]; int reply_style;
-    int quit, select_held, select_used;
+    int quit, force;
     /* the sync job */
     pid_t job_pid; int job_fd; char job_buf[512]; int job_len; char job_lines[6][96]; int job_nlines; double job_frac; int job_done;
     char idbuf[12]; int idpos;              /* Start > Add: the 11 characters of a YouTube id, 0 for an empty slot */
@@ -205,6 +225,17 @@ typedef struct {
     char note[3][72];                       /* a message box (M_NOTE) */
     unsigned wave_sig;
 } App;
+
+/* The Jump panel's button tags, and the Piano panel's keys: which button plays which note of the octave (C C# D D# E F F# G G# A A# B). */
+static const char *const JUMP_TAGS[JUMP_SLOTS] = {"[^]", "[v]", "[<]", "[>]", "[A]", "[B]", "[X]", "[Y]"};
+
+static const struct { int btn; const char *tag; } PIANO_KEYS[12] = {
+    {R3_BTN_UP, "[^]"}, {R3_BTN_L1, "L1"}, {R3_BTN_LEFT, "[<]"}, {R3_BTN_L2, "L2"}, {R3_BTN_DOWN, "[v]"}, {R3_BTN_RIGHT, "[>]"},
+    {R3_BTN_R2, "R2"}, {R3_BTN_Y, "[Y]"}, {R3_BTN_R1, "R1"}, {R3_BTN_B, "[B]"}, {R3_BTN_X, "[X]"}, {R3_BTN_A, "[A]"}};
+static const char *const NOTE_NAME[12] = {"C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"};
+
+static int jump_marker_of(const App *a, int slot);
+static int loop_running(const App *a);
 
 static void say(App *a, int style, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
 static void say(App *a, int style, const char *fmt, ...) {
@@ -495,6 +526,12 @@ static void close_song(App *a) {
     a->open = -1;
     a->demo = 0;
     a->loop_state = 0;
+    a->loop_off = 0;
+    a->rec = 0;
+    a->nrec = 0;
+    a->piano = 0;
+    a->jump_view = 0;
+    a->auto_jump = 0;
 }
 
 static int save_cues(App *a) {
@@ -514,7 +551,7 @@ static int save_cues(App *a) {
 static int load_progress(void *ud, double secs) { (void)ud; (void)secs; SDL_PumpEvents(); return 0; }
 
 static void set_loop_engine(App *a) {
-    if (a->loop_state == 2) engine_loop_set(&a->eng, a->loop_a, a->loop_b); else engine_loop_clear(&a->eng);
+    if (a->loop_state == 2 && !a->loop_off) engine_loop_set(&a->eng, a->loop_a, a->loop_b); else engine_loop_clear(&a->eng);
 }
 
 static double dur_of(const App *a) { return a->track.pcm ? track_seconds(&a->track) : 0; }
@@ -612,6 +649,32 @@ static int assist_model(const App *a, double *avg, double *anchor) {
 
 
 /* Open song i: decode it, read its cue files. Returns 1, or 0 with the reason in the reply row. */
+/* The Jump panel's bindings are one line each in cues/<id>.jump ("<slot> <seconds>"): the marker is found by its time, so renaming or moving others does not matter. */
+static void jump_load(App *a) {
+    memset(a->jump_on, 0, sizeof a->jump_on);
+    memset(a->jump_t, 0, sizeof a->jump_t);
+    if (a->open < 0) return;
+    char path[PATH_MAX];
+    cue_path(a, a->songs[a->open].id, "jump", path, sizeof path);
+    char *t = cue_read_file(path, NULL);
+    if (!t) return;
+    for (char *line = strtok(t, "\n"); line; line = strtok(NULL, "\n")) {
+        int slot;
+        double tm;
+        if (sscanf(line, "%d %lf", &slot, &tm) == 2 && slot >= 0 && slot < JUMP_SLOTS && tm >= 0) { a->jump_on[slot] = 1; a->jump_t[slot] = tm; }
+    }
+    free(t);
+}
+
+static void jump_save(const App *a) {
+    if (a->open < 0) return;
+    char path[PATH_MAX], buf[JUMP_SLOTS * 40];
+    size_t n = 0;
+    for (int i = 0; i < JUMP_SLOTS; i++) if (a->jump_on[i]) n += (size_t)snprintf(buf + n, sizeof buf - n, "%d %.3f\n", i, a->jump_t[i]);
+    cue_path(a, a->songs[a->open].id, "jump", path, sizeof path);
+    cue_write_file(path, buf, n);
+}
+
 static int open_song(App *a, int i) {
     close_song(a);
     Song *s = &a->songs[i];
@@ -643,13 +706,20 @@ static int open_song(App *a, int i) {
     s->nmarkers = a->cues.nm;
     a->msel = 0;
     a->loop_state = 0;
+    a->loop_off = 0;
+    a->rec = 0;
+    a->nrec = 0;
+    a->piano = 0;
+    a->jump_view = 0;
+    a->jsel = 0;
+    jump_load(a);
     a->next_label = 0;
     engine_open(&a->eng, &a->track);
     a->csel = 0;
     if (a->track.truncated) say(a, R3_ST_WARN, "Only the first %d minutes are loaded.", TRACK_MAX_SECONDS / 60);
     else if (a->cues.meta.sig[0] && !sig_valid(a->cues.meta.sig)) say(a, R3_ST_WARN, "Sig %s is not 4/4 or 6/8: counted as 4/4 (Metadata > Sig).", a->cues.meta.sig);
-    else if (!a->cues.nm && !a->cues.nc) say(a, R3_ST_HINT, "No cues for this song yet: D-pad Down stamps one.");
-    else say(a, R3_ST_HINT, "%d markers, %d cues. A plays, X jumps, L1/R1 step.", a->cues.nm, a->cues.nc);
+    else if (!a->cues.nm && !a->cues.nc) say(a, R3_ST_HINT, "No cues for this song yet: L1+Start records them.");
+    else say(a, R3_ST_HINT, "%d markers, %d cues. Start plays, L1+Start records.", a->cues.nm, a->cues.nc);
     a->mode = M_PLAYER;
     return 1;
 }
@@ -748,6 +818,8 @@ static void open_demo(App *a) {
     a->offset = 0;
     a->msel = 0;
     a->loop_state = 0;
+    a->jsel = 0;
+    memset(a->jump_on, 0, sizeof a->jump_on);
     engine_open(&a->eng, &a->track);
     a->mode = M_PLAYER;
 }
@@ -1059,7 +1131,76 @@ static void compose_panel(App *a, R3Screen *s, int slot, double vt, int cm) {
     free(cluster);
 }
 
+/* The Jump panel: every marker on the whole width, with Cue's playback-progress fill (its updateMarkerProgressFills): the marker's own section, from its time to the next
+ * marker's, fills left to right while the playhead is in it, and the last marker has no section. The tags are the buttons bound to a marker; the bottom row is Cue's
+ * A-B progress (its updateTempLoopCProgress), filling only while the loop is on. */
+static void compose_jump(App *a, R3Screen *s, double vt, int cm) {
+    const int n = a->cues.nm, per = JUMP_ROWS, x0 = 1, wi = R3_COLS - 2;
+    if (a->jsel >= n) a->jsel = n ? n - 1 : 0;
+    int page, pages;
+    r3_list_window(n, a->jsel, per, &page, &pages);
+    char right[32] = "";
+    if (pages > 1) snprintf(right, sizeof right, "Page %d/%d", page, pages);
+    R3Box b = {1, "Jump", right[0] ? right : NULL, a->eng.playing ? "a button jumps" : "a button binds", 0};
+    r3_box(s, 0, 9, R3_COLS, 12, &b);
+    int cur = -1;
+    double frac = 0;
+    for (int i = 0; i + 1 < n; i++)
+        if (vt >= a->cues.m[i].time && vt < a->cues.m[i + 1].time) { cur = i; frac = (vt - a->cues.m[i].time) / (a->cues.m[i + 1].time - a->cues.m[i].time); break; }
+    if (!n) {
+        r3_text_fit(s, x0 + 1, 11, "No markers yet.", wi - 2, R3_ST(R3_ST_BODY));
+        r3_text_fit(s, x0 + 1, 12, "Bookmark a cue in the Cues panel, or Mark here", wi - 2, R3_ST(R3_ST_HINT));
+        r3_text_fit(s, x0 + 1, 13, "(L2+R2 menu). Then bind buttons to the markers.", wi - 2, R3_ST(R3_ST_HINT));
+    }
+    const double lo = a->loop_a, hi = a->loop_b;
+    const double dur = dur_of(a);
+    for (int k = 0; k < per; k++) {
+        int i = (page - 1) * per + k, y = 10 + k;
+        if (i >= n) break;
+        int on = i == a->jsel, hue = hue_of(a->cues.m[i].label);
+        if (on) sel_bar(s, x0, y, wi);
+        if (i == cur) {
+            int fillw = (int)(frac * wi + 0.5);
+            for (int c = 0; c < fillw && c < wi; c++) r3_put(s, x0 + c, y, 32, pick_fg(P_HUE0 + hue), P_HUE0 + hue);
+        }
+        int bold = on || i == cur;
+        int fg = bold ? -1 : R3_LIGHT_GRAY;
+        char tm[16], tags[JUMP_SLOTS * 3 + 1] = "";
+        fmt_time_s(a->cues.m[i].time, tm, sizeof tm);
+        for (int sl = 0; sl < JUMP_SLOTS; sl++) if (jump_marker_of(a, sl) == i) strncat(tags, JUMP_TAGS[sl], sizeof tags - strlen(tags) - 1);
+        int tw = (int)strlen(tags);
+        if (i == cm) r3_put(s, x0, y, 16, bold ? pick_fg(s->bg[y * R3_COLS + x0]) : R3_LIGHT_GREEN, -1);
+        gtext(s, x0 + 2, y, tm, 5, bold ? -1 : R3_LIGHT_CYAN);
+        double end = i + 1 < n ? a->cues.m[i + 1].time : dur;
+        int looping = loop_running(a) && a->cues.m[i].time + a->offset < hi && end + a->offset > lo;
+        if (looping) r3_put(s, x0 + wi - tw - 2, y, 'L', bold ? pick_fg(s->bg[y * R3_COLS + x0 + wi - tw - 2]) : R3_LIGHT_CYAN, -1);
+        (on ? gscroll : gtext)(s, x0 + 8, y, a->cues.m[i].label, wi - 8 - tw - 3, fg);
+        if (tw) gtext(s, x0 + wi - tw, y, tags, tw, bold ? -1 : R3_LIGHT_CYAN);
+    }
+    /* the A-B row */
+    const int y = 10 + per;
+    if (a->loop_state >= 1) {
+        char ta[16], tb[16], l[40];
+        fmt_time(a->loop_a, ta, sizeof ta);
+        if (a->loop_state == 2) fmt_time(a->loop_b, tb, sizeof tb); else snprintf(tb, sizeof tb, "...");
+        snprintf(l, sizeof l, "A %s", ta);
+        r3_text_fit(s, x0 + 1, y, l, 9, R3_ST(R3_ST_BODY));
+        const int bx = x0 + 11, bw = 36;
+        double pos = engine_pos_sec(&a->eng), f = loop_running(a) && hi > lo ? (pos - lo) / (hi - lo) : 0;
+        if (f < 0) f = 0;
+        if (f > 1) f = 1;
+        int full = (int)(f * bw + 0.5);
+        for (int c = 0; c < bw; c++) {
+            if (c < full) { int bg = P_ACC0 + c * (RAMP - 1) / (bw - 1); r3_put(s, bx + c, y, 32, pick_fg(bg), bg); }
+            else r3_put(s, bx + c, y, 176, R3_ST(R3_ST_HINT));
+        }
+        snprintf(l, sizeof l, "B %s%s", tb, a->loop_state == 2 && a->loop_off ? " off" : "");
+        r3_text_fit(s, bx + bw + 2, y, l, wi - (bx + bw + 2) + 1, R3_ST(R3_ST_BODY));
+    } else r3_text_fit(s, x0 + 1, y, "R1+Up sets A  R1+Down sets B  R1+Start loops  R1+Select to A", wi - 2, R3_ST(R3_ST_HINT));
+}
+
 static void compose_panels(App *a, R3Screen *s, double vt, int cm) {
+    if (a->jump_view) { compose_jump(a, s, vt, cm); return; }
     compose_panel(a, s, 0, vt, cm);
     compose_panel(a, s, 1, vt, cm);
 }
@@ -1071,7 +1212,7 @@ static void compose_player(App *a, R3Screen *s) {
     char t1[24], t2[24], right[48];
     fmt_time_s(pos, t1, sizeof t1);
     fmt_time_s(dur, t2, sizeof t2);
-    snprintf(right, sizeof right, "%s / %s", t1, t2);
+    snprintf(right, sizeof right, "%s%s / %s", a->rec ? "REC " : "", t1, t2);
     compose_topbar(a, s, "MusiCue", right);
     int tw = r3_width(right);
     gscroll(s, 11, 0, title, R3_COLS - 14 - tw, -1);
@@ -1096,14 +1237,17 @@ static void compose_player(App *a, R3Screen *s) {
         if (a->loop_state) {
             fmt_time(a->loop_a, la, sizeof la);
             if (a->loop_state == 2) fmt_time(a->loop_b, lb, sizeof lb); else snprintf(lb, sizeof lb, "...");
-            snprintf(extra, sizeof extra, "%s A %s B %s", a->loop_state == 2 ? "Loop" : "Loop", la, lb);
+            snprintf(extra, sizeof extra, "Loop%s A %s B %s", a->loop_state == 2 && a->loop_off ? " off" : "", la, lb);
         }
         if (a->offset != 0) { size_t n = strlen(extra); snprintf(extra + n, sizeof extra - n, "%soffset %+.2fs", n ? "  " : "", a->offset); }
         char all[128];
         snprintf(all, sizeof all, "%s%s%s", extra, status[0] ? "  " : "", status);
         snprintf(status, sizeof status, "%s", all);
     }
-    R3Cmd cmd = {a->reply, a->reply_style, a->eng.playing ? '>' : '|', "Down cue  A go  Start play  Select 0:00  Y loop  Fn panels  L1+R1 menu", 0, status,
+    const char *keys = a->jump_view ? "Stick picks  buttons bind/jump  Fn panels  L1+R1 menu"
+                     : a->rec && a->eng.playing ? "Down cue  Up undo  Left/Right cue  Start stop  Fn panels"
+                     : "Start play  L1+Start rec  Left/Right cue  Fn panels  L1+R1 menu";
+    R3Cmd cmd = {a->reply, a->reply_style, a->rec && a->eng.playing ? '*' : a->eng.playing ? '>' : '|', keys, 0, status,
                  a->eng.noaudio && !a->demo ? "no sound device" : "", R3_ST_WARN};
     r3_command_line(s, &cmd);
 }
@@ -1144,24 +1288,69 @@ static void compose_id(App *a, R3Screen *s) {
     r3_command_line(s, &cmd);
 }
 
+/* The Piano panel over the Key field: one octave C3 to B3 (the octave moves with Select and Start); each key shows the button that plays it. */
+static void compose_piano(App *a, R3Screen *s) {
+    const int bx = 12, by = 10, bw = 40, bh = 11, kx = bx + 2, ky = by + 2;
+    char title[32], line[48];
+    snprintf(title, sizeof title, "Piano  C%d-B%d", a->piano_oct, a->piano_oct);
+    R3Box b = {1, title, NULL, "Fn closes", 0};
+    r3_box(s, bx, by, bw, bh, &b);
+    static const int white[7] = {0, 2, 4, 5, 7, 9, 11};
+    static const int black_after[7] = {1, 3, -1, 6, 8, 10, -1};
+    const int press_bg = P_ACC0 + RAMP / 2;
+    for (int i = 0; i < 7; i++) {                                                    /* white keys: 4 cells and a dark divider, 5 rows */
+        int key = white[i], x = kx + i * 5, bg = a->piano_now[key] ? press_bg : R3_WHITE;
+        for (int r = 0; r < 5; r++) {
+            r3_fill(s, x, ky + r, 4, 1, 32, pick_fg(bg), bg);
+            r3_put(s, x + 4, ky + r, 32, R3_WHITE, R3_DARK_GRAY);
+        }
+        snprintf(line, sizeof line, "%s%d", NOTE_NAME[key], a->piano_oct);
+        for (int c = 0; line[c] && c < 4; c++) r3_put(s, x + c, ky + 3, (unsigned char)line[c], pick_fg(bg), bg);
+        for (int c = 0; PIANO_KEYS[key].tag[c] && c < 4; c++) r3_put(s, x + c, ky + 4, (unsigned char)PIANO_KEYS[key].tag[c], pick_fg(bg), bg);
+    }
+    for (int i = 0; i < 7; i++) {                                                    /* black keys: 3 cells over the divider, 3 rows */
+        int key = black_after[i];
+        if (key < 0) continue;
+        int x = kx + i * 5 + 3, bg = a->piano_now[key] ? press_bg : R3_BLACK;
+        for (int r = 0; r < 3; r++) r3_fill(s, x, ky + r, 3, 1, 32, pick_fg(bg), bg);
+        for (int c = 0; NOTE_NAME[key][c]; c++) r3_put(s, x + c, ky + 1, (unsigned char)NOTE_NAME[key][c], pick_fg(bg), bg);
+        for (int c = 0; PIANO_KEYS[key].tag[c] && c < 3; c++) r3_put(s, x + c, ky + 2, (unsigned char)PIANO_KEYS[key].tag[c], pick_fg(bg), bg);
+    }
+    snprintf(line, sizeof line, "Select Oct-   Start Oct+   Key: %s", a->tbuf[0] ? a->tbuf : "?");
+    r3_text_fit(s, bx + 2, by + bh - 2, line, bw - 4, R3_ST(R3_ST_HINT));
+}
+
 static void compose_text(App *a, R3Screen *s) {
     r3_clear(s);
-    compose_topbar(a, s, "MusiCue", "Metadata");
-    char title[40];
-    snprintf(title, sizeof title, "Edit: %s", META_NAMES[a->tfield == 3 ? 3 : a->tfield]);
+    const int suffix = a->tfield == TF_SUFFIX;
+    compose_topbar(a, s, "MusiCue", suffix ? "Name" : "Metadata");
+    char title[64], label[96];
+    if (suffix) snprintf(title, sizeof title, "Name: %s", a->suffix_base);
+    else snprintf(title, sizeof title, "Edit: %s", META_NAMES[a->tfield == TF_SCRIPTER ? TF_SCRIPTER : a->tfield]);
+    const int top = a->piano ? 2 : 5, h = a->piano ? 8 : 12;                    /* the Piano takes the lower half, so the field's box shrinks to the upper */
     R3Box b = {1, title, NULL, "A keep   B cancel", 0};
-    r3_box(s, 2, 5, 60, 12, &b);
+    r3_box(s, 2, top, 60, h, &b);
+    const int ly = top + 4;
     int from = a->tpos > 40 ? a->tpos - 40 : 0;                               /* the line scrolls with the cursor: a field can be longer than the box */
     for (int i = 0; i < 56; i++) {
         int k = from + i;
         int ch = k < a->tlen ? (unsigned char)a->tbuf[k] : (k == a->tpos ? 32 : 0);
-        if (k == a->tpos) { int bg = P_ACC0 + RAMP / 2; r3_put(s, 4 + i, 9, ch ? ch : 32, pick_fg(bg), bg); }
-        else if (ch) r3_put(s, 4 + i, 9, ch, R3_ST(R3_ST_STRONG));
-        else if (k < a->tmax) r3_put(s, 4 + i, 9, 250, R3_ST(R3_ST_HINT));
+        if (k == a->tpos) { int bg = P_ACC0 + RAMP / 2; r3_put(s, 4 + i, ly, ch ? ch : 32, pick_fg(bg), bg); }
+        else if (ch) r3_put(s, 4 + i, ly, ch, R3_ST(R3_ST_STRONG));
+        else if (k < a->tmax) r3_put(s, 4 + i, ly, 250, R3_ST(R3_ST_HINT));
     }
-    r3_text_fit(s, 4, 7, a->tfield == 1 ? "Beats per minute. Erase it and keep for a suggestion." : a->tfield == 0 ? "The musical key, e.g. C or Am." : "Who made these cues.", 56, R3_ST(R3_ST_BODY));
-    r3_text_fit(s, 4, 12, "Up/Down letter   L1/R1 jump 8   Left/Right move", 56, R3_ST(R3_ST_HINT));
-    r3_text_fit(s, 4, 13, "Y erase   A keep   a keyboard types it", 56, R3_ST(R3_ST_HINT));
+    r3_text_fit(s, 4, top + 2, suffix ? "The number or letter after the name: 1, 2, A, 1a ..." : a->tfield == TF_TEMPO ? "Beats per minute. Erase it and keep for a suggestion." : a->tfield == TF_KEY ? "The musical key, e.g. C or Am. Fn shows the piano." : "Who made these cues.", 56, R3_ST(R3_ST_BODY));
+    if (a->piano) r3_text_fit(s, 4, top + 6, "Play the note. Fn closes the piano, then A keeps.", 56, R3_ST(R3_ST_HINT));
+    else if (suffix) {
+        snprintf(label, sizeof label, "Marker: %s%s%s", a->suffix_base, a->tlen ? " " : "", a->tbuf);
+        r3_text_fit(s, 4, top + 6, label, 56, R3_ST(R3_ST_STRONG));
+        r3_text_fit(s, 4, top + 7, "Up/Down number or letter   Right next place", 56, R3_ST(R3_ST_HINT));
+        r3_text_fit(s, 4, top + 8, "Y erase   A keep   B cancel", 56, R3_ST(R3_ST_HINT));
+    } else {
+        r3_text_fit(s, 4, top + 7, "Up/Down letter   R1+Up/Down jump 8   Left/Right move", 56, R3_ST(R3_ST_HINT));
+        r3_text_fit(s, 4, top + 8, "Y erase   A keep   a keyboard types it", 56, R3_ST(R3_ST_HINT));
+    }
+    if (a->piano) compose_piano(a, s);
     R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, "", "", R3_ST_HINT};
     r3_command_line(s, &cmd);
 }
@@ -1189,6 +1378,11 @@ static void compose(App *a, R3Screen *s) {
     case M_TEXT: compose_text(a, s); break;
     default: compose_library(a, s);
     }
+    if (a->overlay == OV_MM) r3_mm_draw(s, &a->mm, r3_themes[a->theme].name);
+    else if (a->overlay == OV_ABOUT) {
+        static const char *const lines[] = {"The R36S port of Cue (chordica.com/cue):", "markers and cues on a song, A-B loops, Set Lists.", "r3i6nos-ansiapps theme, MIT; the font is CC BY-SA 4.0.", "Songs and cues stay on the card; nothing is sent.", NULL};
+        r3_about_draw(s, "MusiCue", VERSION, BUILD_LINE, lines);
+    } else if (a->overlay == OV_THEME) r3_theme_pick_draw(s, a->theme_sel, a->theme);
 }
 
 /* ---- presenting: the cells, with the waveform's pixels laid over rows 1-6 ----------------------------------------------------------------- */
@@ -1199,6 +1393,7 @@ static unsigned wave_signature(App *a) {
     unsigned h = 2166136261u;
     h = (h ^ (unsigned)wave_x(engine_pos_sec(&a->eng), dur)) * 16777619u;
     h = (h ^ (unsigned)a->loop_state) * 16777619u;
+    h = (h ^ (unsigned)a->overlay) * 16777619u;
     h = (h ^ (unsigned)(a->loop_a * 100) ^ (unsigned)(a->loop_b * 100) << 3) * 16777619u;
     h = (h ^ (unsigned)a->cues.nm) * 16777619u;
     h = (h ^ (unsigned)(a->offset * 1000)) * 16777619u;
@@ -1208,7 +1403,7 @@ static unsigned wave_signature(App *a) {
 
 static void paint(App *a, uint32_t *px, const R3Screen *s) {
     r3_render(s, px);
-    if (a->mode == M_PLAYER || (a->mode == M_MENU && a->back_mode == M_PLAYER)) {
+    if ((a->mode == M_PLAYER || (a->mode == M_MENU && a->back_mode == M_PLAYER)) && a->overlay != OV_THEME && a->overlay != OV_ABOUT) {      /* those two boxes reach into the waveform's rows */
         WaveStyle st;
         WaveMark marks[WAVE_MAX_MARKS];
         wave_style(&st);
@@ -1240,7 +1435,7 @@ static void present(App *a, R3Video *v, SDL_Renderer *r, const R3Screen *s, int 
 
 /* ---- actions ------------------------------------------------------------------------------------------------------------------------------- */
 
-enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_THEME, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_ADD, A_CUE, A_BOOKMARK, A_CUEDEL, A_RECALC, A_SLADD, A_SLDEL, A_SLUP, A_SLDOWN, A_QUIT, A_CLOSE, A_LABELPICK };
+enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_ADD, A_CUE, A_BOOKMARK, A_CUEDEL, A_RECALC, A_SLADD, A_SLDEL, A_SLUP, A_SLDOWN, A_QUIT, A_CLOSE, A_JUMPCLEAR, A_LABELPICK };
 
 static const char *const PRESET_LABELS[] = {"Intro", "Verse", "Pre-Chorus", "Chorus", "Bridge", "Solo", "Instrumental", "Outro", "End", "Tag"};
 #define NPRESET ((int)(sizeof PRESET_LABELS / sizeof *PRESET_LABELS))
@@ -1266,11 +1461,12 @@ static void mark_here(App *a) {
     say(a, R3_ST_OK, "Marked %s at %.1fs. L1+R1 > Name it.", label, vt);
 }
 
-/* Cue's "Cue" button (here D-pad Down): a cue at the playhead, reading "- - - -" until its words are typed. The Tempo is suggested again from the cues (only if it is unset). */
+/* Cue's "Cue" button (here D-pad Down in Rec mode, and the context menu's Cue here): a cue at the playhead, reading "- - - -" until its words are typed. The Tempo is suggested again from the cues (only if it is unset). */
 static void cue_here(App *a) {
     double vt = engine_pos_sec(&a->eng) - a->offset;
     if (vt < 0) vt = 0;
     if (cue_add_caption(&a->cues, vt, 0, 0, "- - - -") < 0) { say(a, R3_ST_ERROR, "No room for another cue."); return; }
+    if (a->rec && a->nrec < REC_UNDO) a->rec_t[a->nrec++] = vt;                 /* in Rec mode, so D-pad Up can take it back */
     cue_sort(&a->cues);
     for (int i = 0; i < a->cues.nc; i++) if (fabs(a->cues.c[i].start - vt) < 0.0005) a->csel = i;
     a->stick_idle_ms = 1e9;                                     /* the cursor goes to the new cue and follows the playing one */
@@ -1311,14 +1507,126 @@ static void cue_bookmark(App *a, int i) {
     say(a, R3_ST_OK, "Marker: %s.", label);
 }
 
-static void loop_cycle(App *a) {
+/* A-B looping (R1+D-pad Up sets A, R1+D-pad Down sets B, R1+Start switches the loop on and off, R1+Select goes to A). */
+static void loop_set_a(App *a) {
     double pos = engine_pos_sec(&a->eng);
-    if (a->loop_state == 0) { a->loop_a = pos; a->loop_state = 1; say(a, R3_ST_HINT, "Loop A set. Y again sets B."); }
-    else if (a->loop_state == 1) {
-        if (pos - a->loop_a < 0.1) { say(a, R3_ST_WARN, "B must be after A."); return; }
-        a->loop_b = pos; a->loop_state = 2; set_loop_engine(a);
-        say(a, R3_ST_OK, "Looping A to B. Y clears it.");
-    } else { a->loop_state = 0; set_loop_engine(a); say(a, R3_ST_HINT, "Loop cleared."); }
+    char t[16];
+    fmt_time(pos, t, sizeof t);
+    a->loop_a = pos;
+    if (a->loop_state == 2 && a->loop_b - pos < 0.1) { a->loop_state = 1; a->loop_off = 0; set_loop_engine(a); say(a, R3_ST_WARN, "A is past B: set B again (R1+Down)."); return; }
+    int had = a->loop_state == 2;
+    if (a->loop_state == 0) a->loop_state = 1;
+    set_loop_engine(a);
+    say(a, R3_ST_OK, had ? "A moved to %s." : "A set at %s. R1+Down sets B.", t);
+}
+
+static void loop_set_b(App *a) {
+    double pos = engine_pos_sec(&a->eng);
+    char t[16];
+    if (a->loop_state == 0) { say(a, R3_ST_WARN, "Set A first (R1+Up)."); return; }
+    if (pos - a->loop_a < 0.1) { say(a, R3_ST_WARN, "B must be after A."); return; }
+    a->loop_b = pos;
+    a->loop_state = 2;
+    a->loop_off = 0;
+    set_loop_engine(a);
+    fmt_time(pos, t, sizeof t);
+    say(a, R3_ST_OK, "B set at %s: looping A to B. R1+Start stops it.", t);
+}
+
+static void loop_toggle(App *a) {
+    if (a->loop_state != 2) { say(a, R3_ST_WARN, "No A-B loop yet: R1+Up sets A, R1+Down sets B."); return; }
+    a->loop_off = !a->loop_off;
+    set_loop_engine(a);
+    if (a->loop_off) { say(a, R3_ST_HINT, "A-B loop off. R1+Start starts it again."); return; }
+    double pos = engine_pos_sec(&a->eng);
+    if (pos < a->loop_a || pos >= a->loop_b) engine_seek(&a->eng, a->loop_a);
+    say(a, R3_ST_OK, "Looping A to B.");
+}
+
+static void loop_goto_a(App *a) {
+    if (a->loop_state == 0) { say(a, R3_ST_WARN, "No A yet: R1+Up sets it."); return; }
+    engine_seek(&a->eng, a->loop_a);
+    say(a, R3_ST_HINT, "At A.");
+}
+
+static int loop_running(const App *a) { return a->loop_state == 2 && !a->loop_off; }
+
+/* Cue navigation (D-pad Left and Right in both modes, Up and Down in Play mode): the cue's own time, in the audio's clock. */
+static void cue_goto(App *a, int i) {
+    engine_seek(&a->eng, a->cues.c[i].start + a->offset);
+    a->csel = i;
+    a->stick_idle_ms = 1e9;
+    say(a, R3_ST_HINT, "Cue %d of %d: %s", i + 1, a->cues.nc, a->cues.c[i].text);
+}
+
+static void cue_prev(App *a) {
+    if (!a->cues.nc) { say(a, R3_ST_WARN, "No cues yet."); return; }
+    double vt = engine_pos_sec(&a->eng) - a->offset;
+    int ci = -1;
+    for (int i = 0; i < a->cues.nc; i++) if (a->cues.c[i].start <= vt + 0.0005) ci = i;
+    int target = ci >= 0 && vt - a->cues.c[ci].start >= 1.5 ? ci : ci - 1;          /* inside a cue's first 1.5 s: the one before; later: its own start (as a player's Previous) */
+    if (target < 0) { engine_seek(&a->eng, 0); say(a, R3_ST_HINT, "The start."); }
+    else cue_goto(a, target);
+}
+
+static void cue_next(App *a) {
+    double vt = engine_pos_sec(&a->eng) - a->offset;
+    for (int i = 0; i < a->cues.nc; i++) if (a->cues.c[i].start > vt + 0.05) { cue_goto(a, i); return; }
+    say(a, R3_ST_HINT, a->cues.nc ? "No later cue." : "No cues yet.");
+}
+
+static void cue_edge(App *a, int last) {
+    if (!a->cues.nc) { say(a, R3_ST_WARN, "No cues yet."); return; }
+    cue_goto(a, last ? a->cues.nc - 1 : 0);
+}
+
+/* Start: play and stop. L1+Start: play in Rec mode. Playing, either one stops (and ends Rec mode). */
+static void transport(App *a, int rec) {
+    if (a->eng.playing) {
+        engine_play(&a->eng, 0);
+        if (a->rec) say(a, R3_ST_HINT, "Rec stopped: %d cue%s added this take.", a->nrec, a->nrec == 1 ? "" : "s");
+        a->rec = 0;
+        return;
+    }
+    a->rec = rec;
+    a->nrec = 0;
+    if (rec) say(a, R3_ST_OK, "Rec: D-pad Down cues, Up takes the last back, Start stops.");
+    engine_play(&a->eng, 1);
+}
+
+static void rec_undo(App *a) {
+    while (a->nrec > 0) {
+        double t = a->rec_t[--a->nrec];
+        for (int i = 0; i < a->cues.nc; i++)
+            if (fabs(a->cues.c[i].start - t) < 0.0005) {
+                char tm[16];
+                fmt_time(t, tm, sizeof tm);
+                cue_delete(a, i);
+                say(a, R3_ST_HINT, "Took back the cue at %s.", tm);
+                return;
+            }
+    }
+    say(a, R3_ST_WARN, "Nothing to take back: only the cues added in this take.");
+}
+
+/* The Jump panel's buttons: D-pad up, down, left, right, then A, B, X, Y. Stopped, a press binds the marker the right stick has picked (again on the same one unbinds);
+ * playing, it moves the playhead to the marker bound. */
+static int jump_marker_of(const App *a, int slot) { return a->jump_on[slot] ? marker_at(a, a->jump_t[slot]) : -1; }
+
+static void jump_button(App *a, int slot) {
+    int m = jump_marker_of(a, slot);
+    if (a->eng.playing) {
+        if (m < 0) { say(a, R3_ST_WARN, "%s has no marker: stop, pick one with the right stick, press it.", JUMP_TAGS[slot]); return; }
+        engine_seek(&a->eng, a->cues.m[m].time + a->offset);
+        a->jsel = m;
+        say(a, R3_ST_HINT, "%s %s", JUMP_TAGS[slot], a->cues.m[m].label);
+        return;
+    }
+    if (!a->cues.nm) { say(a, R3_ST_WARN, "No markers to bind: bookmark a cue first."); return; }
+    if (a->jsel >= a->cues.nm) a->jsel = a->cues.nm - 1;
+    if (m == a->jsel) { a->jump_on[slot] = 0; say(a, R3_ST_HINT, "%s is free again.", JUMP_TAGS[slot]); }
+    else { a->jump_on[slot] = 1; a->jump_t[slot] = a->cues.m[a->jsel].time; say(a, R3_ST_OK, "%s jumps to %s.", JUMP_TAGS[slot], a->cues.m[a->jsel].label); }
+    jump_save(a);
 }
 
 static void seek_rel(App *a, double d) { engine_seek(&a->eng, engine_pos_sec(&a->eng) + d); }
@@ -1344,13 +1652,77 @@ static void meta_text_start(App *a, int field) {
     a->tlen = (int)strlen(a->tbuf);
     a->tpos = a->tlen;
     a->mode = M_TEXT;
-    say(a, R3_ST_HINT, "Up/Down letter, Left/Right move, Y erase, A keeps, B cancels.");
+    a->piano = field == TF_KEY;                                  /* the Key: a piano to find it by ear; Fn closes it */
+    a->piano_oct = 3;
+    memset(a->piano_now, 0, sizeof a->piano_now);
+    if (a->piano) say(a, R3_ST_HINT, "Play the key's note. Fn closes the piano, then A keeps.");
+    else say(a, R3_ST_HINT, "Up/Down letter, Left/Right move, Y erase, A keeps, B cancels.");
+}
+
+/* The Piano panel (floating over the Key field): one octave, C3 to B3, on the pad. The buttons are the keys (shoulders are one-touch here, not modifiers); Select and Start
+ * move the octave, Fn closes it. A note names the key's root; what follows it (m, 7 ...) stays. */
+static double piano_freq(int key, int oct) { return 130.8128 * pow(2.0, (key + 12 * (oct - 3)) / 12.0); }      /* C3 is 130.81 Hz */
+
+static void piano_apply(App *a, int key) {
+    int skip = 0;
+    if (a->tbuf[0] >= 'A' && a->tbuf[0] <= 'G') skip = a->tbuf[1] == '#' || a->tbuf[1] == 'b' ? 2 : 1;
+    char rest[72];
+    snprintf(rest, sizeof rest, "%s", a->tbuf + skip);
+    snprintf(a->tbuf, sizeof a->tbuf, "%s%s", NOTE_NAME[key], rest);
+    a->tbuf[a->tmax < (int)sizeof a->tbuf - 1 ? a->tmax : (int)sizeof a->tbuf - 1] = 0;
+    a->tlen = (int)strlen(a->tbuf);
+    a->tpos = a->tlen;
+}
+
+static void piano_close(App *a) {
+    a->piano = 0;
+    memset(a->piano_now, 0, sizeof a->piano_now);
+    engine_notes_off(&a->eng);
+}
+
+/* A raw button while the Piano is up (down or up). */
+static void piano_button(App *a, int bt, int down) {
+    if (bt == R3_BTN_FN) { if (down) { if (a->piano) { piano_close(a); say(a, R3_ST_HINT, "Piano closed. A keeps the key, B cancels."); } else if (a->tfield == TF_KEY) { a->piano = 1; say(a, R3_ST_HINT, "Fn closes the piano."); } } return; }
+    if (!a->piano) return;
+    if (bt == R3_BTN_SELECT || bt == R3_BTN_START) {
+        if (down) { a->piano_oct += bt == R3_BTN_START ? 1 : -1; if (a->piano_oct < 1) a->piano_oct = 1; if (a->piano_oct > 5) a->piano_oct = 5; }
+        return;
+    }
+    for (int k = 0; k < 12; k++) {
+        if (PIANO_KEYS[k].btn != bt) continue;
+        if (down) { engine_note_on(&a->eng, k, piano_freq(k, a->piano_oct)); a->piano_now[k] = 1; piano_apply(a, k); say(a, R3_ST_HINT, "%s%d", NOTE_NAME[k], a->piano_oct); }
+        else { engine_note_off(&a->eng, k); a->piano_now[k] = 0; }
+        return;
+    }
+}
+
+/* Naming a marker: Right on a preset (Verse, Chorus ...) asks for the number or letter after it, with Up and Down, and A keeps "Verse 1", "Chorus 1a". */
+static const char SUFFIX_ALPHA[] = "123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0";
+
+static void suffix_start(App *a, int preset) {
+    if (preset < 0 || preset >= NPRESET || !a->cues.nm) return;
+    snprintf(a->suffix_base, sizeof a->suffix_base, "%s", PRESET_LABELS[preset]);
+    a->tfield = TF_SUFFIX;
+    a->tmax = 8;
+    a->talpha = SUFFIX_ALPHA;
+    a->tbuf[0] = 0;
+    a->tlen = a->tpos = 0;
+    a->mode = M_TEXT;
+    say(a, R3_ST_HINT, "Up/Down number or letter, Right next place, A keeps, B cancels.");
 }
 
 /* Keep what was typed. A Tempo must be a positive number, or empty (or ?) to be suggested from the cues; changing the Sig re-suggests too (Cue's input handler). */
 static void meta_text_done(App *a) {
     static const char *const F[] = {"key", "tempo", "sig", "scripter"};
     char v[72];
+    if (a->tfield == TF_SUFFIX) {                               /* the marker's name with its number or letter: "Verse 1a" */
+        char label[sizeof a->cues.m[0].label];
+        snprintf(label, sizeof label, "%s%s%s", a->suffix_base, a->tlen ? " " : "", a->tbuf);
+        if (a->cues.nm) { snprintf(a->cues.m[a->msel].label, sizeof a->cues.m[a->msel].label, "%s", label); a->cues.dirty = 1; }
+        a->mode = M_PLAYER;
+        say(a, R3_ST_OK, "Named %s.", label);
+        return;
+    }
     snprintf(v, sizeof v, "%s", a->tbuf);
     while (a->tlen > 0 && v[a->tlen - 1] == ' ') v[--a->tlen] = 0;
     if (a->tfield == 1 && v[0]) {
@@ -1362,6 +1734,7 @@ static void meta_text_done(App *a) {
     if (a->tfield == 1) { int ch = maybe_suggest_tempo(a); say(a, R3_ST_OK, ch ? "Tempo suggested from the cues." : "Tempo kept."); }
     else say(a, R3_ST_OK, "%s kept.", META_NAMES[a->tfield == 3 ? 3 : a->tfield]);
     a->cues.dirty = 1;
+    piano_close(a);
     a->mode = M_PLAYER;
 }
 
@@ -1400,18 +1773,38 @@ static void panel_accept(App *a) {
     }
 }
 
-/* The right stick: up and down move the selection in the panel it is in, left and right hop to the other panel on display. */
+/* The right stick (and R1 with it): up and down move the selection in the panel it is in (Page up and down, Home and End with R1 held), left and right hop to the other
+ * panel on display. On the Jump panel it picks the marker a button will bind to. */
 static void stick_action(App *a, int act) {
     a->stick_idle_ms = 0;
+    if (act == R3_LEFT || act == R3_RIGHT) { if (!a->jump_view) a->pan_focus = act == R3_LEFT ? 0 : 1; return; }
+    if (a->jump_view) { a->jsel = r3_list_step(a->jsel, a->cues.nm, JUMP_ROWS, act); return; }
     int p = panel_at(a, a->pan_focus), *sel = panel_sel(a, p), n = panel_count(a, p);
-    if (act == R3_UP || act == R3_DOWN) *sel = r3_list_key(*sel, n, 10, act);
-    else if (act == R3_LEFT) a->pan_focus = 0;
-    else if (act == R3_RIGHT) a->pan_focus = 1;
+    *sel = r3_list_step(*sel, n, 10, act);
 }
 
-static void panels_turn(App *a) {                              /* Fn: the carousel turns one place; what the stick was in stays where it is */
-    a->pan_first = (a->pan_first + 1) % P_COUNT;
-    say(a, R3_ST_HINT, "%s | %s", PANEL_NAMES[panel_at(a, 0)], PANEL_NAMES[panel_at(a, 1)]);
+/* The carousel: the six panels two at a time (Fn turns it one place), then the Jump panel on the whole width, then round again. */
+static int view_code(const App *a) { return a->jump_view ? P_COUNT : a->pan_first; }
+
+static void view_set(App *a, int code) {
+    int cur = view_code(a);
+    if (code == cur) return;
+    a->prev_view = cur;
+    a->jump_view = code == P_COUNT;
+    if (!a->jump_view) a->pan_first = code;
+    if (a->jump_view) say(a, R3_ST_HINT, "Jump: stopped, a button binds the marker; playing, it jumps.");
+    else say(a, R3_ST_HINT, "%s | %s", PANEL_NAMES[panel_at(a, 0)], PANEL_NAMES[panel_at(a, 1)]);
+}
+
+static void panels_turn(App *a, int action) {
+    if (action != R3_PANEL_NEXT) a->auto_jump = 0;
+    if (action == R3_PANEL_FIRST) view_set(a, 0);
+    else if (action == R3_PANEL_PREV) { if (a->prev_view == view_code(a)) say(a, R3_ST_HINT, "No earlier panel yet."); else view_set(a, a->prev_view); }
+    else if (a->eng.playing && !a->rec && !a->jump_view) {      /* playing in Play mode: Fn goes straight to Jump, wherever the carousel is; stopping brings the panels back */
+        a->auto_jump = 1;
+        a->auto_prev = view_code(a);
+        view_set(a, P_COUNT);
+    } else view_set(a, (view_code(a) + 1) % (P_COUNT + 1));
 }
 
 /* A typed key while a metadata field is open (a keyboard); true when used. */
@@ -1437,7 +1830,7 @@ static int text_key(App *a, SDL_Keycode k, Uint16 mod) {
 static void text_action(App *a, int act) {
     const int alen = (int)strlen(a->talpha);
     switch (act) {
-    case R3_BACK: a->mode = M_PLAYER; say(a, R3_ST_HINT, "Unchanged."); break;
+    case R3_BACK: piano_close(a); a->mode = M_PLAYER; say(a, R3_ST_HINT, "Unchanged."); break;
     case R3_ACCEPT: meta_text_done(a); break;
     case R3_LEFT: if (a->tpos > 0) a->tpos--; break;
     case R3_RIGHT: if (a->tpos < a->tlen) a->tpos++; break;
@@ -1470,16 +1863,36 @@ static void save_offset(const App *a) {
     cue_write_file(path, buf, strlen(buf));
 }
 
-static void build_main_menu(App *a) {
+/* The app's own menus (the main menu, L1+R1, has the six fixed items first, then one of these): the songs' (Add, Sync ...), the song's (offset, save, export ...), and the
+ * context menu (L2+R2, or Y) for what the cursor is on. */
+static void build_menu(App *a, int kind) {
     char v[40];
-    menu_clear(&a->menu, a->back_mode == M_PLAYER ? "Song" : "MusiCue");
-    if (a->back_mode == M_PLAYER) {
-        int fp = panel_at(a, a->pan_focus);
-        menu_add(&a->menu, A_CUE, "Cue here (D-pad Down)", "");
+    a->menu_kind = kind;
+    if (kind == MK_LIBRARY) {
+        menu_clear(&a->menu, "Songs and sync");
+        menu_add(&a->menu, A_ADD, "Add: YouTube ID (11 chars)", "");
+        menu_add(&a->menu, A_SYNC, "Sync: fetch cues and songs", "");
+        menu_add(&a->menu, A_IMPORT, "Import Cue bundles from inbox/", "");
+        menu_add(&a->menu, A_DEMO, "Demo song", "");
+        menu_add(&a->menu, A_LICENSE, "Fetch from YouTube", a->any_license ? "any video" : "Creative Commons only");
+    } else if (kind == MK_SONG) {
+        menu_clear(&a->menu, "Song options");
+        snprintf(v, sizeof v, "%+.2f s", a->offset);
+        menu_add(&a->menu, A_OFFSET, "Offset (audio against cues)", v);
+        menu_add(&a->menu, A_SAVE, "Save cues", a->cues.dirty ? "unsaved" : "saved");
+        menu_add(&a->menu, A_EXPORT, "Export for Cue (json, srt, bundle)", "");
+        menu_add(&a->menu, A_SLADD, "Add this song to the Set List", a->open >= 0 && setlist_find(a, a->songs[a->open].id) >= 0 ? "in list" : "");
+        menu_add(&a->menu, A_RECALC, "Recalculate tempo", "");
+        menu_add(&a->menu, A_QUIT, "Back to the songs", "");
+    } else {
+        menu_clear(&a->menu, a->jump_view ? "Jump" : PANEL_NAMES[panel_at(a, a->pan_focus)]);
+        int fp = a->jump_view ? -1 : panel_at(a, a->pan_focus);
+        menu_add(&a->menu, A_CUE, "Cue here", "");
         menu_add(&a->menu, A_MARK, "Mark here", "");
-        if (fp == P_MARKERS) {
-            menu_add(&a->menu, A_LABEL, "Name the selected marker", a->cues.nm ? a->cues.m[a->msel].label : "");
+        if (fp == P_MARKERS || a->jump_view) {
+            menu_add(&a->menu, A_LABEL, "Name the selected marker", a->cues.nm ? a->cues.m[a->jump_view ? a->jsel : a->msel].label : "");
             menu_add(&a->menu, A_DELETE, "Delete the selected marker", "");
+            if (a->jump_view) menu_add(&a->menu, A_JUMPCLEAR, "Clear every button", "");
         } else if (fp == P_CUES) {
             menu_add(&a->menu, A_BOOKMARK, "Bookmark the selected cue", a->cues.nc && marker_at(a, a->cues.c[a->csel].start) >= 0 ? "marked" : "");
             menu_add(&a->menu, A_CUEDEL, "Delete the selected cue", "");
@@ -1490,35 +1903,21 @@ static void build_main_menu(App *a) {
             menu_add(&a->menu, A_SLUP, "Move up", "");
             menu_add(&a->menu, A_SLDOWN, "Move down", "");
         }
-        menu_add(&a->menu, A_SLADD, "Add this song to the Set List", a->open >= 0 && setlist_find(a, a->songs[a->open].id) >= 0 ? "in list" : "");
-        snprintf(v, sizeof v, "%+.2f s", a->offset);
-        menu_add(&a->menu, A_OFFSET, "Offset (audio against cues)", v);
-        menu_add(&a->menu, A_SAVE, "Save cues", a->cues.dirty ? "unsaved" : "saved");
-        menu_add(&a->menu, A_EXPORT, "Export for Cue (json, srt, bundle)", "");
-    } else {
-        menu_add(&a->menu, A_ADD, "Add: YouTube ID (11 chars)", "");
-        menu_add(&a->menu, A_SYNC, "Sync: fetch cues and songs", "");
-        menu_add(&a->menu, A_IMPORT, "Import Cue bundles from inbox/", "");
-        menu_add(&a->menu, A_DEMO, "Demo song", "");
-        menu_add(&a->menu, A_LICENSE, "Fetch from YouTube", a->any_license ? "any video" : "Creative Commons only");
     }
-    menu_add(&a->menu, A_THEME, "Theme", r3_themes[a->theme].name);
-    menu_add(&a->menu, A_QUIT, a->back_mode == M_PLAYER ? "Back to the songs" : "Quit", "");
 }
 
-static void open_menu(App *a) {
-    a->back_mode = a->mode;
-    int keep = a->mode == M_MENU ? a->menu.sel : 0;
-    build_main_menu(a);
-    a->menu.sel = keep;
+static void open_menu(App *a, int kind) {
+    a->back_mode = a->mode == M_MENU ? a->back_mode : a->mode;
+    build_menu(a, kind);
     a->mode = M_MENU;
 }
 
 static void open_label_menu(App *a) {
     if (!a->cues.nm) return;
     menu_clear(&a->menu, "Name the marker");
-    for (int i = 0; i < NPRESET; i++) menu_add(&a->menu, A_LABELPICK + i, PRESET_LABELS[i], "");
+    for (int i = 0; i < NPRESET; i++) menu_add(&a->menu, A_LABELPICK + i, PRESET_LABELS[i], "> 1 2 a b");
     a->menu.sel = 0;
+    say(a, R3_ST_HINT, "A keeps the name; Right adds a number or letter (Verse 1, Chorus 1a).");
     a->mode = M_MENU;
 }
 
@@ -1784,11 +2183,8 @@ static int id_key(App *a, SDL_Keycode k, Uint16 mod) {
 
 static void menu_adjust(App *a, int dir) {
     MItem *it = &a->menu.it[a->menu.sel];
-    if (it->id == A_THEME) {
-        a->theme = (a->theme + dir + R3_THEME_COUNT) % R3_THEME_COUNT;
-        apply_theme(a);
-        save_settings(a);
-        snprintf(it->value, sizeof it->value, "%s", r3_themes[a->theme].name);
+    if (it->id >= A_LABELPICK) {
+        if (dir > 0) suffix_start(a, it->id - A_LABELPICK);
     } else if (it->id == A_OFFSET && a->open >= 0) {
         a->offset += dir * 0.05;
         if (fabs(a->offset) < 0.0001) a->offset = 0;
@@ -1814,14 +2210,16 @@ static void menu_choose(App *a) {
     switch (id) {
     case A_MARK: a->mode = M_PLAYER; mark_here(a); break;
     case A_CUE: a->mode = M_PLAYER; cue_here(a); break;
-    case A_LABEL: open_label_menu(a); break;
+    case A_LABEL: if (a->jump_view) a->msel = a->jsel; open_label_menu(a); break;
     case A_DELETE:
+        if (a->jump_view) a->msel = a->jsel;
         if (a->cues.nm) { cue_del_marker(&a->cues, a->msel); if (a->msel >= a->cues.nm) a->msel = a->cues.nm ? a->cues.nm - 1 : 0; say(a, R3_ST_HINT, "Marker deleted."); }
         a->mode = M_PLAYER;
         break;
     case A_SAVE: say(a, save_cues(a) == 0 ? R3_ST_OK : R3_ST_ERROR, "%s", a->cues.dirty ? "Could not save the cues." : "Cues saved."); a->mode = M_PLAYER; break;
     case A_EXPORT: export_cues(a); a->mode = M_PLAYER; break;
-    case A_OFFSET: case A_THEME: case A_LICENSE: menu_adjust(a, 1); break;
+    case A_OFFSET: case A_LICENSE: menu_adjust(a, 1); break;
+    case A_JUMPCLEAR: memset(a->jump_on, 0, sizeof a->jump_on); jump_save(a); say(a, R3_ST_HINT, "Every Jump button is free."); a->mode = M_PLAYER; break;
     case A_SYNC: job_start(a, NULL); break;
     case A_ADD: id_open(a); break;
     case A_BOOKMARK: cue_bookmark(a, a->csel); a->mode = M_PLAYER; break;
@@ -1845,67 +2243,75 @@ static void menu_choose(App *a) {
     }
     case A_DEMO: open_demo(a); say(a, R3_ST_HINT, "The demo song: A plays, X jumps, Y loops."); break;
     case A_QUIT:
-        if (a->back_mode == M_PLAYER) { save_cues(a); close_song(a); a->mode = M_LIBRARY; }
-        else a->quit = 1;
+        save_cues(a);
+        close_song(a);
+        a->mode = M_LIBRARY;
         break;
     default: a->mode = a->back_mode;
     }
 }
 
-/* MusiCue's own actions, beside the theme's R3_*: Start (play/stop), Fn (turn the panels) and the right stick's four directions. */
-enum { MC_PLAY = 100, MC_FN, MC_SU, MC_SD, MC_SL, MC_SR };
+/* ---- the pad: the mapping's reader, the main menu, and MusiCue's own map for the player ---------------------------------------------------------- */
 
-static void menu_toggle(App *a) {                                   /* L1+R1: the menu opens and closes (a pad has no Start for it) */
-    if (a->mode == M_MENU) a->mode = a->back_mode == M_PLAYER || a->menu.it[0].id >= A_LABELPICK ? (a->open >= 0 || a->demo ? M_PLAYER : M_LIBRARY) : a->back_mode;
-    else if (a->mode == M_LIBRARY || a->mode == M_PLAYER) open_menu(a);
+static void mm_open(App *a) {
+    a->mm.n_own = 0;
+    a->mm.own[a->mm.n_own++] = a->mode == M_PLAYER ? "Song options" : "Songs and sync";
+    r3_mm_open(&a->mm);
+    a->overlay = OV_MM;
+    a->force = 1;
+}
+
+/* One action while L1+R1's menu, About or the colour theme picker shows. */
+static void overlay_key(App *a, int act) {
+    a->force = 1;
+    if (a->overlay == OV_ABOUT) { a->overlay = OV_NONE; return; }
+    if (a->overlay == OV_THEME) {
+        if (act == R3_ACCEPT) {
+            a->theme = a->theme_sel;
+            apply_theme(a);
+            save_settings(a);
+            say(a, R3_ST_OK, "Colour theme: %s", r3_themes[a->theme].name);
+            a->overlay = OV_NONE;
+        } else if (act == R3_BACK || act == R3_MENU) {
+            apply_theme(a);
+            a->overlay = OV_NONE;
+        } else {
+            a->theme_sel = r3_list_step(a->theme_sel, R3_THEME_COUNT, r3_list_rows(R3_DISPLAY_ROWS - 2), act);
+            r3_theme_apply(a->theme_sel);
+            app_palette(r3_themes[a->theme_sel].look);
+        }
+        return;
+    }
+    int id = r3_mm_key(&a->mm, act);
+    if (id == R3MM_NOTHING) return;
+    a->overlay = OV_NONE;
+    switch (id) {
+    case R3MM_ABOUT: a->overlay = OV_ABOUT; break;
+    case R3MM_THEME: a->overlay = OV_THEME; a->theme_sel = a->theme; break;
+    case R3MM_REPORT: say(a, R3_ST_WARN, "The device report is not built for MusiCue yet."); break;
+    case R3MM_DEMO: say(a, R3_ST_WARN, "Rec demo is not built for MusiCue yet (Rec mode, L1+Start, is another thing)."); break;
+    case R3MM_QUIT: a->quit = 1; break;
+    case R3MM_OWN0: open_menu(a, a->mode == M_PLAYER ? MK_SONG : MK_LIBRARY); break;
+    default: break;
+    }
 }
 
 static void app_action(App *a, int act) {
-    if (act >= MC_SU && act <= MC_SR && a->mode != M_PLAYER)        /* outside the player the stick moves in lists like the D-pad */
-        act = act == MC_SU ? R3_UP : act == MC_SD ? R3_DOWN : act == MC_SL ? R3_LEFT : R3_RIGHT;
     switch (a->mode) {
     case M_LIBRARY:
         if (act == R3_ACCEPT) { if (a->nsongs && !open_song(a, a->lsel)) a->mode = M_LIBRARY; }
-        else if (act == R3_BACK) a->quit = 1;
-        else if (act == R3_MORE) open_menu(a);
+        else if (act == R3_BACK) say(a, R3_ST_HINT, "L1+R1 is the menu; Quit is in it.");
+        else if (act == R3_MORE || act == R3_Y) open_menu(a, MK_LIBRARY);
         else a->lsel = r3_list_key(a->lsel, a->nsongs, 11, act);
         break;
-    case M_PLAYER:
-        switch (act) {
-        case R3_ACCEPT: case R3_X: panel_accept(a); break;                  /* A: the selection of the panel the stick is in */
-        case MC_PLAY: engine_play(&a->eng, !a->eng.playing); break;         /* Start */
-        case R3_SELECT: engine_seek(&a->eng, 0); say(a, R3_ST_HINT, "Back to 0:00."); break;
-        case R3_BACK: save_cues(a); close_song(a); a->mode = M_LIBRARY; break;
-        case R3_MORE: open_menu(a); break;                                  /* a keyboard's F1 (the pad's is L1+R1) */
-        case R3_Y: loop_cycle(a); break;
-        case R3_DOWN: cue_here(a); break;                                   /* D-pad Down: Cue */
-        case R3_UP: break;
-        case MC_FN: panels_turn(a); break;
-        case MC_SU: stick_action(a, R3_UP); break;
-        case MC_SD: stick_action(a, R3_DOWN); break;
-        case MC_SL: stick_action(a, R3_LEFT); break;
-        case MC_SR: stick_action(a, R3_RIGHT); break;
-        case R3_PAGEUP: case R3_PAGEDOWN: {                                 /* L1, R1: the marker before, the marker after */
-            int cm = cur_marker(a, engine_pos_sec(&a->eng) - a->offset);
-            int target = act == R3_PAGEUP ? (cm > 0 && engine_pos_sec(&a->eng) - a->offset - a->cues.m[cm].time < 1.5 ? cm - 1 : cm) : cm + 1;
-            if (target >= 0 && target < a->cues.nm) jump_marker(a, target);
-            else if (act == R3_PAGEUP) engine_seek(&a->eng, 0);
-            break;
-        }
-        case R3_LEFT: seek_rel(a, -1); break;
-        case R3_RIGHT: seek_rel(a, 1); break;
-        case R3_HOME: seek_rel(a, -10); break;
-        case R3_END: seek_rel(a, 10); break;
-        default: break;
-        }
-        break;
+    case M_PLAYER: break;                                                   /* the player reads raw buttons (player_press) and the stick (stick_action) */
     case M_TEXT: text_action(a, act); break;
     case M_MENU:
-        if (act == R3_BACK || act == R3_MORE) { a->mode = a->back_mode == M_PLAYER || a->menu.it[0].id >= A_LABELPICK ? (a->open >= 0 || a->demo ? M_PLAYER : M_LIBRARY) : a->back_mode; }
+        if (act == R3_BACK || act == R3_MORE || act == R3_MENU || act == R3_CONTEXT) { a->mode = a->back_mode == M_PLAYER || a->menu.it[0].id >= A_LABELPICK ? (a->open >= 0 || a->demo ? M_PLAYER : M_LIBRARY) : a->back_mode; }
         else if (act == R3_ACCEPT) menu_choose(a);
         else if (act == R3_LEFT) menu_adjust(a, -1);
         else if (act == R3_RIGHT) menu_adjust(a, 1);
-        else a->menu.sel = r3_list_key(a->menu.sel, a->menu.n, 12, act);
+        else a->menu.sel = r3_list_step(a->menu.sel, a->menu.n, 12, act);
         break;
     case M_JOB:
         if (act == R3_BACK || act == R3_ACCEPT) { job_stop(a); a->mode = M_LIBRARY; scan_songs(a); }
@@ -1928,38 +2334,118 @@ static void app_action(App *a, int act) {
             else if (a->idpos < 10) a->idpos++;
             else id_go(a);                                                                  /* A on the last, filled slot fetches */
             break;
-        case R3_MORE: case MC_PLAY: id_go(a); break;
+        case R3_MORE: case R3_START: id_go(a); break;
         default: break;
         }
         break;
     }
 }
 
-/* The right stick held: the selection keeps moving (a first wait, then a steady repeat). */
-static void stick_fire(App *a) {
-    if (a->stick_y) app_action(a, a->stick_y < 0 ? MC_SU : MC_SD);
-    else if (a->stick_x) app_action(a, a->stick_x < 0 ? MC_SL : MC_SR);
+/* The system chords and the overlays, ahead of every screen's own actions. */
+static void dispatch(App *a, int act) {
+    if (act == R3_NONE) return;
+    if (a->overlay) { overlay_key(a, act); return; }
+    if (act == R3_MENU && (a->mode == M_LIBRARY || a->mode == M_PLAYER)) { mm_open(a); return; }
+    if (act == R3_CONTEXT && a->mode == M_PLAYER) { open_menu(a, MK_CONTEXT); return; }
+    if (act == R3_CONTEXT && a->mode == M_LIBRARY) { say(a, R3_ST_HINT, "No contextual menu here: L1+R1 is the menu."); return; }
+    if (act == R3_L3 || act == R3_R3) { if (a->mode == M_PLAYER || a->mode == M_LIBRARY) say(a, R3_ST_HINT, "MusiCue has no virtual %s.", act == R3_L3 ? "mouse" : "keyboard"); return; }
+    app_action(a, act);
 }
 
-static void stick_axis(App *a, int axis, int value) {              /* SDL axes 2 and 3 are the right stick (docs/hardware-findings.md) */
-    int dir = value > 20000 ? 1 : value < -20000 ? -1 : (abs(value) < 10000 ? 0 : 2);   /* 2: in between, no change (so the stick does not chatter) */
-    if (dir == 2) return;
-    int *cur = axis == 2 ? &a->stick_x : &a->stick_y;
-    if (dir == *cur) return;
-    *cur = dir;
-    if (dir) { a->stick_rep_ms = 350; stick_fire(a); }
+/* A step of the right stick (the reader makes them at the stick's rate, Page up and down and Home and End with R1 held). */
+static void stick_dispatch(App *a, int act) {
+    if (a->overlay) { overlay_key(a, act); return; }
+    if (a->mode == M_PLAYER) stick_action(a, act);
+    else app_action(a, act);
+}
+
+/* The player's map, from the raw button and what is held (the maintainer's, 2026-11-20). Returns 1 when it used the press.
+ *   Start play/stop;  L1+Start play in Rec mode;  playing, Start stops (and ends Rec mode).
+ *   Rec mode:  D-pad Down adds a cue, Up takes the last one back, Left and Right the cue before and after.
+ *   Play mode: D-pad Up the first cue, Down the last, Left and Right the cue before and after.
+ *   R1+Up sets A, R1+Down sets B, R1+Start switches the A-B loop, R1+Select goes to A;  R1+Left/Right: 10 seconds back or on.
+ *   On the Jump panel the D-pad and A, B, X, Y are its eight buttons (Rec mode's D-pad and B's Back give way to them).
+ *   Fn turns the panels, L1+Fn the first, R1+Fn the one before;  A acts on the selection;  B back to the songs;  Y the context menu;  Select 0:00. */
+static int player_press(App *a, int bt, int act) {
+    if (act == R3_MENU || act == R3_CONTEXT) return 0;
+    const int r1 = a->in.held[R3_BTN_R1], l1 = a->in.held[R3_BTN_L1];
+    switch (bt) {
+    case R3_BTN_FN: panels_turn(a, act); return 1;
+    case R3_BTN_START:
+        if (r1) loop_toggle(a);
+        else transport(a, l1);
+        return 1;
+    case R3_BTN_SELECT:
+        if (r1) loop_goto_a(a);
+        else { engine_seek(&a->eng, 0); say(a, R3_ST_HINT, "Back to 0:00."); }
+        return 1;
+    case R3_BTN_UP: case R3_BTN_DOWN: case R3_BTN_LEFT: case R3_BTN_RIGHT: {
+        const int up = bt == R3_BTN_UP, down = bt == R3_BTN_DOWN, left = bt == R3_BTN_LEFT;
+        if (r1) {
+            if (up) loop_set_a(a);
+            else if (down) loop_set_b(a);
+            else seek_rel(a, left ? -10 : 10);
+        } else if (a->jump_view) jump_button(a, up ? 0 : down ? 1 : left ? 2 : 3);
+        else if (a->rec && a->eng.playing) {
+            if (down) cue_here(a);
+            else if (up) rec_undo(a);
+            else if (left) cue_prev(a);
+            else cue_next(a);
+        } else {
+            if (up) cue_edge(a, 0);
+            else if (down) cue_edge(a, 1);
+            else if (left) cue_prev(a);
+            else cue_next(a);
+        }
+        return 1;
+    }
+    case R3_BTN_A: case R3_BTN_B: case R3_BTN_X: case R3_BTN_Y:
+        if (a->jump_view && !r1) { jump_button(a, bt == R3_BTN_A ? 4 : bt == R3_BTN_B ? 5 : bt == R3_BTN_X ? 6 : 7); return 1; }
+        if (bt == R3_BTN_A) panel_accept(a);
+        else if (bt == R3_BTN_B) { save_cues(a); close_song(a); a->mode = M_LIBRARY; }
+        else if (bt == R3_BTN_Y) open_menu(a, MK_CONTEXT);
+        else say(a, R3_ST_HINT, "Delete is in the context menu (L2+R2).");
+        return 1;
+    case R3_BTN_L3: case R3_BTN_R3:
+        say(a, R3_ST_HINT, "MusiCue has no virtual %s.", bt == R3_BTN_L3 ? "mouse" : "keyboard");
+        return 1;
+    default: return 1;                                                      /* L1, R1, L2, R2 alone do nothing */
+    }
+}
+
+/* A raw button, down or up, from the pad (or the keyboard standing in for it). The reader keeps what is held; the Piano over the Key field takes every button but
+ * the system chords' meaning (a shoulder is a note there). */
+static void pad_button(App *a, int bt, int down) {
+    int act = r3_input_button(&a->in, bt, down);
+    if (a->mode == M_TEXT && a->tfield == TF_KEY && !a->overlay && (a->piano || bt == R3_BTN_FN)) { piano_button(a, bt, down); return; }
+    if (!down) return;
+    if (!a->overlay && a->mode == M_PLAYER && player_press(a, bt, act)) return;
+    dispatch(a, act);
+}
+
+/* The right stick, once a pass of the main loop: the steps it made since the last (the reader counts the rate). */
+static void stick_tick(App *a, uint32_t now_ms) {
+    int acts[8], n = r3_input_tick(&a->in, now_ms, acts, 8);
+    for (int i = 0; i < n; i++) stick_dispatch(a, acts[i]);
 }
 
 static void app_tick(App *a, double ms) {
     engine_tick(&a->eng, ms);
     r3_marquee_clock(ms);
     a->stick_idle_ms += ms;
-    if (a->stick_x || a->stick_y) { a->stick_rep_ms -= ms; if (a->stick_rep_ms <= 0) { a->stick_rep_ms = 120; stick_fire(a); } }
+    if (a->auto_jump && !a->eng.playing) {                                          /* the music stopped: the panels Fn left come back */
+        if (a->jump_view) view_set(a, a->auto_prev);
+        a->auto_jump = 0;
+    }
     if (a->mode == M_PLAYER && a->eng.playing && a->stick_idle_ms > 4000) {        /* the cue cursor follows the cue playing, unless the stick moved lately */
         int ci = cur_caption(a, engine_pos_sec(&a->eng) - a->offset);
         if (ci >= 0) a->csel = ci;
     }
-    if (a->mode == M_PLAYER && a->eng.ended) { a->eng.ended = 0; say(a, R3_ST_HINT, "The end. A plays it again."); }
+    if (a->mode == M_PLAYER && a->eng.ended) {
+        a->eng.ended = 0;
+        if (a->rec) { say(a, R3_ST_HINT, "The end: Rec stopped, %d cue%s added.", a->nrec, a->nrec == 1 ? "" : "s"); a->rec = 0; }
+        else say(a, R3_ST_HINT, "The end. Start plays it again.");
+    }
     job_poll(a);
 }
 
@@ -1972,6 +2458,8 @@ static void app_init(App *a, const char *data) {
     a->sl = (SetItem *)calloc(SETLIST_MAX, sizeof *a->sl);
     a->hist = (HistItem *)calloc(HIST_MAX, sizeof *a->hist);
     a->stick_idle_ms = 1e9;
+    r3_input_init(&a->in);
+    r3_mm_init(&a->mm, 0);                  /* Benchmark is hidden: MusiCue has nothing to measure yet */
 }
 
 static void app_free(App *a) {
@@ -1987,6 +2475,10 @@ static void app_free(App *a) {
 
 static int g_bad;
 #define CHECK(cond, ...) do { if (!(cond)) { g_bad++; fprintf(stderr, "selftest FAIL (%s:%d): ", __FILE__, __LINE__); fprintf(stderr, __VA_ARGS__); fputc('\n', stderr); } } while (0)
+
+/* A tap of a pad button through the same path the main loop uses, and a tap with a modifier held. */
+static void press(App *a, int bt) { pad_button(a, bt, 1); pad_button(a, bt, 0); }
+static void with(App *a, int mod, int bt) { pad_button(a, mod, 1); pad_button(a, bt, 1); pad_button(a, bt, 0); pad_button(a, mod, 0); }
 
 static void write_wav(const char *path, int rate, int chans, int bits, int frames, int shape) {
     FILE *f = fopen(path, "wb");
@@ -2385,44 +2877,56 @@ static void test_panels_and_tempo(void) {
     snprintf(d, sizeof d, "%s/panels", g_tmp);
     snprintf(a.data, sizeof a.data, "%s", d);
     mkdirs(d);
+    setenv("R3I6NOS_MUSICUE_NOAUDIO", "1", 1);
     open_demo(&a);
     R3Screen s;
 
-    /* the carousel: Fn turns it one place; two panels show, the stick hops between them and moves in the one it is in */
+    /* the carousel: Fn turns it one place (six pairs, then the Jump panel on the whole width); two panels show, the stick hops between them and moves in the one it is in */
     CHECK(panel_at(&a, 0) == P_MARKERS && panel_at(&a, 1) == P_CUES, "Markers and Cues first");
-    app_action(&a, MC_FN);
+    press(&a, R3_BTN_FN);
     CHECK(panel_at(&a, 0) == P_CUES && panel_at(&a, 1) == P_META, "Fn: Cues and Metadata");
-    for (int i = 0; i < 5; i++) app_action(&a, MC_FN);
-    CHECK(panel_at(&a, 0) == P_MARKERS && panel_at(&a, 1) == P_CUES, "six turns come round");
+    for (int i = 0; i < 5; i++) press(&a, R3_BTN_FN);
+    CHECK(a.jump_view && view_code(&a) == P_COUNT, "six more turns reach the Jump panel");
+    press(&a, R3_BTN_FN);
+    CHECK(!a.jump_view && panel_at(&a, 0) == P_MARKERS && panel_at(&a, 1) == P_CUES, "and one more comes round to Markers and Cues");
+    with(&a, R3_BTN_R1, R3_BTN_FN);
+    CHECK(a.jump_view, "R1+Fn goes back to the panel shown before (the Jump panel)");
+    with(&a, R3_BTN_R1, R3_BTN_FN);
+    CHECK(!a.jump_view && a.pan_first == 0, "R1+Fn again comes back, like Alt+Tab");
+    press(&a, R3_BTN_FN);
+    press(&a, R3_BTN_FN);
+    with(&a, R3_BTN_L1, R3_BTN_FN);
+    CHECK(!a.jump_view && a.pan_first == 0, "L1+Fn is the first panel");
     CHECK(a.pan_focus == 0, "the left panel has the stick");
-    app_action(&a, MC_SD);
+    stick_dispatch(&a, R3_DOWN);
     CHECK(a.msel == 1, "the stick moves the selection in the left panel");
-    app_action(&a, MC_SR);
+    stick_dispatch(&a, R3_RIGHT);
     CHECK(a.pan_focus == 1, "right hops to the right panel");
-    app_action(&a, MC_SD);
-    app_action(&a, MC_SD);
+    stick_dispatch(&a, R3_DOWN);
+    stick_dispatch(&a, R3_DOWN);
     CHECK(a.csel == 2 && a.msel == 1, "and moves there");
-    app_action(&a, MC_SL);
+    stick_dispatch(&a, R3_PAGEDOWN);
+    CHECK(a.csel == a.cues.nc - 1, "R1 held pages (the end of a short list)");
+    stick_dispatch(&a, R3_HOME);
+    CHECK(a.csel == 0, "and Home goes to the first");
+    stick_dispatch(&a, R3_LEFT);
     CHECK(a.pan_focus == 0, "left hops back");
     compose(&a, &s);
     CHECK(s.ch[9 * R3_COLS + 0] == 201 && s.ch[9 * R3_COLS + 32] == 218, "the panel with the stick has the double frame, the other the single");
 
-    /* D-pad Down is Cue; Select is 0:00; Start plays and stops */
+    /* Select is 0:00; Start plays and stops */
     engine_seek(&a.eng, 33.0);
-    int before = a.cues.nc;
-    app_action(&a, R3_DOWN);
-    CHECK(a.cues.nc == before + 1 && a.csel >= 0 && fabs(a.cues.c[a.csel].start - 33.0) < 0.01 && !strcmp(a.cues.c[a.csel].text, "- - - -"), "D-pad Down places a Cue");
-    app_action(&a, R3_SELECT);
+    press(&a, R3_BTN_SELECT);
     CHECK(engine_pos_sec(&a.eng) == 0, "Select goes to 0:00");
-    app_action(&a, MC_PLAY);
-    CHECK(a.eng.playing, "Start plays");
-    app_action(&a, MC_PLAY);
+    press(&a, R3_BTN_START);
+    CHECK(a.eng.playing && !a.rec, "Start plays (Play mode)");
+    press(&a, R3_BTN_START);
     CHECK(!a.eng.playing, "Start stops");
     a.mode = M_LIBRARY;
-    menu_toggle(&a);
-    CHECK(a.mode == M_MENU, "L1+R1 opens the menu");
-    menu_toggle(&a);
-    CHECK(a.mode == M_LIBRARY, "and closes it");
+    dispatch(&a, R3_MENU);
+    CHECK(a.overlay == OV_MM && a.mode == M_LIBRARY, "L1+R1 opens the main menu");
+    dispatch(&a, R3_MENU);
+    CHECK(a.overlay == OV_NONE, "and closes it");
     a.mode = M_PLAYER;
 
     /* Tempo, as Cue does it: 16 beats a cue in 4/4 (8 in 6/8), cues 9.6 s apart are 100 bpm */
@@ -2463,10 +2967,10 @@ static void test_panels_and_tempo(void) {
     a.pan_first = P_CUES;                                          /* Cues left, Metadata right */
     a.pan_focus = 1;
     a.psel[P_META] = 2;
-    app_action(&a, R3_ACCEPT);
+    press(&a, R3_BTN_A);
     CHECK(!strcmp(c->meta.sig, "6/8"), "A on Sig toggles it");
     a.psel[P_META] = 1;
-    app_action(&a, R3_ACCEPT);
+    press(&a, R3_BTN_A);
     CHECK(a.mode == M_TEXT && !strcmp(a.tbuf, "98.5"), "A on Tempo opens it");
     snprintf(a.tbuf, sizeof a.tbuf, "fast"); a.tlen = 4;
     app_action(&a, R3_ACCEPT);
@@ -2475,7 +2979,8 @@ static void test_panels_and_tempo(void) {
     app_action(&a, R3_ACCEPT);
     CHECK(a.mode == M_PLAYER && !tempo_unset(&a), "an empty Tempo is suggested from the cues: %s", c->meta.tempo);
     a.psel[P_META] = 0;
-    app_action(&a, R3_ACCEPT);
+    press(&a, R3_BTN_A);
+    piano_close(&a);                                               /* the piano is tested in test_pad_map; here the field is typed with Up and Down */
     a.tbuf[0] = 0; a.tlen = a.tpos = 0;
     app_action(&a, R3_UP);
     app_action(&a, R3_UP);
@@ -2529,6 +3034,302 @@ static void test_panels_and_tempo(void) {
     a.pan_first = P_TOP;                                           /* Top, then Markers */
     compose(&a, &s);
     app_free(&a);
+    unsetenv("R3I6NOS_MUSICUE_NOAUDIO");
+}
+
+/* The 2026-11-20 map: Start and L1+Start (Play and Rec mode), the D-pad in each, A-B looping on R1, the Jump panel, the Piano over the Key, the number after a marker's name,
+ * the main menu and the context menu. Every press goes through pad_button, the path the main loop uses. */
+static void test_pad_map(void) {
+    setenv("R3I6NOS_MUSICUE_NOAUDIO", "1", 1);
+    App a;
+    app_init(&a, g_tmp);
+    char d[PATH_MAX];
+    snprintf(d, sizeof d, "%s/padmap", g_tmp);
+    snprintf(a.data, sizeof a.data, "%s", d);
+    mkdirs(d);
+    open_demo(&a);
+    R3Screen s;
+    const int ncues = a.cues.nc;
+
+    /* Play mode: Start plays, the D-pad goes to cues */
+    press(&a, R3_BTN_START);
+    CHECK(a.eng.playing && !a.rec, "Start plays in Play mode");
+    press(&a, R3_BTN_DOWN);
+    CHECK(a.cues.nc == ncues && fabs(engine_pos_sec(&a.eng) - a.cues.c[ncues - 1].start) < 0.001, "Play mode: Down goes to the last cue and adds none");
+    press(&a, R3_BTN_UP);
+    CHECK(engine_pos_sec(&a.eng) == a.cues.c[0].start, "Play mode: Up goes to the first cue");
+    engine_seek(&a.eng, 21.0);
+    press(&a, R3_BTN_LEFT);
+    CHECK(fabs(engine_pos_sec(&a.eng) - 19.2) < 0.001, "Left goes to the start of the cue playing (more than 1.5 s in)");
+    press(&a, R3_BTN_LEFT);
+    CHECK(fabs(engine_pos_sec(&a.eng) - 9.6) < 0.001, "and again to the one before");
+    press(&a, R3_BTN_RIGHT);
+    CHECK(fabs(engine_pos_sec(&a.eng) - 19.2) < 0.001, "Right goes to the next cue");
+    press(&a, R3_BTN_START);
+    CHECK(!a.eng.playing, "Start stops");
+
+    /* Rec mode: L1+Start plays in Rec mode; Down adds a cue, Up takes the last back; Start stops and ends it */
+    engine_seek(&a.eng, 40.0);
+    with(&a, R3_BTN_L1, R3_BTN_START);
+    CHECK(a.eng.playing && a.rec, "L1+Start plays in Rec mode");
+    compose(&a, &s);
+    char top[R3_COLS + 1];
+    row_text(&s, 0, top);
+    CHECK(strstr(top, "REC ") != NULL, "the top bar says REC: %s", top);
+    for (int i = 0; i < 10; i++) engine_tick(&a.eng, 50);                       /* half a second on the caller's clock */
+    press(&a, R3_BTN_DOWN);
+    CHECK(a.cues.nc == ncues + 1 && a.nrec == 1, "Rec mode: Down adds a cue");
+    double t1 = a.rec_t[0];
+    for (int i = 0; i < 10; i++) engine_tick(&a.eng, 50);
+    press(&a, R3_BTN_DOWN);
+    CHECK(a.cues.nc == ncues + 2 && a.nrec == 2 && a.rec_t[1] > t1, "a second cue");
+    press(&a, R3_BTN_UP);
+    CHECK(a.cues.nc == ncues + 1 && a.nrec == 1, "Rec mode: Up takes the last cue back");
+    press(&a, R3_BTN_LEFT);
+    CHECK(fabs(engine_pos_sec(&a.eng) - t1) < 0.001 || engine_pos_sec(&a.eng) < t1, "Rec mode: Left goes to a cue before");
+    press(&a, R3_BTN_START);
+    CHECK(!a.eng.playing && !a.rec, "Start stops and ends Rec mode");
+    press(&a, R3_BTN_UP);
+    CHECK(a.cues.nc == ncues + 1 && engine_pos_sec(&a.eng) == a.cues.c[0].start, "back in Play mode Up is the first cue and takes nothing back");
+    with(&a, R3_BTN_L1, R3_BTN_START);
+    with(&a, R3_BTN_L1, R3_BTN_START);
+    CHECK(!a.eng.playing && !a.rec, "L1+Start while playing stops it too");
+
+    /* A-B looping on R1 */
+    engine_seek(&a.eng, 10.0);
+    with(&a, R3_BTN_R1, R3_BTN_UP);
+    CHECK(a.loop_state == 1 && fabs(a.loop_a - 10.0) < 0.001, "R1+Up sets A");
+    with(&a, R3_BTN_R1, R3_BTN_DOWN);
+    CHECK(a.loop_state == 1, "B at the same place is refused");
+    engine_seek(&a.eng, 20.0);
+    with(&a, R3_BTN_R1, R3_BTN_DOWN);
+    CHECK(a.loop_state == 2 && fabs(a.loop_b - 20.0) < 0.001 && a.eng.loop && !a.loop_off, "R1+Down sets B and the loop runs");
+    with(&a, R3_BTN_R1, R3_BTN_START);
+    CHECK(a.loop_state == 2 && a.loop_off && !a.eng.loop, "R1+Start stops the loop and keeps A and B");
+    with(&a, R3_BTN_R1, R3_BTN_START);
+    CHECK(!a.loop_off && a.eng.loop, "and starts it again");
+    CHECK(fabs(engine_pos_sec(&a.eng) - 10.0) < 0.001, "starting it from outside the span goes to A");
+    engine_seek(&a.eng, 50.0);
+    with(&a, R3_BTN_R1, R3_BTN_SELECT);
+    CHECK(fabs(engine_pos_sec(&a.eng) - 10.0) < 0.001, "R1+Select goes to the start of the loop");
+    press(&a, R3_BTN_SELECT);
+    CHECK(engine_pos_sec(&a.eng) == 0, "Select alone is still 0:00");
+    engine_seek(&a.eng, 25.0);
+    with(&a, R3_BTN_R1, R3_BTN_UP);
+    CHECK(a.loop_state == 1 && !a.eng.loop, "an A past B puts the loop back to A alone");
+    with(&a, R3_BTN_R1, R3_BTN_RIGHT);
+    CHECK(fabs(engine_pos_sec(&a.eng) - 35.0) < 0.001, "R1+Right is 10 s on");
+
+    /* playing in Play mode, Fn goes to Jump from anywhere on the carousel; stopping restores the panels */
+    a.jump_view = 0; a.pan_first = P_META;
+    press(&a, R3_BTN_START);
+    press(&a, R3_BTN_FN);
+    CHECK(a.jump_view && a.auto_jump, "playing, Fn goes straight to Jump");
+    press(&a, R3_BTN_START);
+    app_tick(&a, 10);
+    CHECK(!a.jump_view && a.pan_first == P_META && !a.auto_jump, "stopping brings the earlier panels back");
+    a.pan_first = 0;
+
+    /* the Jump panel: the stick picks a marker, stopped a button binds it, playing it jumps; the tags and the fill show */
+    a.loop_state = 0;
+    set_loop_engine(&a);
+    for (int i = 0; i < 6; i++) press(&a, R3_BTN_FN);
+    CHECK(a.jump_view, "Fn reaches the Jump panel");
+    stick_dispatch(&a, R3_DOWN);
+    stick_dispatch(&a, R3_DOWN);
+    CHECK(a.jsel == 2, "the stick picks a marker (Pre-Chorus)");
+    press(&a, R3_BTN_A);
+    CHECK(a.jump_on[4] && jump_marker_of(&a, 4) == 2 && a.mode == M_PLAYER, "stopped, A binds the marker (and does not accept a panel)");
+    stick_dispatch(&a, R3_END);
+    press(&a, R3_BTN_UP);
+    press(&a, R3_BTN_B);
+    CHECK(jump_marker_of(&a, 0) == 7 && jump_marker_of(&a, 5) == 7 && a.mode == M_PLAYER, "D-pad Up and B bind the last marker too; B does not leave the song here");
+    press(&a, R3_BTN_B);
+    CHECK(!a.jump_on[5] && jump_marker_of(&a, 0) == 7, "the same button on the same marker frees it");
+    stick_dispatch(&a, R3_HOME);
+    press(&a, R3_BTN_LEFT);
+    CHECK(jump_marker_of(&a, 2) == 0, "Left binds the first marker");
+    compose(&a, &s);
+    char row[R3_COLS + 1];
+    row_text(&s, 10, row);
+    CHECK(strstr(row, "[<]") != NULL, "the first marker's row carries its tag: %s", row);
+    row_text(&s, 12, row);
+    CHECK(strstr(row, "[A]") != NULL, "the third row carries [A]: %s", row);
+    engine_seek(&a.eng, 28.0);
+    engine_play(&a.eng, 1);
+    compose(&a, &s);
+    int fill = 0;
+    for (int c = 1; c < R3_COLS - 1; c++) fill += s.bg[12 * R3_COLS + c] >= P_HUE0 && s.bg[12 * R3_COLS + c] < P_HUE0 + 32;
+    CHECK(fill > 25 && fill < 36, "Pre-Chorus (24 s to 32 s) is half filled at 28 s: %d cells", fill);
+    int others = 0;
+    for (int r = 10; r < 19; r++) if (r != 12) for (int c = 1; c < R3_COLS - 1; c++) others += s.bg[r * R3_COLS + c] >= P_HUE0 && s.bg[r * R3_COLS + c] < P_HUE0 + 32;
+    CHECK(others == 0, "only the section the playhead is in fills (Cue's rule): %d", others);
+    press(&a, R3_BTN_A);
+    CHECK(fabs(engine_pos_sec(&a.eng) - 24.0) < 0.01, "playing, A jumps to the bound marker");
+    press(&a, R3_BTN_UP);
+    CHECK(fabs(engine_pos_sec(&a.eng) - 88.0) < 0.01, "and D-pad Up to the one bound to it");
+    press(&a, R3_BTN_X);
+    CHECK(a.jump_on[6] == 0 && fabs(engine_pos_sec(&a.eng) - 88.0) < 0.01, "an unbound button only says so");
+    engine_seek(&a.eng, 40.0);
+    with(&a, R3_BTN_R1, R3_BTN_UP);
+    with(&a, R3_BTN_R1, R3_BTN_DOWN);
+    engine_seek(&a.eng, 50.0);
+    with(&a, R3_BTN_R1, R3_BTN_DOWN);
+    CHECK(a.loop_state == 2, "R1+Up and R1+Down keep setting A and B on the Jump panel");
+    engine_seek(&a.eng, 45.0);
+    compose(&a, &s);
+    int abfill = 0;
+    for (int c = 0; c < R3_COLS; c++) abfill += s.bg[19 * R3_COLS + c] >= P_ACC0 && s.bg[19 * R3_COLS + c] < P_ACC0 + RAMP;
+    CHECK(abfill > 10 && abfill < 26, "the A-B bar is half full at 45 s of 40 to 50 s: %d", abfill);
+    with(&a, R3_BTN_R1, R3_BTN_START);
+    compose(&a, &s);
+    abfill = 0;
+    for (int c = 0; c < R3_COLS; c++) abfill += s.bg[19 * R3_COLS + c] >= P_ACC0 && s.bg[19 * R3_COLS + c] < P_ACC0 + RAMP;
+    CHECK(abfill == 0, "it empties while the loop is off: %d", abfill);
+    engine_play(&a.eng, 0);
+    a.open = 0;
+    a.nsongs = 1;
+    a.songs = (Song *)calloc(1, sizeof *a.songs);
+    snprintf(a.songs[0].id, sizeof a.songs[0].id, "jumpTEST001");
+    char jp[PATH_MAX];
+    sub_path(&a, "cues", NULL, jp, sizeof jp);
+    mkdirs(jp);
+    jump_save(&a);
+    memset(a.jump_on, 0, sizeof a.jump_on);
+    jump_load(&a);
+    CHECK(a.jump_on[0] && a.jump_on[2] && a.jump_on[4] && jump_marker_of(&a, 4) == 2, "the bindings are kept in cues/<id>.jump and come back");
+    a.open = -1;
+    free(a.songs);
+    a.songs = NULL;
+    a.nsongs = 0;
+    a.jump_view = 0;
+    a.pan_first = 0;
+
+    /* the main menu (L1+R1) and the context menu (L2+R2 or Y) */
+    pad_button(&a, R3_BTN_L1, 1);
+    pad_button(&a, R3_BTN_R1, 1);
+    CHECK(a.overlay == OV_MM && a.mode == M_PLAYER, "L1+R1 opens the main menu over the player");
+    pad_button(&a, R3_BTN_R1, 0);
+    pad_button(&a, R3_BTN_L1, 0);
+    char msg[160];
+    CHECK(r3_mm_selftest(&a.mm, msg, sizeof msg) == 0, "%s", msg);
+    int ids[R3MM_FIXED + R3MM_MAX_OWN], n = r3_mm_ids(&a.mm, ids);
+    CHECK(n == 6 && ids[0] == R3MM_ABOUT && ids[1] == R3MM_THEME && ids[2] == R3MM_REPORT && ids[3] == R3MM_DEMO && ids[4] == R3MM_QUIT && ids[5] == R3MM_OWN0, "About, Colour theme, Device report, Rec demo, Quit (Benchmark hidden), then the app's own");
+    press(&a, R3_BTN_A);
+    CHECK(a.overlay == OV_ABOUT, "About opens");
+    compose(&a, &s);
+    press(&a, R3_BTN_B);
+    CHECK(a.overlay == OV_NONE, "any key closes it");
+    dispatch(&a, R3_MENU);
+    press(&a, R3_BTN_DOWN);
+    press(&a, R3_BTN_A);
+    CHECK(a.overlay == OV_THEME && a.theme_sel == a.theme, "Colour theme opens the picker");
+    press(&a, R3_BTN_DOWN);
+    int shown = a.theme_sel;
+    CHECK(shown != a.theme, "moving shows another theme");
+    press(&a, R3_BTN_A);
+    CHECK(a.overlay == OV_NONE && a.theme == shown, "A keeps it");
+    a.theme = r3_theme_find("Nord");
+    apply_theme(&a);
+    dispatch(&a, R3_MENU);
+    for (int i = 0; i < 5; i++) press(&a, R3_BTN_DOWN);
+    CHECK(a.mm.sel == 5, "the app's own item is last");
+    press(&a, R3_BTN_A);
+    CHECK(a.mode == M_MENU && a.menu_kind == MK_SONG && a.menu.n >= 5, "the app's own item opens the song's options");
+    press(&a, R3_BTN_B);
+    CHECK(a.mode == M_PLAYER, "B closes it");
+    dispatch(&a, R3_MENU);
+    for (int i = 0; i < 4; i++) press(&a, R3_BTN_DOWN);
+    press(&a, R3_BTN_A);
+    CHECK(a.quit, "Quit leaves the app");
+    a.quit = 0;
+    pad_button(&a, R3_BTN_L2, 1);
+    pad_button(&a, R3_BTN_R2, 1);
+    CHECK(a.mode == M_MENU && a.menu_kind == MK_CONTEXT, "L2+R2 opens the context menu");
+    pad_button(&a, R3_BTN_R2, 0);
+    pad_button(&a, R3_BTN_L2, 0);
+    press(&a, R3_BTN_B);
+    CHECK(a.mode == M_PLAYER, "B closes it");
+    press(&a, R3_BTN_Y);
+    CHECK(a.mode == M_MENU && a.menu_kind == MK_CONTEXT, "Y opens it as well");
+    press(&a, R3_BTN_B);
+
+    /* naming a marker with a number or a letter: Right on a preset */
+    a.msel = 1;                                                              /* "Verse 1" in the demo */
+    open_menu(&a, MK_CONTEXT);
+    for (int i = 0; i < a.menu.n; i++) if (a.menu.it[i].id == A_LABEL) a.menu.sel = i;
+    press(&a, R3_BTN_A);
+    CHECK(a.mode == M_MENU && a.menu.it[0].id >= A_LABELPICK, "Name the selected marker lists the presets (mode %d, first item %d, %d items)", a.mode, a.menu.it[0].id, a.menu.n);
+    press(&a, R3_BTN_DOWN);                                                  /* Verse */
+    press(&a, R3_BTN_RIGHT);
+    CHECK(a.mode == M_TEXT && a.tfield == TF_SUFFIX && !strcmp(a.suffix_base, "Verse"), "Right on Verse asks for a number or letter");
+    press(&a, R3_BTN_UP);
+    press(&a, R3_BTN_UP);
+    CHECK(!strcmp(a.tbuf, "2"), "Up gives 1, then 2: %s", a.tbuf);
+    press(&a, R3_BTN_RIGHT);
+    press(&a, R3_BTN_UP);
+    press(&a, R3_BTN_DOWN);
+    CHECK(!strcmp(a.tbuf, "20") || !strcmp(a.tbuf, "21") || a.tlen == 2, "Right makes a second place: %s", a.tbuf);
+    a.tbuf[1] = 0; a.tlen = 1; a.tpos = 1;                                   /* "2": make it "2" then a letter */
+    press(&a, R3_BTN_UP);
+    for (int i = 0; i < 9; i++) press(&a, R3_BTN_UP);                         /* 1 2 ... 9 A */
+    CHECK(a.tlen == 2, "two places");
+    a.tbuf[0] = '1'; a.tbuf[1] = 'a'; a.tbuf[2] = 0;
+    press(&a, R3_BTN_A);
+    CHECK(a.mode == M_PLAYER && !strcmp(a.cues.m[1].label, "Verse 1a") && a.cues.dirty, "A keeps \"Verse 1a\"");
+    open_label_menu(&a);
+    press(&a, R3_BTN_A);
+    CHECK(!strcmp(a.cues.m[1].label, "Intro"), "A on a preset alone keeps the plain name");
+
+    /* the Piano over the Key: C3 to B3 on the pad, the shoulders are notes, Select and Start move the octave, Fn closes */
+    a.pan_first = P_META;
+    a.pan_focus = 0;
+    a.psel[P_META] = 0;
+    press(&a, R3_BTN_A);
+    CHECK(a.mode == M_TEXT && a.tfield == TF_KEY && a.piano && a.piano_oct == 3, "editing the Key shows the piano at octave 3");
+    static const struct { int bt; const char *name; } want[] = {
+        {R3_BTN_UP, "C"}, {R3_BTN_L1, "C#"}, {R3_BTN_LEFT, "D"}, {R3_BTN_L2, "D#"}, {R3_BTN_DOWN, "E"}, {R3_BTN_RIGHT, "F"},
+        {R3_BTN_R2, "F#"}, {R3_BTN_Y, "G"}, {R3_BTN_R1, "G#"}, {R3_BTN_B, "A"}, {R3_BTN_X, "A#"}, {R3_BTN_A, "B"}};
+    for (int k = 0; k < 12; k++) {
+        pad_button(&a, want[k].bt, 1);
+        CHECK(!strcmp(a.tbuf, want[k].name) && a.piano_now[k] && a.mode == M_TEXT && a.piano, "%s plays %s3 (key shows %s)", r3_button_name(want[k].bt), NOTE_NAME[k], a.tbuf);
+        int voices = 0;
+        for (int v = 0; v < VOICES; v++) voices += a.eng.voice[v].active && a.eng.voice[v].key == k;
+        CHECK(voices == 1, "a voice sounds for %s", NOTE_NAME[k]);
+        pad_button(&a, want[k].bt, 0);
+        CHECK(!a.piano_now[k], "and lets go");
+    }
+    CHECK(fabs(piano_freq(9, 3) - 220.0) < 0.2 && fabs(piano_freq(0, 4) - 261.63) < 0.1, "A3 is 220 Hz and C4 is 261.63 Hz (C3 is 130.81)");
+    int16_t buf[2 * 512];
+    memset(buf, 0, sizeof buf);
+    memset(a.eng.voice, 0, sizeof a.eng.voice);                              /* no audio callback runs here to retire the twelve notes just played */
+    pad_button(&a, R3_BTN_L1, 1);
+    pad_button(&a, R3_BTN_R1, 1);
+    CHECK(a.overlay == OV_NONE && a.piano, "a shoulder pair plays two notes; it is not the menu chord");
+    engine_mix_voices(&a.eng, buf, 512);
+    int peak = 0;
+    for (int i = 0; i < 1024; i++) peak = abs(buf[i]) > peak ? abs(buf[i]) : peak;
+    CHECK(peak > 1000 && peak < 32000, "the voices make sound without clipping: peak %d", peak);
+    pad_button(&a, R3_BTN_R1, 0);
+    pad_button(&a, R3_BTN_L1, 0);
+    press(&a, R3_BTN_START);
+    CHECK(a.piano_oct == 4, "Start is Oct +");
+    press(&a, R3_BTN_SELECT);
+    press(&a, R3_BTN_SELECT);
+    press(&a, R3_BTN_SELECT);
+    press(&a, R3_BTN_SELECT);
+    CHECK(a.piano_oct == 1, "Select is Oct -, down to 1");
+    check_contrast(&a, "piano");
+    snprintf(a.tbuf, sizeof a.tbuf, "Am7");
+    a.tlen = a.tpos = 3;
+    press(&a, R3_BTN_Y);                                                     /* G */
+    CHECK(!strcmp(a.tbuf, "Gm7"), "a note names the root and keeps what follows: %s", a.tbuf);
+    press(&a, R3_BTN_FN);
+    CHECK(!a.piano && a.mode == M_TEXT, "Fn closes the piano");
+    press(&a, R3_BTN_A);
+    CHECK(a.mode == M_PLAYER && !strcmp(a.cues.meta.key, "Gm7"), "A keeps the key: %s", a.cues.meta.key);
+    app_free(&a);
+    unsetenv("R3I6NOS_MUSICUE_NOAUDIO");
 }
 
 static void test_screens(void) {
@@ -2573,9 +3374,37 @@ static void test_screens(void) {
         a.pan_first = 0; a.pan_focus = 0;
         a.loop_state = 2; a.loop_a = 40; a.loop_b = 50;
         a.msel = 3;
-        open_menu(&a);
-        check_contrast(&a, "menu");
+        for (int mk = MK_SONG; mk <= MK_CONTEXT; mk++) { a.mode = M_PLAYER; open_menu(&a, mk); check_contrast(&a, "menu"); }
         a.mode = M_PLAYER;
+        a.jump_view = 1;                                                      /* the Jump panel: a section filling, tags, the A-B bar, then empty */
+        a.jump_on[0] = 1; a.jump_t[0] = a.cues.m[1].time; a.jump_on[4] = 1; a.jump_t[4] = a.cues.m[3].time; a.jump_on[7] = 1; a.jump_t[7] = a.cues.m[3].time;
+        a.jsel = 3;
+        engine_seek(&a.eng, 45.0);
+        check_contrast(&a, "jump");
+        a.loop_off = 1;
+        check_contrast(&a, "jump, loop off");
+        a.loop_off = 0; a.loop_state = 1;
+        check_contrast(&a, "jump, A only");
+        a.loop_state = 0;
+        check_contrast(&a, "jump, no loop");
+        a.cues.nm = 0;
+        check_contrast(&a, "jump, no markers");
+        demo_cues(&a.cues);
+        a.jump_view = 0;
+        a.rec = 1;
+        engine_play(&a.eng, 1);
+        check_contrast(&a, "rec");
+        a.rec = 0;
+        engine_play(&a.eng, 0);
+        a.mode = M_TEXT; a.tfield = TF_KEY; a.talpha = "ABCDEFG#bm7 ?"; a.tmax = 40; snprintf(a.tbuf, sizeof a.tbuf, "Am"); a.tlen = a.tpos = 2;
+        a.piano = 1; a.piano_oct = 3; a.piano_now[1] = a.piano_now[4] = 1;
+        check_contrast(&a, "piano");
+        a.piano = 0; a.tfield = TF_SUFFIX; snprintf(a.suffix_base, sizeof a.suffix_base, "Chorus");
+        check_contrast(&a, "marker number");
+        a.mode = M_PLAYER;
+        for (int ov = OV_MM; ov <= OV_THEME; ov++) { a.overlay = ov; if (ov == OV_MM) mm_open(&a); a.theme_sel = a.theme; check_contrast(&a, "overlay"); }
+        a.overlay = OV_NONE;
+        a.mm.open = 0;
         close_song(&a);
         a.mode = M_JOB; job_line(&a, "Fetching 3 of 5"); a.job_frac = 0.6;
         check_contrast(&a, "job");
@@ -2596,11 +3425,11 @@ static void test_screens(void) {
     app_action(&a, R3_ACCEPT);
     CHECK(a.mode == M_PLAYER && a.open == 1 && a.track.frames == 88200, "A opens the song");
     CHECK(a.cues.nm == 0, "no cue file yet");
-    app_action(&a, MC_PLAY);
+    press(&a, R3_BTN_START);
     CHECK(a.eng.playing, "Start plays");
-    app_action(&a, MC_PLAY);
+    press(&a, R3_BTN_START);
     CHECK(!a.eng.playing, "and stops");
-    app_action(&a, MC_PLAY);
+    press(&a, R3_BTN_START);
     for (int i = 0; i < 20; i++) app_tick(&a, 25);
     mark_here(&a);
     CHECK(a.cues.nm == 1 && fabs(a.cues.m[0].time - 0.5) < 0.05, "Mark here marks the playhead: %.3f", a.cues.nm ? a.cues.m[0].time : -1);
@@ -2610,23 +3439,22 @@ static void test_screens(void) {
     CHECK(access(cj, R_OK) == 0, "the cues were saved to cues/<id>.json");
     a.offset = 0.1;
     save_offset(&a);
-    app_action(&a, R3_BACK);
+    press(&a, R3_BTN_B);
     CHECK(a.mode == M_LIBRARY && a.open < 0, "B goes back to the songs");
     app_action(&a, R3_ACCEPT);
     CHECK(a.mode == M_PLAYER && a.cues.nm == 1 && fabs(a.offset - 0.1) < 0.001, "the cues and the offset come back: %d markers, offset %.2f", a.cues.nm, a.offset);
     a.eng.pos = 0;
-    app_action(&a, R3_PAGEDOWN);
-    CHECK(fabs(engine_pos_sec(&a.eng) - (a.cues.m[0].time + 0.1)) < 0.01, "R1 jumps to the next marker, in the audio's time (offset applied)");
-    app_action(&a, R3_Y);
-    CHECK(a.loop_state == 1, "Y sets loop A");
-    for (int i = 0; i < 12; i++) app_tick(&a, 25);
-    app_action(&a, R3_Y);
-    CHECK(a.loop_state == 2 && a.eng.loop, "Y again sets B and loops");
-    app_action(&a, R3_Y);
-    CHECK(a.loop_state == 0 && !a.eng.loop, "and once more clears it");
-    app_action(&a, R3_MORE);
-    CHECK(a.mode == M_MENU && a.menu.n > 4, "the menu opens");
-    app_action(&a, R3_BACK);
+    a.jump_view = 1;                                                       /* a button on the Jump panel jumps to a marker, in the audio's time (offset applied) */
+    a.jump_on[0] = 1;
+    a.jump_t[0] = a.cues.m[0].time;
+    engine_play(&a.eng, 1);
+    press(&a, R3_BTN_UP);
+    CHECK(fabs(engine_pos_sec(&a.eng) - (a.cues.m[0].time + 0.1)) < 0.01, "a Jump button goes to the marker, offset applied");
+    engine_play(&a.eng, 0);
+    a.jump_view = 0;
+    press(&a, R3_BTN_Y);
+    CHECK(a.mode == M_MENU && a.menu.n >= 3, "Y opens the context menu");
+    press(&a, R3_BTN_B);
     CHECK(a.mode == M_PLAYER, "B closes it");
     app_free(&a);
     /* the inbox: a bundle is imported, an unchanged one is not imported twice, a different one is kept as a conflict */
@@ -2679,6 +3507,7 @@ static int selftest(void) {
     test_marquee();
     test_cue_panel();
     test_panels_and_tempo();
+    test_pad_map();
     char cmd[PATH_MAX + 16];
     snprintf(cmd, sizeof cmd, "rm -rf '%s'", d);
     if (system(cmd) != 0) fprintf(stderr, "could not remove %s\n", d);
@@ -2718,7 +3547,28 @@ static int save_screenshot(const char *file, const char *screen, int theme) {
         a.reply_style = R3_ST_HINT;
         a.mode = M_LIBRARY;
     } else if (!strcmp(screen, "menu")) {
-        open_menu(&a);
+        open_menu(&a, MK_SONG);
+    } else if (!strcmp(screen, "context")) {
+        open_menu(&a, MK_CONTEXT);
+    } else if (!strcmp(screen, "mainmenu")) {
+        mm_open(&a);
+    } else if (!strcmp(screen, "about")) {
+        a.overlay = OV_ABOUT;
+    } else if (!strcmp(screen, "jump")) {
+        a.jump_view = 1;
+        a.jsel = 3;
+        a.jump_on[0] = 1; a.jump_t[0] = 8.0; a.jump_on[4] = 1; a.jump_t[4] = 32.0; a.jump_on[7] = 1; a.jump_t[7] = 32.0; a.jump_on[2] = 1; a.jump_t[2] = 88.0;
+        engine_seek(&a.eng, 38.0);
+        a.eng.playing = 1;
+    } else if (!strcmp(screen, "rec")) {
+        a.rec = 1;
+        a.eng.playing = 1;
+        a.loop_state = 0;
+    } else if (!strcmp(screen, "piano")) {
+        a.mode = M_TEXT; a.tfield = TF_KEY; a.talpha = "ABCDEFG#bm7 ?"; a.tmax = 40; snprintf(a.tbuf, sizeof a.tbuf, "Am"); a.tlen = a.tpos = 2;
+        a.piano = 1; a.piano_oct = 3; a.piano_now[4] = 1; a.piano_now[1] = 1;
+    } else if (!strcmp(screen, "suffix")) {
+        a.mode = M_TEXT; a.tfield = TF_SUFFIX; snprintf(a.suffix_base, sizeof a.suffix_base, "Chorus"); a.talpha = SUFFIX_ALPHA; a.tmax = 8; snprintf(a.tbuf, sizeof a.tbuf, "1a"); a.tlen = 2; a.tpos = 2;
     }
     R3Screen s;
     compose(&a, &s);
@@ -2771,6 +3621,27 @@ static int make_demo(const char *dir) {
 
 /* ---- main ---------------------------------------------------------------------------------------------------------------------------------- */
 
+/* A keyboard standing in for the pad: arrows are the D-pad, Enter or Z is A, Esc is B, X, Y, Space is Start, Tab is Fn, Left Shift is R1 and Left Ctrl is L1 (held),
+ * so Ctrl+Space is Rec mode and Shift+Up sets A. -1 for a key with no button. */
+static int key_button(SDL_Keycode k) {
+    switch (k) {
+    case SDLK_UP: return R3_BTN_UP;
+    case SDLK_DOWN: return R3_BTN_DOWN;
+    case SDLK_LEFT: return R3_BTN_LEFT;
+    case SDLK_RIGHT: return R3_BTN_RIGHT;
+    case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_z: return R3_BTN_A;
+    case SDLK_ESCAPE: return R3_BTN_B;
+    case SDLK_x: return R3_BTN_X;
+    case SDLK_y: return R3_BTN_Y;
+    case SDLK_SPACE: return R3_BTN_START;
+    case SDLK_BACKSPACE: return R3_BTN_SELECT;
+    case SDLK_TAB: return R3_BTN_FN;
+    case SDLK_LSHIFT: return R3_BTN_R1;
+    case SDLK_LCTRL: return R3_BTN_L1;
+    default: return -1;
+    }
+}
+
 static void open_pads(void) { for (int i = 0; i < SDL_NumJoysticks(); i++) SDL_JoystickOpen(i); }
 
 static int wait_event(SDL_Event *e, int ms, int step) {
@@ -2802,7 +3673,7 @@ int main(int argc, char **argv) {
                 return 2;
             }
         } else {
-            fprintf(stderr, "usage: %s [--selftest | --version | --sync-path | --make-demo DIR | [--theme NAME] [--screen library|player|menu] --screenshot out.bmp]\n", argv[0]);
+            fprintf(stderr, "usage: %s [--selftest | --version | --sync-path | --make-demo DIR | [--theme NAME] [--screen library|player|menu|context|mainmenu|about|jump|rec|piano|suffix] --screenshot out.bmp]\n", argv[0]);
             return 2;
         }
     }
@@ -2861,55 +3732,41 @@ int main(int argc, char **argv) {
     Uint32 last = SDL_GetTicks();
     while (!app.quit) {
         SDL_Event e;
-        int busy = force || video.settle > 0 || app.eng.playing || r3_toast_active(&toast) || app.mode == M_JOB || app.stick_x || app.stick_y;
+        int busy = force || app.force || video.settle > 0 || app.eng.playing || r3_toast_active(&toast) || app.mode == M_JOB || r3_input_stick_active(&app.in);
         int have = wait_event(&e, busy ? 16 : 250, busy ? 8 : 40);
         while (have) {
             switch (e.type) {
             case SDL_QUIT: app.quit = 1; break;
             case SDL_WINDOWEVENT: force = 1; break;
             case SDL_JOYDEVICEADDED: SDL_JoystickOpen(e.jdevice.which); break;
-            case SDL_JOYAXISMOTION:
-                if (e.jaxis.axis == 2 || e.jaxis.axis == 3) stick_axis(&app, e.jaxis.axis, e.jaxis.value);
-                break;
-            case SDL_JOYBUTTONUP: {
-                int bt = e.jbutton.button;
-                if (bt == 12) app.select_held = 0;
-                else if (bt == 4 || bt == 5) {                 /* L1 and R1 step a marker, on release, unless they were pressed together (the menu) */
-                    if (bt == 4) app.pad_l1 = 0; else app.pad_r1 = 0;
-                    if (!app.chord) app_action(&app, bt == 4 ? R3_PAGEUP : R3_PAGEDOWN);
-                    if (!app.pad_l1 && !app.pad_r1) app.chord = 0;
-                }
-                break;
-            }
-            case SDL_JOYBUTTONDOWN: {
+            case SDL_JOYAXISMOTION: r3_input_axis(&app.in, e.jaxis.axis, e.jaxis.value / 32768.0f); break;      /* axes 2 and 3 are the right stick (docs/hardware-findings.md) */
+            case SDL_JOYBUTTONUP: pad_button(&app, e.jbutton.button, 0); break;
+            case SDL_JOYBUTTONDOWN:
                 if (r3_toast_key(&toast)) break;
-                int bt = e.jbutton.button;
-                if (bt == 4 || bt == 5) {
-                    if (bt == 4) app.pad_l1 = 1; else app.pad_r1 = 1;
-                    if (app.pad_l1 && app.pad_r1) { app.chord = 1; menu_toggle(&app); }     /* L1+R1: the menu, always */
-                } else if (bt == 12) { app.select_held = 1; app_action(&app, R3_SELECT); }  /* Select: back to 0:00 */
-                else if (bt == 13) { if (app.select_held) app.quit = 1; else app_action(&app, MC_PLAY); }   /* Start: play and stop; with Select, leave */
-                else if (bt == 16) { if (app.mode == M_PLAYER) app_action(&app, MC_FN); }   /* Fn: turn the panels */
-                else { int act = r3_pad_action(bt); if (act != R3_NONE) app_action(&app, act); }
+                pad_button(&app, e.jbutton.button, 1);
+                break;
+            case SDL_KEYUP: {
+                int bt = key_button(e.key.keysym.sym);
+                if (bt == R3_BTN_L1 || bt == R3_BTN_R1 || (app.piano && bt >= 0)) pad_button(&app, bt, 0);
                 break;
             }
             case SDL_KEYDOWN: {
+                if (e.key.repeat) break;
                 if (r3_toast_key(&toast)) break;
                 SDL_Keycode k = e.key.keysym.sym;
                 if (app.mode == M_ID && id_key(&app, k, e.key.keysym.mod)) break;      /* a keyboard types the id */
-                if (app.mode == M_TEXT && text_key(&app, k, e.key.keysym.mod)) break;  /* ... and a metadata field */
-                int act = k == SDLK_x ? R3_X : k == SDLK_y ? R3_Y : k == SDLK_m && app.mode == M_PLAYER ? R3_NONE : r3_key_action(k);
-                if (app.mode == M_PLAYER) {                                                /* a keyboard: Tab is Fn, I K J L the right stick, Space is Start */
-                    if (k == SDLK_TAB) act = MC_FN;
-                    else if (k == SDLK_i) act = MC_SU;
-                    else if (k == SDLK_k) act = MC_SD;
-                    else if (k == SDLK_j) act = MC_SL;
-                    else if (k == SDLK_l) act = MC_SR;
+                if (app.mode == M_TEXT && !app.piano && text_key(&app, k, e.key.keysym.mod)) break;  /* ... and a metadata field */
+                if (k == SDLK_q && app.mode != M_TEXT && app.mode != M_ID) { app.quit = 1; break; }
+                if (k == SDLK_m && app.mode == M_PLAYER && !app.overlay) { mark_here(&app); break; }
+                if (app.mode == M_PLAYER && !app.overlay && (k == SDLK_i || k == SDLK_k || k == SDLK_j || k == SDLK_l)) {       /* a keyboard: I K J L are the right stick */
+                    stick_action(&app, k == SDLK_i ? R3_UP : k == SDLK_k ? R3_DOWN : k == SDLK_j ? R3_LEFT : R3_RIGHT);
+                    break;
                 }
-                if (k == SDLK_m && app.mode == M_PLAYER) mark_here(&app);
-                if (k == SDLK_SPACE) act = MC_PLAY;
-                if (k == SDLK_q) app.quit = 1;
-                if (act != R3_NONE) app_action(&app, act);
+                int bt = key_button(k);
+                if (k == SDLK_F10) dispatch(&app, R3_MENU);
+                else if (k == SDLK_F9) dispatch(&app, R3_CONTEXT);
+                else if (bt >= 0) pad_button(&app, bt, 1);
+                else dispatch(&app, r3_input_key(k));
                 break;
             }
             default: break;
@@ -2918,7 +3775,9 @@ int main(int argc, char **argv) {
         }
         Uint32 now = SDL_GetTicks();
         app_tick(&app, (double)(now - last));
+        stick_tick(&app, now);
         last = now;
+        if (app.force) { force = 1; app.force = 0; }
         r3_toast_poll(&toast, now);
         compose(&app, &screen_cells);
         r3_toast_draw(&toast, &screen_cells);
