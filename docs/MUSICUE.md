@@ -15,7 +15,7 @@ around **an audio file on the card** and working **offline** once the device has
 
 Cue's own rules had to be weighed (its `CLAUDE.md` rule 1, strictly a web app, and rule 3, no downloading or caching video, kept from the YouTube API review): a native port is a different thing, and the
 yt-dlp add-on is what leaves rule 3. **One default was chosen to keep the add-on inside the line the maintainer has drawn so far: it fetches Creative Commons videos only** (yt-dlp's `license` field,
-`--match-filter "license*=Creative Commons"`; the field's exact text should be checked against a real video), and fetching any video is a setting, off, in Start > Fetch from YouTube. That default is
+`--match-filter "license*=Creative Commons"`; the field's exact text should be checked against a real video), and fetching any video is a setting, off, in Start > Fetch from YouTube. **Also save the video (480p)** (a checkbox under it, off, 2026-11-20) makes `musicue-sync --video` download the picture into `video/` after the audio: H.264 (avc1) + AAC in an mp4, at most 480p and 30 fps, as `docs/VIDEO-DECODE.md` and `docs/STREAM-TOOLS.md` settle (the screen is 640x480; the VPU has no VP9 or AV1 and software decodes; 720p is wasted pixels); format 18 (360p) is the fallback and the battery option. **Whether the unit decodes 480p in real time is not measured (ROADMAP section 35 step 1); if it does not, lower the cap to 360p in `VIDEO_FORMAT`.** Untested on a unit. That default is
 a recommendation to confirm or change; it is not legal advice, and what a person fetches is theirs to answer for.
 
 ## What is built

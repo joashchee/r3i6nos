@@ -205,6 +205,24 @@ class Sync(unittest.TestCase):
         self.run_sync("--yt-dlp", yt, "--any-license")
         self.assertNotIn("--match-filter", log.read_text())
 
+    def test_video_flag_saves_an_r36s_friendly_video_in_video_dir(self):
+        log = self.d / "args.txt"
+        yt = self.fake_ytdlp(f'echo "$@" >> {log}\nfor a; do case "$prev" in -o) out="$a" ;; esac; prev="$a"; done\n'
+                             'case "$out" in *video*) echo x > "$(echo "$out" | sed "s/%(title).80s/Song/;s/%(id)s/aaaaaaaaaaa/;s/%(ext)s/mp4/")" ;; esac\nexit 0\n')
+        self.urls("aaaaaaaaaaa\n")
+        self.run_sync("--yt-dlp", yt, "--video")
+        text = log.read_text()
+        self.assertIn("avc1", text)
+        self.assertIn("height<=480", text)
+        self.assertIn("--merge-output-format mp4", text)
+        self.assertEqual(len(list((self.d / "video").glob("*[[]aaaaaaaaaaa[]]*"))), 1)
+
+    def test_no_video_flag_makes_no_video_dir(self):
+        yt = self.fake_ytdlp("exit 0\n")
+        self.urls("aaaaaaaaaaa\n")
+        self.run_sync("--yt-dlp", yt)
+        self.assertFalse((self.d / "video").exists())
+
     def test_a_video_that_is_not_creative_commons_is_skipped_and_said(self):
         yt = self.fake_ytdlp('echo "[download] Song does not pass filter (license*=Creative Commons), skipping .." \nexit 0\n')
         self.urls("aaaaaaaaaaa\n")

@@ -72,7 +72,8 @@ menu, Q leaves.
 | `cues/.merge-conflicts/` | an imported bundle that disagrees with a file already there is kept here, never written over |
 | `inbox/` | `.cuebundle` and `.json` files to import (the main menu's Songs and sync > Import), and `urls.txt` for the sync |
 | `export/` | what Song options > Export writes for Cue: `<id>.json`, `<id>.srt`, `<id>.cuebundle` |
-| `settings.conf` | the theme and whether the sync may fetch any video |
+| `settings.conf` | the theme, whether the sync may fetch any video, and whether it also saves the video |
+| `video/` | videos saved by Songs and sync > "Also save the video (480p)" (off by default): H.264 + AAC mp4, at most 480p and 30 fps, named `Title [<videoId>].mp4`; kept out of `media/` so the song is not listed twice; play them in Commander |
 | `setlist.tsv` | the Set List: one song a line, its id and its name (the menu adds, removes and moves) |
 | `history.tsv` | the songs opened here: id, when last, how many times, name (Last 10 and Top 10 cued) |
 

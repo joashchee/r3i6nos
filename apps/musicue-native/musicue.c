@@ -188,7 +188,7 @@ typedef struct { char title[40]; MItem it[16]; int n, sel; } Menu;
 
 typedef struct {
     char data[PATH_MAX];                    /* <app data>: media/, cues/, inbox/, export/, settings.conf */
-    int theme, any_license;
+    int theme, any_license, save_video;
     Song *songs; int nsongs, lsel;
     int mode, back_mode;
     /* the open song */
@@ -323,6 +323,7 @@ static void load_settings(App *a) {
     for (char *line = strtok(t, "\n"); line; line = strtok(NULL, "\n")) {
         if (!strncmp(line, "theme=", 6)) { int i = r3_theme_find(line + 6); if (i >= 0) a->theme = i; }
         else if (!strncmp(line, "any_license=", 12)) a->any_license = atoi(line + 12) ? 1 : 0;
+        else if (!strncmp(line, "save_video=", 11)) a->save_video = atoi(line + 11) ? 1 : 0;
     }
     free(t);
 }
@@ -330,7 +331,7 @@ static void load_settings(App *a) {
 static void save_settings(const App *a) {
     char p[PATH_MAX], buf[256];
     settings_path(a, p, sizeof p);
-    snprintf(buf, sizeof buf, "theme=%s\nany_license=%d\n", r3_themes[a->theme].name, a->any_license);
+    snprintf(buf, sizeof buf, "theme=%s\nany_license=%d\nsave_video=%d\n", r3_themes[a->theme].name, a->any_license, a->save_video);
     cue_write_file(p, buf, strlen(buf));
 }
 
@@ -1435,7 +1436,7 @@ static void present(App *a, R3Video *v, SDL_Renderer *r, const R3Screen *s, int 
 
 /* ---- actions ------------------------------------------------------------------------------------------------------------------------------- */
 
-enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_ADD, A_CUE, A_BOOKMARK, A_CUEDEL, A_RECALC, A_SLADD, A_SLDEL, A_SLUP, A_SLDOWN, A_QUIT, A_CLOSE, A_JUMPCLEAR, A_LABELPICK };
+enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_VIDEO, A_ADD, A_CUE, A_BOOKMARK, A_CUEDEL, A_RECALC, A_SLADD, A_SLDEL, A_SLUP, A_SLDOWN, A_QUIT, A_CLOSE, A_JUMPCLEAR, A_LABELPICK };
 
 static const char *const PRESET_LABELS[] = {"Intro", "Verse", "Pre-Chorus", "Chorus", "Bridge", "Solo", "Instrumental", "Outro", "End", "Tag"};
 #define NPRESET ((int)(sizeof PRESET_LABELS / sizeof *PRESET_LABELS))
@@ -1875,6 +1876,7 @@ static void build_menu(App *a, int kind) {
         menu_add(&a->menu, A_IMPORT, "Import Cue bundles from inbox/", "");
         menu_add(&a->menu, A_DEMO, "Demo song", "");
         menu_add(&a->menu, A_LICENSE, "Fetch from YouTube", a->any_license ? "any video" : "Creative Commons only");
+        menu_add(&a->menu, A_VIDEO, "Also save the video (480p)", a->save_video ? "[x]" : "[ ]");
     } else if (kind == MK_SONG) {
         menu_clear(&a->menu, "Song options");
         snprintf(v, sizeof v, "%+.2f s", a->offset);
@@ -2048,8 +2050,9 @@ static void job_start(App *a, const char *one_id) {
         dup2(fd[1], 2);
         close(fd[0]); close(fd[1]);
         setenv("R3I6NOS_APP_DATA", a->data, 1);
-        if (one_id) execlp(helper, helper, "--data", a->data, a->any_license ? "--any-license" : "--cc-only", "--id", one_id, (char *)NULL);
-        else execlp(helper, helper, "--data", a->data, a->any_license ? "--any-license" : "--cc-only", (char *)NULL);
+        const char *lic = a->any_license ? "--any-license" : "--cc-only", *vid = a->save_video ? "--video" : "--cc-only";   /* a repeated --cc-only is harmless */
+        if (one_id) execlp(helper, helper, "--data", a->data, lic, vid, "--id", one_id, (char *)NULL);
+        else execlp(helper, helper, "--data", a->data, lic, vid, (char *)NULL);
         _exit(127);
     }
     close(fd[1]);
@@ -2196,6 +2199,10 @@ static void menu_adjust(App *a, int dir) {
         a->any_license = !a->any_license;
         save_settings(a);
         snprintf(it->value, sizeof it->value, "%s", a->any_license ? "any video" : "Creative Commons only");
+    } else if (it->id == A_VIDEO) {
+        a->save_video = !a->save_video;
+        save_settings(a);
+        snprintf(it->value, sizeof it->value, "%s", a->save_video ? "[x]" : "[ ]");
     }
 }
 
@@ -2218,7 +2225,7 @@ static void menu_choose(App *a) {
         break;
     case A_SAVE: say(a, save_cues(a) == 0 ? R3_ST_OK : R3_ST_ERROR, "%s", a->cues.dirty ? "Could not save the cues." : "Cues saved."); a->mode = M_PLAYER; break;
     case A_EXPORT: export_cues(a); a->mode = M_PLAYER; break;
-    case A_OFFSET: case A_LICENSE: menu_adjust(a, 1); break;
+    case A_OFFSET: case A_LICENSE: case A_VIDEO: menu_adjust(a, 1); break;
     case A_JUMPCLEAR: memset(a->jump_on, 0, sizeof a->jump_on); jump_save(a); say(a, R3_ST_HINT, "Every Jump button is free."); a->mode = M_PLAYER; break;
     case A_SYNC: job_start(a, NULL); break;
     case A_ADD: id_open(a); break;

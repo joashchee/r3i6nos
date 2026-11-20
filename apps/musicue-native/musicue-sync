@@ -141,6 +141,10 @@ def fetch_audio(vid, media_dir, ytdlp, cc_only, on_frac=None):
         cmd += ["--match-filter", "license*=Creative Commons"]
     cmd += ["-f", "ba[acodec^=mp4a]/ba/b", "--no-playlist", "--progress", "--newline",
             "-o", os.path.join(media_dir, "%(title).80s [%(id)s].%(ext)s"), f"https://www.youtube.com/watch?v={vid}"]
+    return run_ytdlp(cmd, vid, media_dir, "audio", on_frac)
+
+
+def run_ytdlp(cmd, vid, out_dir, what, on_frac):
     try:
         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
     except OSError as e:
@@ -162,15 +166,40 @@ def fetch_audio(vid, media_dir, ytdlp, cc_only, on_frac=None):
         timer.cancel()
         if proc.poll() is None:
             proc.kill()
-    if proc.returncode is not None and proc.returncode < 0 and not have_media(vid, media_dir):
+    if proc.returncode is not None and proc.returncode < 0 and not have_media(vid, out_dir):
         return "fail", "yt-dlp took too long"
-    if have_media(vid, media_dir):
-        return "got", "audio saved"
+    if have_media(vid, out_dir):
+        return "got", f"{what} saved"
     out = "\n".join(lines)
     if "pass filter" in out:
         return "skip", "not Creative Commons (the menu's Fetch from YouTube changes that)"
     errs = [ln for ln in lines if ln.startswith("ERROR")]
     return "fail", (errs[-1] if errs else f"yt-dlp exit {proc.returncode}")[:90]
+
+
+# The video for the R36S, as docs/VIDEO-DECODE.md and docs/STREAM-TOOLS.md settle it: H.264 (avc1) + AAC in an mp4 (the VPU has no VP9 or AV1, and nothing here uses
+# the VPU: software decode), at most 480p (the screen is 640x480; 720p is three times the pixels thrown away), at most 30 fps. Format 18 (360p, one file, no merge)
+# is the battery fallback. Whether the unit's cores keep up at 480p is not measured yet (ROADMAP section 35 step 1); if they do not, lower the cap to 360p here.
+VIDEO_FORMAT = ("bv*[height<=480][vcodec^=avc1][fps<=30]+ba[acodec^=mp4a]/"
+                "b[height<=480][vcodec^=avc1][fps<=30][ext=mp4]/18")
+
+
+def status_ok(status):
+    """The audio step did not skip the video as not Creative Commons (a failed or absent audio step still lets the video try)."""
+    return status != "skip"
+
+
+def fetch_video(vid, video_dir, ytdlp, cc_only, on_frac=None):
+    """(status, note) like fetch_audio, for the video saved in DIR/video/ (not media/, so the song list does not list the song twice)."""
+    if have_media(vid, video_dir):
+        return "have", "video already in video/"
+    os.makedirs(video_dir, exist_ok=True)
+    cmd = [ytdlp]
+    if cc_only:
+        cmd += ["--match-filter", "license*=Creative Commons"]
+    cmd += ["-f", VIDEO_FORMAT, "--merge-output-format", "mp4", "--no-playlist", "--progress", "--newline",
+            "-o", os.path.join(video_dir, "%(title).80s [%(id)s].%(ext)s"), f"https://www.youtube.com/watch?v={vid}"]
+    return run_ytdlp(cmd, vid, video_dir, "video", on_frac)
 
 
 def main(argv):
@@ -180,6 +209,7 @@ def main(argv):
     g.add_argument("--cc-only", action="store_true", help="fetch only Creative Commons videos (the default)")
     g.add_argument("--any-license", action="store_true", help="fetch any video")
     ap.add_argument("--id", dest="one_id", default=None, help="fetch this one 11-character video id instead of reading inbox/urls.txt")
+    ap.add_argument("--video", action="store_true", help="also save the video (H.264 + AAC, at most 480p, for the R36S) in DIR/video/")
     ap.add_argument("--no-audio", action="store_true", help="fetch cue data only, never audio")
     ap.add_argument("--cues-base", default=None)
     ap.add_argument("--yt-dlp", dest="ytdlp", default=None)
@@ -207,7 +237,9 @@ def main(argv):
     ytdlp = None if args.no_audio else (args.ytdlp or os.environ.get("MUSICUE_YTDLP") or shutil.which("yt-dlp"))
     if not ytdlp and not args.no_audio:
         say("yt-dlp is not installed (the r3i6nos-ytdlp package): fetching cue data only")
-    n_cues = n_audio = n_skip = n_fail = 0
+    video_tool = args.ytdlp or os.environ.get("MUSICUE_YTDLP") or shutil.which("yt-dlp") if args.video else None
+    n_cues = n_audio = n_skip = n_fail = n_video = 0
+    status = None
     for i, vid in enumerate(ids, 1):
         saved, note = fetch_cues(vid, cues)
         n_cues += saved
@@ -221,7 +253,15 @@ def main(argv):
             say(f"PROGRESS {i}/{len(ids)} {vid}: {anote}")
         else:
             say(f"PROGRESS {i}/{len(ids)} {vid}: {note}")
-    say(f"DONE {len(ids)} video{'s' if len(ids) != 1 else ''}: {n_cues} cue files, {n_audio} audio saved, {n_skip} skipped, {n_fail} failed")
+        if video_tool and status_ok(status):
+            say(f"PROGRESS {i - 1}/{len(ids)} {vid}: fetching the video")
+            vstatus, vnote = fetch_video(vid, os.path.join(args.data, "video"), video_tool, cc_only,
+                                         lambda f, i=i: bar((i - 1 + 0.05 + 0.95 * f) / len(ids)))
+            n_video += vstatus == "got"
+            n_fail += vstatus == "fail"
+            say(f"PROGRESS {i}/{len(ids)} {vid}: {vnote}")
+    vtxt = f", {n_video} video saved" if args.video else ""
+    say(f"DONE {len(ids)} video{'s' if len(ids) != 1 else ''}: {n_cues} cue files, {n_audio} audio saved{vtxt}, {n_skip} skipped, {n_fail} failed")
     return 0
 
 
