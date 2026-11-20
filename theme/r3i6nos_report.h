@@ -49,7 +49,7 @@
 #define R3_INFO "INFO"
 #define R3_SKIP "SKIP"
 
-typedef struct {
+typedef struct R3Report_ {
     FILE *f;
     char path[PATH_MAX], tmp[PATH_MAX + 8];
     int pass, fail, info, skip;
@@ -58,7 +58,8 @@ typedef struct {
     int steps, step, step_missed, last_secs;   /* milestones in all, the one running, how many were never reached when the report closed, the last second drawn */
     double t0;                                /* r3_report_ms at r3_report_steps */
     char doing[96];
-    void (*on_step)(void *ctx, int step, int steps, const char *doing, int secs);   /* draws the bar: at each milestone and once a second from r3_report_tick */
+    double win_t0, win_len;                   /* a long milestone of known length (a power window, a render): the bar moves inside it by the clock */
+    void (*on_step)(void *ctx, const struct R3Report_ *r);   /* draws the bar: at each milestone and once a second from r3_report_tick */
     void *step_ctx;
 } R3Report;
 
@@ -155,7 +156,7 @@ static inline void r3_report_prog_write(const R3Report *r) {
     if (fclose(f) == 0) rename(tmp, pf); else unlink(tmp);
 }
 /* Call once after r3_report_open: n milestones, fn (may be NULL) draws them. */
-static inline void r3_report_steps(R3Report *r, int n, void (*fn)(void *, int, int, const char *, int), void *ctx) {
+static inline void r3_report_steps(R3Report *r, int n, void (*fn)(void *, const R3Report *), void *ctx) {
     r->steps = n; r->step = 0; r->step_missed = 0; r->last_secs = -1;
     r->t0 = r3_report_ms(); r->on_step = fn; r->step_ctx = ctx;
 }
@@ -163,11 +164,11 @@ static inline void r3_report_steps(R3Report *r, int n, void (*fn)(void *, int, i
 static inline void r3_report_at(R3Report *r, int n, const char *doing) {
     if (r->steps <= 0 || n < r->step) return;
     if (n > r->steps) n = r->steps;
-    r->step = n;
+    r->step = n; r->win_len = 0;
     snprintf(r->doing, sizeof r->doing, "%s", doing);
     r->last_secs = (int)((r3_report_ms() - r->t0) / 1000.0);
     r3_report_prog_write(r);
-    if (r->on_step) r->on_step(r->step_ctx, r->step, r->steps, r->doing, r->last_secs);
+    if (r->on_step) r->on_step(r->step_ctx, r);
 }
 /* Inside a long milestone: redraws when the second changes, so the time moves. Cheap to call often. */
 static inline void r3_report_tick(R3Report *r) {
@@ -175,7 +176,19 @@ static inline void r3_report_tick(R3Report *r) {
     int secs = (int)((r3_report_ms() - r->t0) / 1000.0);
     if (secs == r->last_secs) return;
     r->last_secs = secs;
-    r->on_step(r->step_ctx, r->step, r->steps, r->doing, secs);
+    r->on_step(r->step_ctx, r);
+}
+/* The current milestone will take about len_s: the bar moves inside it by the clock (never past the next milestone). */
+static inline void r3_report_window(R3Report *r, double len_s) { r->win_t0 = r3_report_ms(); r->win_len = len_s; }
+/* Seconds since r3_report_steps, and how far the bar is, 0-100. */
+static inline int r3_report_secs(const R3Report *r) { return (int)((r3_report_ms() - r->t0) / 1000.0); }
+static inline int r3_report_percent(const R3Report *r) {
+    if (r->steps <= 0) return 0;
+    if (r->step >= r->steps) return 100;
+    double frac = 0;
+    if (r->win_len > 0) { frac = (r3_report_ms() - r->win_t0) / 1000.0 / r->win_len; frac = frac > 0.98 ? 0.98 : frac < 0 ? 0 : frac; }
+    int p = (int)(((r->step - 1) + frac) * 100.0 / r->steps);
+    return p < 0 ? 0 : p;
 }
 
 static inline int r3_report_close(R3Report *r) {

@@ -96,8 +96,7 @@ local function drawBusy(scr, n)
   scr:text(col + 3, row + 3, doing, st.hint.fg, st.hint.bg)
   local bw = w - 6
   if p.step and p.steps then
-    local filled = math.floor(bw * p.step / p.steps + 0.5)
-    for i = 0, bw - 1 do scr:put(col + 3 + i, row + 5, i < filled and 219 or 176, st.body.fg, st.body.bg) end
+    theme.progressBar(scr, col + 3, row + 5, bw, 100 * p.step / p.steps, st.body)      -- the theme's one bar (rule 18)
     scr:text(col + 3, row + 6, ("step %d of %d   %s"):format(p.step, p.steps, secs), st.hint.fg, st.hint.bg)
   else
     scr:text(col + 3, row + 5, "This report does not say its steps.", st.hint.fg, st.hint.bg)

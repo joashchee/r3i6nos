@@ -146,3 +146,16 @@ eq(T.PAD[5], "pageup"); eq(T.PAD[6], "pagedown"); eq(T.PAD[7], "home"); eq(T.PAD
 eq(T.KEYS["return"], "accept"); eq(T.KEYS.escape, "back")
 
 print("theme: ok")
+
+-- the shared progress bar (rule 18): blocks and light shade, rounded, clamped; and its text form
+do
+  local cells = {}
+  local scr = { put = function(_, c, r, ch, fg, bg) cells[c] = ch end }
+  T.progressBar(scr, 0, 0, 10, 45)
+  local full = 0
+  for i = 0, 9 do if cells[i] == 219 then full = full + 1 else eq(cells[i], 176, "light shade") end end
+  eq(full, 5, "45% of 10 cells rounds to 5")
+  T.progressBar(scr, 0, 0, 10, 250); eq(cells[9], 219, "clamped to full")
+  T.progressBar(scr, 0, 0, 10, -5); eq(cells[0], 176, "clamped to empty")
+  eq(T.progressText(45), "[####......] 45%"); eq(T.progressText(0), "[..........] 0%"); eq(T.progressText(100), "[##########] 100%")
+end

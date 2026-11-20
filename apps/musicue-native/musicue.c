@@ -44,6 +44,7 @@
 #include "r3i6nos_keymap.h"
 #include "r3i6nos_toast.h"
 #include "r3i6nos_report.h"
+#include "r3i6nos_reportbar.h"
 #include "r3i6nos_demo.h"
 #include "r3i6nos_appdata.h"
 #include "cuedata.h"
@@ -3608,8 +3609,7 @@ static void test_report(void) {
         int rc = musicue_report(&b, r, &video, &toast, 1);
         CHECK(rc == 0, "the report is written (rc %d)", rc);
         CHECK(b.force == 0, "the report clears the main loop's force flag, or idle polls every 8 ms");
-        CHECK(g_rpt_prog.max_step == RPT_STEPS && !g_rpt_prog.on, "the report's progress reaches step %d of %d and ends (rule 18; reached %d)", RPT_STEPS, RPT_STEPS, g_rpt_prog.max_step);
-        CHECK(g_rpt_prog.drawn >= RPT_STEPS, "the bar was drawn at every step (%d draws)", g_rpt_prog.drawn);
+        CHECK(g_rpt_missed == 0, "the report's progress reached step %d of %d and ended (rule 18; missed %d)", RPT_STEPS, RPT_STEPS, g_rpt_missed);
         {
             char *pg = cue_read_file(g_prog_file, NULL);
             CHECK(pg && strstr(pg, "step=13\n") && strstr(pg, "steps=13\n") && strstr(pg, "r36s-report.txt"), "the progress file ends at step=13 steps=13 and names the report");

@@ -165,7 +165,7 @@ static void power_test(const char *base) {
 
 /* ---- progress (rule 18): milestones, the progress file, the tick, skipped steps, and a report that stops short ---- */
 static int draws, last_step, last_steps;
-static void count_draw(void *ctx, int step, int steps, const char *doing, int secs) { (void)ctx; (void)doing; (void)secs; draws++; last_step = step; last_steps = steps; }
+static void count_draw(void *ctx, const R3Report *r) { (void)ctx; draws++; last_step = r->step; last_steps = r->steps; }
 static void progress_test(const char *base) {
     char dir[PATH_MAX + 16], pf[PATH_MAX + 32];
     snprintf(dir, sizeof dir, "%s/prog", base);
@@ -190,6 +190,14 @@ static void progress_test(const char *base) {
     r.last_secs = -5;
     r3_report_tick(&r);
     CHECK(draws == d + 1, "progress: a tick in a new second redraws");
+    CHECK(r3_report_percent(&r) == 75 || r3_report_percent(&r) == 100, "progress: the percent of the last step");
+    r.step = 2; r3_report_window(&r, 1000.0);
+    CHECK(r3_report_percent(&r) == 25, "progress: a window just begun adds nothing to the step before it");
+    r.win_t0 -= 500000.0;                                 /* half of 1000 s gone */
+    CHECK(r3_report_percent(&r) == 37, "progress: halfway through a window the bar is halfway to the next step");
+    r.win_t0 -= 9e9;
+    CHECK(r3_report_percent(&r) == 49, "progress: a window that overruns stops just short of the next step");
+    r.step = 4; r.win_len = 0;
     CHECK(r3_report_close(&r) == 0 && r.step_missed == 0 && r.step == 4, "progress: a report that reached the last step closes with none missed");
     CHECK(strstr(slurp(pf), "step=4\nsteps=4\ndoing=Done") != NULL, "progress: the file ends at step=steps");
     R3Report q;

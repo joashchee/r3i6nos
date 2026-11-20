@@ -21,84 +21,14 @@
 typedef struct { App *app; SDL_Renderer *r; R3Video *video; R3Toast *toast; R3Screen cells; Uint32 last; } RptCtx;
 
 
-/* ---- the progress bar (rule 18): the report takes about two minutes, so it shows how far it has got, from its first check to its last ---------------------------------------------
- * RPT_STEPS milestones (rpt_at sets the step, so a skipped part still moves the bar on), and inside a long one a fraction (a power window, the render) from the clock.
- * While a window is measured the bar is only the three command rows laid over the player's own screen, so what is measured is still that screen; a blocking part (opening a
- * song, the helpers) shows a screen of its own. Both redraw at most once a second. It also writes $R3I6NOS_REPORT_PROGRESS (step, steps, doing, file: docs/DEVICE-REPORTS.md,
- * "Progress") when the menu started it, and the self-test reads `g_rpt_prog` to check the bar reaches the last step. */
+/* ---- the progress bar (rule 18): the shared one (theme/r3i6nos_report.h `r3_report_at`, theme/r3i6nos_reportbar.h), 13 milestones; inside a power window or the render the bar moves by the clock.
+ * While a window is measured only the three command rows are laid over the player's own screen, so what is measured is still that screen. */
 #define RPT_STEPS 13
-typedef struct {
-    App *app; SDL_Renderer *r; R3Video *video;
-    int step, shown_step, shown_s;          /* the milestone; what is on the screen (a redraw only when it changes) */
-    double t0, win_t0, win_len;             /* the report's clock; the current window's start and expected length (s; 0: none) */
-    char doing[96], file[PATH_MAX + 16];
-    int on, max_step, drawn;                /* on: the report is running; the highest step seen; how many redraws */
-} RptProg;
-static RptProg g_rpt_prog;
-
-static int rpt_percent(const RptProg *g) {
-    double frac = 0;
-    if (g->win_len > 0) { frac = (r3_report_ms() - g->win_t0) / 1000.0 / g->win_len; if (frac > 0.98) frac = 0.98; if (frac < 0) frac = 0; }
-    int pct = (int)(((g->step - 1) + frac) * 100.0 / RPT_STEPS);
-    if (g->step >= RPT_STEPS) pct = 100;
-    return pct < 0 ? 0 : pct > 100 ? 100 : pct;
-}
-
-/* The three command rows: what it is doing, the bar, the step and the time. */
-static void rpt_prog_rows(const RptProg *g, R3Screen *s) {
-    int pct = rpt_percent(g), full = pct / 10, secs = (int)((r3_report_ms() - g->t0) / 1000.0);
-    char bar[40], stat[64];
-    snprintf(bar, sizeof bar, "[%.*s%.*s] %d%%", full, "##########", 10 - full, "..........", pct);
-    snprintf(stat, sizeof stat, "step %d of %d, %d s", g->step, RPT_STEPS, secs);
-    R3Cmd cmd = {g->doing, R3_ST_STRONG, '>', bar, 0, stat, "", R3_ST_HINT};
-    r3_command_line(s, &cmd);
-}
-
-/* Redraw if the step or the second changed. overlay: the player's cells are on s already (a window); otherwise a screen of its own. */
-static void rpt_prog_draw(int own_screen) {
-    RptProg *g = &g_rpt_prog;
-    if (!g->on || !g->video || !g->r) return;
-    int secs = (int)((r3_report_ms() - g->t0) / 1000.0);
-    if (g->step == g->shown_step && secs == g->shown_s) return;
-    g->shown_step = g->step; g->shown_s = secs; g->drawn++;
-    if (!own_screen) return;
-    R3Screen s;
-    r3_clear(&s);
-    compose_topbar(g->app, &s, "MusiCue", "Device report");
-    r3_box(&s, 6, 5, 52, 10, &(R3Box){1, "Device report", NULL, NULL, 0});
-    r3_text_fit(&s, 8, 7, "The unit is measuring itself: sound, screen, power.", 48, R3_ST(R3_ST_BODY));
-    r3_text_fit(&s, 8, 8, "No input is read until it is done (about two minutes).", 48, R3_ST(R3_ST_BODY));
-    r3_progress(&s, 8, 11, 48, rpt_percent(g));
-    rpt_prog_rows(g, &s);
-    r3_video_draw(g->video, g->r, &s, 1);
-}
-
-/* The milestone n of RPT_STEPS has started. */
-static void rpt_at(int n, const char *doing) {
-    RptProg *g = &g_rpt_prog;
-    if (!g->on) return;
-    g->step = n; g->win_len = 0;
-    if (n > g->max_step) g->max_step = n;
-    snprintf(g->doing, sizeof g->doing, "%s", doing);
-    const char *pf = getenv("R3I6NOS_REPORT_PROGRESS");
-    if (pf && *pf) {                                        /* Settings > Device reports reads it (written whole, renamed over) */
-        char tmp[PATH_MAX + 8];
-        snprintf(tmp, sizeof tmp, "%s.tmp", pf);
-        FILE *f = fopen(tmp, "w");
-        if (f) {
-            fprintf(f, "step=%d\nsteps=%d\ndoing=%s\nfile=%s\n", n, RPT_STEPS, doing, g->file);
-            if (fclose(f) == 0) rename(tmp, pf); else unlink(tmp);
-        }
-    }
-    g->shown_step = -1;                                     /* a new step always redraws */
-    rpt_prog_draw(1);
-}
-
-/* A long step with a known length (a window, the render): the bar moves inside it by the clock. */
-static void rpt_window(double len_s) { g_rpt_prog.win_t0 = r3_report_ms(); g_rpt_prog.win_len = len_s; }
-
-/* For the blocking parts (track_load's progress, the helper's output loop): redraw its own screen once a second. Never stops anything. */
-static int rpt_prog_cb(void *ud, double so_far) { (void)ud; (void)so_far; rpt_prog_draw(1); return 0; }
+static R3Report *g_rpt_rep;                 /* the running report, for the helpers that have no `rep` of their own; NULL when none runs */
+static int g_rpt_missed = -1;               /* milestones the last report never reached (the self-test wants 0) */
+static void rpt_at(int n, const char *doing) { if (g_rpt_rep) r3_report_at(g_rpt_rep, n, doing); }
+static void rpt_window(double len_s) { if (g_rpt_rep) r3_report_window(g_rpt_rep, len_s); }
+static int rpt_prog_cb(void *ud, double so_far) { (void)ud; (void)so_far; if (g_rpt_rep) r3_report_tick(g_rpt_rep); return 0; }   /* a long decode: the time moves */
 
 /* One pass of the main loop as it runs while waiting or playing, minus input (a report in progress takes none). */
 static void rpt_turn(void *arg) {
@@ -119,7 +49,7 @@ static void rpt_turn(void *arg) {
     r3_toast_poll(c->toast, now);
     compose(a, &c->cells);
     r3_toast_draw(c->toast, &c->cells);
-    if (g_rpt_prog.on) { rpt_prog_draw(0); rpt_prog_rows(&g_rpt_prog, &c->cells); }      /* the bar over the player's own screen: what is measured stays that screen */
+    r3_reportbar_overlay(&c->cells);                                  /* the bar over the player's own screen: what is measured stays that screen */
     present(a, c->video, c->r, &c->cells, force);
 }
 
@@ -160,7 +90,7 @@ static void rpt_run(char *const argv[], R3Power *pw, RptRun *out) {
         if (errno == EINTR) continue;
         if (errno != EAGAIN) break;
         if (pw) r3_power_sample(pw);
-        rpt_prog_draw(1);
+        if (g_rpt_rep) r3_report_tick(g_rpt_rep);
         usleep(100000);
         if (r3_report_ms() - t0 > 900000.0) { kill(pid, SIGKILL); break; }       /* fifteen minutes: something is wrong */
     }
@@ -247,10 +177,9 @@ static int musicue_report(App *a, SDL_Renderer *r, R3Video *video, R3Toast *toas
         fprintf(stderr, "musicue: cannot write the report in %s: %s\n", dir, strerror(errno));
         return 1;
     }
-    memset(&g_rpt_prog, 0, sizeof g_rpt_prog);
-    g_rpt_prog.app = a; g_rpt_prog.r = r; g_rpt_prog.video = video;
-    g_rpt_prog.t0 = r3_report_ms(); g_rpt_prog.on = 1; g_rpt_prog.shown_step = -1; g_rpt_prog.shown_s = -1;
-    snprintf(g_rpt_prog.file, sizeof g_rpt_prog.file, "%s/r36s-report.txt", dir);
+    R3ReportBar bar = {video, r, "MusiCue"};
+    r3_reportbar_begin(&bar, &rep, RPT_STEPS);
+    g_rpt_rep = &rep;
     rpt_at(1, "System, card and memory");
     save_cues(a);                                              /* the report plays its own song: the person's is saved and closed */
     close_song(a);
@@ -427,8 +356,11 @@ static int musicue_report(App *a, SDL_Renderer *r, R3Video *video, R3Toast *toas
     close_song(a);
     a->mode = M_LIBRARY;
     scan_songs(a);
-    g_rpt_prog.on = 0;
-    return r3_report_close(&rep);
+    g_rpt_rep = NULL;
+    r3_reportbar_end(&rep);
+    int closed = r3_report_close(&rep);
+    g_rpt_missed = rep.step_missed;
+    return closed;
 }
 
 #endif

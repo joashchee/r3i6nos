@@ -98,18 +98,10 @@ static void rd_show(Rd *rd) {
     int pct = rd->plan > 0 ? (int)(rd->d.n_frames * 100 / rd->plan) : 0;
     if (pct > 99) pct = 99;
     R3Screen s;
-    r3_clear(&s);
-    compose_topbar(rd->a, &s, "MusiCue", "Rec demo");
-    r3_box(&s, 6, 5, 52, 10, &(R3Box){1, "Rec demo", NULL, "Select+Start held: cancel", 0});
-    r3_text_fit(&s, 8, 7, "The unit is recording its own screen and sound.", 48, R3_ST(R3_ST_BODY));
-    r3_text_fit(&s, 8, 8, "Nothing else runs until it is done.", 48, R3_ST(R3_ST_BODY));
-    r3_progress(&s, 8, 11, 48, pct);
-    char bar[40], stat[96];
-    int full = pct / 10;
-    snprintf(bar, sizeof bar, "[%.*s%.*s] %d%%", full, "##########", 10 - full, "..........", pct);
+    char stat[96];
     snprintf(stat, sizeof stat, "%.1f s recorded", r3_demo_seconds(&rd->d));
-    R3Cmd cmd = {rd->doing, R3_ST_STRONG, '>', bar, 0, stat, "", R3_ST_HINT};
-    r3_command_line(&s, &cmd);
+    r3_wait_screen(&s, "MusiCue", "Rec demo", "Rec demo", "The unit is recording its own screen and sound.", "Nothing else runs until it is done.", rd->doing, pct, stat,
+                   "Select+Start held: cancel");
     r3_video_draw(rd->video, rd->r, &s, 1);
     if (pct != rd->last_pct) { rd->last_pct = pct; r3_demo_status("MusiCue", pct, rd->doing, rd->dir); }
 }

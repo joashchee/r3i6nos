@@ -48,6 +48,19 @@ int main(void) {
         for (int k = 1; k < R3_FK_COUNT; k++)
             CHECK(r3_contrast_pal(r3_fk_slot(k), R3_BLACK) >= 4.5, "%s: file kind %d is %.2f:1 on the page", th->name, k, r3_contrast_pal(r3_fk_slot(k), R3_BLACK));
         CHECK(r3_pal[R3_BLACK] != r3_pal[R3_LIGHT_GRAY], "%s: page and text differ", th->name);
+        {   /* the wait screen (every Device report, Rec demo and long job): every drawn cell passes 4.5:1, at 0, half and 100% */
+            static R3Screen ws;
+            for (int pct = 0; pct <= 100; pct += 50) {
+                r3_wait_screen(&ws, "App", "Device report", "Device report", "The unit is measuring itself.", "No input is read.", "Power: idle", pct, "step 3 of 8, 12 s", "foot");
+                double worst = 99;
+                for (int i = 0; i < R3_COLS * R3_ROWS; i++) {
+                    if (ws.ch[i] == 32 || ws.ch[i] == 0) continue;
+                    double c = r3_contrast_pal(ws.fg[i], ws.bg[i]);
+                    if (c < worst) worst = c;
+                }
+                CHECK(worst >= 4.5, "%s: the wait screen at %d%% has a cell at %.2f:1", th->name, pct, worst);
+            }
+        }
     }
     CHECK(dark >= 4 && light >= 2 && mono >= 3, "dark %d, light %d, monochrome %d themes", dark, light, mono);
     r3_theme_apply(-5);

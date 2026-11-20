@@ -253,6 +253,23 @@ function Screen:dump()
   return lines
 end
 
+-- ---- a wait's progress bar, one for every app (CLAUDE.md rule 18; the C theme's r3_progress and r3_progress_text) ----------------------
+
+--- A bar of blocks (219) and light shade (176) `width` cells wide, `percent` full (0-100), in a style of T.STYLE (default hint).
+function T.progressBar(scr, col, row, width, percent, style)
+  local st = style or T.STYLE.hint
+  percent = math.max(0, math.min(100, percent))
+  local full = math.floor(width * percent / 100 + 0.5)
+  for i = 0, width - 1 do scr:put(col + i, row, i < full and 219 or 176, st.fg, st.bg) end
+end
+
+--- "[#####.....] 45%", the same bar as text (the command line's prompt).
+function T.progressText(percent)
+  percent = math.max(0, math.min(100, math.floor(percent)))
+  local full = math.floor(percent / 10)
+  return ("[%s%s] %d%%"):format(("#"):rep(full), ("."):rep(10 - full), percent)
+end
+
 -- ---- the three windows --------------------------------------------------------------------------------------------------------------
 
 --- Row 0: white on blue. left from column 1; right ends at column 62.

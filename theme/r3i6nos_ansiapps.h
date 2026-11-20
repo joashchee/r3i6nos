@@ -420,6 +420,28 @@ static inline void r3_progress(R3Screen *s, int col, int row, int width, int per
     for (int i = 0; i < width; i++) r3_put(s, col + i, row, i < full ? 219 : 176, R3_ST(R3_ST_HINT));
 }
 
+/* A wait, drawn one way for every app (CLAUDE.md rule 18): "[#####.....] 45%" as the command line's prompt text. */
+static inline void r3_progress_text(char *out, size_t cap, int percent) {
+    int pct = percent < 0 ? 0 : (percent > 100 ? 100 : percent), full = pct / 10;
+    snprintf(out, cap, "[%.*s%.*s] %d%%", full, "##########", 10 - full, "..........", pct);
+}
+
+/* The screen of a wait: the top bar, a box with two lines of words and the bar, and the three command rows (what it is doing, the bar in
+ * text, the status). Used by every Device report, Rec demo and long job so the waits look alike; the self-test checks it in every theme. */
+static inline void r3_wait_screen(R3Screen *s, const char *left, const char *right, const char *title, const char *line1, const char *line2,
+                                  const char *doing, int percent, const char *status, const char *foot) {
+    char bar[40];
+    r3_clear(s);
+    r3_top_bar(s, left, right);
+    r3_box(s, 6, 5, 52, 10, &(R3Box){1, title, NULL, foot, 0});
+    if (line1) r3_text_fit(s, 8, 7, line1, 48, R3_ST(R3_ST_BODY));
+    if (line2) r3_text_fit(s, 8, 8, line2, 48, R3_ST(R3_ST_BODY));
+    r3_progress(s, 8, 11, 48, percent);
+    r3_progress_text(bar, sizeof bar, percent);
+    R3Cmd cmd = {doing, R3_ST_STRONG, '>', bar, 0, status, "", R3_ST_HINT};
+    r3_command_line(s, &cmd);
+}
+
 /* ---- list dialogs ---------------------------------------------------------------------------------------------- */
 
 /* value holds 63 bytes: a pad GUID (32) and longer readings fit whole, so a report copied from items is not cut (2026-11-09); the

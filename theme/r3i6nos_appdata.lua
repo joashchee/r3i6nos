@@ -292,11 +292,7 @@ local function ask(u, app, title, lines, options, sel)
   end
 end
 
-local function progress(scr, col, row, width, percent)
-  percent = math.max(0, math.min(100, percent))
-  local full = math.floor(width * percent / 100)
-  for i = 0, width - 1 do scr:put(col + i, row, i < full and 219 or 176, T.STYLE.hint.fg, T.STYLE.hint.bg) end
-end
+local progress = T.progressBar          -- the theme's one bar (rule 18)
 
 --- Run the engine's move or merge behind a progress bar. B asks it to stop. Returns true when it finished, and the reason or counts.
 local function work(u, app, verb, arg)
