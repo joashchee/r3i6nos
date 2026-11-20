@@ -1,0 +1,131 @@
+#!/bin/bash
+# stretch-proto-report: the device report of the Key-and-Tempo render prototype (CLAUDE.md rule 9; ROADMAP section 40 step 2; docs/MUSICUE.md).
+#
+# Run on the R36S (Settings > Device reports, or over SSH: `stretch-proto-report`). Unplug the charger first if you can: the draw is only read on
+# battery. It checks the build, then times the render on 1 to 4 workers with each FFT (the built-in one and PFFFT, which has NEON code) and
+# each preset, and writes r36s-report.txt in the app's data folder ($R3I6NOS_APP_DATA, else /roms2/StretchProto when a data card is in,
+# else /roms/StretchProto) for Claude to read. About 3 minutes. R3I6NOS_STRETCH_SECS (default 60) is the length of the test song.
+# For tests: R3I6NOS_SYS, R3I6NOS_PROC, R3I6NOS_STRETCH_DIR (where the two programs are).
+# NEEDS: Take the charger out first (the power section
+# NEEDS: only reads the draw on battery), then press A.
+# NEEDS: It takes about 3 minutes and uses all four cores.
+# shellcheck disable=SC2034
+APP="StretchProto"   # read by the menu (menu/reports.lua), not by this script
+set -u
+SYS="${R3I6NOS_SYS:-/sys}"; PROC="${R3I6NOS_PROC:-/proc}"
+BIN="${R3I6NOS_STRETCH_DIR:-$(dirname "$(readlink -f "$0")")}"
+SECS="${R3I6NOS_STRETCH_SECS:-60}"
+VERSION="@VERSION@"
+if [ -n "${R3I6NOS_APP_DATA:-}" ]; then DIR="$R3I6NOS_APP_DATA"
+elif [ -d /roms2 ] && [ -w /roms2 ]; then DIR=/roms2/StretchProto
+else DIR=/roms/StretchProto; fi
+mkdir -p "$DIR" || { echo "cannot make $DIR" >&2; exit 1; }
+OUT="$DIR/r36s-report.txt"; TMP="$OUT.tmp"
+STEPS=9; STEP=0
+prog() {   # the menu's progress bar (docs/DEVICE-REPORTS.md, "Progress"): step, steps, what is being done, and where the file goes
+    STEP=$((STEP+1))
+    [ -n "${R3I6NOS_REPORT_PROGRESS:-}" ] || return 0
+    printf 'step=%s\nsteps=%s\ndoing=%s\nfile=%s\n' "$STEP" "$STEPS" "$1" "$OUT" > "$R3I6NOS_REPORT_PROGRESS.tmp" && mv "$R3I6NOS_REPORT_PROGRESS.tmp" "$R3I6NOS_REPORT_PROGRESS"
+}
+pass=0; fail=0; info=0; skip=0
+emit() { echo "$1"; echo "$1" >> "$TMP"; }
+line() { emit "$1 $2: $3"; case "$1" in PASS) pass=$((pass+1)) ;; FAIL) fail=$((fail+1)) ;; INFO) info=$((info+1)) ;; SKIP) skip=$((skip+1)) ;; esac; }
+rd() { head -n 1 "$1" 2>/dev/null; }
+kv() { local v="${2#*"$1"=}"; echo "${v%% *}"; }      # kv key 'a=1 b=2' -> value of key
+mw() { echo $(( $(rd "$bat/current_now") * $(rd "$bat/voltage_now") / 1000000000 )); }      # microamps x microvolts -> milliwatts
+: > "$TMP"
+emit "# r3i6nos device report"
+emit "app: StretchProto $VERSION (r3i6nos-stretch-proto)"
+emit "made: $(date '+%Y-%m-%d %H:%M:%S')"
+emit "how: stretch-proto-report"
+emit "for: Claude. Copy EASYROMS/StretchProto/r36s-report.txt to a computer and give it to Claude in the r3i6nos repo (ROADMAP section 40 step 2)."
+emit ""
+prog "the system"
+emit "== system =="
+line INFO kernel "$(uname -sr) $(uname -m)"
+cores="$(grep -c '^processor' "$PROC/cpuinfo" 2>/dev/null)"
+line INFO cpu "$cores cores, part $(grep -m1 'CPU part' "$PROC/cpuinfo" 2>/dev/null | sed 's/.*: //'), features $(grep -m1 -i '^Features' "$PROC/cpuinfo" 2>/dev/null | sed 's/.*: //')"
+for c in 0 1 2 3; do
+    d="$SYS/devices/system/cpu/cpu$c/cpufreq"
+    [ -d "$d" ] || continue
+    line INFO "cpu$c cpufreq" "governor $(rd "$d/scaling_governor"), now $(rd "$d/scaling_cur_freq") kHz, min $(rd "$d/scaling_min_freq"), max $(rd "$d/scaling_max_freq")"
+done
+line INFO memory "$(grep -m1 MemTotal "$PROC/meminfo" | sed 's/  */ /g'), $(grep -m1 MemAvailable "$PROC/meminfo" | sed 's/  */ /g')"
+bat=""; for b in "$SYS"/class/power_supply/*attery*; do [ -d "$b" ] && { bat="$b"; break; }; done
+if [ -n "$bat" ]; then line INFO battery "$(rd "$bat/status"), $(rd "$bat/capacity") %"; else line SKIP battery "no battery under $SYS/class/power_supply"; fi
+for t in "$SYS"/class/thermal/thermal_zone*; do [ -r "$t/temp" ] && line INFO "temperature $(rd "$t/type")" "$(( $(rd "$t/temp") / 1000 )) C"; done
+line INFO fft-flags "stretch-proto: default FFT; stretch-proto-pffft: PFFFT (NEON); both -O3 -mcpu=cortex-a35"
+
+emit ""
+prog "the card"
+emit "== card =="
+if echo ok > "$DIR/.write-test" 2>/dev/null && [ "$(cat "$DIR/.write-test")" = ok ]; then rm -f "$DIR/.write-test"; line PASS "write in $DIR" ok; else line FAIL "write in $DIR" "cannot write"; fi
+line INFO filesystem "$(grep " $(df -P "$DIR" 2>/dev/null | tail -n 1 | awk '{print $6}') " "$PROC/mounts" | awk '{print $3}' | head -n 1), $(df -Pk "$DIR" 2>/dev/null | tail -n 1 | awk '{print $4}') KiB free"
+
+emit ""
+emit "== correctness =="
+for v in stretch-proto stretch-proto-pffft; do
+    if [ ! -x "$BIN/$v" ]; then line FAIL "$v selftest" "$BIN/$v is missing"; continue; fi
+    prog "self-test: $v"
+    out="$("$BIN/$v" selftest 2>&1)"; rc=$?
+    nfail="$(echo "$out" | grep -c '^FAIL')"
+    if [ "$rc" = 0 ] && echo "$out" | grep -q 'all passed'; then line PASS "$v selftest" "$(echo "$out" | grep -c '^PASS') checks passed on this unit"
+    else line FAIL "$v selftest" "exit $rc, $nfail failed: $(echo "$out" | grep '^FAIL' | head -n 3 | tr '\n' ';')"; fi
+done
+
+emit ""
+emit "== speed =="
+line INFO test "$SECS s of 44.1 kHz stereo, ratio 0.80, +3 semitones, 4 segments, a worker each; x_realtime = audio seconds / wall seconds"
+best=""; bestx=0
+for v in stretch-proto stretch-proto-pffft; do
+    [ -x "$BIN/$v" ] || continue
+    for preset in "" "--cheaper"; do
+        pname="${preset:+cheaper}"; pname="${pname:-default}"
+        prog "speed: $v $pname"
+        # a run is the 4 worker counts; the first worker count's number is one core's speed, the last's is the whole unit's
+        res="$("$BIN/$v" bench "$SECS" $preset 2>&1 | grep -E '^RESULT|^INFO peak')"
+        [ -n "$res" ] || { line FAIL "$v $pname" "no result"; continue; }
+        for w in 1 2 3 4; do
+            r="$(echo "$res" | grep " workers=$w ")"
+            [ -n "$r" ] || continue
+            x="$(kv x_realtime "$r")"; sp="$(kv speedup "$r")"; wall="$(kv wall_s "$r")"
+            line INFO "$v $pname, $w worker(s)" "$x x real time, wall $wall s, speed-up $sp x"
+        done
+        line INFO "$v $pname peak memory" "$(echo "$res" | grep '^INFO peak' | sed 's/INFO peak memory: //')"
+        x4="$(kv x_realtime "$(echo "$res" | grep ' workers=4 ')")"
+        if awk "BEGIN{exit !($x4+0 > $bestx+0)}"; then bestx="$x4"; best="$v $pname"; fi
+        sleep 5      # let the unit cool a little between runs, so the later ones are not slowed by the first
+    done
+done
+line INFO "temperature after" "$(for t in "$SYS"/class/thermal/thermal_zone*; do [ -r "$t/temp" ] && printf '%s %s C; ' "$(rd "$t/type")" "$(( $(rd "$t/temp") / 1000 ))"; done)"
+# goal: a 4-minute song's copy in about a minute (4x real time or better on all four cores). A first guess, set before any measurement: adjust from this report.
+if [ -n "$best" ]; then
+    if awk "BEGIN{exit !($bestx >= 4)}"; then line PASS "render speed (goal 4x real time on 4 workers)" "$bestx x with $best"
+    else line FAIL "render speed (goal 4x real time on 4 workers)" "$bestx x with $best"; fi
+    line INFO "estimate" "a 4-minute song takes about $(awk "BEGIN{printf \"%.0f\", 240 / $bestx}") s with $best on 4 workers"
+else line SKIP "render speed" "no benchmark ran"; fi
+
+emit ""
+prog "the power draw"
+emit "== power =="
+if [ -n "$bat" ] && [ "$(rd "$bat/status")" = Discharging ] && [ -r "$bat/current_now" ] && [ -r "$bat/voltage_now" ]; then
+    # one 4-worker run, the battery read once a second (docs/POWER.md): the draw while rendering and the draw just before it
+    idle=0; n=0; for _ in 1 2 3 4 5; do idle=$(( idle + $(mw) )); n=$((n+1)); sleep 1; done
+    line INFO "draw idle" "$(( idle / n )) mW"
+    v="${best%% *}"; v="${v:-stretch-proto}"
+    "$BIN/$v" bench "$SECS" --workers 4 > /dev/null 2>&1 &
+    pid=$!; sum=0; n=0
+    while kill -0 "$pid" 2>/dev/null; do sum=$(( sum + $(mw) )); n=$((n+1)); sleep 1; done
+    [ "$n" -gt 0 ] && line INFO "draw while rendering" "$(( sum / n )) mW over $n s (one worker, then four), $(rd "$bat/capacity") % charge"
+    line INFO "power hint" "repeat at 100, 50 and 20 % charge before trusting a small difference (docs/POWER.md)"
+else
+    line SKIP "draw" "not on battery (status $(rd "${bat:-/nonexistent}/status")): unplug the charger and run again"
+fi
+
+emit ""
+emit "== summary =="
+emit "PASS $pass  FAIL $fail  INFO $info  SKIP $skip"
+emit "end"
+mv "$TMP" "$OUT"
+echo "wrote $OUT"
+[ "$fail" = 0 ]

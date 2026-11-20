@@ -33,6 +33,7 @@ struct Job {
     double seam_s = 0.05;          // crossfade length at a cut
     bool equal_power = false;      // crossfade law: linear (the pieces are aligned, so they add up; equal power would swell a cut by up to 3 dB) or equal power
     double align_ms = 15.0;        // each piece may move this far to be in phase with the one before it (0: no alignment)
+    bool cheaper = false;          // Signalsmith's presetCheaper (a block of 0.1 s every 0.04 s) instead of presetDefault (0.12 s every 0.03 s)
     bool quiet_seams = true;       // move each cut to the quietest 50 ms within +-1 s of where it would fall
 };
 
@@ -77,7 +78,7 @@ inline std::vector<std::vector<float>> render_segment(const Pcm &p, int64_t a, i
     const int64_t N = p.frames(), x0 = std::max<int64_t>(0, a - lo), x1 = std::min<int64_t>(N, b + hi);
     const int64_t y0 = out_pos(x0, j.ratio), y1 = out_pos(x1, j.ratio), L = y1 - y0;
     SignalsmithStretch<float> st(seed);                // a fixed seed: the same input gives the same bytes, so a test can compare
-    st.presetDefault(p.channels, (float)p.rate);
+    if (j.cheaper) st.presetCheaper(p.channels, (float)p.rate); else st.presetDefault(p.channels, (float)p.rate);
     st.setTransposeSemitones((float)j.semitones);
     std::vector<const float *> in(p.channels);
     std::vector<std::vector<float>> out(p.channels, std::vector<float>(L));

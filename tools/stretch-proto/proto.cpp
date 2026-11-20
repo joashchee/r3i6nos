@@ -1,9 +1,16 @@
 // proto.cpp: command line and self-test for stretch_render.hpp (MIT).
 //   stretch-proto render IN.wav OUT.wav [--ratio R] [--semitones S] [--workers N] [--chunks N] [--equal-power] [--no-quiet-seams]
 //   stretch-proto selftest      the checks (length, pitch, seams, determinism); exit 1 on a failure
-//   stretch-proto bench [SECS]  the same synthetic song with 1, 2, 3 and 4 workers: wall time, CPU time, speed against real time
+//   stretch-proto bench [SECS] [--cheaper] [--workers N]   the same synthetic song with 1, 2, 3 and 4 workers: wall time, CPU time, speed against real time
 #include "stretch_render.hpp"
 #include <cstdlib>
+#include <sys/resource.h>
+
+#ifdef SIGNALSMITH_USE_PFFFT
+#define FFT_NAME "pffft"
+#else
+#define FFT_NAME "default"
+#endif
 
 using namespace sr;
 
@@ -107,17 +114,24 @@ static void test_wav() {
     remove(path);
 }
 
-static void bench(double secs) {
+static long peak_kib() { struct rusage ru; getrusage(RUSAGE_SELF, &ru); return ru.ru_maxrss; }
+
+// Times 1 to 4 workers on the same synthetic song. One line a worker count, in the device report's words:
+//   RESULT fft=default preset=default workers=2 chunks=4 wall_s=1.23 cpu_s=2.31 x_realtime=48.7 speedup=1.9
+static void bench(double secs, bool cheaper, int only) {
     Pcm in = make_music(secs);
-    printf("INFO bench: %.0f s of 44.1 kHz stereo, ratio 0.80, +3 semitones, hardware threads %u (a Mac/Docker core is several times faster than a Cortex-A35)\n", secs, std::thread::hardware_concurrency());
+    printf("INFO bench: %.0f s of 44.1 kHz stereo, ratio 0.80, +3 semitones, fft %s, preset %s, hardware threads %u\n", secs, FFT_NAME, cheaper ? "cheaper" : "default", std::thread::hardware_concurrency());
     printf("%7s %7s %9s %9s %12s %10s\n", "workers", "chunks", "wall s", "cpu s", "x real time", "speed-up");
     double base = 0;
     for (int w = 1; w <= 4; w++) {
-        Job j; j.ratio = 0.8; j.semitones = 3; j.workers = w; j.chunks = std::max(4, w);
+        if (only && w != only && w != 1) continue;          // --workers N: one worker (the speed-up's base) and N
+        Job j; j.ratio = 0.8; j.semitones = 3; j.workers = w; j.chunks = std::max(4, w); j.cheaper = cheaper;
         Stats st; render(in, j, &st);
         if (w == 1) base = st.wall_s;
         printf("%7d %7d %9.2f %9.2f %12.1f %9.2fx\n", w, st.chunks, st.wall_s, st.cpu_s, st.audio_s / st.wall_s, base / st.wall_s);
+        printf("RESULT fft=%s preset=%s workers=%d chunks=%d wall_s=%.3f cpu_s=%.3f x_realtime=%.2f speedup=%.2f\n", FFT_NAME, cheaper ? "cheaper" : "default", w, st.chunks, st.wall_s, st.cpu_s, st.audio_s / st.wall_s, base / st.wall_s);
     }
+    printf("INFO peak memory: %ld KiB (the input, the pieces and the output of the last run)\n", peak_kib());
 }
 
 int main(int argc, char **argv) {
@@ -129,7 +143,12 @@ int main(int argc, char **argv) {
         printf(g_fail ? "stretch-proto: %d FAILED\n" : "stretch-proto: all passed\n", g_fail);
         return g_fail ? 1 : 0;
     }
-    if (argc >= 2 && !strcmp(argv[1], "bench")) { bench(argc > 2 ? atof(argv[2]) : 60); return 0; }
+    if (argc >= 2 && !strcmp(argv[1], "bench")) {
+        double secs = 60; bool cheaper = false; int only = 0;
+        for (int i = 2; i < argc; i++) { if (!strcmp(argv[i], "--cheaper")) cheaper = true; else if (!strcmp(argv[i], "--workers") && i + 1 < argc) only = atoi(argv[++i]); else secs = atof(argv[i]); }
+        bench(secs, cheaper, only);
+        return 0;
+    }
     if (argc >= 4 && !strcmp(argv[1], "render")) {
         Job j; j.workers = 4;
         for (int i = 4; i < argc; i++) {
@@ -151,6 +170,6 @@ int main(int argc, char **argv) {
         if (clip) printf("WARN %d samples clipped\n", clip);
         return 0;
     }
-    fprintf(stderr, "usage: stretch-proto render IN.wav OUT.wav [--ratio R] [--semitones S] [--workers N] [--chunks N] | selftest | bench [SECS]\n");
+    fprintf(stderr, "usage: stretch-proto render IN.wav OUT.wav [--ratio R] [--semitones S] [--workers N] [--chunks N] | selftest | bench [SECS] [--cheaper] [--workers N]\n");
     return 2;
 }
