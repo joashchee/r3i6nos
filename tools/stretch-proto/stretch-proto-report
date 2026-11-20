@@ -32,7 +32,7 @@ emit() { echo "$1"; echo "$1" >> "$TMP"; }
 line() { emit "$1 $2: $3"; case "$1" in PASS) pass=$((pass+1)) ;; FAIL) fail=$((fail+1)) ;; INFO) info=$((info+1)) ;; SKIP) skip=$((skip+1)) ;; esac; }
 rd() { head -n 1 "$1" 2>/dev/null; }
 kv() { local v="${2#*"$1"=}"; echo "${v%% *}"; }      # kv key 'a=1 b=2' -> value of key
-mw() { echo $(( $(rd "$bat/current_now") * $(rd "$bat/voltage_now") / 1000000000 )); }      # microamps x microvolts -> milliwatts
+mw() { local p=$(( $(rd "$bat/current_now") * $(rd "$bat/voltage_now") / 1000000000 )); echo "${p#-}"; }      # microamps x microvolts -> milliwatts; the current is negative while discharging
 : > "$TMP"
 emit "# r3i6nos device report"
 emit "app: StretchProto $VERSION (r3i6nos-stretch-proto)"
@@ -89,7 +89,7 @@ for v in stretch-proto stretch-proto-pffft; do
             r="$(echo "$res" | grep " workers=$w ")"
             [ -n "$r" ] || continue
             x="$(kv x_realtime "$r")"; sp="$(kv speedup "$r")"; wall="$(kv wall_s "$r")"
-            line INFO "$v $pname, $w worker(s)" "$x x real time, wall $wall s, speed-up $sp x"
+            line INFO "$v $pname, $w worker(s)" "$x x real time, wall $wall s, speed-up $sp x, threads busy $(kv cpu_s "$r") s, join $(kv assemble_s "$r") s, $(kv chunks "$r") segments"
         done
         line INFO "$v $pname peak memory" "$(echo "$res" | grep '^INFO peak' | sed 's/INFO peak memory: //')"
         x4="$(kv x_realtime "$(echo "$res" | grep ' workers=4 ')")"

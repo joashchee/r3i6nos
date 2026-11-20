@@ -5,6 +5,7 @@
 #include "stretch_render.hpp"
 #include <cstdlib>
 #include <sys/resource.h>
+#include <unistd.h>
 
 #ifdef SIGNALSMITH_USE_PFFFT
 #define FFT_NAME "pffft"
@@ -104,7 +105,10 @@ static void test_music() {
 
 static void test_wav() {
     Pcm p = make_sine(2.0, 440.0), q; std::string err;
-    const char *path = "stretch-proto-test.wav";
+    const char *tmp = getenv("TMPDIR");                           // the working folder may be read-only (the menu starts a report from anywhere)
+    std::string path_s = std::string(tmp && *tmp ? tmp : "/tmp") + "/stretch-proto-test-" + std::to_string((long)getpid()) + ".wav";
+    const char *path = path_s.c_str();
+    if (!write_wav(path, p)) err = "cannot write " + path_s;
     int clip = -1;
     bool ok = write_wav(path, p, &clip) && read_wav(path, q, err);
     CHECK(ok && clip == 0 && q.frames() == p.frames() && q.channels == 2 && q.rate == 44100, "WAV round trip keeps the length, channels and rate (%s)", err.c_str());
@@ -125,11 +129,11 @@ static void bench(double secs, bool cheaper, int only) {
     double base = 0;
     for (int w = 1; w <= 4; w++) {
         if (only && w != only && w != 1) continue;          // --workers N: one worker (the speed-up's base) and N
-        Job j; j.ratio = 0.8; j.semitones = 3; j.workers = w; j.chunks = std::max(4, w); j.cheaper = cheaper;
+        Job j; j.ratio = 0.8; j.semitones = 3; j.workers = w; j.chunks = w == 3 ? 6 : 4; j.cheaper = cheaper;     // whole rounds of work: 4 segments on 3 workers would be two rounds, as slow as 2 workers
         Stats st; render(in, j, &st);
         if (w == 1) base = st.wall_s;
         printf("%7d %7d %9.2f %9.2f %12.1f %9.2fx\n", w, st.chunks, st.wall_s, st.cpu_s, st.audio_s / st.wall_s, base / st.wall_s);
-        printf("RESULT fft=%s preset=%s workers=%d chunks=%d wall_s=%.3f cpu_s=%.3f x_realtime=%.2f speedup=%.2f\n", FFT_NAME, cheaper ? "cheaper" : "default", w, st.chunks, st.wall_s, st.cpu_s, st.audio_s / st.wall_s, base / st.wall_s);
+        printf("RESULT fft=%s preset=%s workers=%d chunks=%d wall_s=%.3f cpu_s=%.3f assemble_s=%.3f x_realtime=%.2f speedup=%.2f\n", FFT_NAME, cheaper ? "cheaper" : "default", w, st.chunks, st.wall_s, st.cpu_s, st.assemble_s, st.audio_s / st.wall_s, base / st.wall_s);
     }
     printf("INFO peak memory: %ld KiB (the input, the pieces and the output of the last run)\n", peak_kib());
 }

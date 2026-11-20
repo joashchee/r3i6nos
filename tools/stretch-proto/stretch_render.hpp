@@ -39,7 +39,7 @@ struct Job {
 
 struct Stats {
     int chunks = 0;
-    double wall_s = 0, cpu_s = 0, audio_s = 0;      // audio_s: the input's length
+    double wall_s = 0, cpu_s = 0, audio_s = 0, assemble_s = 0;      // cpu_s: the threads' own time added up (it grows if the cores slow each other); audio_s: the input's length
     std::vector<int64_t> seams_out;                 // the cuts, in output frames
 };
 
@@ -116,6 +116,7 @@ inline Pcm render(const Pcm &p, const Job &j, Stats *stats = nullptr) {
     for (int i = 1; i < std::max(1, j.workers); i++) th.emplace_back(work);
     work();
     for (auto &t : th) t.join();
+    auto t_join = std::chrono::steady_clock::now();
     // assemble: each piece is placed where its own input start lands (`base`), then moved by a small shift so that it is in phase with the
     // piece before it over the cut (independent phase vocoders agree on the notes but not on the phase: without this, a steady tone dips or
     // clicks at the cut). The shift is searched in +-align_ms and kept absolute (never added to the previous one), so the sound is never more
@@ -174,6 +175,7 @@ inline Pcm render(const Pcm &p, const Job &j, Stats *stats = nullptr) {
         stats->chunks = n; stats->seams_out = seams; stats->audio_s = (double)N / p.rate;
         stats->wall_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
         stats->cpu_s = 0; for (double c : cpu) stats->cpu_s += c;
+        stats->assemble_s = std::chrono::duration<double>(std::chrono::steady_clock::now() - t_join).count();
     }
     return o;
 }
