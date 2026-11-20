@@ -24,5 +24,11 @@ FF="${R3I6NOS_FFMPEG:-/usr/bin/ffmpeg}"
 [ -n "${R3I6NOS_APP_DATA:-}" ] && ARGS+=(-P "$R3I6NOS_APP_DATA")
 # the screen is 640x480 and the CPU has no video decoder: at most 480p, and H.264 + AAC that the image's ffmpeg can join into an MP4 without re-encoding; the last
 # alternatives take whatever the site has. -f, -S and --merge-output-format of your own replace these.
-ARGS+=(-f 'bv*[height<=480][vcodec^=avc1]+ba[acodec^=mp4a]/b[height<=480][ext=mp4]/bv*[height<=480]+ba/b[height<=480]/b' --merge-output-format mp4)
+# R3I6NOS_YTDLP_QUALITY picks the default's size (a frontend's setting; docs/STREAM-TOOLS.md, "Quality"): `saver` is at most 360p (format 18 is the YouTube fallback) for the battery,
+# `audio` is the sound only (AAC, YouTube's format 140) with no video to decode or merge; anything else is the 480p default.
+case "${R3I6NOS_YTDLP_QUALITY:-}" in
+    saver) ARGS+=(-f 'bv*[height<=360][vcodec^=avc1]+ba[acodec^=mp4a]/b[height<=360][ext=mp4]/18/bv*[height<=360]+ba/b[height<=360]/b' --merge-output-format mp4) ;;
+    audio) ARGS+=(-f 'ba[acodec^=mp4a]/140/ba/b') ;;
+    *) ARGS+=(-f 'bv*[height<=480][vcodec^=avc1]+ba[acodec^=mp4a]/b[height<=480][ext=mp4]/bv*[height<=480]+ba/b[height<=480]/b' --merge-output-format mp4) ;;
+esac
 exec "$PY" -s "$LIB/yt-dlp" "${ARGS[@]}" "$@"

@@ -68,6 +68,15 @@ first_f="$(echo "$out" | grep -n '^ARG -f$' | head -1 | cut -d: -f1)"
 out2="$("$T/yt-dlp/bin/yt-dlp" -f 22 URL)"
 [ "$(echo "$out2" | grep -n '^ARG -f$' | tail -1 | cut -d: -f1)" -gt "$first_f" ] || fail "yt-dlp: a user's -f does not come after the default -f"
 echo "$out2" | grep -A1 '^ARG -f$' | tail -1 | grep -qx "ARG 22" || fail "yt-dlp: the user's -f value is not last"
+# the quality setting: the default is 480p, `saver` 360p, `audio` the sound only (no merge)
+fsel() { grep -A1 '^ARG -f$' | head -2 | tail -1; }
+echo "$out" | fsel | grep -q 'height<=480' || fail "yt-dlp: the default is not at most 480p"
+sv="$(R3I6NOS_YTDLP_QUALITY=saver "$T/yt-dlp/bin/yt-dlp" URL)"
+echo "$sv" | fsel | grep -q 'height<=360' || fail "yt-dlp: saver is not at most 360p"
+echo "$sv" | fsel | grep -q 'height<=480' && fail "yt-dlp: saver still offers 480p"
+au="$(R3I6NOS_YTDLP_QUALITY=audio "$T/yt-dlp/bin/yt-dlp" URL)"
+echo "$au" | fsel | grep -q 'ba\[acodec^=mp4a\]/140' || fail "yt-dlp: audio does not ask for AAC audio only"
+echo "$au" | grep -qx 'ARG --merge-output-format' && fail "yt-dlp: audio merges"
 # ffmpeg only when it exists; the cache and -P follow the app's data folder when a frontend gave one
 echo "$out" | grep -qx "ARG --ffmpeg-location" && [ ! -x /usr/bin/ffmpeg ] && fail "yt-dlp: --ffmpeg-location without an ffmpeg"
 printf '#!/bin/sh\n' > "$T/ff"; chmod 755 "$T/ff"

@@ -55,7 +55,7 @@ Commander's report now measures this on the unit (`== playback ==`, `docs/PLAYBA
    the whole hardware path below is unnecessary. Use a 480p H.264 file of the same kind YouTube serves.
 2. **The `== video hardware ==` section of `r3i6nos-report`** (rule 9): written (above). It does not run `modprobe` (root), so "would loading them work" is the step after it: `sudo modprobe mpp_service rk-vcodec rga2`, then run the report again.
 3. **Audio-only mode in the first frontend**: `yt-dlp -f 'ba[acodec^=mp4a]'` (format 140) then `ffmpeg`/nttplay. Cheapest in CPU, data and battery; the JavaScript challenge solve (~4.5 s CPU on an Apple core) still happens.
-4. **Keep 480p as the cap**, 360p as the saver. Do not adopt the guide's 720p.
+4. **Keep 480p as the cap**, 360p as the saver. Do not adopt the guide's 720p. **Built 2026-11-20 as `R3I6NOS_YTDLP_QUALITY` (`saver`, `audio`) in the wrapper** (`docs/STREAM-TOOLS.md`, "Quality").
 
 ## What is not worth pursuing now
 
