@@ -253,6 +253,7 @@ bash tests/test_push_packages.sh || fail=1
 bash tests/test_runtimes.sh || fail=1
 bash tests/test_streamtools.sh || fail=1
 bash tests/test_run_app_runtime.sh || fail=1
+bash tests/test_portmaster_unpack.sh || fail=1
 bash tests/test_image.sh || fail=1
 
 step "shell syntax"

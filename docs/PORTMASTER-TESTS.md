@@ -65,8 +65,8 @@ the catalogue (`ports.json` of 2026-11-15, 1,506 ports) because their data is in
 | 3 | Pyxel | **vortexion** | 0.1 MB | `rtr` | An arcade game with sound |
 | 4 | Pyxel | **megaball** | 0.04 MB | `rtr`, loose `.py` and `.pyxres` | The unpacked form: a folder with `main.py` |
 | 5 | Pyxel | **pyxeljack** | 0.03 MB | `rtr` | A second small game, for frame pacing |
-| 6 | Godot 3.6 | **yolkheroes** | 0.3 MB | `.pck` | The one port built for the Godot 3.6 we ship: GLES2 on the Mali |
-| 7 | Godot 3.6 | **cairn** | 0.1 MB | free download | A second 3.6 port |
+| 6 | Godot 3.6 | **yolkheroes** | 0.3 MB | **not in the zip** (the launcher only says where its `.pck` goes: your own copy) | The one port built for the Godot 3.6 we ship: GLES2 on the Mali |
+| 7 | Godot 3.6 | **cairn** | 0.1 MB | **not in the zip** (your own copy of the game, plus an xdelta3 patch the port applies to it; the patch is not applied here) | A second 3.6 port |
 | 8 | Godot 3.5 data | **turbotabletennis** | 0.1 MB | `rtr` | 3.5 data on the 3.6 engine: **the first that may fail on a version mismatch** |
 | 9 | Godot 3.5 | **starcatcher**, **hyper.jump** | 1.1 / 1.5 MB | `rtr` | A platformer and an action game: pad feel, frame rate |
 | 10 | Godot 3.5 | **pachycefalosaurus** | 0.8 MB | `rtr`, full game | A strategy game on the pad |
@@ -79,6 +79,8 @@ the catalogue (`ports.json` of 2026-11-15, 1,506 ports) because their data is in
 
 Total about 20 MB without Ren'Py's full game, about 55 MB with it.
 
+- **Corrected 2026-11-21, reading the real zips (the first draft of this table said otherwise):** `yolkheroes` and `cairn` carry no `.pck`; `milkinside` and `onenighthotsprings` have an empty `gamefiles/`; `yarntown_pm` has only its libraries. So **the only Godot 3 data that is in a zip is group 8 to 11** (`turbotabletennis`, `starcatcher`, `hyper.jump`, `pachycefalosaurus`, `yomihd`, all Godot 3.4 or 3.5 packs), and **groups 6, 7, 13, 14 and 16 need the person's own copy** (`scripts/portmaster-unpack.sh` says `NEEDS-DATA` and where to put it). `pyxeljack` is one script (the script copies it in as `main.py`).
+- **`scripts/portmaster-unpack.sh [--to DIR] [--dry-run] PORT.zip ...`** (2026-11-21; `tests/test_portmaster_unpack.sh`, in `check.sh`) does the unpacking: it reads each zip, finds the engine from the launch script and the data from the files, and puts it in `DIR/Pyxel/`, `Godot/`, `Renpy/`, `Solarus/` or `AGS/` (default `build/port-games`; point `--to` at a card). It prints `OK`, `NEEDS-DATA` or `SKIP` for each zip and runs nothing from the zip. Tried on 15 of the real zips (2026-11-15 catalogue): 9 placed, 5 `NEEDS-DATA`, 1 more `Godot 3.4` placed. **Untested on a unit.**
 - **Version risk:** a `.pck` pack is not guaranteed to load across Godot minor versions, and a Pyxel or Ren'Py game built for a newer or older runtime may not load. Left out for that reason: Godot 4.x ports, Pyxel ports on 2.3 to 2.9, Ren'Py 8.1.3 ports.
 - **`gptokeyb`:** many Godot ports expect the keyboard from `gptokeyb` (`turbotabletennis.gptk` is one). The menu's runner does not start it, so a game with no joypad action may ignore the pad: that is a finding about the game, not a failure of the runtime.
 - **Left out because it is not cheap:** anything that needs weston, Mono, .NET, Java or Qt; rlvm (an interpreter of a commercial engine: ask first, `docs/RUNTIMES.md`).
