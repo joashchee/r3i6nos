@@ -164,6 +164,8 @@ rated when it is written; rerate one when what is left changes size.
 
 ## Check before committing
 
+**Shell: never write `A && B || C`** (CI's older shellcheck fails it as SC2015 and the Mac's does not): use `if ...; then ...; else ...; fi` or one `[ x ] || fail` per line. `scripts/check.sh` has a grep step for it.
+
 `scripts/check.sh` (Python tests, Lua test, `bash -n`, shellcheck). Report
 tools that were not installed rather than calling the run clean.
 **While working on one native app**, `scripts/check.sh --app <folder under apps/>` (for example `musicue-native`; add `--theme` when the theme headers changed) runs only that app's compile, `--selftest`, Python tests and scripts' lint in seconds (`scripts/check-app.sh`). It does not replace the full `scripts/check.sh` before a commit that touches anything else.

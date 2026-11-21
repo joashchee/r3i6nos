@@ -230,7 +230,7 @@ typedef struct {
     int quit, force;
     /* the sync job */
     pid_t job_pid; int job_fd; char job_buf[512]; int job_len; char job_lines[6][96]; int job_nlines; double job_frac; int job_done;
-    R3Osk osk; int osk_marker;                  /* M_OSK: the on-screen keyboard (R3, or Name the marker > Type a name) naming marker osk_marker freely */
+    R3Osk osk; int osk_marker; int osk_cue;     /* M_OSK: the on-screen keyboard (R3, or Name the marker > Type a name) naming marker osk_marker freely, or (osk_cue >= 0) writing that cue's words */
     char idbuf[12]; int idpos, idgx, idgy;            /* Start > Add: the 11 characters of a YouTube id, 0 for an empty slot */
     char job_want[16];                      /* a sync for one id: open that song when it is done */
     KtPlan kt; int kt_workers, kt_cheaper;  /* M_KT: the Key and Tempo being asked for, and its two choices (2 or 4 workers; best or faster) */
@@ -1385,7 +1385,7 @@ static void compose_id(App *a, R3Screen *s) {
 static void compose_osk(App *a, R3Screen *s) {
     compose_player(a, s);
     r3_osk_draw(s, &a->osk);
-    R3Cmd cmd = {a->reply, a->reply_style, '>', a->osk.text, 1, "R3 or B closes without naming", "", R3_ST_HINT};
+    R3Cmd cmd = {a->reply, a->reply_style, '>', a->osk.text, 1, "R3 or B closes without saving", "", R3_ST_HINT};
     r3_command_line(s, &cmd);
 }
 
@@ -1554,7 +1554,7 @@ static void present(App *a, R3Video *v, SDL_Renderer *r, const R3Screen *s, int 
 
 /* ---- actions ------------------------------------------------------------------------------------------------------------------------------- */
 
-enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_VIDEO, A_ADD, A_CUE, A_BOOKMARK, A_CUEDEL, A_RECALC, A_SLADD, A_SLDEL, A_SLUP, A_SLDOWN, A_QUIT, A_CLOSE, A_JUMPCLEAR, A_KT, A_COMPRESS, A_LABELTYPE, A_LABELPICK };
+enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_VIDEO, A_ADD, A_CUE, A_BOOKMARK, A_CUEDEL, A_RECALC, A_SLADD, A_SLDEL, A_SLUP, A_SLDOWN, A_QUIT, A_CLOSE, A_JUMPCLEAR, A_KT, A_COMPRESS, A_LABELTYPE, A_CUETEXT, A_LABELPICK };
 
 static const char *const PRESET_LABELS[] = {"Intro", "Verse", "Pre-Chorus", "Chorus", "Bridge", "Solo", "Instrumental", "Outro", "End", "Tag"};
 #define NPRESET ((int)(sizeof PRESET_LABELS / sizeof *PRESET_LABELS))
@@ -2017,6 +2017,7 @@ static void build_menu(App *a, int kind) {
             if (a->jump_view) menu_add(&a->menu, A_JUMPCLEAR, "Clear every button", "");
         } else if (fp == P_CUES) {
             menu_add(&a->menu, A_BOOKMARK, "Bookmark the selected cue", a->cues.nc && marker_at(a, a->cues.c[a->csel].start) >= 0 ? "marked" : "");
+            menu_add(&a->menu, A_CUETEXT, "Edit the selected cue's words", "");
             menu_add(&a->menu, A_CUEDEL, "Delete the selected cue", "");
         } else if (fp == P_META) {
             menu_add(&a->menu, A_RECALC, "Recalculate tempo", "");
@@ -2041,6 +2042,7 @@ static void osk_open(App *a) {
     if (a->jump_view) a->msel = a->jsel;
     if (a->msel < 0 || a->msel >= a->cues.nm) a->msel = 0;
     a->osk_marker = a->msel;
+    a->osk_cue = -1;
     char prompt[64];
     snprintf(prompt, sizeof prompt, "Marker %d, at %d:%02d", a->msel + 1, (int)a->cues.m[a->msel].time / 60, (int)a->cues.m[a->msel].time % 60);
     r3_osk_new(&a->osk, "Name the marker", prompt, 0, MARKER_NAME_MAX, a->cues.m[a->msel].label);
@@ -2050,9 +2052,35 @@ static void osk_open(App *a) {
     say(a, R3_ST_HINT, "A types, X deletes, Y changes layer, Start keeps the name.");
 }
 
+/* Cues panel > Edit the selected cue's words: the same keyboard on the cue's text (up to the keyboard's 127 characters). */
+static void osk_open_cue(App *a) {
+    if (!a->cues.nc) { say(a, R3_ST_HINT, "No cue to edit; D-pad Down stamps one."); return; }
+    if (a->csel < 0 || a->csel >= a->cues.nc) a->csel = 0;
+    if (strlen(a->cues.c[a->csel].text) > R3_OSK_MAXTEXT) { say(a, R3_ST_HINT, "These words are too long for the keyboard."); return; }
+    a->osk_cue = a->csel;
+    a->osk_marker = -1;
+    char prompt[64];
+    snprintf(prompt, sizeof prompt, "Cue %d, at %d:%02d", a->csel + 1, (int)a->cues.c[a->csel].start / 60, (int)a->cues.c[a->csel].start % 60);
+    r3_osk_new(&a->osk, "The cue's words", prompt, 0, R3_OSK_MAXTEXT, a->cues.c[a->csel].text);
+    a->back_mode = M_PLAYER;
+    a->mode = M_OSK;
+    SDL_StartTextInput();
+    say(a, R3_ST_HINT, "A types, X deletes, Y changes layer, Start keeps the words.");
+}
+
 static void osk_close(App *a, int result) {
     SDL_StopTextInput();
     a->mode = M_PLAYER;
+    if (a->osk_cue >= 0) {
+        int i = a->osk_cue;
+        a->osk_cue = -1;
+        if (result == R3_OSK_DONE && i < a->cues.nc) {
+            cue_clean_text(a->cues.c[i].text, sizeof a->cues.c[i].text, a->osk.text);
+            a->cues.dirty = 1;
+            say(a, R3_ST_OK, a->osk.text[0] ? "Words saved." : "The words are cleared.");
+        } else say(a, R3_ST_HINT, "Words kept as they were.");
+        return;
+    }
     if (result == R3_OSK_DONE && a->osk_marker >= 0 && a->osk_marker < a->cues.nm) {
         snprintf(a->cues.m[a->osk_marker].label, sizeof a->cues.m[a->osk_marker].label, "%s", a->osk.text);
         a->cues.dirty = 1;
@@ -2601,6 +2629,7 @@ static void menu_choose(App *a) {
     case A_SYNC: job_start(a, NULL); break;
     case A_ADD: id_open(a); break;
     case A_BOOKMARK: cue_bookmark(a, a->csel); a->mode = M_PLAYER; break;
+    case A_CUETEXT: osk_open_cue(a); break;
     case A_CUEDEL: cue_delete(a, a->csel); a->mode = M_PLAYER; break;
     case A_RECALC: recalc_tempo(a); a->mode = M_PLAYER; break;
     case A_KT: kt_open(a); break;
@@ -4266,6 +4295,33 @@ static void test_pad_map(void) {
     CHECK(a.mode == M_PLAYER && a.cues.m[1].label[0] == 0 && a.cues.dirty, "an empty name is allowed: it clears the label");
     snprintf(a.cues.m[1].label, sizeof a.cues.m[1].label, "%s", was);
     a.cues.dirty = 0;
+    {   /* a cue's words, with the same keyboard (Cues panel > Edit the selected cue's words) */
+        int had = a.cues.nc;
+        if (!had) cue_add_caption(&a.cues, 1.0, 0, 0, "la la");
+        a.csel = 0;
+        char old[256];
+        snprintf(old, sizeof old, "%s", a.cues.c[0].text);
+        a.pan_first = P_CUES; a.pan_focus = 0; a.jump_view = 0;
+        open_menu(&a, MK_CONTEXT);
+        int found = 0;
+        for (int i = 0; i < a.menu.n; i++) if (a.menu.it[i].id == A_CUETEXT) { a.menu.sel = i; found = 1; }
+        CHECK(found, "the Cues panel's menu has Edit the selected cue's words");
+        press(&a, R3_BTN_A);
+        CHECK(a.mode == M_OSK && a.osk_cue == 0 && !strcmp(a.osk.text, old), "it opens the keyboard on the cue's own words (mode %d, cue %d, \"%s\")", a.mode, a.osk_cue, a.reply);
+        for (int i = 0; i < 130; i++) press(&a, R3_BTN_X);
+        r3_osk_type(&a.osk, "hello  there");
+        press(&a, R3_BTN_B);
+        CHECK(a.mode == M_PLAYER && !strcmp(a.cues.c[0].text, old) && !a.cues.dirty, "B keeps the old words");
+        open_menu(&a, MK_CONTEXT);
+        for (int i = 0; i < a.menu.n; i++) if (a.menu.it[i].id == A_CUETEXT) a.menu.sel = i;
+        press(&a, R3_BTN_A);
+        for (int i = 0; i < 130; i++) press(&a, R3_BTN_X);
+        r3_osk_type(&a.osk, "hello there");
+        press(&a, R3_BTN_START);
+        CHECK(a.mode == M_PLAYER && !strcmp(a.cues.c[0].text, "hello there") && a.cues.dirty && a.osk_cue < 0, "Start keeps the typed words: %s", a.cues.c[0].text);
+        snprintf(a.cues.c[0].text, sizeof a.cues.c[0].text, "%s", old);
+        a.cues.dirty = 0;
+    }
     {   /* the keyboard on the screen, in every theme: the cells pass 4.5:1 (the player stays behind it) */
         static R3Screen os;
         for (int t = 0; t < R3_THEME_COUNT; t++) {

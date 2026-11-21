@@ -77,7 +77,7 @@ done
 
 if [ "${#FILES[@]}" -eq 0 ]; then
     for f in "$NATIVE_BUILD/Commander.deb" "$NATIVE_BUILD/IO_Checker_Native.deb" "$REPO/build/system/r3i6nos-system.deb"; do
-        [ -f "$f" ] && FILES+=("$f") || echo "publish-packages: not published (no build): $(basename "$f")" >&2
+        if [ -f "$f" ]; then FILES+=("$f"); else echo "publish-packages: not published (no build): $(basename "$f")" >&2; fi
     done
     if [ -n "$PORT_NAMES" ]; then
         # shellcheck source=/dev/null  # scripts/ports.conf: data, read here

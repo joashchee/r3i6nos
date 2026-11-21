@@ -95,7 +95,7 @@ The main menu's **Rec demo** asks first (a checklist of the hero features above:
 
 ## Still open (ROADMAP section 36)
 
-The on-screen keyboard for naming a marker or a cue's words freely (the presets, the pad's letter picker for metadata and a USB keyboard for now), and every number about the unit: decode time, memory, the sound device, the pad.
+Every number about the unit (the on-screen keyboard that names a marker and edits a cue's words is built, untested there): decode time, memory, the sound device, the pad.
 
 ## Build and test
 
