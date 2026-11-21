@@ -115,6 +115,40 @@ local function drawConfirm(scr, n)
   return n.hint
 end
 
+-- PortMaster's notice: the terms (first time) or a reminder, the runtimes' checklist, then the two choices.
+local function drawNotice(scr, n)
+  local pm = require("portmaster")
+  local st = theme.STYLE
+  local text = n.first and pm.TERMS or pm.REMINDER
+  local w, h = 58, #text + #n.runtimes + 9
+  local col, row = centered(w, h)
+  scr:box(col, row, w, h, { title = n.title, foot = "A Choose  B Not now" })
+  local y = row + 2
+  for i, line in ipairs(text) do
+    local s = (i == 1) and st.warn or st.body
+    scr:text(col + 3, y, theme.fit(line, w - 6), s.fg, s.bg)
+    y = y + 1
+  end
+  y = y + 1
+  scr:text(col + 3, y, "Runtimes r3i6nos can run (installed as packages):", st.strong.fg, st.strong.bg)
+  y = y + 1
+  for _, r in ipairs(n.runtimes) do
+    scr:put(col + 5, y, r.installed and 251 or 32, st.body.fg, st.body.bg)
+    scr:text(col + 7, y, r.name, st.body.fg, st.body.bg)
+    scr:text(col + 20, y, r.installed and "installed" or "not installed", st.hint.fg, st.hint.bg)
+    y = y + 1
+  end
+  scr:text(col + 3, y, theme.fit(pm.OTHER, w - 6), st.hint.fg, st.hint.bg)
+  y = y + 2
+  local go = n.first and "I understand: accept and open" or "Open PortMaster"
+  for i, label in ipairs({ go, "Not now" }) do
+    local s = (n.sel == i) and st.select or st.strong
+    scr:fill(col + 3, y + i - 1, w - 6, 1, 32, s.fg, s.bg)
+    scr:text(col + 4, y + i - 1, label, s.fg, s.bg)
+  end
+  return n.first and "You must accept to go on" or "Unofficial and not supported"
+end
+
 -- Date and time: six fields on one row, the chosen one black on cyan.
 local function drawClock(scr, n)
   local clock = require("clock")
@@ -184,6 +218,7 @@ function view.dialog(scr, d)
   elseif n.kind == "osk" then hint = drawOsk(scr, n)
   elseif n.kind == "busy" then hint = drawBusy(scr, n)
   elseif n.kind == "confirm" then hint = drawConfirm(scr, n)
+  elseif n.kind == "notice" then hint = drawNotice(scr, n)
   elseif n.kind == "clock" then hint = drawClock(scr, n)
   elseif n.kind == "mixer" then hint = drawMixer(scr, n) end
   local titles = {}

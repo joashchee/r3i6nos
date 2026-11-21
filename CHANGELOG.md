@@ -5,6 +5,8 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- Menu: choosing PortMaster opens a notice first: the terms on the first launch (unsupported, no help from the PortMaster site or Discord, many ports will not run) which must be accepted, a short reminder on later launches, and the Pyxel / Ren'Py / Solarus runtimes' checklist both times (`menu/portmaster.lua`). Untested on a unit.
+
 - PortMaster: decided which of rule 18 applies (only r3i6nos's own waits: the launcher's first-start copy has no bar; PortMaster's GUI and ports are third-party), recorded in `docs/PORTMASTER.md` (section 41 step 8). Docs only.
 
 - IO Checker: the card-speed test (after Benchmark's Motion pass, or Files) shows a bar: three marks per card (check, write, read back), "card n of m" (section 41 step 7). Untested on a unit.

@@ -29,6 +29,14 @@ The rootfs also gains the four SDL2 add-on libraries its GUI loads and `procps`.
 - **Installed ports** appear in the menu: `menu/scan.lua` lists `<card>/ports/*.sh` (not `PortMaster.sh`) as type `port`; `run_app.sh port <script>` runs the script from its folder with the shim.
 - **No network at boot** (rule 6): PortMaster talks to the network only when a person opens it and chooses to; its GUI also checks for its own updates when it opens (hourly at most).
 
+## The notice (2026-11-21, maintainer's request)
+PortMaster is not supported on r3i6nos, so the menu shows a dialog (`menu/portmaster.lua`, `settings.openPortMaster`, drawn by `view.lua`) every time PortMaster is chosen, before it hands over:
+- **First launch: the terms.** It is unsupported and third-party; do not ask for help on the PortMaster site or Discord; r3i6nos stays slim on purpose and does not provide all PortMaster asks for, so a number of ports will not run. The person must choose "I understand: accept and open" (A); "Not now" or B closes it and PortMaster does not start. The answer is remembered by the file `<system card>/ports/.r3i6nos-portmaster-terms` (made by the menu; a card that cannot be written means the dialog asks again next time).
+- **Later launches:** no terms, a three-line reminder (unofficial, no help from the PortMaster site or Discord, many ports will not run) and "Open PortMaster".
+- **Both times: the runtimes' checklist,** Pyxel, Ren'Py and Solarus, ticked when their command (`r3i6nos-run-<name>`, docs/RUNTIMES.md) is on the tools path, with a line that other PortMaster runtimes are not supported. **Only those three are listed:** they are the ones r3i6nos can run (pre-extracted, no root); PortMaster's own squashfs runtimes need a loop mount and root (item 1 above) and the list of them is PortMaster's, not read here.
+- **Where it applies:** only the menu entry. A launch from SSH or `run_app.sh native .../portmaster.sh` skips it. The terms file is not part of the saved settings (docs/SAVED-SETTINGS.md), so a new system card asks again.
+- Tests: `tests/test_portmaster_notice.lua` (terms once, reminder after, a declined notice starts nothing, an unwritable card, the checklist, every line fits, the 24 rows). **Not seen on a unit.**
+
 ## Rules that do not apply
 It is third-party, so the theme (rule 8), the device report (9), Rec demo (11), splash (12), toast (13), power section (14) and the app data folder (16: PortMaster's scripts fix `/roms/ports`) are not done for it.
 

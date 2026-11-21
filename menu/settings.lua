@@ -13,6 +13,7 @@ local clock = require("clock")
 local mixer = require("mixer")
 local mirror = require("mirror")
 local datacard = require("datacard")
+local portmaster = require("portmaster")
 
 local settings = {}
 
@@ -426,6 +427,14 @@ function settings.open(s)
   push(s, root(s))
 end
 
+--- PortMaster's notice (menu/portmaster.lua): the terms the first time, a reminder after, the runtimes' checklist both times. on_go starts it.
+--- Opens over whatever is open; A on "Accept and open" (first time) or "Open PortMaster" calls on_go, B or "Not now" closes.
+function settings.openPortMaster(s, on_go)
+  s.stack = {}
+  local first = not portmaster.accepted()
+  push(s, { kind = "notice", title = "PortMaster", first = first, sel = 1, runtimes = portmaster.runtimes(), on_go = on_go })
+end
+
 --- The card's first boot: the Date and time dialog on its own (docs/CLOCK.md). B is "Not now" and is remembered.
 function settings.openClock(s)
   s.stack = {}
@@ -469,6 +478,18 @@ function settings.press(s, action)
         local r = n.on_yes(s)
         if r == "poweroff" or r == "reboot" then s.stack = {}; return r end
       end
+    end
+  elseif n.kind == "notice" then
+    if action == "up" or action == "down" then n.sel = 3 - n.sel
+    elseif action == "back" then pop(s)
+    elseif action == "accept" then
+      if n.sel == 1 then
+        if n.first and not portmaster.accept() then
+          n.first = false -- the card could not keep the answer: go on, and ask again next time
+        end
+        pop(s)
+        n.on_go()
+      else pop(s) end
     end
   elseif n.kind == "osk" then
     local ev = osk.press(n.osk, action)

@@ -90,7 +90,9 @@ end
 
 local function launch()
   local e = entries[selected]
-  if e then request(e.type .. "\t" .. e.target) end
+  if e and require("portmaster").is(e) then -- unofficial and unsupported: the notice first (docs/PORTMASTER.md)
+    settings.openPortMaster(dialog, function() request(e.type .. "\t" .. e.target) end)
+  elseif e then request(e.type .. "\t" .. e.target) end
 end
 
 -- Settings > Sound mixer's test sound: made by mixer.sample, looped while that screen is up and the sound is not Off.
