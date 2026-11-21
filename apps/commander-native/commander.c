@@ -1182,6 +1182,9 @@ typedef struct {
     int mm_from, pending_report;
     /* colour: the theme in use (an index into r3_themes), the one the picker is on, and whether files are coloured by kind (0: yes) */
     int theme, theme_sel, no_file_colors;
+    /* where a blocking open draws its wait screen (set by main; NULL in tests and unattended runs, which just run it), and a test's stand-in */
+    R3Video *wait_video; SDL_Renderer *wait_r; void (*wait_hook)(const R3Screen *); int wait_threaded;
+    Uint32 job_t0;
 } App;
 
 static void say(App *a, int style, const char *fmt, ...) __attribute__((format(printf, 3, 4)));
@@ -1261,6 +1264,70 @@ static void refresh_all(App *a) {
     refresh(a, 1, NULL);
 }
 
+/* ---- a wait that blocks (rule 18): open a big file, list or extract from an archive, plan a big folder ------------------------------------------------ */
+
+/* The work runs on a thread and the main one draws: the file's name and size, a moving indicator and the seconds (the total of a decode is unknown
+ * until it ends, so the bar cannot be a percentage). Under 400 ms nothing is drawn (no flicker for the usual file). No cancel: the work cannot be
+ * interrupted from outside, and no input is read meanwhile. With no window (tests, --report) it runs on the caller's thread. */
+typedef struct { int (*fn)(void *); void *arg; int rc; SDL_atomic_t done; } Blocking;
+
+static int blocking_main(void *p) {
+    Blocking *b = p;
+    b->rc = b->fn(b->arg);
+    SDL_AtomicSet(&b->done, 1);
+    return 0;
+}
+
+static int run_blocking(App *a, const char *what, const char *name, unsigned long long size, int (*fn)(void *), void *arg) {
+    if (!(a->wait_video && a->wait_r) && !a->wait_hook && !a->wait_threaded) return fn(arg);
+    Blocking b = {fn, arg, 0, {0}};
+    SDL_Thread *th = SDL_CreateThread(blocking_main, "commander-wait", &b);
+    if (!th) return fn(arg);
+    Uint32 t0 = SDL_GetTicks();
+    int drawn = 0;
+    while (!SDL_AtomicGet(&b.done)) {
+        SDL_Delay(25);
+        Uint32 ms = SDL_GetTicks() - t0;
+        if (ms < 400 || ms / 100 == (Uint32)drawn) continue;
+        drawn = (int)(ms / 100);
+        char l1[96], l2[96], stat[32];
+        R3Screen s;
+        char sz[16];
+        fmt_size(size, sz, sizeof sz);
+        snprintf(l1, sizeof l1, "%s", name);
+        if (size) snprintf(l2, sizeof l2, "%s bytes: this can take a while.", sz);
+        else snprintf(l2, sizeof l2, "This can take a while.");
+        snprintf(stat, sizeof stat, "%u s", (unsigned)(ms / 1000));
+        r3_wait_screen_t(&s, "Commander", what, what, l1, l2, "Working...", -1, (int)(ms / 250), stat, NULL);
+        if (a->wait_hook) a->wait_hook(&s);
+        else r3_video_draw(a->wait_video, a->wait_r, &s, 1);
+        SDL_PumpEvents();
+    }
+    SDL_WaitThread(th, NULL);
+    return b.rc;
+}
+
+typedef struct { Viewer *w; const char *path, *title; char *err; size_t errsz; } OpenArgs;
+static int open_main(void *p) { OpenArgs *o = p; return viewer_open_as(o->w, o->path, o->title, o->err, o->errsz); }
+
+/* viewer_open_as, as a wait when the file is big or slow to read. */
+static int viewer_open_wait(App *a, const char *path, const char *title, char *err, size_t errsz) {
+    struct stat st;
+    unsigned long long size = stat(path, &st) == 0 ? (unsigned long long)st.st_size : 0;
+    OpenArgs o = {&a->view, path, title, err, errsz};
+    return run_blocking(a, "Opening", base_name(path), size, open_main, &o);
+}
+
+typedef struct { const Arc *arc; int idx; size_t *n; char *why; size_t whysz; uint8_t *out; } ReadArgs;
+static int read_main(void *p) { ReadArgs *r = p; r->out = arc_read(r->arc, r->idx, r->n, r->why, r->whysz); return r->out != NULL; }
+
+/* arc_read, as a wait: the member's name and size shown while it is decompressed. */
+static uint8_t *arc_read_wait(App *a, const char *what, const char *name, unsigned long long size, const Arc *arc, int idx, size_t *n, char *why, size_t whysz) {
+    ReadArgs ra = {arc, idx, n, why, whysz, NULL};
+    run_blocking(a, what, name, size, read_main, &ra);
+    return ra.out;
+}
+
 /* ---- opening and extracting an archive's members from the viewer's Contents list ---------------------------------------------- */
 
 static void tmp_remove(char *file, char *dir) {
@@ -1283,7 +1350,7 @@ static void viewer_up(App *a) {
     ViewFrame *fr = &a->vstack[--a->vdepth];
     tmp_remove(a->vtmpfile, a->vtmpdir);
     char err[256];
-    if (viewer_open_as(&a->view, fr->path, fr->title, err, sizeof err) != 0) {
+    if (viewer_open_wait(a, fr->path, fr->title, err, sizeof err) != 0) {
         say(a, R3_ST_ERROR, "%s", err);
         tmp_remove(fr->tmpfile, fr->tmpdir);
         viewer_close_all(a);
@@ -1333,7 +1400,7 @@ static void member_open(App *a) {
     member_file_name(m->name, fname, sizeof fname);
     if (a->vdepth >= VIEW_DEPTH) { say(a, R3_ST_WARN, "Archives inside archives open %d deep at most", VIEW_DEPTH); return; }
     size_t n;
-    uint8_t *b = arc_read(&w->arc, w->sel, &n, why, sizeof why);
+    uint8_t *b = arc_read_wait(a, "Opening", fname, (unsigned long long)m->size, &w->arc, w->sel, &n, why, sizeof why);
     if (!b) { say(a, R3_ST_WARN, "%s: %s", fname, why); return; }
     const char *root = getenv("TMPDIR");
     char dir[PATH_MAX], file[PATH_MAX];
@@ -1363,7 +1430,7 @@ static void member_open(App *a) {
     copy_str(a->vtmpfile, sizeof a->vtmpfile, file);
     copy_str(a->vtmpdir, sizeof a->vtmpdir, dir);
     char err[256];
-    if (viewer_open_as(w, file, title, err, sizeof err) != 0) {
+    if (viewer_open_wait(a, file, title, err, sizeof err) != 0) {
         viewer_up(a); /* back to the list, and the file made for it is removed */
         say(a, R3_ST_ERROR, "%s", err);
     }
@@ -1377,7 +1444,7 @@ static void member_extract(App *a) {
     char fname[256], why[160], dest[PATH_MAX];
     member_file_name(m->name, fname, sizeof fname);
     size_t n;
-    uint8_t *b = arc_read(&w->arc, w->sel, &n, why, sizeof why);
+    uint8_t *b = arc_read_wait(a, "Extracting", fname, (unsigned long long)m->size, &w->arc, w->sel, &n, why, sizeof why);
     if (!b) { say(a, R3_ST_WARN, "%s: %s", fname, why); return; }
     Pane *to = other(a);
     path_join(dest, sizeof dest, to->path, fname);
@@ -1486,6 +1553,9 @@ static void conflict_free(App *a) {
     a->cf_n = 0;
 }
 
+typedef struct { Job *j; int kind; char **srcs; int n; const char *dst; char *err; size_t errsz; } PlanArgs;
+static int plan_main(void *p) { PlanArgs *x = p; return job_plan(x->j, x->kind, x->srcs, x->n, x->dst, x->err, x->errsz); }
+
 /* Plan and run the job; a->cf_pol (or NULL) says what to do with names that exist. Takes srcs (n of them). */
 static void launch_job(App *a, int kind, char **srcs, int n, const unsigned char *pol) {
     job_free(&a->job);
@@ -1493,7 +1563,8 @@ static void launch_job(App *a, int kind, char **srcs, int n, const unsigned char
     a->job.policy = pol;
     char err[256] = "";
     const char *dst = kind == J_DELETE ? NULL : other(a)->path;
-    if (job_plan(&a->job, kind, srcs, n, dst, err, sizeof err) != 0) {
+    PlanArgs pa = {&a->job, kind, srcs, n, dst, err, sizeof err};
+    if (run_blocking(a, kind == J_DELETE ? "Deleting" : kind == J_MOVE ? "Moving" : "Copying", "Counting the files first", 0, plan_main, &pa) != 0) {
         free_list(srcs, n);
         job_free(&a->job);
         say(a, R3_ST_ERROR, "%s", err);
@@ -1505,6 +1576,7 @@ static void launch_job(App *a, int kind, char **srcs, int n, const unsigned char
     a->job_srcs = srcs;
     a->job_nsrcs = n;
     a->job_active = 1;
+    a->job_t0 = SDL_GetTicks();
     a->mode = M_JOB;
 }
 
@@ -1595,7 +1667,7 @@ static void run_cmd(App *a, int cmd) {
         if (e->is_dir) { say(a, R3_ST_WARN, "%s is a folder: A opens it", e->name); break; }
         char full[PATH_MAX], err[256];
         path_join(full, sizeof full, p->path, e->name);
-        if (viewer_open(&a->view, full, err, sizeof err) != 0) { say(a, R3_ST_ERROR, "%s", err); break; }
+        if (viewer_open_wait(a, full, NULL, err, sizeof err) != 0) { say(a, R3_ST_ERROR, "%s", err); break; }
         a->mode = M_VIEW;
         break;
     }
@@ -2170,7 +2242,9 @@ static void app_compose(const App *a, R3Screen *s) {
         r3_text_fit(s, 1, R3_COMMAND_TOP + 2, left, 26, R3_ST(R3_ST_BODY));
         c.left = NULL;
         c.right = NULL;
-        c.reply = "Working... B cancels";
+        char step[64];
+        snprintf(step, sizeof step, "%s %d of %d, %u s  B cancels", verb[a->job.kind], a->job.cur < a->job.nops ? a->job.cur + 1 : a->job.nops, a->job.nops, (unsigned)((SDL_GetTicks() - a->job_t0) / 1000));
+        c.reply = step;
         c.reply_style = R3_ST_WARN;
         r3_command_line(s, &c);
         r3_text_fit(s, 1, R3_COMMAND_TOP + 2, left, 26, R3_ST(R3_ST_BODY));
@@ -2264,7 +2338,7 @@ static void app_video_draw(R3Video *v, SDL_Renderer *r, const R3Screen *s, const
 /* Open the viewer on a file at start (--view), on tab number `tab` (1 is Info; 0 keeps the one it opens on) and page `page`. */
 static int start_viewer(App *a, const char *file, int tab, int page) {
     char err[256];
-    if (viewer_open(&a->view, file, err, sizeof err) != 0) { fprintf(stderr, "commander: %s\n", err); return -1; }
+    if (viewer_open_wait(a, file, NULL, err, sizeof err) != 0) { fprintf(stderr, "commander: %s\n", err); return -1; }
     a->mode = M_VIEW;
     if (tab > 0) viewer_show(&a->view, tab - 1, err, sizeof err);
     if (page > 1) set_page(&a->view, page - 1);
@@ -2332,6 +2406,18 @@ static char *slurp(const char *path, size_t *n) {
 static void run_job_to_end(Job *j) {
     for (int guard = 0; guard < 100000 && job_step(j, 50); guard++) {}
 }
+
+static int wait_calls; static char wait_last[2048];
+static void wait_capture(const R3Screen *s) {
+    wait_calls++;
+    wait_last[0] = 0;
+    for (int r = 0; r < R3_ROWS; r++) {
+        for (int c = 0; c < R3_COLS && strlen(wait_last) < sizeof wait_last - 2; c++) { int ch = s->ch[r * R3_COLS + c]; size_t n = strlen(wait_last); wait_last[n] = ch >= 32 && ch < 127 ? (char)ch : '#'; wait_last[n + 1] = 0; }
+        strcat(wait_last, "\n");
+    }
+}
+static int wait_fast(void *p) { (void)p; return 7; }
+static int wait_slow(void *p) { (void)p; SDL_Delay(750); return 9; }
 
 static int dump_has(const R3Screen *s, const char *text) {
     char d[R3_ROWS][R3_COLS + 1];
@@ -2793,6 +2879,7 @@ static void test_ui(const char *root) {
     CHECK(a.mode == M_JOB, "A starts the job");
     app_compose(&a, &s);
     CHECK(row_has(&s, 21, "B cancels"), "job tip");
+    CHECK(row_has(&s, 21, "Copying 1 of 1, 0 s"), "the job row says the step and the seconds (rule 18)");
     shot(&a, &s, "4-job");
     for (int g = 0; g < 1000 && a.mode == M_JOB; g++) app_tick(&a, 50);
     CHECK(a.mode == M_BROWSE && strstr(a.reply, "Copied 1 item"), "copy finished: %s", a.reply);
@@ -3254,6 +3341,19 @@ static void test_archive_members(const char *root) {
     app_init(&a, g_fxdir, out);
     R3Screen s;
 
+    {   /* a blocking open is a wait (rule 18): drawn only when it takes over 400 ms, with the name, a moving indicator and the seconds */
+        wait_calls = 0; wait_last[0] = 0;
+        a.wait_hook = wait_capture; a.wait_threaded = 1;
+        int quick = run_blocking(&a, "Opening", "quick.bin", 10, wait_fast, NULL);
+        CHECK(quick == 7 && wait_calls == 0, "a quick open draws no wait screen (%d calls)", wait_calls);
+        int slow = run_blocking(&a, "Opening", "big archive.tar.xz", 5000000, wait_slow, NULL);
+        CHECK(slow == 9 && wait_calls >= 2, "a slow open returns its result and draws the wait screen (%d draws)", wait_calls);
+        CHECK(strstr(wait_last, "big archive.tar.xz") && strstr(wait_last, " bytes: this can take a while."), "the wait screen names the file and its size: %s", wait_last);
+        CHECK(strstr(wait_last, "Opening") && strstr(wait_last, " s") && strstr(wait_last, "[") , "and says what it is doing, the seconds, and a moving indicator: %s", wait_last);
+        wait_calls = 0;
+        CHECK(start_viewer(&a, fx_path("targz"), 0, 0) == 0 && a.view.has_arc && a.view.arc.n == 2 && wait_calls == 0, "an open on the thread gives the same viewer as one on the caller's");
+        a.wait_hook = NULL; a.wait_threaded = 0;
+    }
     /* a tar.gz: the list, picking, opening a member, and back */
     CHECK(start_viewer(&a, fx_path("targz"), 0, 0) == 0 && a.view.has_arc && a.view.arc.n == 2, "tar.gz opens as a list of 2 members");
     CHECK(!strcmp(a.view.arc.m[0].name, "game/main.lua") && a.view.sel == 0, "the first member is picked");
@@ -4174,6 +4274,7 @@ int main(int argc, char **argv) {
     }
     App app;
     app_init(&app, left, right);
+    app.wait_video = &video; app.wait_r = r;
     if (!selftest) load_settings(&app);
     if (data.notice[0]) say(&app, R3_ST_WARN, "%s", data.notice);
     if (g_theme_arg >= 0) { app.theme = g_theme_arg; r3_theme_apply(app.theme); }
