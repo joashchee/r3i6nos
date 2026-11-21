@@ -86,6 +86,12 @@ if [ -n "$QEMU" ]; then
     install -D "$QEMU" "$ROOTFS/usr/bin/qemu-aarch64-static"
 fi
 
+if [ -n "$QEMU" ] && [ ! -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ]; then
+    echo "build_rootfs: the arm64 binfmt handler is not registered (stage 2 would fail with 'Exec format error')." >&2
+    echo "  Run: sudo update-binfmts --enable qemu-aarch64   (or: docker run --privileged --rm tonistiigi/binfmt --install arm64)" >&2
+    exit 1
+fi
+
 echo "[*] Debootstrap stage 2 (under qemu)..."
 chroot "$ROOTFS" /debootstrap/debootstrap --second-stage
 

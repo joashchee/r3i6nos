@@ -5,6 +5,7 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **CI rootfs build: the arm64 binfmt handler is registered before debootstrap** (2026-11-21): stage 2 failed on the runner with `chroot: failed to run command '/debootstrap/debootstrap': Exec format error` because `qemu-user-static` was installed but not enabled. `build.yml` now enables `qemu-aarch64` (falling back to `tonistiigi/binfmt`) and `scripts/build_rootfs.sh` stops early with that fix if it is missing. **Not run on GitHub yet.**
 - **On-screen keyboard in the C theme, and MusiCue names a marker freely with it** (2026-11-21, ROADMAP section 36 step 8 and section 39 step 3): `theme/r3i6nos_osk.h` is `menu/osk.lua` for C (10 by 4 keys, three layers, hidden text, length limits, USB keyboard text) with `tests/test_osk.c` in `scripts/check.sh`; MusiCue opens it with R3 in the player or Name the selected marker > Type a name..., 40 characters, Start keeps, B or R3 cancels. Untested on a unit.
 - ROADMAP: three "not in scope / not pursued / not done by design" entries (sections 33, 34, PortMaster) are notes now, not open checkboxes (2026-11-21).
 - ROADMAP: two stale "rebuild an image" items ticked (Settings > Device reports; the hot-plug service), both already shown working on rebuilt images by the unit's reports (2026-11-21).
