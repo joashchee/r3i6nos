@@ -460,6 +460,16 @@ def runtimes(r):
         va = [k for k in cfg if k.startswith("CONFIG_ARM64_VA_BITS_") and cfg[k] == "y"]
         r.line("INFO", "user address space", (va[0].rsplit("_", 1)[1] + " bits" + (" (LuaJIT's 47-bit pointer limit is fine)" if va[0].endswith("_39") or va[0].endswith("_42") else " (LuaJIT, so Solarus, may panic with 'bad light userdata pointer')")) if va else "not in the config")
     r.line("INFO" if (DEV / "uinput").exists() or (DEV / "input/uinput").exists() else "SKIP", "/dev/uinput", "present" if (DEV / "uinput").exists() or (DEV / "input/uinput").exists() else "absent")
+    # PortMaster's runtimes (docs/PORTMASTER.md): a port's `sudo mount X.squashfs DIR` is answered by the root helper, which extracts with unsquashfs
+    helper = ENV("R3I6NOS_RUNTIMES_BIN", "/usr/local/bin/r3i6nos-runtimes")
+    code, out, err = run_full([helper, "status"], 20) if os.path.exists(helper) else (None, "", "not installed")
+    if code != 0:
+        r.line("FAIL", "portmaster runtime helper", f"r3i6nos-runtimes status failed: {err or code}")
+    else:
+        st = dict(ln.split(": ", 1) for ln in out.splitlines() if ": " in ln and not ln.startswith("runtime:"))
+        missing = st.get("unsquashfs", "missing").startswith("missing")
+        r.line("FAIL" if missing else "PASS", "unsquashfs", st.get("unsquashfs", "missing") + ("" if not missing else " (a port's runtime cannot be extracted)"))
+        r.line("INFO", "extracted portmaster runtimes", f"{st.get('extracted', '0')} in {st.get('cache', '?')}; {st.get('used', '?')}; {st.get('free', '?')} free")
     pkgs = sorted(APP_ROOT.glob("r3i6nos-runtime-*")) if APP_ROOT.is_dir() else []
     if not pkgs:
         r.line("SKIP", "runtime packages", "none installed (r3i6nos-runtime-pyxel.deb, -renpy.deb, -solarus.deb, -ags.deb, -godot.deb into native_deb/ on a card, or scripts/push-packages.sh)")

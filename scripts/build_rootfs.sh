@@ -41,6 +41,7 @@ PACKAGES=(
     iproute2 iw wpasupplicant udhcpc iputils-ping  # Settings > Network (r3i6nos-net): addresses, Wi-Fi scan and join, DHCP, tests
     ca-certificates                      # Settings > About > Check for updates (HTTPS to GitHub, only when chosen)
     sudo                                 # root over SSH for diagnostics (r3i6nos-gadget-probe, the report's stop-and-compare); password required: overlay/etc/sudoers.d/r3i6nos
+    squashfs-tools                       # unsquashfs: r3i6nos-runtimes extracts the PortMaster runtimes a port asks for (docs/PORTMASTER.md; reads ZSTD in userspace, the kernel's squashfs cannot)
     libarchive-tools                     # bsdtar: Commander lists and opens members of 7-Zip, RAR, Cabinet, LHA, ISO, lzip and .tar.bz2 (apps/README.md, ROADMAP section 21)
     openssh-server                       # Settings > SSH; its service is NOT enabled and its host keys are made on first start (configure_rootfs.sh)
 )

@@ -96,6 +96,8 @@ grep -q '^Before=loveos.service' "$R/etc/systemd/system/r3i6nos-sound.service" |
 [ -L "$R/etc/systemd/system/timers.target.wants/r3i6nos-bootstate.timer" ] || fail "the boot state is not written for the report"
 [ -L "$R/etc/systemd/system/multi-user.target.wants/r3i6nos-clock-set.path" ] || fail "the menu's Date and time requests are not watched"
 [ -f "$R/opt/loveos/menu/clock.lua" ]           || fail "the menu's Date and time dialog is missing"
+[ -x "$R/usr/local/bin/r3i6nos-runtimes" ]      || fail "r3i6nos-runtimes not installed executable"
+[ -L "$R/etc/systemd/system/multi-user.target.wants/r3i6nos-runtimes.path" ] || fail "a port's request for a runtime is not watched"
 [ -x "$R/usr/local/bin/r3i6nos-format" ]        || fail "r3i6nos-format not installed executable"
 [ -L "$R/etc/systemd/system/multi-user.target.wants/r3i6nos-format.path" ] || fail "the menu's Data card format requests are not watched"
 [ -f "$R/opt/loveos/menu/datacard.lua" ]        || fail "the menu's Data card dialog is missing"

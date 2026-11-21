@@ -251,6 +251,7 @@ bash tests/test_build_ports.sh || fail=1
 bash tests/test_portmaster.sh || fail=1
 bash tests/test_push_packages.sh || fail=1
 bash tests/test_runtimes.sh || fail=1
+bash tests/test_r3i6nos_runtimes_docker.sh || fail=1       # the helper as root with the real squashfs-tools (prints NOT RUN without Docker)
 bash tests/test_streamtools.sh || fail=1
 bash tests/test_run_app_runtime.sh || fail=1
 bash tests/test_portmaster_unpack.sh || fail=1

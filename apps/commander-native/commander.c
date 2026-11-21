@@ -3837,7 +3837,28 @@ static void test_play(const char *root) {
     app_free(&a);
 }
 
+/* The start-up screen (rule 12): name, tagline, the build line "v<version> <commit> <date>" and the load's step; drawn at once at start. */
+static void splash_screen(R3Screen *s, const char *what, int percent) {
+    r3_splash(s, "Commander", VERSION, BUILD_LINE, "Two-panel file manager", what, percent);
+}
+
+static int splash_has(const R3Screen *s, const char *text) {
+    char row[R3_COLS + 1];
+    for (int y = 0; y < R3_ROWS; y++) {
+        for (int x = 0; x < R3_COLS; x++) { int c = s->ch[y * R3_COLS + x]; row[x] = c >= 32 && c < 127 ? (char)c : ' '; }
+        row[R3_COLS] = 0;
+        if (strstr(row, text)) return 1;
+    }
+    return 0;
+}
+
 static int selftest_logic(void) {
+    {
+        R3Screen sp;
+        splash_screen(&sp, "Looking for your data", 50);
+        CHECK(splash_has(&sp, "v" VERSION " " R3_BUILD_COMMIT " "), "the splash says the version, the commit and the date");
+        CHECK(splash_has(&sp, "Looking for your data") && splash_has(&sp, "Two-panel file manager"), "the splash says what is loading");
+    }
     char templ[PATH_MAX];
     const char *tmp = getenv("TMPDIR");
     snprintf(templ, sizeof templ, "%s/r3i6nos-commander.XXXXXX", tmp && *tmp ? tmp : "/tmp");
@@ -4255,7 +4276,7 @@ int main(int argc, char **argv) {
     memset(&data, 0, sizeof data);
     if (!selftest) {
         R3Screen splash;
-        r3_splash(&splash, "Commander", VERSION, NULL, "Two-panel file manager", "Looking for your data", 50);
+        splash_screen(&splash, "Looking for your data", 50);
         for (int i = 0; i < R3_VIDEO_SETTLE; i++) r3_video_draw(&video, r, &splash, i == 0);
         open_pads();
         if (report || view) {

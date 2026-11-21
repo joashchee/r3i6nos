@@ -2931,11 +2931,29 @@ static void selftest_usb(void) {
     if (system(cmd) != 0) fprintf(stderr, "io-checker selftest: could not remove %s\n", root);
 }
 
+/* The start-up screen (rule 12): name, tagline, the build line "v<version> <commit> <date>" and the load's step; drawn at once at start. */
+static void splash_screen(R3Screen *s, const char *what, int percent) {
+    r3_splash(s, "IO Checker", VERSION, BUILD_LINE, "Input and output checks", what, percent);
+}
+
+static int splash_has(const R3Screen *s, const char *text) {
+    char row[R3_COLS + 1];
+    for (int y = 0; y < R3_ROWS; y++) {
+        for (int x = 0; x < R3_COLS; x++) { int c = s->ch[y * R3_COLS + x]; row[x] = c >= 32 && c < 127 ? (char)c : ' '; }
+        row[R3_COLS] = 0;
+        if (strstr(row, text)) return 1;
+    }
+    return 0;
+}
+
 static int selftest_logic(void) {
     App *a = calloc(1, sizeof(App));
     R3Screen s;
     if (!a) return 1;
     app_init(a);
+    splash_screen(&s, "Looking for your data", 50);
+    CHECK(splash_has(&s, "v" VERSION " " R3_BUILD_COMMIT " "), "the splash says the version, the commit and the date");
+    CHECK(splash_has(&s, "Looking for your data") && splash_has(&s, "Input and output checks"), "the splash says what is loading");
     /* a pretend pad: the R36S's shape */
     a->nbuttons = 17; a->naxes = 4; a->nhats = 0;
     a->js = (SDL_Joystick *)1; /* only tested for non-NULL in this test; never passed to SDL */
@@ -3419,7 +3437,7 @@ int main(int argc, char **argv) {
     memset(&data, 0, sizeof data);
     if (!selftest) {
         R3Screen splash;
-        r3_splash(&splash, "IO Checker", VERSION, NULL, "Input and output checks", "Looking for your data", 50);
+        splash_screen(&splash, "Looking for your data", 50);
         for (int i = 0; i < R3_VIDEO_SETTLE; i++) r3_video_draw(&video, r, &splash, i == 0);
         R3AppDataUI adui = { r, &video, &a->toast, NULL, NULL, NULL };
         r3_appdata_init(&data, "IO_Checker", &adui);

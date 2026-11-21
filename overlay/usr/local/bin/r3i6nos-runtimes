@@ -1,0 +1,367 @@
+#!/usr/bin/env python3
+"""r3i6nos-runtimes - extract a PortMaster runtime (a *.squashfs) so a port can use it without root (docs/PORTMASTER.md, ROADMAP section 33).
+
+    r3i6nos-runtimes apply    a port's `sudo mount X.squashfs DIR` reached the launcher's sudo shim, which asked for it (r3i6nos-runtimes.path,
+                              from the request in /run/loveos/runtimes): extract the runtime once into the cache and answer where it is
+    r3i6nos-runtimes status   key: value lines (the cache's entries and sizes, the space left), for the device report
+    r3i6nos-runtimes prune    remove every extracted runtime (they are made again by the next request); root, by hand over SSH
+
+Why extract and not mount: PortMaster mounts each runtime with `mount -o loop` as root, and r3i6nos has no root for the login user. The kernel
+(4.4.189) has no squashfs ZSTD either, and a mount would put a person-chosen file's contents under the kernel's parser. This helper reads the
+file in userspace (squashfs-tools' unsquashfs, which also reads ZSTD), once, into /opt/loveos/runtimes/pm/<name>-<size>-<mtime>/, and the shim
+makes the port's mount point a link to that folder. A runtime used again is not extracted again.
+
+What a hostile file can and cannot do (CLAUDE.md rule 7's spirit: only what a person's request names is touched):
+  * only a regular file named NAME.squashfs under /roms/ports or /roms2/ports (real path, after links), with the squashfs magic, is read;
+  * it is extracted by a process that has dropped to an unprivileged user (nobody), into a folder only that user can enter, so the login user
+    cannot reach the tree while root walks it, and the extractor cannot write outside it;
+  * root then walks it without following links: pipes and sockets are removed (a device node makes the unprivileged extraction fail, and the file is refused), set-uid, set-gid and sticky bits are cleared,
+    everything becomes root's and read-only for others, and the finished folder is renamed into place whole (a half extraction is never in use);
+  * the cache cannot grow past R3I6NOS_RUNTIMES_MAX bytes (1.5 GiB) and a request is refused without about four times the file's size free.
+Nothing here runs by itself: the path unit only watches for the shim's request, so nothing runs at boot (rule 6).
+
+The request comes from /run/loveos/runtimes (the login user owns it) and is treated as hostile, as r3i6nos-clock treats its own: opened without
+following links, a small regular file, every field checked. The answer goes to /run/r3i6nos-runtimes/result, which only root writes.
+Request: id=, verb=extract, file=/roms/ports/PortMaster/libs/NAME.squashfs.
+Result:  id=, ok=1|0, dir=<the extracted folder> when ok, then L<TAB>text lines. /run/r3i6nos-runtimes/progress has step=, steps=, doing= while it works.
+
+Standard library only; it calls unsquashfs. Overrides, for tests: R3I6NOS_RUNTIMES_DIR, R3I6NOS_RUNTIMES_OUT, R3I6NOS_RUNTIMES_CACHE
+(/opt/loveos/runtimes/pm), R3I6NOS_RUNTIMES_ROOTS (colon-separated, /roms/ports:/roms2/ports), R3I6NOS_UNSQUASHFS, R3I6NOS_RUNTIMES_UID (65534;
+empty: do not drop privileges), R3I6NOS_RUNTIMES_MAX, R3I6NOS_RUNTIMES_TIMEOUT (seconds, 1500).
+"""
+import errno
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ENV = os.environ.get
+REQ_DIR = Path(ENV("R3I6NOS_RUNTIMES_DIR", "/run/loveos/runtimes"))
+OUT_DIR = Path(ENV("R3I6NOS_RUNTIMES_OUT", "/run/r3i6nos-runtimes"))
+CACHE = Path(ENV("R3I6NOS_RUNTIMES_CACHE", "/opt/loveos/runtimes/pm"))
+ROOTS = [r for r in ENV("R3I6NOS_RUNTIMES_ROOTS", "/roms/ports:/roms2/ports").split(":") if r]
+UNSQUASHFS = ENV("R3I6NOS_UNSQUASHFS", "unsquashfs")
+UID = ENV("R3I6NOS_RUNTIMES_UID", "65534")
+MAX_BYTES = int(ENV("R3I6NOS_RUNTIMES_MAX", str(1536 * 1024 * 1024)))
+TIMEOUT = int(ENV("R3I6NOS_RUNTIMES_TIMEOUT", "1500"))
+MAX_REQUEST = 4096
+MAX_FILE = 600 * 1024 * 1024        # the biggest PortMaster runtime is about 330 MB (Mono); a bigger file is not one
+MAGIC = b"hsqs"
+NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._+-]{0,100}\.squashfs")
+DONE = ".r3i6nos-complete"
+STEPS = 4
+
+
+class Refused(Exception):
+    pass
+
+
+# ---- plumbing -----------------------------------------------------------------------------------------------------------------
+
+def read_request():
+    """The request text, or None. Never follows a link or waits on a pipe; a small regular file only."""
+    try:
+        fd = os.open(REQ_DIR / "request", os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as e:
+        # a link (ELOOP) is refused, but answered and deleted, or the path unit would keep firing on it
+        return "" if e.errno == errno.ELOOP else None
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode) or st.st_size > MAX_REQUEST:
+            return ""
+        return os.read(fd, MAX_REQUEST).decode("utf-8", "replace")
+    finally:
+        os.close(fd)
+
+
+def parse_request(text):
+    req = {}
+    for line in text.splitlines():
+        k, sep, v = line.partition("=")
+        if sep and re.fullmatch(r"[a-z]+", k):
+            req[k] = v.strip()
+    return req
+
+
+def write_result(rid, ok, lines, dirpath=None):
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+    os.chmod(OUT_DIR, 0o755)
+    tmp = OUT_DIR / f"result.{os.getpid()}"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    with os.fdopen(fd, "w") as f:
+        f.write(f"id={rid}\nok={1 if ok else 0}\n")
+        if ok and dirpath:
+            f.write(f"dir={dirpath}\n")
+        f.write("".join(f"L\t{line}\n" for line in lines))
+    os.replace(tmp, OUT_DIR / "result")
+
+
+def progress(step, doing):
+    try:
+        OUT_DIR.mkdir(parents=True, exist_ok=True)
+        tmp = OUT_DIR / f"progress.{os.getpid()}"
+        tmp.write_text(f"step={step}\nsteps={STEPS}\ndoing={doing}\n")
+        os.chmod(tmp, 0o644)
+        os.replace(tmp, OUT_DIR / "progress")
+    except OSError:
+        pass
+
+
+def clear_progress():
+    try:
+        (OUT_DIR / "progress").unlink()
+    except OSError:
+        pass
+
+
+def tree_bytes(path):
+    total = 0
+    for dp, dn, fn in os.walk(path):
+        for n in fn:
+            try:
+                total += os.lstat(os.path.join(dp, n)).st_size
+            except OSError:
+                pass
+    return total
+
+
+def cache_entries():
+    out = []
+    try:
+        names = sorted(os.listdir(CACHE))
+    except OSError:
+        return out
+    for n in names:
+        p = CACHE / n
+        if n.startswith(".") or not (p / DONE).is_file():
+            continue
+        out.append((n, p, tree_bytes(p)))
+    return out
+
+
+# ---- the request -------------------------------------------------------------------------------------------------------------
+
+def check_source(value):
+    """The real path of a runtime file the person's port named, or Refused. Returns (path, size, mtime)."""
+    if not value or "\0" in value or not value.startswith("/"):
+        raise Refused("A runtime is asked for by its full path.")
+    real = os.path.realpath(value)
+    if not any(real.startswith(r.rstrip("/") + "/") for r in (os.path.realpath(x) for x in ROOTS)):
+        raise Refused("Only runtimes under the games card's ports folder are extracted.")
+    name = os.path.basename(real)
+    if not NAME.fullmatch(name):
+        raise Refused("That is not a runtime file name (NAME.squashfs).")
+    try:
+        fd = os.open(real, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    except OSError as e:
+        raise Refused(f"The runtime file cannot be opened ({e.strerror}).")
+    try:
+        st = os.fstat(fd)
+        if not stat.S_ISREG(st.st_mode):
+            raise Refused("That is not a regular file.")
+        if st.st_size < 96 or st.st_size > MAX_FILE:
+            raise Refused("That file is not the size of a runtime.")
+        if os.read(fd, 4) != MAGIC:
+            raise Refused("That file is not a squashfs.")
+    finally:
+        os.close(fd)
+    return real, st.st_size, int(st.st_mtime)
+
+
+def make_key(real, size, mtime):
+    return f"{os.path.basename(real)[:-len('.squashfs')]}-{size}-{mtime}"
+
+
+def drop_privileges():
+    if UID == "":
+        return None
+    uid = int(UID)
+
+    def prep():
+        os.setgroups([])
+        os.setgid(uid)
+        os.setuid(uid)
+    return prep
+
+
+def extract(real, dest):
+    """Run unsquashfs unprivileged into dest (which does not exist yet)."""
+    cmd = [UNSQUASHFS, "-no-progress", "-no-xattrs", "-d", str(dest), real]
+    try:
+        r = subprocess.run(cmd, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=TIMEOUT,
+                           preexec_fn=drop_privileges(), cwd=str(dest.parent), env={"PATH": "/usr/sbin:/usr/bin:/sbin:/bin", "LC_ALL": "C"})
+    except subprocess.TimeoutExpired:
+        raise Refused("The runtime took too long to extract.")
+    except OSError as e:
+        raise Refused(f"unsquashfs could not run ({e.strerror}).")
+    if r.returncode != 0:
+        tail = [x for x in r.stderr.decode("utf-8", "replace").strip().splitlines() if x][-2:]
+        raise Refused("unsquashfs failed: " + (" / ".join(tail) or f"exit {r.returncode}"))
+
+
+def secure(dirfd, counts):
+    """Walk one folder without following links: make it root's, drop dangerous bits, remove what must not be there."""
+    for ent in list(os.scandir(dirfd)):
+        name = ent.name
+        st = os.stat(name, dir_fd=dirfd, follow_symlinks=False)
+        m = st.st_mode
+        if stat.S_ISLNK(m):
+            os.chown(name, 0, 0, dir_fd=dirfd, follow_symlinks=False)
+            counts["links"] += 1
+        elif stat.S_ISDIR(m):
+            sub = os.open(name, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=dirfd)
+            try:
+                os.fchown(sub, 0, 0)
+                os.fchmod(sub, public_mode(m, True))
+                counts["dirs"] += 1
+                secure(sub, counts)
+            finally:
+                os.close(sub)
+        elif stat.S_ISREG(m):
+            fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=dirfd)
+            try:
+                os.fchown(fd, 0, 0)
+                os.fchmod(fd, public_mode(m))
+                counts["files"] += 1
+                counts["bytes"] += st.st_size
+            finally:
+                os.close(fd)
+        else:                                   # a device node, a pipe or a socket: never in a runtime
+            os.unlink(name, dir_fd=dirfd)
+            counts["removed"] += 1
+
+
+def public_mode(m, is_dir=False):
+    """The mode with no set-uid, set-gid or sticky bit, no write for group or other, readable by all, and run by all where the owner can run it."""
+    mode = (m & 0o777) & ~0o022 | 0o444
+    if is_dir or mode & 0o100:
+        mode |= 0o111
+    return mode
+
+
+def handle(req):
+    """(ok, lines, dir) for one request."""
+    try:
+        if req.get("verb") != "extract":
+            raise Refused("Only extract is understood.")
+        progress(1, "Checking the runtime file")
+        real, size, mtime = check_source(req.get("file", ""))
+        key = make_key(real, size, mtime)
+        final = CACHE / key
+        if (final / DONE).is_file():
+            return True, [f"{os.path.basename(real)} was already extracted."], str(final)
+        CACHE.mkdir(parents=True, exist_ok=True)
+        os.chmod(CACHE, 0o755)
+        used = sum(e[2] for e in cache_entries())
+        free = shutil.disk_usage(CACHE).free
+        if free < size * 4 + 64 * 1024 * 1024:
+            raise Refused(f"Not enough room on the system to extract {os.path.basename(real)}: {free // (1024 * 1024)} MiB free, "
+                          f"about {(size * 4) // (1024 * 1024) + 64} MiB needed.")
+        if used + size * 3 > MAX_BYTES:
+            raise Refused(f"The extracted runtimes already use {used // (1024 * 1024)} MiB; remove them with r3i6nos-runtimes prune.")
+        tmp = CACHE / f".tmp-{os.getpid()}"
+        shutil.rmtree(tmp, ignore_errors=True)
+        tmp.mkdir(mode=0o700)
+        try:
+            if UID != "":
+                os.chown(tmp, int(UID), int(UID))
+            progress(2, f"Extracting {os.path.basename(real)}")
+            tree = tmp / "tree"
+            extract(real, tree)
+            progress(3, "Making it safe")
+            os.chown(tmp, 0, 0)                 # nobody's process is gone; root owns the tmp folder from here on
+            counts = {"files": 0, "dirs": 0, "links": 0, "bytes": 0, "removed": 0}
+            top = os.open(tree, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+            try:
+                os.fchown(top, 0, 0)
+                os.fchmod(top, 0o755)
+                secure(top, counts)
+            finally:
+                os.close(top)
+            if counts["files"] == 0:
+                raise Refused("The runtime has no files in it.")
+            if used + counts["bytes"] > MAX_BYTES:
+                raise Refused("The extracted runtime would not fit the cache's limit.")
+            progress(4, "Putting it in place")
+            (tree / DONE).write_text(f"source={real}\nsize={size}\nmtime={mtime}\nextracted={int(time.time())}\n"
+                                     f"files={counts['files']}\nbytes={counts['bytes']}\nremoved_special={counts['removed']}\n")
+            os.chmod(tree / DONE, 0o644)
+            shutil.rmtree(final, ignore_errors=True)
+            os.rename(tree, final)
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+        lines = [f"{os.path.basename(real)} extracted: {counts['files']} files, {counts['bytes'] // (1024 * 1024)} MiB."]
+        if counts["removed"]:
+            lines.append(f"{counts['removed']} device node(s) or pipe(s) in it were removed.")
+        return True, lines, str(final)
+    except Refused as e:
+        return False, [str(e)], None
+    except OSError as e:
+        return False, ["The runtime could not be extracted:", str(e)], None
+    finally:
+        clear_progress()
+
+
+# ---- verbs ------------------------------------------------------------------------------------------------------------------
+
+def apply():
+    text = read_request()
+    if text is None:
+        return 0
+    try:
+        (REQ_DIR / "request").unlink()           # first: a failure below must not make the path unit loop
+    except OSError:
+        pass
+    req = parse_request(text)
+    rid = re.sub(r"[^0-9A-Za-z._-]", "", req.get("id", "0"))[:40] or "0"
+    ok, lines, d = handle(req)
+    write_result(rid, ok, lines, d)
+    return 0
+
+
+def status():
+    entries = cache_entries()
+    print(f"cache: {CACHE}")
+    print(f"extracted: {len(entries)}")
+    total = 0
+    for name, _p, size in entries:
+        total += size
+        print(f"runtime: {name} {size // 1024} KiB")
+    print(f"used: {total // (1024 * 1024)} MiB of {MAX_BYTES // (1024 * 1024)} MiB")
+    try:
+        probe = CACHE if CACHE.exists() else CACHE.parent
+        print(f"free: {shutil.disk_usage(probe).free // (1024 * 1024)} MiB")
+    except OSError:
+        print("free: unknown")
+    try:
+        r = subprocess.run([UNSQUASHFS, "-version"], stdin=subprocess.DEVNULL, capture_output=True, timeout=10)
+        first = (r.stdout or r.stderr).decode("utf-8", "replace").splitlines()
+        print("unsquashfs: " + (first[0] if first else "runs"))
+    except (OSError, subprocess.TimeoutExpired):
+        print("unsquashfs: missing")
+    return 0
+
+
+def prune():
+    n = 0
+    for name, p, _s in cache_entries():
+        shutil.rmtree(p, ignore_errors=True)
+        n += 1
+    print(f"removed {n} extracted runtime(s)")
+    return 0
+
+
+def main(argv):
+    verbs = {"apply": apply, "status": status, "prune": prune}
+    if len(argv) != 2 or argv[1] not in verbs:
+        print("\n".join(__doc__.strip().splitlines()[2:5]), file=sys.stderr)
+        return 2
+    return verbs[argv[1]]()
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

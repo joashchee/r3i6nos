@@ -1,0 +1,10 @@
+[Unit]
+Description=Watch for a PortMaster port's request to use a runtime
+# Only WATCHES a file: the launcher's sudo shim writes it when a port runs `sudo mount NAME.squashfs DIR` (docs/PORTMASTER.md). Nothing is extracted otherwise.
+
+[Path]
+PathExists=/run/loveos/runtimes/request
+Unit=r3i6nos-runtimes.service
+
+[Install]
+WantedBy=multi-user.target

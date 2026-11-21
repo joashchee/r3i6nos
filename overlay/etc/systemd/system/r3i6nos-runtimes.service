@@ -1,0 +1,12 @@
+[Unit]
+Description=Extract a PortMaster runtime a port asked for, once, into the cache
+Documentation=file:/usr/local/bin/r3i6nos-runtimes
+# Started by r3i6nos-runtimes.path; never wanted by a target. Deletes the request, checks it, extracts the squashfs as an unprivileged user,
+# makes the tree safe and writes /run/r3i6nos-runtimes/result.
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/r3i6nos-runtimes apply
+# Mono and Godot runtimes are a few hundred MB; the port waits for the answer.
+TimeoutStartSec=1700
+Nice=10

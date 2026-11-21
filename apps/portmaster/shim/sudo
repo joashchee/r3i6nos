@@ -1,3 +1,84 @@
 #!/bin/sh
-# r3i6nos: no sudo for PortMaster (docs/PORTMASTER.md): a password prompt nobody can answer would hang it, and it runs as the login user without.
-exit 1
+# r3i6nos's sudo for PortMaster and its ports (docs/PORTMASTER.md): there is no root for the login user, and a password prompt nobody can answer
+# would hang a port, so every command is refused (exit 1) except two that ports use for their runtimes:
+#
+#   sudo mount [-o ...] /roms/ports/.../NAME.squashfs DIR   the runtime is extracted once by the root helper r3i6nos-runtimes (no mount), and DIR
+#                                                           becomes a link to the extracted folder
+#   sudo umount DIR                                          removes that link (and nothing else)
+#
+# Overrides, for tests: R3I6NOS_RUNTIMES_DIR (/run/loveos/runtimes), R3I6NOS_RUNTIMES_OUT (/run/r3i6nos-runtimes), R3I6NOS_RUNTIMES_WAIT (seconds, 1800),
+# R3I6NOS_RUNTIMES_CACHE (/opt/loveos/runtimes/pm: a link is only removed when it points in here).
+REQ_DIR="${R3I6NOS_RUNTIMES_DIR:-/run/loveos/runtimes}"
+OUT_DIR="${R3I6NOS_RUNTIMES_OUT:-/run/r3i6nos-runtimes}"
+WAIT="${R3I6NOS_RUNTIMES_WAIT:-1800}"
+CACHE="${R3I6NOS_RUNTIMES_CACHE:-/opt/loveos/runtimes/pm}"
+
+# the sudo flags a port may pass before the command (-n, -E, -S ...): none of them changes what this does
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -*) shift ;;
+    *) break ;;
+  esac
+done
+cmd="$1"
+[ $# -gt 0 ] && shift
+
+do_mount() {
+  # mount [options] FILE DIR: the last two words that are not options (-o takes a value; --bind and the like are refused)
+  file="" dir=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -o|-t) shift ;;
+      --bind|--rbind|--move|-B|-R|-M) return 1 ;;
+      -*) ;;
+      *) if [ -z "$file" ]; then file="$1"; else dir="$1"; fi ;;
+    esac
+    shift
+  done
+  case "$file" in *.squashfs) ;; *) return 1 ;; esac
+  [ -n "$dir" ] || return 1
+  file=$(readlink -f -- "$file") || return 1
+  [ -f "$file" ] || return 1
+  # an earlier link of ours is replaced; an empty folder (a port made it with mkdir) is replaced; anything else is the port's own data
+  if [ -L "$dir" ]; then rm -f -- "$dir"
+  elif [ -d "$dir" ]; then rmdir -- "$dir" 2>/dev/null || { echo "sudo: $dir is not empty" >&2; return 1; }
+  elif [ -e "$dir" ]; then return 1
+  fi
+  mkdir -p -- "$(dirname -- "$dir")" 2>/dev/null
+  mkdir -p -- "$REQ_DIR" 2>/dev/null || return 1
+  id="$$-$(date +%s)"
+  rm -f -- "$OUT_DIR/result" 2>/dev/null || true
+  # one request at a time: the helper deletes the file when it starts; a second port waits its turn
+  waited=0
+  while ! (set -C; printf 'id=%s\nverb=extract\nfile=%s\n' "$id" "$file" > "$REQ_DIR/request") 2>/dev/null; do
+    sleep 1; waited=$((waited + 1))
+    [ "$waited" -gt "$WAIT" ] && { echo "sudo: the runtime helper is busy" >&2; return 1; }
+  done
+  waited=0
+  while :; do
+    if [ -f "$OUT_DIR/result" ] && grep -q "^id=$id\$" "$OUT_DIR/result" 2>/dev/null; then break; fi
+    sleep 1; waited=$((waited + 1))
+    [ "$waited" -gt "$WAIT" ] && { echo "sudo: no answer for the runtime" >&2; return 1; }
+  done
+  tab=$(printf '\t')
+  grep -q '^ok=1$' "$OUT_DIR/result" || { sed -n "s/^L${tab}//p" "$OUT_DIR/result" >&2; return 1; }
+  target=$(sed -n 's/^dir=//p' "$OUT_DIR/result")
+  [ -n "$target" ] && [ -d "$target" ] || return 1
+  ln -s -- "$target" "$dir"
+}
+
+do_umount() {
+  dir=""
+  while [ $# -gt 0 ]; do
+    case "$1" in -*) ;; *) dir="$1" ;; esac
+    shift
+  done
+  [ -L "$dir" ] || return 1
+  case "$(readlink -- "$dir")" in "$CACHE"/*) rm -f -- "$dir" ;; *) return 1 ;; esac
+}
+
+case "$cmd" in
+  mount) do_mount "$@" ;;
+  umount) do_umount "$@" ;;
+  *) exit 1 ;;
+esac

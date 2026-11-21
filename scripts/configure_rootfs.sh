@@ -229,6 +229,9 @@ ln -sfn /etc/systemd/system/r3i6nos-net.path \
 # Settings > Data card: a path unit that only watches for the menu's Format request; the helper formats only the card that is not the boot card.
 ln -sfn /etc/systemd/system/r3i6nos-format.path \
     "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-format.path"
+# PortMaster runtimes (docs/PORTMASTER.md): a path unit that only watches for the launcher's sudo shim asking to use a runtime; the helper extracts it once.
+ln -sfn /etc/systemd/system/r3i6nos-runtimes.path \
+    "$ROOTFS/etc/systemd/system/multi-user.target.wants/r3i6nos-runtimes.path"
 # System packages (docs/PACKAGES-OTA.md): a path unit that only watches for a staged package, and a boot step that undoes an update the menu never
 # confirmed. The helper installs nothing the catalog's key (/etc/r3i6nos/packages.pub) did not sign.
 ln -sfn /etc/systemd/system/r3i6nos-sysupdate.path \
