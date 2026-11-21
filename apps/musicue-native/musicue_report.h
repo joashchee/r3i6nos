@@ -28,7 +28,7 @@ static R3Report *g_rpt_rep;                 /* the running report, for the helpe
 static int g_rpt_missed = -1;               /* milestones the last report never reached (the self-test wants 0) */
 static void rpt_at(int n, const char *doing) { if (g_rpt_rep) r3_report_at(g_rpt_rep, n, doing); }
 static void rpt_window(double len_s) { if (g_rpt_rep) r3_report_window(g_rpt_rep, len_s); }
-static int rpt_prog_cb(void *ud, double so_far) { (void)ud; (void)so_far; if (g_rpt_rep) r3_report_tick(g_rpt_rep); return 0; }   /* a long decode: the time moves */
+static int rpt_prog_cb(void *ud, double so_far, double total) { (void)ud; (void)so_far; (void)total; if (g_rpt_rep) r3_report_tick(g_rpt_rep); return 0; }   /* a long decode: the time moves */
 
 /* One pass of the main loop as it runs while waiting or playing, minus input (a report in progress takes none). */
 static void rpt_turn(void *arg) {

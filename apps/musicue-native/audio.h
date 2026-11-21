@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <time.h>
 #include <unistd.h>
 
 #ifndef M_PI
@@ -125,30 +126,48 @@ static int track_load_wav(Track *t, const char *path, double max_seconds, char *
     }
 }
 
-/* Called now and then while a long decode runs, with the seconds decoded so far; return nonzero to stop. */
-typedef int (*TrackProgress)(void *ud, double seconds_so_far);
+/* Called about five times a second while a long decode runs, with the seconds decoded so far and the song's length when ffmpeg said it
+ * (its "Duration:" line, cut at the cap; 0 when it did not: the caller then shows a moving indicator, CLAUDE.md rule 18); return nonzero to stop. */
+typedef int (*TrackProgress)(void *ud, double seconds_so_far, double total_seconds);
+
+static double track_now_s(void) { struct timespec ts; clock_gettime(CLOCK_MONOTONIC, &ts); return (double)ts.tv_sec + ts.tv_nsec / 1e9; }
+
+/* "  Duration: 00:03:45.12, start: ..." in ffmpeg's banner: the seconds, or 0. */
+static double track_parse_duration(const char *text) {
+    const char *d = strstr(text, "Duration: ");
+    int h, m;
+    double s;
+    if (d && sscanf(d + 10, "%d:%d:%lf", &h, &m, &s) == 3 && h >= 0 && m >= 0 && s >= 0) return h * 3600.0 + m * 60.0 + s;
+    return 0;
+}
 
 /* Anything else, through ffmpeg. 1 loaded, 0 failed (err says why). */
 static int track_load_ffmpeg(Track *t, const char *path, double max_seconds, TrackProgress prog, void *ud, char *err, size_t errsz) {
     const char *ff = getenv("R3I6NOS_FFMPEG") && *getenv("R3I6NOS_FFMPEG") ? getenv("R3I6NOS_FFMPEG") : "ffmpeg";
-    int fd[2];
+    int fd[2], ef[2];
     if (pipe(fd) != 0) { snprintf(err, errsz, "no pipe"); return 0; }
+    if (pipe(ef) != 0) { close(fd[0]); close(fd[1]); snprintf(err, errsz, "no pipe"); return 0; }
     pid_t pid = fork();
-    if (pid < 0) { close(fd[0]); close(fd[1]); snprintf(err, errsz, "cannot start ffmpeg"); return 0; }
+    if (pid < 0) { close(fd[0]); close(fd[1]); close(ef[0]); close(ef[1]); snprintf(err, errsz, "cannot start ffmpeg"); return 0; }
     if (pid == 0) {
         dup2(fd[1], 1);
+        dup2(ef[1], 2);                         /* the banner's Duration line: the bar's total */
         int nul = open("/dev/null", O_RDWR);
-        if (nul >= 0) { dup2(nul, 0); dup2(nul, 2); }
-        close(fd[0]); close(fd[1]);
-        execlp(ff, ff, "-v", "error", "-nostdin", "-i", path, "-vn", "-f", "s16le", "-ar", "44100", "-ac", "2", "pipe:1", (char *)NULL);
+        if (nul >= 0) dup2(nul, 0);
+        close(fd[0]); close(fd[1]); close(ef[0]); close(ef[1]);
+        execlp(ff, ff, "-v", "info", "-hide_banner", "-nostats", "-nostdin", "-i", path, "-vn", "-f", "s16le", "-ar", "44100", "-ac", "2", "pipe:1", (char *)NULL);
         _exit(127);
     }
     close(fd[1]);
+    close(ef[1]);
+    fcntl(ef[0], F_SETFL, fcntl(ef[0], F_GETFL) | O_NONBLOCK);
+    char banner[2048];
+    size_t nbanner = 0;
+    double total = 0, last_call = track_now_s();
     PcmBuf b = {0};
     int64_t cap_frames = (int64_t)(max_seconds * TRACK_RATE);
     unsigned char chunk[65536], carry[4];
     int ncarry = 0, stopped = 0;
-    int64_t last_report = 0;
     for (;;) {
         ssize_t got = read(fd[0], chunk, sizeof chunk);
         if (got < 0 && errno == EINTR) continue;
@@ -172,12 +191,25 @@ static int track_load_ffmpeg(Track *t, const char *path, double max_seconds, Tra
         if (stopped) break;
         ncarry = 0;
         while (off < n) carry[ncarry++] = chunk[off++];
-        if (prog && b.frames - last_report > TRACK_RATE * 5) {
-            last_report = b.frames;
-            if (prog(ud, (double)b.frames / TRACK_RATE)) { stopped = 3; break; }
+        for (;;) {                              /* drain ffmpeg's messages (it must never block on them), and read the length once */
+            char eb[512];
+            ssize_t en = read(ef[0], eb, sizeof eb);
+            if (en <= 0) break;
+            if (total <= 0 && nbanner < sizeof banner - 1) {
+                size_t take = (size_t)en < sizeof banner - 1 - nbanner ? (size_t)en : sizeof banner - 1 - nbanner;
+                memcpy(banner + nbanner, eb, take);
+                banner[nbanner += take] = 0;
+                total = track_parse_duration(banner);
+                if (total > max_seconds) total = max_seconds;
+            }
+        }
+        if (prog && track_now_s() - last_call >= 0.2) {
+            last_call = track_now_s();
+            if (prog(ud, (double)b.frames / TRACK_RATE, total)) { stopped = 3; break; }
         }
     }
     close(fd[0]);
+    close(ef[0]);
     if (stopped) kill(pid, SIGKILL);
     int status = 0;
     waitpid(pid, &status, 0);

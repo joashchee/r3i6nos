@@ -241,7 +241,7 @@ do
   snap("report wait")
   prog = { doing = nil }
   settings.tick(dialog, 1); rows = draw(); j = table.concat(rows, "\n")
-  has(j, "This report does not say its steps."); has(j, "13 s; this screen changes when it is done.")
+  has(j, "This one does not say its steps."); has(j, "13 s")      -- a moving indicator and the seconds (rule 18)
   snap("report wait, no steps")
 end
 

@@ -60,6 +60,16 @@ int main(void) {
                 }
                 CHECK(worst >= 4.5, "%s: the wait screen at %d%% has a cell at %.2f:1", th->name, pct, worst);
             }
+            for (int tick = 0; tick < 3; tick++) {      /* the unknown-total form: the moving indicator */
+                r3_wait_screen_t(&ws, "App", "Song", "Opening", "Reading the song.", NULL, "3 s of music read", -1, tick * 20, "12 s", NULL);
+                double worst = 99;
+                for (int i = 0; i < R3_COLS * R3_ROWS; i++) {
+                    if (ws.ch[i] == 32 || ws.ch[i] == 0) continue;
+                    double c = r3_contrast_pal(ws.fg[i], ws.bg[i]);
+                    if (c < worst) worst = c;
+                }
+                CHECK(worst >= 4.5, "%s: the moving wait screen (tick %d) has a cell at %.2f:1", th->name, tick * 20, worst);
+            }
         }
     }
     CHECK(dark >= 4 && light >= 2 && mono >= 3, "dark %d, light %d, monochrome %d themes", dark, light, mono);

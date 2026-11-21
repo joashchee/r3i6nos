@@ -239,6 +239,9 @@ typedef struct {
     int pending_report;                     /* the Device report was asked for (and confirmed): the main loop runs it */
     int pending_tour; unsigned tour_mask;   /* Rec demo was asked for (the checklist's Start): the main loop runs it with these hero features */
     R3Checklist tour_ck;                    /* Rec demo's checklist of hero features (OV_DEMO) */
+    R3Video *load_video; SDL_Renderer *load_r;   /* where a song's load draws its wait screen (set by main; NULL in tests and unattended runs) */
+    double load_t0; char load_name[64];
+    double job_t0; int job_secs;            /* the job screen's clock: when it started, and its seconds once it is done */
     double audio_idle_ms;                   /* how long nothing has sounded: the sound device is closed after 2 s (engine_sleep) */
 } App;
 static void demo_checklist_open(App *a);          /* Rec demo's checklist (musicue_demo.h) */
@@ -579,7 +582,21 @@ static int save_cues(App *a) {
     return rc;
 }
 
-static int load_progress(void *ud, double secs) { (void)ud; (void)secs; SDL_PumpEvents(); return 0; }
+/* Opening a song is a wait (rule 18): the screen shows the song, the seconds of music read so far and, when ffmpeg said the length, a bar of
+ * how much; when it did not, a moving indicator (the total is unknown to a decoder that does not report it). No input is read, so no cancel. */
+static void load_draw(App *a, double secs, double total) {
+    if (!a->load_video || !a->load_r) return;
+    R3Screen s;
+    char read[64], stat[64];
+    double waited = (SDL_GetTicks() / 1000.0) - a->load_t0;
+    snprintf(read, sizeof read, total > 0 ? "%.0f of %.0f s of music read" : "%.0f s of music read", secs, total);
+    snprintf(stat, sizeof stat, "%.0f s", waited);
+    r3_wait_screen_t(&s, "MusiCue", "Opening", "Opening a song", a->load_name, "Reading the whole song into memory.", read,
+                     total > 0 ? (int)(100.0 * secs / total) : -1, (int)(waited * 4), stat, NULL);
+    r3_video_draw(a->load_video, a->load_r, &s, 1);
+}
+
+static int load_progress(void *ud, double secs, double total) { load_draw((App *)ud, secs, total); SDL_PumpEvents(); return 0; }
 
 static void set_loop_engine(App *a) {
     if (a->loop_state == 2 && !a->loop_off) engine_loop_set(&a->eng, a->loop_a, a->loop_b); else engine_loop_clear(&a->eng);
@@ -710,6 +727,9 @@ static int open_song(App *a, int i) {
     close_song(a);
     Song *s = &a->songs[i];
     char err[160] = "";
+    snprintf(a->load_name, sizeof a->load_name, "%s", s->name);
+    a->load_t0 = SDL_GetTicks() / 1000.0;
+    load_draw(a, 0, 0);                         /* at once: ffmpeg takes a moment before its first sound */
     if (!track_load(&a->track, s->path, TRACK_MAX_SECONDS, load_progress, a, err, sizeof err)) {
         say(a, R3_ST_ERROR, "Cannot play %s: %s", s->name, err[0] ? err : "unknown error");
         return 0;
@@ -1288,13 +1308,15 @@ static void compose_job(App *a, R3Screen *s) {
     compose_topbar(a, s, "MusiCue", a->job_kind == JOB_RENDER ? "Copy" : a->job_kind == JOB_COMPRESS ? "Compress" : "Sync");
     R3Box b = {1, a->job_kind == JOB_RENDER ? "Making a copy at the new Key and Tempo" : a->job_kind == JOB_COMPRESS ? "Compressing copies to AAC" : "Getting songs and cues", NULL, a->job_done ? "B close" : "B stop", 0};
     r3_box(s, 2, 4, 60, 14, &b);
-    int full = (int)(56 * a->job_frac + 0.5);
-    for (int i = 0; i < 56; i++) {
-        if (i < full) { int bg = P_ACC0 + i * (RAMP - 1) / 55; r3_put(s, 4 + i, 6, 32, pick_fg(bg), bg); }
-        else r3_put(s, 4 + i, 6, 176, R3_ST(R3_ST_HINT));
-    }
+    int pct = (int)(100 * a->job_frac + 0.5), waited = a->job_done ? a->job_secs : (int)(SDL_GetTicks() / 1000.0 - a->job_t0);
+    if (!a->job_done) a->job_secs = waited;                     /* a finished job keeps the time it took */
+    char tl[64], bartxt[40];
+    r3_progress(s, 4, 6, 56, pct);                              /* the theme's one bar (rule 18), with the percent and the time under it */
+    r3_progress_text(bartxt, sizeof bartxt, pct);
+    snprintf(tl, sizeof tl, "%d%% done, %d s", pct, waited);
+    r3_text(s, 4, 7, tl, R3_ST(R3_ST_HINT));
     for (int i = 0; i < a->job_nlines && i < 6; i++) r3_text_scroll(s, 4, 8 + i, a->job_lines[i], 56, R3_ST(i == a->job_nlines - 1 ? R3_ST_STRONG : R3_ST_BODY));
-    R3Cmd cmd = {a->reply, a->reply_style, '>', "", 0, a->job_done ? "A or B closes this list" : a->job_kind == JOB_RENDER ? "B stops it and takes the half copy away" : a->job_kind == JOB_COMPRESS ? "B stops it; copies already done stay done" : "Your own list: MusiCue/inbox/urls.txt", "", R3_ST_HINT};
+    R3Cmd cmd = {a->reply, a->reply_style, '>', bartxt, 0, a->job_done ? "A or B closes this list" : a->job_kind == JOB_RENDER ? "B stops it and takes the half copy away" : a->job_kind == JOB_COMPRESS ? "B stops it; copies already done stay done" : "Your own list: MusiCue/inbox/urls.txt", "", R3_ST_HINT};
     r3_command_line(s, &cmd);
 }
 
@@ -2142,6 +2164,7 @@ static int job_spawn(App *a, const char *const *argv, int kind) {
     fcntl(fd[0], F_SETFL, fcntl(fd[0], F_GETFL) | O_NONBLOCK);
     a->job_fd = fd[0];
     a->job_pid = pid;
+    a->job_t0 = SDL_GetTicks() / 1000.0; a->job_secs = 0;
     a->job_kind = kind;
     a->mode = M_JOB;
     job_line(a, "Starting...");
@@ -2965,6 +2988,9 @@ static void test_json_and_cues(void) {
 
 static const char *g_tmp;
 
+static double seen_total, seen_max, seen_so_far; static int calls;
+static int cb(void *ud, double so_far, double total) { (void)ud; calls++; seen_total = total; if (so_far > seen_so_far) seen_so_far = so_far; if (total > seen_max) seen_max = total; return 0; }
+
 static void test_audio(void) {
     char p[PATH_MAX], err[160];
     Track t;
@@ -3002,6 +3028,24 @@ static void test_audio(void) {
     track_free(&t);
     CHECK(track_load(&t, p, 0.5, NULL, NULL, err, sizeof err) && t.frames == 22050 && t.truncated, "the cap applies to the pipe");
     track_free(&t);
+    {   /* the progress callback (rule 18): ffmpeg's Duration line is the bar's total, cut at the cap; without one the total is 0 and the screen moves instead */
+        calls = 0; seen_total = seen_max = seen_so_far = 0;
+        char fake2[PATH_MAX];
+        snprintf(fake2, sizeof fake2, "%s/fakeffmpeg2", g_tmp);
+        f = fopen(fake2, "w");
+        fprintf(f, "#!/bin/sh\necho '  Duration: 00:00:01.50, start: 0.000000, bitrate: 128 kb/s' >&2\nhead -c 132300 %s\nsleep 0.5\ntail -c +132301 %s\n", raw, raw);
+        fclose(f);
+        chmod(fake2, 0755);
+        setenv("R3I6NOS_FFMPEG", fake2, 1);
+        CHECK(track_load(&t, p, 600, cb, NULL, err, sizeof err) && t.frames == 66150, "a decode with a Duration line loads whole: %s", err);
+        CHECK(calls >= 1 && fabs(seen_max - 1.5) < 0.01 && seen_so_far > 0.5, "the callback hears the total (%.2f s) and the seconds so far (%.2f), %d calls", seen_max, seen_so_far, calls);
+        track_free(&t);
+        setenv("R3I6NOS_FFMPEG", fake, 1);
+        calls = 0; seen_max = 0;
+        CHECK(track_load(&t, p, 600, cb, NULL, err, sizeof err) && seen_max == 0, "no Duration line: the total stays 0 (the screen shows a moving indicator)");
+        track_free(&t);
+        CHECK(fabs(track_parse_duration("Input #0\n  Duration: 01:02:03.50, start") - 3723.5) < 0.001 && track_parse_duration("nothing here") == 0, "the Duration line is read");
+    }
     setenv("R3I6NOS_FFMPEG", "/nonexistent/ffmpeg", 1);
     CHECK(!track_load(&t, p, 600, NULL, NULL, err, sizeof err) && strstr(err, "not installed"), "a missing ffmpeg is said: %s", err);
     unsetenv("R3I6NOS_FFMPEG");
@@ -4759,6 +4803,7 @@ int main(int argc, char **argv) {
 
     App app;
     app_init(&app, "/roms/MusiCue");
+    app.load_video = &video; app.load_r = r;
     if (theme >= 0) app.theme = theme;
     apply_theme(&app);
     R3Screen splash;

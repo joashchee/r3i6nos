@@ -5,6 +5,10 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- Fixed a Lua test (`tests/test_menu_view.lua`) that still expected the old no-steps wait text after section 41 step 4 changed it; step 4's commit went in with that test failing.
+
+- MusiCue: opening a song shows a bar (seconds of music read of the song's length from ffmpeg, or a moving indicator when ffmpeg does not say it), the job screen uses the theme's bar and shows the percent and seconds; the C theme gained `r3_progress_moving` and `r3_wait_screen_t` (section 41 step 5). Untested on a unit.
+
 - The menu's waits on a helper show a bar (section 41 step 4): Settings > Data card's format reports 6 steps (`r3i6nos-format` writes `progress`), every other helper wait (Wi-Fi, SSH, network test, update check, clock) shows a moving indicator, the seconds and why the total is unknown (`T.progressMoving`). Untested on a unit.
 
 - ROADMAP section 41 step 1: the audit of every app's waits is written down (menu helper waits incl. Data card format, MusiCue's song load, Commander's blocking opens, IO Checker's card test have no bar); steps 4-9 added. Read from the code, not run on a unit.
