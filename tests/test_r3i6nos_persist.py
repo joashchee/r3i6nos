@@ -314,6 +314,10 @@ class Persist(unittest.TestCase):
         self.assertIn("item=timezone state=differs", out)
         self.assertIn("item=clock state=card-only", out)
         self.assertIn("item=mixer state=card-invalid", out)
+        wifi = [ln for ln in out.splitlines() if ln.startswith("item=wifi ")][0]
+        self.assertIn("local=set card=set", wifi, "a secret item says only that it is there")
+        tz = [ln for ln in out.splitlines() if ln.startswith("item=timezone ")][0]
+        self.assertRegex(tz, r"local=[0-9a-f]{8} card=[0-9a-f]{8}", "other items still show a short hash")
 
     def test_status_before_any_sync(self):
         self.assertIn("STATE=never", self.run_persist("status").stdout)

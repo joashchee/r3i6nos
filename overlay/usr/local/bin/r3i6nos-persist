@@ -418,7 +418,9 @@ def cmd_status(args):
                     else "card-only" if L is None else "same" if L == C else "differs")
             if C is not None and item.validate(cb):
                 word = "card-invalid"
-            row += [f"state={word}", f"local={(L or 'none')[:8]}", f"card={(C or 'none')[:8]}"]
+            # a secret item (the Wi-Fi key) shows only that it is there, never a hash of it: a prefix of a hash of a short secret helps to guess it
+            show = (lambda h: "set" if h else "none") if item.secret else (lambda h: (h or "none")[:8])
+            row += [f"state={word}", f"local={show(L)}", f"card={show(C)}"]
             print(" ".join(row))
     return 0
 

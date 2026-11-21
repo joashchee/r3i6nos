@@ -50,6 +50,7 @@ DEV = Path(ENV("R3I6NOS_DEV", "/dev"))
 PROC = Path(ENV("R3I6NOS_PROC", "/proc"))
 ROOT = Path(ENV("R3I6NOS_ROOT", "/"))
 BOOT = Path(ENV("R3I6NOS_BOOT", "/boot"))
+BOOT_LOGO = Path(ENV("R3I6NOS_BOOT_LOGO", "/usr/share/r3i6nos/boot-logo.bmp"))   # the logo the bootloader shows (scripts/inject-boot.sh puts the same on a flashed card)
 RUN = Path(ENV("R3I6NOS_RUN", "/run/r3i6nos"))
 INPUT = Path(ENV("R3I6NOS_INPUT", "/dev/input"))
 VAR = Path(ENV("R3I6NOS_VAR", "/var/lib/r3i6nos"))
@@ -765,6 +766,19 @@ def ensure_boot_mounted(root, src):
     return before
 
 
+def boot_logo():
+    """The r3i6nos logo as bytes when it is there and a 640x480 24-bit BMP like the stock one, else None (the stock logo then stays)."""
+    try:
+        d = BOOT_LOGO.read_bytes()
+    except OSError:
+        return None
+    if len(d) < 54 + 640 * 480 * 3 or d[:2] != b"BM":
+        return None
+    w, h = int.from_bytes(d[18:22], "little", signed=True), int.from_bytes(d[22:26], "little", signed=True)
+    planes, bpp, comp = int.from_bytes(d[26:28], "little"), int.from_bytes(d[28:30], "little"), int.from_bytes(d[30:34], "little")
+    return d if (w, h, planes, bpp, comp) == (640, 480, 1, 24, 0) else None
+
+
 def copy_boot(src_boot, say=None):
     """The original's boot files into this card's BOOT, root= pointed here. Returns (files, roots rewritten)."""
     staged, roots = [], 0
@@ -782,6 +796,9 @@ def copy_boot(src_boot, say=None):
                 staged.append((rel, None, new.encode("utf-8", "surrogateescape")))
             else:
                 staged.append((rel, p, None))
+    logo = boot_logo()
+    if logo is not None:       # the card keeps r3i6nos's logo, not the stock one (ROADMAP section 1, "Boot logo")
+        staged = [(rel, None, logo) if str(rel).lower() == "logo.bmp" else (rel, p, data) for rel, p, data in staged]
     if not staged:
         raise Stop("the original's boot partition is empty")
     if roots == 0:

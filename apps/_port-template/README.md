@@ -12,5 +12,10 @@ Not an app: this folder has no `app.conf`, so no script or workflow picks it up.
    tour script, a Rec demo menu item (and `--rec-demo`) with a feature checklist, a lock-out and a progress bar, that saves screenshots and `demo-<timestamp>.mp4` with audio (starting on the splash and a version line) to `/roms/<App>/Demo/`, and a self-test.
 8. Show the **hot-plug toast** (CLAUDE.md rule 13, `docs/HOTPLUG.md`): `theme/r3i6nos_toast.h` or `.lua`, polled each frame, `key` first on every input, drawn over the top bar.
 7. Give it a **splash screen** to the theme (rule 12; KlamANSI's is the example) showing the version, commit and date.
+9. Give its device report a **`== power ==` section** (rule 14, `docs/POWER.md`): the port's own process idle and working, the draw in mW, the busiest others, goals and an advice line.
+10. Keep its data where rule 16 says (`docs/APP-DATA.md`): call `r3_appdata_init("<App>")` (LÖVE: `appdata.init("<App>")`) after the splash, name the folder as `DATA_DIR` in `app.conf`, write only under `$R3I6NOS_APP_DATA`
+    (the report and Rec demo too), list what is app data in the README, and let the self-test cover the card-out case. A third-party game that only runs is exempt.
+11. Give it the **main menu and the input mapping** (rule 17, `docs/r3i6nos-mapping.md`): L1 + R1 opens About, Colour theme, Keymap, Device report, Rec demo, Benchmark (hidden when there is nothing to measure), Quit, in that order; only Quit leaves.
+12. Show a **progress bar for every wait** (rule 18): a determinate bar (step, bar, time) from the moment a load, copy, render or install starts, and a self-test that checks the report's progress reaches its last step.
 
 A port is a user-installed `.deb` (card `native_deb/`), never part of the firmware image, and links only libraries the rootfs has.

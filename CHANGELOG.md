@@ -5,6 +5,10 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- `r3i6nos-persist status --items` (so the Device report's saved-settings section) no longer prints a hash prefix of the Wi-Fi key's file, only `set` or `none` (section 38 step 7, first part).
+
+- Two-slot setup: the card it prepares gets r3i6nos's boot logo instead of the stock one (a missing or wrong-shaped logo keeps the stock one); the port template's README lists rules 14, 16, 17 and 18. Untested on a unit.
+
 - ROADMAP: every open item has an effort rating (`[S]` `[M]` `[L]` `[XL]`) so phases can be picked by least or most effort; `scripts/roadmap_effort.py` lists and totals them and `scripts/check.sh` fails on an unrated open item; the rule is in CLAUDE.md.
 
 - Runtimes: Adventure Game Studio 3.6 and Godot 3.6 (FRT) join Pyxel, Ren'Py and Solarus as packages (`r3i6nos-runtime-ags`, `r3i6nos-runtime-godot`), with menu types for games in a card's `AGS/` and `Godot/` folders and the report's smoke tests. Both engines start in Debian 12 arm64; no sample game, untested on a unit.

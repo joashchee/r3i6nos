@@ -161,6 +161,7 @@ class Fixture(unittest.TestCase):
         (boot / "ScreenFiles/Panel 1").mkdir(parents=True)
         (boot / "boot.ini").write_text(BOOT_INI)
         (boot / "ScreenFiles/Panel 1/boot.ini").write_text(BOOT_INI)
+        (boot / "logo.bmp").write_bytes(b"stock logo")
         (boot / "Image").write_bytes(b"kernel" * 1000)
         (boot / "uInitrd").write_bytes(b"initrd" * 500)
         if rk_dtb:
@@ -264,6 +265,28 @@ class Detect(Fixture):
 
 
 class Setup(Fixture):
+    def bmp(self, w=640, h=480, bpp=24):
+        import struct
+        return b"BM" + struct.pack("<IHHI", 54 + 640 * 480 * 3, 0, 0, 54) + struct.pack("<IiiHHIIiiII", 40, w, h, 1, bpp, 0, 640 * 480 * 3, 2835, 2835, 0, 0) + bytes(640 * 480 * 3)
+
+    def test_the_card_gets_the_r3i6nos_boot_logo(self):
+        """The two-slot setup puts r3i6nos's logo over the stock logo.bmp (like scripts/inject-boot.sh); a missing or wrong-shaped file leaves the stock one."""
+        logo = self.t / "boot-logo.bmp"
+        logo.write_bytes(self.bmp())
+        self.env["R3I6NOS_BOOT_LOGO"] = str(logo)
+        code, _m = self.run_setup()
+        self.assertEqual(code, 0, self.err)
+        self.assertEqual((self.t / "boot/logo.bmp").read_bytes(), logo.read_bytes())
+        self.assertEqual((self.t / "dev/mmcblk0p1/logo.bmp").read_bytes(), b"stock logo", "the original card is untouched")
+
+    def test_a_wrong_boot_logo_is_not_used(self):
+        logo = self.t / "boot-logo.bmp"
+        logo.write_bytes(self.bmp(w=320))
+        self.env["R3I6NOS_BOOT_LOGO"] = str(logo)
+        code, _m = self.run_setup()
+        self.assertEqual(code, 0, self.err)
+        self.assertEqual((self.t / "boot/logo.bmp").read_bytes(), b"stock logo")
+
     def test_the_whole_setup(self):
         t = self.t
         orig_raw, orig_boot, orig_root = file_hash(t / "dev/mmcblk0"), tree_hash(t / "dev/mmcblk0p1"), tree_hash(t / "dev/mmcblk0p2")
@@ -295,6 +318,7 @@ class Setup(Fixture):
         self.assertEqual((boot / "rk3326-r35s-linux.dtb").read_bytes(), b"dtb1" * 50)
         self.assertFalse((boot / ".DS_Store").exists())
         self.assertEqual([p for p in boot.rglob("*.r3tmp")], [])
+        self.assertEqual((boot / "logo.bmp").read_bytes(), b"stock logo", "no r3i6nos logo on this machine: the stock one stays")
 
         # the drivers: modules (links kept as links), firmware, the Mali blob and the links that resolve to it
         root = t / "root"
