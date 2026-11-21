@@ -183,15 +183,14 @@ jobs:
           sudo apt-get install -y debootstrap debian-archive-keyring \
             qemu-user-static binfmt-support systemd zstd
 
-      # apt installs qemu but may not enable it; debootstrap stage 2 then fails with "Exec format error"
+      # apt's handler can be missing or registered without the F flag; debootstrap stage 2 then fails with "Exec format error".
+      # So always (re)register tonistiigi's static handlers (F flag: the interpreter is loaded at registration, so it works inside a chroot).
       - name: Register the arm64 binfmt handler
         run: |
-          sudo mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
-          sudo update-binfmts --enable qemu-aarch64 || true
-          if [ ! -e /proc/sys/fs/binfmt_misc/qemu-aarch64 ]; then
-            docker run --privileged --rm tonistiigi/binfmt --install arm64
-          fi
+          docker run --privileged --rm tonistiigi/binfmt --install arm64
+          echo "--- /proc/sys/fs/binfmt_misc/qemu-aarch64"
           cat /proc/sys/fs/binfmt_misc/qemu-aarch64
+          docker run --rm --platform linux/arm64 debian:bookworm uname -m | grep -qx aarch64
 
       - name: Fetch QuickJS (pinned; the toolchain test builds the sample CLI with it)
         run: |
