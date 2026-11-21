@@ -17,6 +17,7 @@ mk_trees() {  # <dir> <machine>
     mkdir -p "$d/renpy/lib/py3-linux-aarch64" "$d/renpy/lib/python3.9" "$d/renpy/lib/python3.12" "$d/renpy/renpy"
     elf "$m" "$d/renpy/lib/py3-linux-aarch64/python"; : > "$d/renpy/lib/python3.9/old.py"; echo MIT > "$d/renpy/renpy/LICENSE.txt"; printf '#!/bin/bash\n' > "$d/renpy/startRENPY"
     mkdir -p "$d/solarus"; elf "$m" "$d/solarus/solarus-1.6.5"; : > "$d/solarus/libsolarus.so.1"
+    mkdir -p "$d/ags" "$d/godot"; elf "$m" "$d/ags/ags_3.6.aarch64"; elf "$m" "$d/godot/frt_3.6"
 }
 mk_trees "$T/trees" 183
 export R3I6NOS_RUNTIMES_TREES="$T/trees" R3I6NOS_RUNTIMES_WORK="$T/work" R3I6NOS_RUNTIMES_OUT="$T/out"
@@ -36,7 +37,7 @@ R="$S/renpy/usr/lib/r3i6nos-runtimes/renpy"
 [ -d "$R/lib/python3.12" ] || fail "renpy trimmed too much"
 [ -f "$R/renpy/LICENSE.txt" ] || fail "renpy trimmed too much"
 # the package layout (a tool package: deb_watcher.py wraps usr/bin/*)
-for n in pyxel renpy solarus; do
+for n in pyxel renpy solarus ags godot; do
     pkg="r3i6nos-runtime-$n"
     [ -x "$S/$n/usr/bin/r3i6nos-run-$n" ] || fail "$n: no command"
     [ -f "$S/$n/usr/share/r3i6nos/tool" ] || fail "$n: no tool marker"
@@ -63,7 +64,7 @@ if env -u R3I6NOS_RUNTIMES_TREES R3I6NOS_RUNTIMES_WORK="$T/w5" R3I6NOS_RUNTIMES_
 grep -q "pinned sha256" "$T/e3" || fail "no hash message: $(cat "$T/e3")"
 
 # the launchers: argument errors, and what they run (with fakes)
-for n in pyxel renpy solarus; do
+for n in pyxel renpy solarus ags godot; do
     if "$S/$n/usr/bin/r3i6nos-run-$n" >/dev/null 2>&1; then fail "$n: ran with no argument"; fi
 done
 G="$T/g"; mkdir -p "$G/pyg"; printf 'import sys\nprint("main", sys.argv[1:])\nimport os; print(os.getcwd().endswith("pyg"))\n' > "$G/pyg/main.py"
@@ -80,4 +81,27 @@ mkdir -p "$G/rp/game"; printf '#!/bin/bash\necho "RP $*"\n' > "$S/renpy/usr/lib/
 printf '#!/bin/bash\necho "SOL $* LD=$LD_LIBRARY_PATH"\n' > "$S/solarus/usr/lib/r3i6nos-runtimes/solarus/solarus-1.6.5"; chmod +x "$S/solarus/usr/lib/r3i6nos-runtimes/solarus/solarus-1.6.5"
 mkdir -p "$G/quest"; sol="$("$S/solarus/usr/bin/r3i6nos-run-solarus" "$G/quest" -fullscreen=yes)"
 echo "$sol" | grep -q "SOL -fullscreen=yes $G/quest LD=.*r3i6nos-runtimes/solarus" || fail "solarus: options before the quest, or the library path, wrong: $sol"
+# AGS: finds the game file in a folder, goes there, asks for the software renderer unless told otherwise
+# shellcheck disable=SC2016  # the fake runs later and expands these then
+printf '#!/bin/bash\necho "AGS $* IN=$(basename "$PWD")"\n' > "$S/ags/usr/lib/r3i6nos-runtimes/ags/ags_3.6.aarch64"; chmod +x "$S/ags/usr/lib/r3i6nos-runtimes/ags/ags_3.6.aarch64"
+mkdir -p "$G/adv" "$G/emptyadv"; : > "$G/adv/ac2game.dat"
+a="$("$S/ags/usr/bin/r3i6nos-run-ags" "$G/adv")"
+echo "$a" | grep -q "^AGS --gfxdriver software $G/adv/ac2game.dat IN=adv" || fail "ags: folder, renderer or directory wrong: $a"
+a="$("$S/ags/usr/bin/r3i6nos-run-ags" "$G/adv" --gfxdriver ogl)"
+echo "$a" | grep -q "^AGS --gfxdriver ogl $G/adv/ac2game.dat" || fail "ags: the game or a chosen renderer is wrong: $a"
+if echo "$a" | grep -q "software"; then fail "ags: a chosen renderer was overridden: $a"; fi
+if "$S/ags/usr/bin/r3i6nos-run-ags" "$G/emptyadv" >/dev/null 2>"$T/e5"; then fail "ags ran a folder with no game"; fi
+grep -q "no ac2game.dat" "$T/e5" || fail "ags: no message"
+# Godot: a .pck or a folder that holds one, GLES2 unless told otherwise, in the game's folder
+# shellcheck disable=SC2016  # the fake runs later and expands these then
+printf '#!/bin/bash\necho "GD $* IN=$(basename "$PWD")"\n' > "$S/godot/usr/lib/r3i6nos-runtimes/godot/frt_3.6"; chmod +x "$S/godot/usr/lib/r3i6nos-runtimes/godot/frt_3.6"
+mkdir -p "$G/gd" "$G/emptygd"; : > "$G/gd/game.pck"
+a="$("$S/godot/usr/bin/r3i6nos-run-godot" "$G/gd")"
+echo "$a" | grep -q "^GD --video-driver GLES2 --main-pack $G/gd/game.pck IN=gd" || fail "godot: folder, renderer or directory wrong: $a"
+a="$("$S/godot/usr/bin/r3i6nos-run-godot" "$G/gd/game.pck" --video-driver GLES3)"
+echo "$a" | grep -q "^GD --video-driver GLES3 --main-pack $G/gd/game.pck" || fail "godot: a .pck was not run or the driver is wrong: $a"
+if echo "$a" | grep -q "GLES2"; then fail "godot: a chosen driver was overridden: $a"; fi
+if "$S/godot/usr/bin/r3i6nos-run-godot" "$G/emptygd" >/dev/null 2>"$T/e6"; then fail "godot ran a folder with no .pck"; fi
+grep -q "no .pck" "$T/e6" || fail "godot: no message"
+grep -q "Artistic-2.0" "$S/ags/usr/share/doc/r3i6nos-runtime-ags/NOTICE" || fail "ags NOTICE does not name the licence"
 echo "runtimes OK"

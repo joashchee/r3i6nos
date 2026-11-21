@@ -3,13 +3,19 @@
 # deb_watcher.py into a scratch root, then each engine run through its r3i6nos-run-* command. Prints "E2E <name> PASS|FAIL|SKIP ...".
 set -u
 apt-get update -qq >/dev/null 2>&1
-apt-get install -y -qq --no-install-recommends python3-minimal libpython3-stdlib libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-ttf-2.0-0 libopenal1 libphysfs1 libvorbisfile3 libmodplug1 libfreetype6 libasound2 dpkg xvfb xauth libgl1-mesa-dri libglx-mesa0 libgl1 >/dev/null 2>&1 || { echo "E2E setup FAIL apt"; exit 1; }
+apt-get install -y -qq --no-install-recommends python3-minimal libpython3-stdlib libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-ttf-2.0-0 libopenal1 libphysfs1 zlib1g libstdc++6 libvorbisfile3 libmodplug1 libfreetype6 libasound2 dpkg xvfb xauth libgl1-mesa-dri libglx-mesa0 libgl1 >/dev/null 2>&1 || { echo "E2E setup FAIL apt"; exit 1; }
 mkdir -p /t/debs /t/apps /t/launch /t/bin
 cp /debs/*.deb /t/debs/
 export R3I6NOS_DEB_DIR=/t/debs R3I6NOS_DEB_DIR2=/nonexistent R3I6NOS_DEFAULT_DEB_DIR=/nonexistent R3I6NOS_APP_ROOT=/t/apps R3I6NOS_LAUNCHER_DIR=/t/launch R3I6NOS_TOOLS_DIR=/t/bin
 python3 /w/deb_watcher.py || { echo "E2E watcher FAIL"; exit 1; }
-for n in pyxel renpy solarus; do [ -x /t/bin/r3i6nos-run-$n ] && echo "E2E install-$n PASS" || echo "E2E install-$n FAIL no command"; done
+for n in pyxel renpy solarus ags godot; do [ -x /t/bin/r3i6nos-run-$n ] && echo "E2E install-$n PASS" || echo "E2E install-$n FAIL no command"; done
 export PATH="/t/bin:$PATH" SDL_AUDIODRIVER=dummy
+
+# AGS and Godot: the engines start and say their version through the installed commands' own binaries (no sample game: an AGS or Godot game cannot be made here)
+ags="$(/t/apps/r3i6nos-runtime-ags/usr/lib/r3i6nos-runtimes/ags/ags_3.6.aarch64 --version 2>&1)"
+if echo "$ags" | grep -q "Engine version"; then echo "E2E ags PASS $(echo "$ags" | grep 'Engine version')"; else echo "E2E ags FAIL no version"; fi
+gd="$(/t/apps/r3i6nos-runtime-godot/usr/lib/r3i6nos-runtimes/godot/frt_3.6 --version 2>&1)"
+if echo "$gd" | grep -q "frt"; then echo "E2E godot PASS $gd"; else echo "E2E godot FAIL no version"; fi
 
 # Pyxel: a window, 9 frames, quit (pyxel.quit exits the process with 0)
 mkdir -p /g/py && cat > /g/py/main.py <<PY

@@ -4,8 +4,8 @@
 local scan = {}
 
 -- What a game is, in each folder: LÖVE games need nothing but themselves. The game-engine runtimes (docs/RUNTIMES.md, ROADMAP section 33) are packages
--- (r3i6nos-runtime-pyxel, -renpy, -solarus, installed from native_deb/ like any package) and a game for one is a folder, or an archive, in "Pyxel", "Renpy" or
--- "Solarus" on a card; run_app.sh runs it with that runtime's command and says which package is missing when it is not installed.
+-- (r3i6nos-runtime-pyxel, -renpy, -solarus, -ags, -godot, installed from native_deb/ like any package) and a game for one is a folder, or an archive, in "Pyxel", "Renpy",
+-- "Solarus", "AGS" or "Godot" on a card; run_app.sh runs it with that runtime's command and says which package is missing when it is not installed.
 local ROOTS = {
   { dir = "Love 11.5", type = "love115" },
   { dir = "Love 12.0", type = "love120" },
@@ -17,6 +17,17 @@ local ROOTS = {
     end },
   { dir = "Solarus", type = "solarus", valid = function(path, name, isdir, exists, ls)
       return isdir and (exists(path .. "/data/quest.dat") or exists(path .. "/data.solarus") or exists(path .. "/data.solarus.zip"))
+    end },
+  { dir = "AGS", type = "ags", valid = function(path, name, isdir, exists, ls)
+      if not isdir then return false end
+      if exists(path .. "/ac2game.dat") then return true end
+      for _, n in ipairs(ls(path)) do local l = n:lower(); if l:match("%.ags$") or l:match("%.exe$") then return true end end
+      return false
+    end },
+  { dir = "Godot", type = "godot", valid = function(path, name, isdir, exists, ls)   -- an exported game: a .pck, or a folder that holds one
+      if not isdir then return name:lower():match("%.pck$") ~= nil end
+      for _, n in ipairs(ls(path)) do if n:lower():match("%.pck$") then return true end end
+      return false
     end },
 }
 
@@ -36,7 +47,7 @@ local function exists(path)
 end
 
 local function title(name)
-  return (name:gsub("%.love$", ""):gsub("%.pyxapp$", ""):gsub("/$", ""):gsub("[_]+", " "))
+  return (name:gsub("%.love$", ""):gsub("%.pyxapp$", ""):gsub("%.pck$", ""):gsub("/$", ""):gsub("[_]+", " "))
 end
 
 --- Returns a sorted list of { title, type, target }.

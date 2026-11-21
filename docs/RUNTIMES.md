@@ -1,4 +1,4 @@
-# Game-engine runtimes: Pyxel, Ren'Py, Solarus (ROADMAP section 33)
+# Game-engine runtimes: Pyxel, Ren'Py, Solarus, AGS, Godot 3 (ROADMAP section 33)
 
 Why: each is a data-driven engine that an on-device no/low-code game maker can target, as NoCoGaMa does for LÖVE: **Pyxel** (retro arcade, Python), **Ren'Py**
 (visual novels), **Solarus** (Zelda-like action RPGs). They are PortMaster's runtimes, taken **pre-extracted** and packed as ordinary packages, so nothing
@@ -13,11 +13,18 @@ the comparison is in ROADMAP section 33.)
 |---|---|
 | The manifests: pinned source, sha256, trim, licences | `tools/runtimes/<name>/runtime.conf` |
 | The command each package installs | `tools/runtimes/<name>/run` (`r3i6nos-run-pyxel`, `-renpy`, `-solarus`) |
-| One command to build all three | `scripts/build-runtimes.sh` (`--stage-only`, or names): `build/runtimes/r3i6nos-runtime-<name>.deb` |
+| One command to build all five | `scripts/build-runtimes.sh` (`--stage-only`, or names): `build/runtimes/r3i6nos-runtime-<name>.deb` |
 | Sample games to try on the unit | `tools/runtimes/samples/{Pyxel,Renpy,Solarus}/` (original, CC0) |
 | The menu | `menu/scan.lua` lists a game in a card folder `Pyxel/`, `Renpy/` or `Solarus/`; `run_app.sh` types `pyxel`, `renpy`, `solarus` |
 | The unit check | `== runtimes ==` in `r3i6nos-report` (Settings > Device reports > r3i6nos) |
 | Tests | `tests/test_runtimes.sh`, `tests/test_run_app_runtime.sh`, `tests/test_runtimes_docker.sh` (Docker), `tests/test_scan.lua`, `tests/test_r3i6nos_report.py` |
+
+## AGS and Godot 3 (added 2026-11-21)
+
+Two more runtimes of the same shape, chosen from the cheap list below (maintainer's request 2026-11-21): **AGS 3.6** (`r3i6nos-runtime-ags`, `r3i6nos-run-ags`, Artistic-2.0, source https://github.com/adventuregamestudio/ags) and **Godot 3.6** as PortMaster's FRT build (`r3i6nos-runtime-godot`, `r3i6nos-run-godot`, MIT, source https://github.com/efornara/frt). Each is one aarch64 executable from the pinned PortMaster-New commit (sha256 in `tools/runtimes/<name>/runtime.conf`): AGS has SDL2 built in (it needs only libc and libstdc++), FRT links the system's SDL2 and zlib. 3.1 MB and 12.3 MB downloads, 7 MB and 28 MB unpacked. The upstream squashfs carries no licence files, so the notice gives the licence and source (not legal advice: check before a release).
+- **Games:** AGS: `<card>/AGS/<Game>/` holding `ac2game.dat`, an `.ags` or an `.exe`; the command goes to that folder and draws with AGS's **software renderer** unless `--gfxdriver` is given (the Mali's OpenGL ES through AGS's driver is untested). Godot: an exported game, `<card>/Godot/<Game>.pck` or a folder holding one; the command asks for **OpenGL ES 2** (`--video-driver GLES2`) unless told otherwise, and the game keeps its saves where Godot puts them (a third-party game is exempt from rule 16). The menu lists them with the types `ags` and `godot` (`run_app.sh`, `menu/scan.lua`).
+- **Checked (Debian 12 arm64, Docker):** both engines start and print their version (AGS 3.6.3.0, Godot `3.6.stable.frt.8ca803cce`); with a game that is not valid they say so and exit (Godot: cannot open the pack); the five packages install through the real `deb_watcher.py` (`tests/test_runtimes_docker.sh`). `tests/test_runtimes.sh` covers the launchers (game found, directory, renderer default and override, no game) and the notice; `== runtimes ==` in `r3i6nos-report` runs `--version` for each.
+- **Not done, untested:** **no sample game for either** (an AGS game or a Godot export cannot be made here: bring one), no window shown, no pad, no sound, no GLES on the Mali, no memory figure, nothing on a unit.
 
 ## How a runtime is packed
 
@@ -34,7 +41,7 @@ Nothing is added to the image's default apps: the base image stays small, and a 
 | Ren'Py 8.3.4 | `renpy_8.3.4.aarch64.squashfs` (72 MB) | 58 MB (`lib/python3.9` dropped) | 14 MB | MIT, with LGPL and zlib parts (`renpy/LICENSE.txt`) |
 | Solarus 1.6.5 | `solarus-1.6.5.aarch64.squashfs` (5.8 MB) | 5.9 MB | 2.0 MB | GPL-3.0-or-later (engine), MIT (bundled LuaJIT); source: tag `v1.6.5` of gitlab.com/solarus-games/solarus |
 
-Together about 73 MiB on the root filesystem if all three are installed (`deb_watcher.py` refuses a package that would leave less than its reserve free).
+Together about 73 MiB on the root filesystem if the first three are installed, 73 MiB, and about 35 MiB more with AGS and Godot (`deb_watcher.py` refuses a package that would leave less than its reserve free).
 The versions are the ones PortMaster's own test ports use (the crew's CFW guide names `pyxel_2.2.8`, `renpy_8.3.4`, `solarus-1.6.5` and `python_3.11`); newer Pyxel builds
 (2.3.18, 2.4.6, 2.9.5) are in PortMaster-New and can be pinned the same way. Licence texts and the source URL travel in `/usr/share/doc/<package>/` (NOTICE, SOURCE); the GPL's
 source for Solarus is the upstream tag named there (not legal advice: check before a release).
@@ -61,7 +68,7 @@ The image has no `libGL` (SDL's KMS/DRM driver gives GLES): **whether Pyxel's re
 
 ## What was tested (Docker, Debian 12 arm64, Apple silicon host)
 
-- The three packages build, are accepted by the real `deb_watcher.py`, and each command is on the `PATH`.
+- The packages build, are accepted by the real `deb_watcher.py`, and each command is on the `PATH`.
 - **Pyxel:** a game opens a window (virtual X server, Mesa software GL), runs 9 frames and quits with 0; the sample game runs 12 frames.
 - **Ren'Py:** a one-line script compiles (so `lib/python3.9` is not needed); the sample reaches its first line and quits.
 - **Solarus:** loads its libraries, answers `-help`, opens a quest. Its Lua then panics with `bad light userdata pointer`: a LuaJIT limit when the host gives 48-bit user addresses (Docker on a current kernel). The
@@ -88,7 +95,7 @@ screen may ignore the pad. The sample games also quit on Start (Pyxel, Solarus) 
 ROADMAP section 33 step 5: one maker for each runtime that passes the unit run, in the order Pyxel, Ren'Py, Solarus, each its own repository and port following rules 8-14 and 16 (theme, device report with
 power, Rec demo, splash, hot-plug toast, data card). They write a game folder in the card's `Pyxel/`, `Renpy/` or `Solarus/` folder (through `r3_appdata_init`'s folder, rule 16) and start it by the same types.
 
-## The rest of PortMaster's runtimes: which could be added cheaply (checked 2026-11-21)
+## The rest of PortMaster's runtimes: which could be added cheaply (checked 2026-11-21; AGS 3.6 and Godot 3.6 were then added)
 
 PortMaster-New's `runtimes/runtimes.json` still lists the same 49 runtimes as on 2026-11-19 (the list is in `menu/portmaster.lua`, shown by the PortMaster notice). Sizes are the squashfs files in the repository's `runtimes/` folder. **"Cheap" means the same shape as Pyxel, Ren'Py and Solarus:** a gzip squashfs (extracted, never mounted, so no root), an aarch64 build whose libraries all resolve on the image, one `r3i6nos-run-<name>` command, a manifest in `tools/runtimes/<name>/`, a package on the card. I fetched five from the pinned commit `16a1a4b`, unpacked them in Debian 12 arm64 and ran `ldd` on every aarch64 ELF with the image's library set. **Nothing was run on a unit; none starts a window yet.**
 

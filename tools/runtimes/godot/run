@@ -1,0 +1,20 @@
+#!/bin/bash
+# r3i6nos-run-godot <game.pck | folder that holds a .pck> [options]
+# Plays an exported Godot 3 game with the FRT player in this package and the system's SDL2. No root, no mount. It asks for OpenGL ES 2 (the safe renderer on
+# the R36S's Mali) unless the options name a --video-driver; the game's own save data goes where Godot puts it (its user:// folder).
+HERE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+RT="$HERE/lib/r3i6nos-runtimes/godot"
+[ -n "${1:-}" ] || { echo "usage: r3i6nos-run-godot <game.pck | folder that holds a .pck> [options]" >&2; exit 2; }
+target="$1"; shift
+[ -e "$target" ] || { echo "r3i6nos-run-godot: $target does not exist" >&2; exit 2; }
+if [ -d "$target" ]; then
+    dir="$target"; pck=""
+    for c in "$dir"/*.pck "$dir"/*.PCK; do [ -f "$c" ] && { pck="$c"; break; }; done
+    [ -n "$pck" ] || { echo "r3i6nos-run-godot: no .pck in $dir" >&2; exit 2; }
+else
+    dir="$(dirname "$target")"; pck="$target"
+fi
+driver=(--video-driver GLES2)
+for a in "$@"; do [ "$a" = --video-driver ] && driver=(); done
+cd "$dir" || exit 1
+exec "$RT/frt_3.6" "${driver[@]}" "$@" --main-pack "$pck"

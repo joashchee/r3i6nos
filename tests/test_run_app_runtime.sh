@@ -1,5 +1,5 @@
 #!/bin/bash
-# tests/test_run_app_runtime.sh: run_app.sh's pyxel, renpy and solarus types (docs/RUNTIMES.md): the runtime's command is found on the tools PATH and gets the
+# tests/test_run_app_runtime.sh: run_app.sh's pyxel, renpy, solarus, ags and godot types (docs/RUNTIMES.md): the runtime's command is found on the tools PATH and gets the
 # target, its exit code comes back, a missing runtime says which package to install, and Select+Start (r3i6nos-portquit, faked here) ends a game that hangs.
 set -eu
 cd "$(dirname "$0")/.."
@@ -7,7 +7,7 @@ T="$(mktemp -d "${TMPDIR:-/tmp}/r3i6nos-ra.XXXXXX")"; trap 'rm -rf "$T"' EXIT
 fail() { echo "FAIL: $*" >&2; exit 1; }
 mkdir -p "$T/bin" "$T/game"
 export R3I6NOS_TOOLS_DIR="$T/bin" R3I6NOS_PORTQUIT="$T/nope"
-for e in pyxel renpy solarus; do
+for e in pyxel renpy solarus ags godot; do
     # shellcheck disable=SC2016  # $1 is for the fake, when it runs
     printf '#!/bin/bash\necho "RAN %s $1"\nexit "${FAKE_RC:-0}"\n' "$e" > "$T/bin/r3i6nos-run-$e"; chmod +x "$T/bin/r3i6nos-run-$e"
     out="$(overlay/usr/local/bin/run_app.sh "$e" "$T/game")" || fail "$e: run_app.sh failed"

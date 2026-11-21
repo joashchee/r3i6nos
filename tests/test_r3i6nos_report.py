@@ -540,6 +540,16 @@ class RuntimesSection(Fake):
             f.write("CONFIG_ARM64_VA_BITS_48=y\n")
         self.assertIn("48 bits (LuaJIT, so Solarus, may panic", self.section())
 
+    def test_a_good_ags_and_a_good_godot(self):
+        self.package("ags", {"ags_3.6.aarch64": b"#!/bin/sh\necho 'Engine version 3.6.3.0, 64-bit LE'\n"})
+        self.package("godot", {"frt_3.6": b"#!/bin/sh\necho 3.6.stable.frt.abc\n"})
+        s = self.section()
+        for n in ("ags", "godot"):
+            self.assertIn(f"INFO {n} package: 9.9-r3i6nos1", s)
+            self.assertRegex(s, rf"PASS {n} runs without a window: ")
+        self.assertIn("Engine version 3.6.3.0", s)
+        self.assertIn("version 3.6.stable.frt.abc", s)
+
     def test_no_config_is_a_skip(self):
         self.assertIn("SKIP kernel config: no /proc/config.gz", self.section())
 

@@ -1,0 +1,22 @@
+#!/bin/bash
+# r3i6nos-run-ags <game folder | ac2game.dat | game.exe | game.ags> [options]
+# Runs an Adventure Game Studio game with the engine in this package. No root, no mount. The engine draws with its software renderer unless the options name
+# another (--gfxdriver): the Mali's OpenGL ES through AGS's own OpenGL driver is untested on the unit.
+HERE="$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd)"
+RT="$HERE/lib/r3i6nos-runtimes/ags"
+[ -n "${1:-}" ] || { echo "usage: r3i6nos-run-ags <game folder | ac2game.dat | game.exe> [options]" >&2; exit 2; }
+target="$1"; shift
+[ -e "$target" ] || { echo "r3i6nos-run-ags: $target does not exist" >&2; exit 2; }
+if [ -d "$target" ]; then
+    dir="$target"; game=""
+    for c in "$dir"/ac2game.dat "$dir"/*.ags "$dir"/*.AGS "$dir"/*.exe "$dir"/*.EXE; do
+        [ -f "$c" ] && { game="$c"; break; }
+    done
+    [ -n "$game" ] || { echo "r3i6nos-run-ags: no ac2game.dat, .ags or .exe in $dir" >&2; exit 2; }
+else
+    dir="$(dirname "$target")"; game="$target"
+fi
+driver=(--gfxdriver software)
+for a in "$@"; do [ "$a" = --gfxdriver ] && driver=(); done
+cd "$dir" || exit 1
+exec "$RT/ags_3.6.aarch64" "${driver[@]}" "$@" "$game"

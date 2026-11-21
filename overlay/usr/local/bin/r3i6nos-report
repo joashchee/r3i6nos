@@ -431,10 +431,10 @@ def packages(r):
 
 
 def runtimes(r):
-    """== runtimes ==: the game-engine runtime packages (r3i6nos-runtime-pyxel, -renpy, -solarus; docs/RUNTIMES.md) and what the kernel says about them.
+    """== runtimes ==: the game-engine runtime packages (r3i6nos-runtime-pyxel, -renpy, -solarus, -ags, -godot; docs/RUNTIMES.md) and what the kernel says about them.
 
     Offline and windowless (the menu owns the screen while a report runs): every ELF in a runtime is linked (ldd) and none may miss a library, and each
-    engine does one thing that needs no window (Pyxel imports, Ren'Py compiles a one-line script, Solarus answers -help), timed, with the peak memory of
+    engine does one thing that needs no window (Pyxel imports, Ren'Py compiles a one-line script, Solarus answers -help, AGS and Godot answer --version), timed, with the peak memory of
     the largest child. A game on the screen, the pad and the sound are tried from the menu with the sample games (docs/RUNTIMES.md, "On the unit")."""
     r.step("the game-engine runtimes")
     r.section("runtimes")
@@ -462,7 +462,7 @@ def runtimes(r):
     r.line("INFO" if (DEV / "uinput").exists() or (DEV / "input/uinput").exists() else "SKIP", "/dev/uinput", "present" if (DEV / "uinput").exists() or (DEV / "input/uinput").exists() else "absent")
     pkgs = sorted(APP_ROOT.glob("r3i6nos-runtime-*")) if APP_ROOT.is_dir() else []
     if not pkgs:
-        r.line("SKIP", "runtime packages", "none installed (r3i6nos-runtime-pyxel.deb, -renpy.deb, -solarus.deb into native_deb/ on a card, or scripts/push-packages.sh)")
+        r.line("SKIP", "runtime packages", "none installed (r3i6nos-runtime-pyxel.deb, -renpy.deb, -solarus.deb, -ags.deb, -godot.deb into native_deb/ on a card, or scripts/push-packages.sh)")
         return
     for pkg in pkgs:
         name = pkg.name[len("r3i6nos-runtime-"):]
@@ -518,6 +518,12 @@ def runtimes(r):
                     e["LD_LIBRARY_PATH"] = str(rt)
                     p = subprocess.run([str(rt / "solarus-1.6.5"), "-help"], capture_output=True, text=True, timeout=60, env=e)
                     ok, why = "Usage" in p.stdout + p.stderr, "answers -help" if "Usage" in p.stdout + p.stderr else (p.stderr.strip().splitlines() or ["no answer"])[-1]
+                elif name == "ags":
+                    p = subprocess.run([str(rt / "ags_3.6.aarch64"), "--version"], capture_output=True, text=True, timeout=60, env=e)
+                    ok, why = "Engine version" in p.stdout + p.stderr, (re.search(r"Engine version [^\n]*", p.stdout + p.stderr) or ["answers --version"])[0] if "Engine version" in p.stdout + p.stderr else (p.stderr.strip().splitlines() or ["no answer"])[-1]
+                elif name == "godot":
+                    p = subprocess.run([str(rt / "frt_3.6"), "--version"], capture_output=True, text=True, timeout=60, env=e)
+                    ok, why = p.returncode == 0 and bool(p.stdout.strip()), f"version {p.stdout.strip()}" if p.returncode == 0 else (p.stderr.strip().splitlines() or ["no answer"])[-1]
                 else:
                     r.line("SKIP", f"{name} smoke test", "no test for this runtime yet")
                     continue

@@ -1,6 +1,6 @@
 #!/bin/bash
 # run_app.sh - launch a LÖVE game or a native app on the R36S.
-# Usage: run_app.sh [love115|love120|native|port|pyxel|renpy|solarus] <path_to_game_or_binary_or_port_script>
+# Usage: run_app.sh [love115|love120|native|port|pyxel|renpy|solarus|ags|godot] <path_to_game_or_binary_or_port_script>
 
 set -u
 
@@ -12,7 +12,7 @@ TYPE="${1:-}"
 TARGET="${2:-}"
 
 if [ -z "$TYPE" ] || [ -z "$TARGET" ]; then
-    echo "Usage: $0 [love115|love120|native|port|pyxel|renpy|solarus] <path_to_target>" >&2
+    echo "Usage: $0 [love115|love120|native|port|pyxel|renpy|solarus|ags|godot] <path_to_target>" >&2
     exit 1
 fi
 
@@ -92,6 +92,8 @@ case "$TYPE" in
     pyxel) run_runtime r3i6nos-run-pyxel r3i6nos-runtime-pyxel ;;
     renpy) run_runtime r3i6nos-run-renpy r3i6nos-runtime-renpy ;;
     solarus) run_runtime r3i6nos-run-solarus r3i6nos-runtime-solarus ;;
+    ags) run_runtime r3i6nos-run-ags r3i6nos-runtime-ags ;;
+    godot) run_runtime r3i6nos-run-godot r3i6nos-runtime-godot ;;
     native)
         if [ ! -x "$TARGET" ]; then
             echo "run_app.sh: not executable: $TARGET" >&2

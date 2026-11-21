@@ -5,6 +5,8 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- Runtimes: Adventure Game Studio 3.6 and Godot 3.6 (FRT) join Pyxel, Ren'Py and Solarus as packages (`r3i6nos-runtime-ags`, `r3i6nos-runtime-godot`), with menu types for games in a card's `AGS/` and `Godot/` folders and the report's smoke tests. Both engines start in Debian 12 arm64; no sample game, untested on a unit.
+
 - Package installs show a bar: `deb_watcher.py` writes `/run/loveos/pkg-progress` while it extracts (one step for each package), `r3i6nos-pkg` prints a bar on a terminal, and the open menu shows it on its command line (section 41 step 9). Untested on a unit.
 
 - Boot: when packages wait to be extracted (a new card's first boot: the default apps) the menu's splash runs the watcher and shows its bar, step by step, instead of a black screen (`deb_watcher.py --pending` / `--progress`, `loveos-session`; section 41 step 9). Untested on a unit.

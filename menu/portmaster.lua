@@ -6,7 +6,7 @@ local M = {}
 M.TOOLS = os.getenv("R3I6NOS_TOOLS_DIR") or "/opt/loveos/bin"
 M.ROMS = os.getenv("R3I6NOS_ROMS") or "/roms"
 -- PortMaster-New's runtimes.json as fetched 2026-11-19 and re-checked unchanged on 2026-11-21 (49 runtimes, each with an aarch64 build): name, the aarch64 file PortMaster downloads into
--- <ports>/PortMaster/libs, and cmd for the three r3i6nos can run (extracted packages, docs/RUNTIMES.md). Refresh it by hand when the list changes.
+-- <ports>/PortMaster/libs, and cmd for the five r3i6nos can run (extracted packages, docs/RUNTIMES.md). Refresh it by hand when the list changes.
 M.LIST = {
   { name = "PMJS v1", file = "pmjs_v1.aarch64.squashfs" },
   { name = "DotNet 3.1.32", file = "dotnet-3.1.32.aarch64.squashfs" },
@@ -20,7 +20,7 @@ M.LIST = {
   { name = "Godot/FRT 3.4.5", file = "frt_3.4.5.aarch64.squashfs" },
   { name = "Godot/FRT 3.5.2", file = "frt_3.5.2.aarch64.squashfs" },
   { name = "Godot/FRT 3.5.3", file = "frt_3.5.3.aarch64.squashfs" },
-  { name = "Godot/FRT 3.6", file = "frt_3.6.aarch64.squashfs" },
+  { name = "Godot/FRT 3.6", file = "frt_3.6.aarch64.squashfs", cmd = "r3i6nos-run-godot" },
   { name = "Godot/FRT 3.7 dev", file = "frt_3.7.aarch64.squashfs" },
   { name = "Godot/FRT 4.0.4", file = "frt_4.0.4.aarch64.squashfs" },
   { name = "Godot/FRT 4.1.3", file = "frt_4.1.3.aarch64.squashfs" },
@@ -38,7 +38,7 @@ M.LIST = {
   { name = "Godot 4.6.3 Mono", file = "godot_4.6.3.mono.aarch64.squashfs" },
   { name = "Godot 4.7.1", file = "godot_4.7.1.aarch64.squashfs" },
   { name = "Godot 4.7.1 Mono", file = "godot_4.7.1.mono.aarch64.squashfs" },
-  { name = "Adventure Game Studio 3.6", file = "ags_3.6.aarch64.squashfs" },
+  { name = "Adventure Game Studio 3.6", file = "ags_3.6.aarch64.squashfs", cmd = "r3i6nos-run-ags" },
   { name = "Mesapack 0.1", file = "mesa_pkg_0.1.aarch64.squashfs" },
   { name = "Mono 6.12.0.122", file = "mono-6.12.0.122-aarch64.squashfs" },
   { name = "Pyxel 2.2.8", file = "pyxel_2.2.8_python_3.11_aarch64.squashfs", cmd = "r3i6nos-run-pyxel" },
