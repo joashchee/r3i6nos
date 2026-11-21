@@ -5,6 +5,8 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- PortMaster: decided which of rule 18 applies (only r3i6nos's own waits: the launcher's first-start copy has no bar; PortMaster's GUI and ports are third-party), recorded in `docs/PORTMASTER.md` (section 41 step 8). Docs only.
+
 - IO Checker: the card-speed test (after Benchmark's Motion pass, or Files) shows a bar: three marks per card (check, write, read back), "card n of m" (section 41 step 7). Untested on a unit.
 
 - Commander: a big file or archive that takes over 400 ms to open, an archive member to extract and the counting before a copy, move or delete show a wait screen (the name, size, a moving indicator and the seconds) instead of a frozen one, and the job row says "Copying 12 of 340, 8 s" (section 41 step 6). Untested on a unit.

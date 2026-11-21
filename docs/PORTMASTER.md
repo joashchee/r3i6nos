@@ -32,6 +32,13 @@ The rootfs also gains the four SDL2 add-on libraries its GUI loads and `procps`.
 ## Rules that do not apply
 It is third-party, so the theme (rule 8), the device report (9), Rec demo (11), splash (12), toast (13), power section (14) and the app data folder (16: PortMaster's scripts fix `/roms/ports`) are not done for it.
 
+**Rule 18 (every wait shows a bar), decided 2026-11-21: it covers only the waits r3i6nos's own code makes, and not PortMaster's or a port's own.** Read from the launcher, the hooks and the shim (PortMaster's GUI code is not in this repository and was not read). What a person waits on:
+- **First start, the launcher's copy** of PortMaster (about 30 MiB) to `/roms/ports/PortMaster`, and on a newer package: **r3i6nos's wait, with no bar and no message on the screen** (the launcher only writes to stderr). A few seconds on an SD card, **not measured**. A bar needs a screen the bash launcher does not have; the fix is a small step the menu shows before handing over (open item below).
+- **Clearing `.tmp`** before each start (`rm -rf` of a crash leftover): normally empty, quick.
+- **PortMaster's own work** (its first-start pylib unpack, its self-update and image-pack download, a port's download and install, a runtime download): PortMaster's GUI draws these itself. **Third-party, exempt like rules 8-14 and 16;** not read, so whether each has a bar is not known.
+- **A port's own loading:** the port's.
+- **Handing over** (the menu leaves, PortMaster's window opens): the menu's launch has no wait screen for any app; if that matters it is a menu change for every app, not PortMaster's.
+
 ## Tested, untested
 - Tested without a unit: `tests/test_portmaster.sh` (fake zip), `tests/test_scan.lua`; and a hand run in Debian 12 arm64 with the image's library set and a login user: the launcher installs it, pugwash extracts its libraries, finds the device and builds its window; it stops at the
   SDL renderer with the dummy video driver (no accelerated renderer), as expected headless. Without the four SDL libraries it stopped at the first import.
