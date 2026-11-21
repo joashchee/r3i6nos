@@ -27,7 +27,7 @@ with gradients and shades made from the chosen theme.
 
 The system parts are the same in every r3i6nos app: **L1 + R1 the main menu** (About, Colour theme, Keymap, Device report, Rec demo, Quit, then Songs and sync / Song options; Benchmark is hidden, MusiCue
 has nothing to measure yet), **L2 + R2 (or Y) the context menu** for what the cursor is on, **Fn the next panel, L1 + Fn the first, R1 + Fn the one before**, the right stick as the D-pad (past the dead
-zone 0.35, at most 6 steps a second), **R1 held is "increase"** (Page up and down, Home and End on lists). Quit is in the main menu; Select + Start no longer leaves. There is no virtual mouse or keyboard.
+zone 0.35, at most 6 steps a second), **R1 held is "increase"** (Page up and down, Home and End on lists). Quit is in the main menu; Select + Start no longer leaves. **R3 opens the virtual keyboard** (the theme's `r3i6nos_osk.h`) on the selected marker's name: A types, X deletes, Y changes layer, Select shows or hides, Start keeps, B or R3 cancels. There is no virtual mouse.
 
 **Start and Rec mode**
 

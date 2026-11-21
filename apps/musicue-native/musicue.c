@@ -42,6 +42,7 @@
 #include "r3i6nos_input.h"
 #include "r3i6nos_mainmenu.h"
 #include "r3i6nos_keymap.h"
+#include "r3i6nos_osk.h"
 #include "r3i6nos_toast.h"
 #include "r3i6nos_report.h"
 #include "r3i6nos_reportbar.h"
@@ -173,7 +174,7 @@ static int hue_of(const char *label) {
 
 typedef struct { char path[PATH_MAX]; char name[96]; char id[16]; int has_cues; int nmarkers; } Song;
 
-enum { M_LIBRARY, M_PLAYER, M_MENU, M_JOB, M_NOTE, M_ID, M_TEXT, M_KT };
+enum { M_LIBRARY, M_PLAYER, M_MENU, M_JOB, M_NOTE, M_ID, M_TEXT, M_KT, M_OSK };
 enum { JOB_SYNC, JOB_RENDER, JOB_COMPRESS };                                                 /* what the job screen is running: the sync, or a Key and Tempo render */
 enum { OV_NONE, OV_MM, OV_ABOUT, OV_THEME, OV_KEYMAP, OV_REPORT, OV_DEMO };                                      /* what shows over a screen: the main menu (L1+R1), About, the colour theme picker */
 enum { MK_LIBRARY, MK_SONG, MK_CONTEXT };                                         /* the app's own menus: the songs' (Add, Sync ...), the song's (offset, save ...), the context menu (L2+R2) */
@@ -229,6 +230,7 @@ typedef struct {
     int quit, force;
     /* the sync job */
     pid_t job_pid; int job_fd; char job_buf[512]; int job_len; char job_lines[6][96]; int job_nlines; double job_frac; int job_done;
+    R3Osk osk; int osk_marker;                  /* M_OSK: the on-screen keyboard (R3, or Name the marker > Type a name) naming marker osk_marker freely */
     char idbuf[12]; int idpos, idgx, idgy;            /* Start > Add: the 11 characters of a YouTube id, 0 for an empty slot */
     char job_want[16];                      /* a sync for one id: open that song when it is done */
     KtPlan kt; int kt_workers, kt_cheaper;  /* M_KT: the Key and Tempo being asked for, and its two choices (2 or 4 workers; best or faster) */
@@ -1379,6 +1381,14 @@ static void compose_id(App *a, R3Screen *s) {
     r3_command_line(s, &cmd);
 }
 
+/* The on-screen keyboard naming a marker: the player stays behind it (the waveform and its flags), the keyboard over the display view. */
+static void compose_osk(App *a, R3Screen *s) {
+    compose_player(a, s);
+    r3_osk_draw(s, &a->osk);
+    R3Cmd cmd = {a->reply, a->reply_style, '>', a->osk.text, 1, "R3 or B closes without naming", "", R3_ST_HINT};
+    r3_command_line(s, &cmd);
+}
+
 /* The Piano panel over the Key field: one octave C3 to B3 (the octave moves with Select and Start); each key shows the button that plays it. */
 static void compose_piano(App *a, R3Screen *s) {
     const int bx = 12, by = 10, bw = 40, bh = 11, kx = bx + 2, ky = by + 2;
@@ -1468,6 +1478,7 @@ static void compose(App *a, R3Screen *s) {
     case M_NOTE: compose_note(a, s); break;
     case M_ID: compose_id(a, s); break;
     case M_TEXT: compose_text(a, s); break;
+    case M_OSK: compose_osk(a, s); break;
     default: compose_library(a, s);
     }
     if (a->overlay == OV_MM) r3_mm_draw(s, &a->mm, r3_themes[a->theme].name);
@@ -1543,7 +1554,7 @@ static void present(App *a, R3Video *v, SDL_Renderer *r, const R3Screen *s, int 
 
 /* ---- actions ------------------------------------------------------------------------------------------------------------------------------- */
 
-enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_VIDEO, A_ADD, A_CUE, A_BOOKMARK, A_CUEDEL, A_RECALC, A_SLADD, A_SLDEL, A_SLUP, A_SLDOWN, A_QUIT, A_CLOSE, A_JUMPCLEAR, A_KT, A_COMPRESS, A_LABELPICK };
+enum { A_MARK = 1, A_LABEL, A_DELETE, A_SAVE, A_EXPORT, A_OFFSET, A_SYNC, A_IMPORT, A_DEMO, A_LICENSE, A_VIDEO, A_ADD, A_CUE, A_BOOKMARK, A_CUEDEL, A_RECALC, A_SLADD, A_SLDEL, A_SLUP, A_SLDOWN, A_QUIT, A_CLOSE, A_JUMPCLEAR, A_KT, A_COMPRESS, A_LABELTYPE, A_LABELPICK };
 
 static const char *const PRESET_LABELS[] = {"Intro", "Verse", "Pre-Chorus", "Chorus", "Bridge", "Solo", "Instrumental", "Outro", "End", "Tag"};
 #define NPRESET ((int)(sizeof PRESET_LABELS / sizeof *PRESET_LABELS))
@@ -2023,10 +2034,37 @@ static void open_menu(App *a, int kind) {
     a->mode = M_MENU;
 }
 
+#define MARKER_NAME_MAX 40
+/* The on-screen keyboard (R3 in the player, or Name the selected marker > Type a name): the marker's own name, typed freely. */
+static void osk_open(App *a) {
+    if (!a->cues.nm) { say(a, R3_ST_HINT, "Mark a place first; then R3 names it."); return; }
+    if (a->jump_view) a->msel = a->jsel;
+    if (a->msel < 0 || a->msel >= a->cues.nm) a->msel = 0;
+    a->osk_marker = a->msel;
+    char prompt[64];
+    snprintf(prompt, sizeof prompt, "Marker %d, at %d:%02d", a->msel + 1, (int)a->cues.m[a->msel].time / 60, (int)a->cues.m[a->msel].time % 60);
+    r3_osk_new(&a->osk, "Name the marker", prompt, 0, MARKER_NAME_MAX, a->cues.m[a->msel].label);
+    a->back_mode = M_PLAYER;
+    a->mode = M_OSK;
+    SDL_StartTextInput();
+    say(a, R3_ST_HINT, "A types, X deletes, Y changes layer, Start keeps the name.");
+}
+
+static void osk_close(App *a, int result) {
+    SDL_StopTextInput();
+    a->mode = M_PLAYER;
+    if (result == R3_OSK_DONE && a->osk_marker >= 0 && a->osk_marker < a->cues.nm) {
+        snprintf(a->cues.m[a->osk_marker].label, sizeof a->cues.m[a->osk_marker].label, "%s", a->osk.text);
+        a->cues.dirty = 1;
+        say(a, R3_ST_OK, a->osk.text[0] ? "Named %s." : "The name is cleared.", a->osk.text);
+    } else say(a, R3_ST_HINT, "Name kept as it was.");
+}
+
 static void open_label_menu(App *a) {
     if (!a->cues.nm) return;
     menu_clear(&a->menu, "Name the marker");
     for (int i = 0; i < NPRESET; i++) menu_add(&a->menu, A_LABELPICK + i, PRESET_LABELS[i], "> 1 2 a b");
+    menu_add(&a->menu, A_LABELTYPE, "Type a name...", "R3");
     a->menu.sel = 0;
     say(a, R3_ST_HINT, "A keeps the name; Right adds a number or letter (Verse 1, Chorus 1a).");
     a->mode = M_MENU;
@@ -2550,6 +2588,7 @@ static void menu_choose(App *a) {
     case A_MARK: a->mode = M_PLAYER; mark_here(a); break;
     case A_CUE: a->mode = M_PLAYER; cue_here(a); break;
     case A_LABEL: if (a->jump_view) a->msel = a->jsel; open_label_menu(a); break;
+    case A_LABELTYPE: osk_open(a); break;
     case A_DELETE:
         if (a->jump_view) a->msel = a->jsel;
         if (a->cues.nm) { cue_del_marker(&a->cues, a->msel); if (a->msel >= a->cues.nm) a->msel = a->cues.nm ? a->cues.nm - 1 : 0; say(a, R3_ST_HINT, "Marker deleted."); }
@@ -2697,6 +2736,11 @@ static void app_action(App *a, int act) {
     case M_NOTE:
         if (act == R3_BACK || act == R3_ACCEPT) a->mode = M_LIBRARY;
         break;
+    case M_OSK: {
+        int r = r3_osk_press(&a->osk, act);
+        if (r != R3_OSK_OPEN) osk_close(a, r);
+        break;
+    }
     case M_ID:
         switch (act) {
         case R3_BACK: a->mode = M_LIBRARY; say(a, R3_ST_HINT, "Nothing added."); break;
@@ -2722,7 +2766,8 @@ static void dispatch(App *a, int act) {
     if (act == R3_MENU && (a->mode == M_LIBRARY || a->mode == M_PLAYER)) { mm_open(a); return; }
     if (act == R3_CONTEXT && a->mode == M_PLAYER) { open_menu(a, MK_CONTEXT); return; }
     if (act == R3_CONTEXT && a->mode == M_LIBRARY) { say(a, R3_ST_HINT, "No contextual menu here: L1+R1 is the menu."); return; }
-    if (act == R3_L3 || act == R3_R3) { if (a->mode == M_PLAYER || a->mode == M_LIBRARY) say(a, R3_ST_HINT, "MusiCue has no virtual %s.", act == R3_L3 ? "mouse" : "keyboard"); return; }
+    if (act == R3_R3 && a->mode == M_PLAYER) { osk_open(a); return; }                  /* the virtual keyboard names the selected marker */
+    if (act == R3_L3 || (act == R3_R3 && a->mode == M_LIBRARY)) { say(a, R3_ST_HINT, act == R3_L3 ? "MusiCue has no virtual mouse." : "R3 names a marker: open a song first."); return; }
     app_action(a, act);
 }
 
@@ -2780,9 +2825,8 @@ static int player_press(App *a, int bt, int act) {
         else if (bt == R3_BTN_Y) open_menu(a, MK_CONTEXT);
         else say(a, R3_ST_HINT, "Delete is in the context menu (L2+R2).");
         return 1;
-    case R3_BTN_L3: case R3_BTN_R3:
-        say(a, R3_ST_HINT, "MusiCue has no virtual %s.", bt == R3_BTN_L3 ? "mouse" : "keyboard");
-        return 1;
+    case R3_BTN_R3: osk_open(a); return 1;                                  /* the virtual keyboard names the selected marker */
+    case R3_BTN_L3: say(a, R3_ST_HINT, "MusiCue has no virtual mouse."); return 1;
     default: return 1;                                                      /* L1, R1, L2, R2 alone do nothing */
     }
 }
@@ -4190,6 +4234,52 @@ static void test_pad_map(void) {
     press(&a, R3_BTN_A);
     CHECK(!strcmp(a.cues.m[1].label, "Intro"), "A on a preset alone keeps the plain name");
 
+    /* the on-screen keyboard names a marker freely: R3, or Name the marker > Type a name */
+    a.msel = 1;
+    char was[64];
+    snprintf(was, sizeof was, "%s", a.cues.m[1].label);
+    open_label_menu(&a);
+    press(&a, R3_BTN_UP);                                                    /* the last item wraps round from the first */
+    CHECK(a.menu.it[a.menu.sel].id == A_LABELTYPE, "Up from the first preset reaches Type a name");
+    press(&a, R3_BTN_A);
+    CHECK(a.mode == M_OSK && a.osk_marker == 1 && !strcmp(a.osk.text, was), "Type a name opens the keyboard on the marker's own name (mode %d, \"%s\")", a.mode, a.osk.text);
+    for (int i = 0; i < 60; i++) press(&a, R3_BTN_X);                         /* the name is erased */
+    CHECK(a.osk.text[0] == 0, "X erases the name");
+    press(&a, R3_BTN_A);                                                     /* "1" */
+    press(&a, R3_BTN_Y); press(&a, R3_BTN_DOWN); press(&a, R3_BTN_A);        /* ABC layer, Q */
+    CHECK(!strcmp(a.osk.text, "1Q"), "A types the keys under the cursor: %s", a.osk.text);
+    r3_osk_type(&a.osk, " solo");                                            /* a USB keyboard's text */
+    press(&a, R3_BTN_START);
+    CHECK(a.mode == M_PLAYER && !strcmp(a.cues.m[1].label, "1Q solo") && a.cues.dirty, "Start keeps the typed name: %s", a.cues.m[1].label);
+    a.cues.dirty = 0;
+    pad_button(&a, R3_BTN_R3, 1); pad_button(&a, R3_BTN_R3, 0);
+    CHECK(a.mode == M_OSK, "R3 in the player opens the keyboard");
+    for (int i = 0; i < 60; i++) press(&a, R3_BTN_X);
+    pad_button(&a, R3_BTN_R3, 1); pad_button(&a, R3_BTN_R3, 0);
+    CHECK(a.mode == M_PLAYER && !strcmp(a.cues.m[1].label, "1Q solo") && !a.cues.dirty, "R3 closes it and keeps the old name");
+    press(&a, R3_BTN_R3);
+    press(&a, R3_BTN_B);
+    CHECK(a.mode == M_PLAYER && !strcmp(a.cues.m[1].label, "1Q solo"), "B cancels as well");
+    press(&a, R3_BTN_R3);
+    for (int i = 0; i < 60; i++) press(&a, R3_BTN_X);
+    press(&a, R3_BTN_START);
+    CHECK(a.mode == M_PLAYER && a.cues.m[1].label[0] == 0 && a.cues.dirty, "an empty name is allowed: it clears the label");
+    snprintf(a.cues.m[1].label, sizeof a.cues.m[1].label, "%s", was);
+    a.cues.dirty = 0;
+    {   /* the keyboard on the screen, in every theme: the cells pass 4.5:1 (the player stays behind it) */
+        static R3Screen os;
+        for (int t = 0; t < R3_THEME_COUNT; t++) {
+            r3_theme_apply(t);
+            press(&a, R3_BTN_R3);
+            compose(&a, &os);
+            double worst = 99;
+            for (int i = 0; i < R3_COLS * R3_ROWS; i++) { if (os.ch[i] == 32 || os.ch[i] == 0) continue; double c = r3_contrast_pal(os.fg[i], os.bg[i]); if (c < worst) worst = c; }
+            CHECK(worst >= 4.5, "%s: the keyboard over the player has a cell at %.2f:1", r3_themes[t].name, worst);
+            press(&a, R3_BTN_B);
+        }
+        r3_theme_apply(a.theme);
+    }
+
     /* the Piano over the Key: C3 to B3 on the pad, the shoulders are notes, Select and Start move the octave, Fn closes */
     a.pan_first = P_META;
     a.pan_focus = 0;
@@ -4871,6 +4961,9 @@ int main(int argc, char **argv) {
                 if (r3_toast_key(&toast)) break;
                 pad_button(&app, e.jbutton.button, 1);
                 break;
+            case SDL_TEXTINPUT:
+                if (app.mode == M_OSK && !app.overlay) r3_osk_type(&app.osk, e.text.text);
+                break;
             case SDL_KEYUP: {
                 int bt = key_button(e.key.keysym.sym);
                 if (bt == R3_BTN_L1 || bt == R3_BTN_R1 || (app.piano && bt >= 0)) pad_button(&app, bt, 0);
@@ -4880,9 +4973,13 @@ int main(int argc, char **argv) {
                 if (e.key.repeat) break;
                 if (r3_toast_key(&toast)) break;
                 SDL_Keycode k = e.key.keysym.sym;
+                if (app.mode == M_OSK && !app.overlay) {                                 /* a keyboard types the marker's name */
+                    int r;
+                    if (r3_osk_sdlkey(&app.osk, k, &r)) { if (r != R3_OSK_OPEN) osk_close(&app, r); break; }
+                }
                 if (app.mode == M_ID && id_key(&app, k, e.key.keysym.mod)) break;      /* a keyboard types the id */
                 if (app.mode == M_TEXT && !app.piano && text_key(&app, k, e.key.keysym.mod)) break;  /* ... and a metadata field */
-                if (k == SDLK_q && app.mode != M_TEXT && app.mode != M_ID) { app.quit = 1; break; }
+                if (k == SDLK_q && app.mode != M_TEXT && app.mode != M_ID && app.mode != M_OSK) { app.quit = 1; break; }
                 if (k == SDLK_m && app.mode == M_PLAYER && !app.overlay) { mark_here(&app); break; }
                 if (app.mode == M_PLAYER && !app.overlay && (k == SDLK_i || k == SDLK_k || k == SDLK_j || k == SDLK_l)) {       /* a keyboard: I K J L are the right stick */
                     stick_action(&app, k == SDLK_i ? R3_UP : k == SDLK_k ? R3_DOWN : k == SDLK_j ? R3_LEFT : R3_RIGHT);

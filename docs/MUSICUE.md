@@ -52,7 +52,7 @@ a recommendation to confirm or change; it is not legal advice, and what a person
 |---|---|
 | **Anything on a real R36S** | decode time on the Cortex-A35, memory, the sound device, the pad, the sync over Wi-Fi: **blocked on the maintainer's unit** |
 | **The rules every R36S port has** | a device report with a `== power ==` section (rules 9, 14), Rec demo with a demo file (the synthetic song is already the demo file, `--make-demo`) and a hero list (in the README), the hot-plug toast (polled in the main loop, so it shows over the sync too; checked by `--selftest`), the app's own `docs/` pointer rule (the app never names a doc: checked) |
-| **Naming a marker freely** | an on-screen keyboard (the theme has none yet); ten preset names and a USB keyboard's `M` for now |
+| **Naming a marker freely** | built 2026-11-21: **R3** (or Name the selected marker > Type a name...) opens the theme's on-screen keyboard (`theme/r3i6nos_osk.h`) on the marker's name; Start keeps it, B or R3 cancels; the ten presets and Right's number or letter stay. Untested on a unit |
 | **A text of its own** | MusiCue's terms and privacy text (Cue's describe a YouTube API client with a play counter), and the name's clearance (`~/Coding/cue/docs/cue-store-name.md` is Cue's research) |
 | **Cue's Set List and versions** | a bundle is imported as one version of each video (the favourite, else "mine", else the first); the Set List's order and the other versions are not kept |
 | **Practice speed and transposing** | the web app has none; `ffmpeg-min` has no `atempo`. Decided 2026-11-20: an offline render of a copy at a new Key and Tempo on four cores ("Key and Tempo: render a copy" below, ROADMAP section 40); the renderer is prototyped, the app does not use it yet |

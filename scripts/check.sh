@@ -191,6 +191,16 @@ if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     rm -f "$input_bin"
 else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
 
+step "on-screen keyboard (theme/r3i6nos_osk.h)"
+if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
+    osk_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-osk.XXXXXX")"
+    # shellcheck disable=SC2046,SC2086  # sdl2-config prints separate flags; $werror is empty or one flag
+    if cc -std=c11 -Wall -Wextra $werror -O2 -I theme $(sdl2-config --cflags) -o "$osk_bin" tests/test_osk.c $(sdl2-config --libs) -lm; then
+        "$osk_bin" || fail=1
+    else echo "FAIL: tests/test_osk.c does not compile"; fail=1; fi
+    rm -f "$osk_bin"
+else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
+
 step "screen mirror tap (theme/r3i6nos_mirror.h)"
 if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     mirror_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-mirror.XXXXXX")"

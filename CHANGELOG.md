@@ -5,6 +5,7 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **On-screen keyboard in the C theme, and MusiCue names a marker freely with it** (2026-11-21, ROADMAP section 36 step 8 and section 39 step 3): `theme/r3i6nos_osk.h` is `menu/osk.lua` for C (10 by 4 keys, three layers, hidden text, length limits, USB keyboard text) with `tests/test_osk.c` in `scripts/check.sh`; MusiCue opens it with R3 in the player or Name the selected marker > Type a name..., 40 characters, Start keeps, B or R3 cancels. Untested on a unit.
 - ROADMAP: three "not in scope / not pursued / not done by design" entries (sections 33, 34, PortMaster) are notes now, not open checkboxes (2026-11-21).
 - ROADMAP: two stale "rebuild an image" items ticked (Settings > Device reports; the hot-plug service), both already shown working on rebuilt images by the unit's reports (2026-11-21).
 - **First full real run of `scripts/build-ports.sh`** (2026-11-21, ROADMAP section 25): every port repo beside this one, Colima up; all 14 builds passed in 13 min 30 s (slowest Hydrolik, 192 s), no script needed a fix. Untested on a unit.
