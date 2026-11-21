@@ -5,7 +5,9 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
-- Package installs show a bar: `deb_watcher.py` writes `/run/loveos/pkg-progress` while it extracts (one step for each package), `r3i6nos-pkg` prints a bar on a terminal, and the open menu shows it on its command line (section 41 step 9). The boot pass still shows no screen. Untested on a unit.
+- Package installs show a bar: `deb_watcher.py` writes `/run/loveos/pkg-progress` while it extracts (one step for each package), `r3i6nos-pkg` prints a bar on a terminal, and the open menu shows it on its command line (section 41 step 9). Untested on a unit.
+
+- Boot: when packages wait to be extracted (a new card's first boot: the default apps) the menu's splash runs the watcher and shows its bar, step by step, instead of a black screen (`deb_watcher.py --pending` / `--progress`, `loveos-session`; section 41 step 9). Untested on a unit.
 
 - Menu: choosing PortMaster opens a notice first: the terms on the first launch (unsupported, no help from the PortMaster site or Discord, many ports will not run) which must be accepted, a short reminder on later launches, and the checklist of all 49 PortMaster runtimes both times, over pages: ticked when r3i6nos runs it, `!` when downloaded but unusable (`menu/portmaster.lua`; the list is the 2026-11-19 copy of `runtimes.json`). Untested on a unit.
 

@@ -117,6 +117,23 @@ class DebWatcher(unittest.TestCase):
         self.mod.extract = lambda deb, dest: False
         self.assertEqual(self.mod.process_debs(), 0)    # the extraction failed; progress still ended cleanly and nothing raised
 
+    def test_pending_and_progress_modes(self):
+        """loveos-session asks --pending (only the word pending on stdout when something waits); the menu's splash runs --progress."""
+        import subprocess, sys as _sys
+        env = dict(os.environ, R3I6NOS_DEB_DIR=str(self.debs), R3I6NOS_DEB_DIR2=str(self.debs.parent / "n2"), R3I6NOS_DEFAULT_DEB_DIR=str(self.debs.parent / "d"),
+                   R3I6NOS_APP_ROOT=str(self.apps), R3I6NOS_LAUNCHER_DIR=str(self.launchers), R3I6NOS_TOOLS_DIR=str(self.bin),
+                   R3I6NOS_PKG_PROGRESS=str(self.debs.parent / "prog"), R3I6NOS_PKG_RESERVE_MB="0", R3I6NOS_PKG_RESERVE_PCT="0")
+        run = lambda *a: subprocess.run([_sys.executable, str(SRC), *a], env=env, capture_output=True, text=True)
+        self.assertEqual(run("--pending").stdout, "")                  # nothing waiting: silent
+        (self.debs / "a.deb").write_bytes(b"x")
+        r = run("--pending")
+        self.assertEqual((r.stdout.strip(), r.returncode), ("pending", 0))
+        self.assertFalse(self.apps.joinpath("a").exists(), "--pending changes nothing")
+        r = run("--progress")                                          # dpkg-deb cannot extract the fake: the lines still come, then it ends
+        lines = [ln for ln in r.stdout.splitlines() if ln.startswith("PROGRESS ")]
+        self.assertEqual(lines[0], "PROGRESS 0 1 Installing a")
+        self.assertEqual(lines[-1], "PROGRESS 1 1 Done")
+
     def test_failed_extraction_leaves_nothing(self):
         (self.debs / "bad.deb").write_bytes(b"x")
         self.mod.extract = lambda deb, dest: False

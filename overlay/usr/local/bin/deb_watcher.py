@@ -284,6 +284,22 @@ def process_debs() -> int:
         _unreport()
 
 
+def pending_count() -> int:
+    """How many packages the next process_debs must extract (a new or replaced deb); nothing is changed."""
+    found = {}
+    for folder in (DEFAULT_DEB_DIR, DEB_DIR, DEB_DIR2):
+        if folder.is_dir():
+            for d in sorted(folder.glob("*.deb")):
+                found.setdefault(d.stem, []).append((d, folder))
+    n = 0
+    for name, c in found.items():
+        deb, _folder = pick(c)
+        stamp = APP_ROOT / name / STAMP
+        if not (stamp.is_file() and stamp.read_text().strip() == signature(deb)):
+            n += 1
+    return n
+
+
 def _process_debs() -> int:
     APP_ROOT.mkdir(parents=True, exist_ok=True)
     LAUNCHER_DIR.mkdir(parents=True, exist_ok=True)
@@ -391,4 +407,17 @@ def installed_packages():
 
 
 if __name__ == "__main__":
-    process_debs()
+    if "--pending" in sys.argv[1:]:
+        # loveos-session asks before the menu starts: "pending" (and nothing else) on stdout means packages are waiting to be extracted, so the
+        # menu's splash runs the watcher and shows the bar (ROADMAP section 41 step 9). Anything else (or a failure) and the session runs it itself.
+        try:
+            if pending_count() > 0:
+                print("pending")
+        except OSError:
+            pass
+    elif "--progress" in sys.argv[1:]:
+        # Run as the menu's splash does: one line "PROGRESS <step> <steps> <doing>" for each step, flushed, so a bar can follow it.
+        PROGRESS = lambda step, steps, doing: print(f"PROGRESS {step} {steps} {doing}", flush=True)
+        process_debs()
+    else:
+        process_debs()

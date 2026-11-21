@@ -50,8 +50,15 @@ mkdir -p "$NEXT_DIR" "$NEXT_DIR/net" "$NEXT_DIR/clock" "$NEXT_DIR/format" "$NEXT
 battery_sample session
 
 while true; do
-    # Pick up any .deb dropped on the card since the last pass.
-    "$WATCHER" || echo "loveos-session: deb_watcher failed" >&2
+    # Pick up any .deb dropped on the card since the last pass. When packages are waiting to be extracted (the first boot of a card: the default apps)
+    # the menu's splash runs the watcher itself and shows a bar (rule 18, ROADMAP section 41 step 9); otherwise (nothing to extract, only removals, or
+    # the watcher cannot say) it runs here, with no screen to show since it takes no time.
+    unset R3I6NOS_MENU_WATCH
+    if [ "$("$WATCHER" --pending 2>/dev/null)" = pending ]; then
+        export R3I6NOS_MENU_WATCH="$WATCHER"
+    else
+        "$WATCHER" || echo "loveos-session: deb_watcher failed" >&2
+    fi
 
     rm -f "$R3I6NOS_NEXT"
     "$MENU_LOVE" "$MENU"

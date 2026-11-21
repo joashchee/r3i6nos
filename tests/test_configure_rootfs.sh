@@ -223,6 +223,27 @@ R3I6NOS_RUN_APP="$T/run_app" R3I6NOS_WATCHER="$T/watcher" \
 [ -d "$T/run/net" ] || fail "the session did not make the folder Settings > Network leaves its requests in"
 [ "$(cat "$T/env")" = '|' ] || fail "no GPU dir, yet the session set GPU env: $(cat "$T/env")"
 
+# Packages waiting (rule 18, ROADMAP section 41 step 9): the watcher says "pending", so the session leaves it to the menu's splash (R3I6NOS_MENU_WATCH) and
+# does not run it; with nothing waiting (or a watcher that says nothing, as above) the session runs it itself and sets no variable.
+cat > "$T/watcher_pending" <<EOF
+#!/bin/bash
+if [ "\${1:-}" = --pending ]; then echo pending; else echo ran >> "$T/watcher_ran"; fi
+EOF
+cat > "$T/menu_watch" <<EOF
+#!/bin/bash
+printf 'love115\t/x.love\n' > "\$R3I6NOS_NEXT"
+printf '%s' "\${R3I6NOS_MENU_WATCH:-unset}" > "$T/menu_watch_env"
+EOF
+chmod +x "$T/watcher_pending" "$T/menu_watch"
+rm -f "$T/watcher_ran"
+R3I6NOS_ONCE=1 R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_MENU_LOVE="$T/menu_watch" R3I6NOS_RUN_APP="$T/run_app" R3I6NOS_WATCHER="$T/watcher_pending" \
+    overlay/usr/local/bin/loveos-session
+[ "$(cat "$T/menu_watch_env")" = "$T/watcher_pending" ] || fail "packages waiting: the menu was not given the watcher: $(cat "$T/menu_watch_env")"
+[ ! -e "$T/watcher_ran" ] || fail "packages waiting: the session ran the watcher itself"
+R3I6NOS_ONCE=1 R3I6NOS_NEXT_DIR="$T/run" R3I6NOS_MENU_LOVE="$T/menu_watch" R3I6NOS_RUN_APP="$T/run_app" R3I6NOS_WATCHER="$T/watcher" \
+    overlay/usr/local/bin/loveos-session
+[ "$(cat "$T/menu_watch_env")" = unset ] || fail "nothing waiting: the menu was given the watcher"
+
 # Battery history: a sample at the session start, around each app (with the app's name), every interval while it runs, and at shutdown.
 printf '#!/bin/bash\necho "$*" >> "%s/bat"\n' "$T" > "$T/battery"; chmod +x "$T/battery"
 cat > "$T/run_slow" <<EOF

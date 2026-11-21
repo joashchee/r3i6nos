@@ -39,4 +39,25 @@ function M.progress(path)
   return { step = math.min(step, steps), steps = steps, doing = text:match("doing=([^\n]*)") or "" }
 end
 
+--- One line of the watcher's --progress output: "PROGRESS <step> <steps> <doing>" -> { step, steps, doing }, anything else nil.
+function M.parseLine(line)
+  local step, steps, doing = tostring(line):match("^PROGRESS (%d+) (%d+) ?(.*)$")
+  if not step then return nil end
+  return { step = tonumber(step), steps = tonumber(steps), doing = doing }
+end
+
+--- Run the watcher for the splash (loveos-session sets R3I6NOS_MENU_WATCH to its path when packages wait): calls onStep(p) for each progress line, as it
+--- arrives, so the caller can draw. `popen` is io.popen (tests pass a fake). Returns true when it ran, false when there was nothing to run.
+function M.watch(cmd, onStep, popen)
+  if not cmd or cmd == "" then return false end
+  local p = (popen or io.popen)("'" .. cmd:gsub("'", "'\\''") .. "' --progress 2>&1")
+  if not p then return false end
+  for line in p:lines() do
+    local step = M.parseLine(line)
+    if step then onStep(step) end
+  end
+  p:close()
+  return true
+end
+
 return M

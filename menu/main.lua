@@ -71,6 +71,12 @@ function love.load()
   theme.init()
   screen = theme.screen()
   splash(0, 3, "Starting")
+  -- Packages waiting to be extracted (a new card's first boot: the default apps): loveos-session left the watcher to this splash so there is a bar (rule 18)
+  local watch = os.getenv("R3I6NOS_MENU_WATCH")
+  if watch and watch ~= "" then
+    splash(0, 3, "Installing packages")
+    pkgflag.watch(watch, function(p) splash(p.step, p.steps, p.doing) end)
+  end
   splash(1, 3, "Looking for games and apps")
   pkgflag.take(pkgs) -- a flag from before this start: the scan below sees what it announced
   entries = scan.entries(ROMS, LAUNCHERS, DEFAULTS, ROMS2)
