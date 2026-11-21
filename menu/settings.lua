@@ -112,6 +112,22 @@ end
 
 local pages_net, pages_ssh = pages.NETWORK, pages.SSH
 
+--- A network that came back from the data card is joined only after a person says yes, once a session (docs/SAVED-SETTINGS.md): a planted
+--- network is seen. The name comes from the helper's status ("Saved Wi-Fi: <name>"). Anything else joins at once.
+local function joinSaved(s, join)
+  local ps = s.dc and s.dc.persistState and s.dc.persistState() or {}
+  if s.wifiOk or not (","  .. (ps.RESTORED or "") .. ","):find(",wifi,", 1, true) then return join(s) end
+  ask(s, "Saved Wi-Fi", "status", {}, function(sy, res)
+    local name
+    for _, l in ipairs(res.lines or {}) do name = l:match("^Saved Wi%-Fi: (.+)$") or name end
+    if not name or name == "none" then return join(sy) end -- the helper reports no network to join
+    confirm(sy, "Join " .. name .. "?", "Join", "It was restored from the data card.", function(sz)
+      sz.wifiOk = true
+      join(sz)
+    end)
+  end)
+end
+
 local function networkMenu(s)
   local function asker(title, verb, args, ok)
     return function(sx) ask(sx, title, verb, args, ok or showResult(title)) end
@@ -125,7 +141,7 @@ local function networkMenu(s)
           wifiList(sy, res)
         end)
       end },
-    { label = "Wi-Fi: join saved", hint = "Join the network remembered from last time", run = asker("Wi-Fi", "wifi") },
+    { label = "Wi-Fi: join saved", hint = "Join the network remembered from last time", run = function(sx) joinSaved(sx, asker("Wi-Fi", "wifi")) end },
     { label = "Forget saved Wi-Fi", hint = "Remove the remembered network and its password", run = asker("Forget", "forget") },
     { label = "Test connection", hint = "Link, address, gateway, DNS, internet", run = asker("Connection test", "test") },
     { label = "Disconnect", hint = "Turn the network off", run = asker("Disconnect", "disconnect") },

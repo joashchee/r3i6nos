@@ -130,6 +130,27 @@ for label, verb in pairs({ ["Wired setup"] = "wired", ["Wi-Fi: join saved"] = "w
   eq(io_.last().verb, verb, label)
 end
 
+-- a network restored from the data card is joined only after a Yes, once a session
+do
+  local io2 = fake()
+  local fdc = { persistState = function() return { RESTORED = "timezone,wifi" } end }
+  local r = settings.new(io2, nil, nil, nil, nil, nil, nil, nil, fdc); settings.open(r)
+  choose(r, "Network"); choose(r, "Wi-Fi: join saved")
+  eq(io2.last().verb, "status", "asks the saved name first")
+  io2.answer({ ok = true, lines = { "Saved Wi-Fi: Cafe" } }); settings.tick(r, 0.1)
+  eq(kind(r), "confirm"); eq(title(r), "Join Cafe?"); eq(settings.node(r).sel, 2, "starts on No")
+  settings.press(r, "accept"); eq(#io2.sent, 1, "No joins nothing")
+  choose(r, "Wi-Fi: join saved"); io2.answer({ ok = true, lines = { "Saved Wi-Fi: Cafe" } }); settings.tick(r, 0.1)
+  settings.press(r, "up"); settings.press(r, "accept")
+  eq(io2.last().verb, "wifi", "Yes joins")
+  io2.answer({ ok = true, lines = { "joined" } }); settings.tick(r, 0.1); settings.press(r, "back")
+  choose(r, "Wi-Fi: join saved"); eq(io2.last().verb, "wifi", "asked once a session")
+  -- no restore: straight to the join
+  local io3 = fake()
+  local r2 = settings.new(io3, nil, nil, nil, nil, nil, nil, nil, { persistState = function() return {} end }); settings.open(r2)
+  choose(r2, "Network"); choose(r2, "Wi-Fi: join saved"); eq(io3.last().verb, "wifi")
+end
+
 -- ---- Wi-Fi: scan, pick, password, join
 local nets = {
   { ssid = "Home", signal = "-40 dBm", security = "WPA" },

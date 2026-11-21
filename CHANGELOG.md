@@ -5,6 +5,7 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- **Settings > Network > Wi-Fi: join saved asks first when the network was restored from the data card** (2026-11-21, `menu/settings.lua`, `tests/test_settings.lua`): "Join <name>? It was restored from the data card." (starts on No; once per menu session; the name from the helper's status), so a planted network is seen. Joining from Wi-Fi setup (typed by a person) and a network not restored this boot are not asked. **Untested on the unit.**
 - `r3i6nos-persist status --items` (so the Device report's saved-settings section) no longer prints a hash prefix of the Wi-Fi key's file, only `set` or `none` (section 38 step 7, first part).
 
 - Two-slot setup: the card it prepares gets r3i6nos's boot logo instead of the stock one (a missing or wrong-shaped logo keeps the stock one); the port template's README lists rules 14, 16, 17 and 18. Untested on a unit.

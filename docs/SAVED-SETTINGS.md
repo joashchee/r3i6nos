@@ -64,6 +64,8 @@ A bad file is left alone and reported. Files are written to a temporary name, sy
 
 ## What is stored for Wi-Fi, and who can read it
 
+**A restored network is confirmed before it is joined** (2026-11-21): when this boot restored the Wi-Fi item (`RESTORED` has `wifi`), Settings > Network > Wi-Fi: join saved first asks "Join <name>? It was restored from the data card." (default No, once per menu session), so a network planted on the card is seen. Untested on the unit.
+
 **The password itself is never written**: `r3i6nos-net` turns it into the 256-bit WPA key (PBKDF2, 4096 rounds, the network's name as the salt) and stores that, as `wpa_supplicant` wants it (`docs/NETWORK.md`).
 That key **cannot be turned back into the password** (a weak password can still be guessed from it offline, as from a captured handshake), but **it lets anyone join that network**, and on a WPA2 network read the traffic of
 anyone who joins it. Do not treat it as harmless.
