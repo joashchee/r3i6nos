@@ -319,7 +319,7 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
   deletes for good only the files Crunchy's own log shows it moved there, each checked by size and BLAKE3 first (a changed one stays; a
   person's own trashed files are never touched); Undo stops offering what is gone. Engine tests and the host's self-test pass on a Mac.
   **Untested on the unit:** that it frees space on the exFAT card, and the pad's X on the Undo panel.
-- [ ] [S] **A GitHub workflow** for the package (maintainer: Crunchy's repo has no CI yet).
+- [x] **A GitHub workflow** for the package (2026-11-21, Crunchy repo `.github/workflows/r36s.yml`, as Neumetik's). **Not yet run on GitHub.**
 - [ ] [L] **Later:** Smart Move on the pad, the `.diskettehashes` export, Compress image (oxipng and WebP first).
 
 ## 16. Chordica (a native port; code in the Chordica repo, `r36s/`; plan and decisions: `docs/CHORDICA-PORT.md`)
