@@ -56,6 +56,20 @@ F
 chmod +x "$T/flood"
 chk "endless output is cut at the cap, not listed" exit_is 2 env R3I6NOS_BSDTAR="$T/flood" "$T/t" bz2 "$T/x.tar.bz2"
 
+# the repository's real archives (corpus/files/archives, made by other tools): each is listed through bsdtar and its member read, or (bsdtar lacks the format) not listed
+corp() { # file kind member text
+    f="corpus/files/archives/$1"; [ -f "$f" ] || return 0
+    out="$("$T/t" "$2" "$f" 2>/dev/null)" || { echo "SKIP: bsdtar does not list $1"; return 0; }
+    chk "corpus $1: $3 read" grep -q "$4" <<<"$out"
+}
+corp stored.rar rar readme.txt "stored in a RAR 4"
+corp stored5.rar rar readme.txt "stored in a RAR 5"
+corp two.cab cab hello.txt "hello from a cabinet"
+corp old.lzh lzip README.TXT "stored in an LHA"
+corp game.7z 7z game/main.lua "hello corpus"
+corp game.tar.bz2 bz2 game/main.lua "hello corpus"
+corp game.tar.lz lzip game/main.lua "hello corpus"
+
 if command -v 7z >/dev/null || command -v 7zr >/dev/null; then
     S7="$(command -v 7z || command -v 7zr)"
     (cd "$T/src" && "$S7" a -bd "$T/x.7z" d >/dev/null)

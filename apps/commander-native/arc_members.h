@@ -127,7 +127,7 @@ static int bsdt_parse_line(char *line, ArcMem *m) {
         *p++ = 0;
     }
     /* tok: perms, links, owner, group, size, month, day, time-or-year; one space, then the name */
-    if (strlen(tok[0]) < 10 || !strchr("-dlhcbps", tok[0][0])) return 0;
+    if (strlen(tok[0]) < 10 || !strchr("-dlhcbps?", tok[0][0])) return 0;
     const char *name = p;
     if (!*name) return 0;
     memset(m, 0, sizeof *m);
@@ -136,13 +136,15 @@ static int bsdt_parse_line(char *line, ArcMem *m) {
     snprintf(when, sizeof when, "%s %2s %s", tok[5], tok[6], tok[7]);
     snprintf(m->when, sizeof m->when, "%-16.16s", when);
     char c = tok[0][0];
-    m->type = c == '-' ? AM_FILE : c == 'd' ? AM_DIR : c == 'l' ? AM_LINK : AM_OTHER;
+    /* '?' is a type libarchive could not tell (a RAR 5 entry made on Windows): a plain file unless its name ends in / */
+    m->type = c == '-' || c == '?' ? AM_FILE : c == 'd' ? AM_DIR : c == 'l' ? AM_LINK : AM_OTHER;
     char *arrow = c == 'l' ? strstr(name, " -> ") : NULL;
     char *hard = (c == '-' && m->size == 0) ? strstr(name, " link to ") : NULL;
     if (hard) { *hard = 0; snprintf(m->target, sizeof m->target, "%s", hard + 9); m->type = AM_LINK; }
     if (arrow) { *arrow = 0; snprintf(m->target, sizeof m->target, "%s", arrow + 4); }
     while (name[0] == '.' && name[1] == '/') name += 2;
     if (!strcmp(name, ".") || !*name) return 0;
+    if (m->type == AM_FILE && name[strlen(name) - 1] == '/') m->type = AM_DIR;
     snprintf(m->name, sizeof m->name, "%s", name);
     return 1;
 }
