@@ -97,6 +97,16 @@ def load_watcher():
 W = load_watcher()
 
 
+def _terminal_bar(step, steps, doing):
+    """Rule 18: the extraction after an install is the slow part and says nothing; on a terminal it prints a bar, once for each package."""
+    if sys.stdout.isatty() and steps:
+        full = step * 10 // steps
+        print(f"  [{'#' * full}{'.' * (10 - full)}] {step} of {steps}  {doing}", flush=True)
+
+
+W.PROGRESS = _terminal_bar
+
+
 # ---- cards ----------------------------------------------------------------------------------------------------------------------
 
 ROLES = {}      # folder -> "data card" or "system card", filled by cards()

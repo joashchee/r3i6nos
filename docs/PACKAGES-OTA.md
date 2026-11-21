@@ -122,3 +122,7 @@ Everything below is tested on a laptop and in Debian 12 (fake roots, fake cards,
 
 **Untested on the unit (all of it):** `openssl`, `dpkg-deb` and `python3` on an SSH login's PATH; the path unit starting the helper; the helper running as root against the real `/opt/loveos` (ownership, `systemctl daemon-reload`, `pkill` of the menu), and the menu really restarting; the menu confirming and the two-boot rollback actually running before `loveos.service`; a download over Wi-Fi and over the wired adapter; the time a 30 MB `get` takes. **Blocked on the maintainer:** `scripts/publish-packages.sh keygen`, committing `overlay/etc/r3i6nos/packages.pub`, a reflash with a build that has the helper (a unit flashed earlier has no `r3i6nos-sysupdate` and can take no system update), and the first `gh release upload`.
 
+
+
+## Progress while installing (2026-11-21, rule 18)
+`deb_watcher.py` writes `/run/loveos/pkg-progress` (`R3I6NOS_PKG_PROGRESS`: `step=`, `steps=`, `doing=`, one step for each package to extract, removed when done) and calls `PROGRESS` when a caller sets it. `r3i6nos-pkg` prints a bar on a terminal; the menu, when open, shows it on its command line within a second (`menu/pkgflag.lua`, `progress`). A boot or restart pass still shows nothing (the session runs the watcher before the menu); see ROADMAP section 41 step 9.

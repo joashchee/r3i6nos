@@ -24,7 +24,11 @@ and the reason is in LAST for r3i6nos-pkg to print; it is not half-installed and
 
 Paths can be overridden with environment variables so the tests run anywhere:
 R3I6NOS_DEB_DIR, R3I6NOS_DEB_DIR2, R3I6NOS_DEFAULT_DEB_DIR, R3I6NOS_APP_ROOT, R3I6NOS_LAUNCHER_DIR, R3I6NOS_TOOLS_DIR,
-R3I6NOS_PKG_RESERVE_MB (200) and R3I6NOS_PKG_RESERVE_PCT (10).
+R3I6NOS_PKG_RESERVE_MB (200) and R3I6NOS_PKG_RESERVE_PCT (10), R3I6NOS_PKG_PROGRESS.
+
+Progress (CLAUDE.md rule 18, ROADMAP section 41 step 9): while packages are extracted the watcher writes PROGRESS_FILE (step=, steps=, doing=: one
+step for each package it has to extract, the file gone when it ends) for the menu to show a bar, and calls PROGRESS(step, steps, doing) when a caller
+set one (r3i6nos-pkg prints a bar on a terminal). Nothing to extract, nothing written.
 """
 
 import json
@@ -48,6 +52,8 @@ SRC = ".r3i6nos-src"    # the folder that deb was in (removal needs that folder 
 META = ".r3i6nos-meta"  # json: version, installed size
 MIN_RESERVE = int(os.environ.get("R3I6NOS_PKG_RESERVE_MB", "200")) * 1024 * 1024  # a package may not leave the root filesystem with
 RESERVE_PCT = int(os.environ.get("R3I6NOS_PKG_RESERVE_PCT", "10"))                # less than this, or this % of it, free (the larger)
+PROGRESS_FILE = Path(os.environ.get("R3I6NOS_PKG_PROGRESS", "/run/loveos/pkg-progress"))
+PROGRESS = None         # a caller's callback(step, steps, doing)
 LAST = {}               # name -> (status, message) of the latest process_debs: installed, kept, refused, failed
 
 BIN_DIRS = ("usr/games", "usr/bin", "bin", "usr/local/games", "usr/local/bin")
@@ -252,7 +258,33 @@ def pick(candidates):
     return best
 
 
+def _report(step: int, steps: int, doing: str) -> None:
+    """Tell whoever is watching how far the extraction has got. A file that cannot be written never stops an install."""
+    try:
+        tmp = PROGRESS_FILE.with_name(PROGRESS_FILE.name + ".tmp")
+        tmp.write_text(f"step={step}\nsteps={steps}\ndoing={doing}\n")
+        os.replace(tmp, PROGRESS_FILE)
+    except OSError:
+        pass
+    if PROGRESS:
+        PROGRESS(step, steps, doing)
+
+
+def _unreport() -> None:
+    try:
+        PROGRESS_FILE.unlink()
+    except OSError:
+        pass
+
+
 def process_debs() -> int:
+    try:
+        return _process_debs()
+    finally:
+        _unreport()
+
+
+def _process_debs() -> int:
     APP_ROOT.mkdir(parents=True, exist_ok=True)
     LAUNCHER_DIR.mkdir(parents=True, exist_ok=True)
     LAST.clear()
@@ -268,11 +300,16 @@ def process_debs() -> int:
     for stale in APP_ROOT.glob("*.new"):                      # an extraction a power-cut interrupted
         shutil.rmtree(stale, ignore_errors=True)
 
+    todo = [n for n, (d, _f) in debs.items() if not ((APP_ROOT / n / STAMP).is_file() and (APP_ROOT / n / STAMP).read_text().strip() == signature(d))]
+    steps, done = len(todo), 0
+
     for name, (deb, folder) in debs.items():
         dest = APP_ROOT / name
         stamp = dest / STAMP
         sig = signature(deb)
         if not (stamp.is_file() and stamp.read_text().strip() == sig):
+            _report(done, steps, f"Installing {name}")
+            done += 1
             # New or replaced deb: extract fresh into <name>.new, then swap, never over an old tree.
             if control(deb, "X-R3i6nos-Kind") == "system":      # root's to install, from the signed catalog only (r3i6nos-sysupdate)
                 why = "a system package is installed only by r3i6nos-sysupdate, from the signed catalog"
@@ -317,6 +354,9 @@ def process_debs() -> int:
         write_launcher(LAUNCHER_DIR / f"{name}.sh", dest, executable)
         installed += 1
         LAST[name] = ("installed", "")
+
+    if steps:
+        _report(steps, steps, "Done")
 
     # A deb that was removed from its folder takes its app and launcher with it, but only when that folder is there to say so:
     # a card that is not mounted must never uninstall anything.

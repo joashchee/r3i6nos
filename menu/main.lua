@@ -24,6 +24,8 @@ local sysconfirm = require("sysconfirm") -- after a system update: the first ful
 local sysmark = sysconfirm.new()
 
 local ROMS = os.getenv("R3I6NOS_ROMS") or "/roms"
+local PKG_PROGRESS = os.getenv("R3I6NOS_PKG_PROGRESS") or "/run/loveos/pkg-progress" -- deb_watcher's bar while it installs (rule 18)
+local pkgProgress, pkgProgressAge, pkgProgressShown = nil, 0, ""
 local ROMS2 = os.getenv("R3I6NOS_ROMS2") or "/roms2" -- the data card (docs/STORAGE.md)
 local LAUNCHERS = os.getenv("R3I6NOS_LAUNCHERS") or "/opt/launchers/native"
 local DEFAULTS = os.getenv("R3I6NOS_DEFAULTS") or "/opt/loveos/defaults"
@@ -124,6 +126,13 @@ end
 function love.update(dt)
   toast.poll(hotplug, love.timer.getTime())
   settings.tick(dialog, dt)
+  pkgProgressAge = pkgProgressAge + dt
+  if pkgProgressAge >= pkgflag.EVERY then -- an install over SSH is extracting: show how far on the command line
+    pkgProgressAge = 0
+    pkgProgress = pkgflag.progress(PKG_PROGRESS)
+    local shown = pkgProgress and (pkgProgress.step .. "/" .. pkgProgress.steps .. pkgProgress.doing) or ""
+    if shown ~= pkgProgressShown then pkgProgressShown = shown; redraw.mark(rd) end
+  end
   if pkgflag.poll(pkgs, dt) then dialog.rescan = true end -- a package was added or removed over SSH
   if dialog.rescan then -- the data card was formatted (Settings > Data card), or a package changed: read the cards again
     dialog.rescan = nil
@@ -214,7 +223,7 @@ function love.joystickpressed(_, button)
 end
 
 function love.draw()
-  view.render(screen, { entries = entries, selected = selected, dialog = dialog, battery = power, net = net })
+  view.render(screen, { entries = entries, selected = selected, dialog = dialog, battery = power, net = net, install = pkgProgress })
   toast.draw(hotplug, screen)
   theme.draw(screen)
   sysconfirm.confirm(sysmark) -- the first frame is up: a system update is good (r3i6nos-sysupdate boot would otherwise undo it)

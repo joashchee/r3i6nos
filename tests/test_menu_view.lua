@@ -309,4 +309,11 @@ do
   view.splash(sp, 3, 3, "Ready")
   has(table.concat(sp:dump(), "\n"), "Ready")
 end
+-- rule 18: an install over SSH shows its bar on the command line
+view.render(scr, { entries = entries, selected = 1, dialog = settings.new(), install = { step = 1, steps = 4, doing = "Installing pyxel" } })
+local last = scr:dump()
+local found = false
+for _, r in ipairs(last) do if r:find("Installing pyxel", 1, true) and r:find("[##", 1, true) and r:find("1 of 4", 1, true) then found = true end end
+assert(found, "the install bar is on the command line")
+
 print("splash ok")

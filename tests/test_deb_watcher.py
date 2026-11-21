@@ -93,6 +93,30 @@ class DebWatcher(unittest.TestCase):
         self.assertFalse((self.apps / "a").exists())
         self.assertFalse((self.launchers / "a.sh").exists())
 
+    def test_progress_one_step_for_each_package_to_extract(self):
+        """Rule 18: the progress file and callback say step n of the packages to extract, reach steps, and the file is gone after."""
+        pf = Path(self.tmp.name) / "progress"
+        self.mod.PROGRESS_FILE = pf
+        seen, files = [], []
+        self.mod.PROGRESS = lambda step, steps, doing: (seen.append((step, steps, doing)), files.append(pf.read_text() if pf.exists() else ""))
+        for n in ("a", "b"):
+            (self.debs / f"{n}.deb").write_bytes(b"x")
+        self.mod.process_debs()
+        self.assertEqual([(s, t) for s, t, _ in seen], [(0, 2), (1, 2), (2, 2)])
+        self.assertEqual(seen[0][2], "Installing a")
+        self.assertIn("step=1\nsteps=2\ndoing=Installing b\n", files[1])
+        self.assertFalse(pf.exists(), "the file goes when the work ends")
+        seen.clear()
+        self.mod.process_debs()                      # nothing new: nothing to say
+        self.assertEqual(seen, [])
+        self.assertFalse(pf.exists())
+
+    def test_progress_survives_an_unwritable_file_and_a_refused_package(self):
+        self.mod.PROGRESS_FILE = Path(self.tmp.name) / "no-such-folder" / "progress"
+        (self.debs / "a.deb").write_bytes(b"x")
+        self.mod.extract = lambda deb, dest: False
+        self.assertEqual(self.mod.process_debs(), 0)    # the extraction failed; progress still ended cleanly and nothing raised
+
     def test_failed_extraction_leaves_nothing(self):
         (self.debs / "bad.deb").write_bytes(b"x")
         self.mod.extract = lambda deb, dest: False

@@ -27,4 +27,16 @@ function M.poll(s, dt)
   return M.take(s)
 end
 
+--- Rule 18: while deb_watcher.py extracts packages (a push over SSH, r3i6nos-pkg) it keeps /run/loveos/pkg-progress (step=, steps=, doing=). The menu looks
+--- every EVERY seconds like the flag above (one failed open when nothing runs) and shows a bar on its command line. Returns { step, steps, doing } or nil.
+function M.progress(path)
+  local f = io.open(path, "r")
+  if not f then return nil end
+  local text = f:read("*a") or ""
+  f:close()
+  local step, steps = tonumber(text:match("step=(%d+)")), tonumber(text:match("steps=(%d+)"))
+  if not step or not steps or steps < 1 then return nil end
+  return { step = math.min(step, steps), steps = steps, doing = text:match("doing=([^\n]*)") or "" }
+end
+
 return M

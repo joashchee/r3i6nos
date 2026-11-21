@@ -304,6 +304,11 @@ function view.render(scr, state)
     left = "0 of 0"
   end
 
+  local ins = state.install -- rule 18: a package is being installed (over SSH): what, how far, as the command line's reply
+  if ins then
+    reply, kind = ("%s  %s  %d of %d"):format(ins.doing, theme.progressText(ins.step * 100 / ins.steps), ins.step, ins.steps), nil
+  end
+
   local d = state.dialog
   if d and settings.isOpen(d) then
     local hint, crumb = view.dialog(scr, d)
