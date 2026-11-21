@@ -50,6 +50,40 @@ ended by holding Select+Start for 2 seconds, with or without `gptokeyb`; `run_ap
 **`scripts/portmaster-diag.sh`**, a read-only report to run on the unit (kernel options, devices, whether a user can mount, each port's missing libraries and last log lines).
 **Next:** run the diagnostic and read why azimuth (no runtime, so no mount) failed; it should answer most of this.
 
+## Second set: games for the engines r3i6nos ships (made 2026-11-21; **nothing here has been run on a unit**)
+
+r3i6nos ships five runtimes pre-extracted (`docs/RUNTIMES.md`): Pyxel 2.2.8, Ren'Py 8.3.4, Solarus 1.6.5, Godot/FRT 3.6 and AGS 3.6. **They do not make PortMaster's own ports start from PortMaster:**
+those launch scripts mount the squashfs with `$ESUDO mount`, which needs root (`docs/PORTMASTER.md`, item 1). What works is taking the port's **game data out of its zip** and putting it in the
+folder the menu scans on a card (`Pyxel/`, `Renpy/`, `Godot/`, `Solarus/`, `AGS/`), where the menu runs it with `r3i6nos-run-<engine>`: no root, no mount, no PortMaster. The ports below were picked from
+the catalogue (`ports.json` of 2026-11-15, 1,506 ports) because their data is in the zip (`rtr`) or is a free download, they are small, and their runtime is the version we ship or the nearest to it.
+**Run our own samples first** (`tools/runtimes/samples/{Pyxel,Renpy,Solarus}`): if a sample fails, every port of that engine will, and the cause is the engine, not the port.
+
+| # | Engine | Port | Size | Data | What it tests |
+|---|---|---|---|---|---|
+| 1 | Pyxel 2.2.8 | **entropipes** | 0.1 MB | `rtr`, one `.pyxapp` | The simplest case: a packed game, window, pad, quit |
+| 2 | Pyxel | **ticoban** | 0.1 MB | `rtr` | Pad-driven puzzle: d-pad and A/B through SDL |
+| 3 | Pyxel | **vortexion** | 0.1 MB | `rtr` | An arcade game with sound |
+| 4 | Pyxel | **megaball** | 0.04 MB | `rtr`, loose `.py` and `.pyxres` | The unpacked form: a folder with `main.py` |
+| 5 | Pyxel | **pyxeljack** | 0.03 MB | `rtr` | A second small game, for frame pacing |
+| 6 | Godot 3.6 | **yolkheroes** | 0.3 MB | `.pck` | The one port built for the Godot 3.6 we ship: GLES2 on the Mali |
+| 7 | Godot 3.6 | **cairn** | 0.1 MB | free download | A second 3.6 port |
+| 8 | Godot 3.5 data | **turbotabletennis** | 0.1 MB | `rtr` | 3.5 data on the 3.6 engine: **the first that may fail on a version mismatch** |
+| 9 | Godot 3.5 | **starcatcher**, **hyper.jump** | 1.1 / 1.5 MB | `rtr` | A platformer and an action game: pad feel, frame rate |
+| 10 | Godot 3.5 | **pachycefalosaurus** | 0.8 MB | `rtr`, full game | A strategy game on the pad |
+| 11 | Godot 3.5 | **yomihd** | 10 MB | `rtr`, demo | Bigger assets, memory on 1 GB |
+| 12 | Ren'Py 8.3.4 | **justkisshimalready** | 33 MB | `rtr`, full game | A full game: start-up time, peak memory, text input |
+| 13 | Ren'Py 8.3.4 | **milkinside**, **onenighthotsprings** | 0.6 MB | free itch download | The missing-data message, then a small game |
+| 14 | Solarus 1.6.5 | **yarntown_pm** | 0.3 MB | free itch download | Whether Solarus's Lua (LuaJIT) works on the 4.4 kernel's address space |
+| 15 | AGS 3.6 | **kenslabyrinth** | 9.8 MB | `rtr` (zip not read: check it holds an `ac2game.dat`) | The only AGS candidate with data; the software renderer |
+| 16 | Godot 3.6 | **chasmal** | 0.1 MB | free download | Two sticks (`analog_2`; the unit has two) |
+
+Total about 20 MB without Ren'Py's full game, about 55 MB with it.
+
+- **Version risk:** a `.pck` pack is not guaranteed to load across Godot minor versions, and a Pyxel or Ren'Py game built for a newer or older runtime may not load. Left out for that reason: Godot 4.x ports, Pyxel ports on 2.3 to 2.9, Ren'Py 8.1.3 ports.
+- **`gptokeyb`:** many Godot ports expect the keyboard from `gptokeyb` (`turbotabletennis.gptk` is one). The menu's runner does not start it, so a game with no joypad action may ignore the pad: that is a finding about the game, not a failure of the runtime.
+- **Left out because it is not cheap:** anything that needs weston, Mono, .NET, Java or Qt; rlvm (an interpreter of a commercial engine: ask first, `docs/RUNTIMES.md`).
+- **How to try one:** unzip the port, copy its data (`<port>/<name>.pyxapp`, the `.pck`, the `game/` folder, the quest) into `<card>/Pyxel/<Name>/`, `Godot/`, `Renpy/<Name>/` or `Solarus/<Name>/`, install the engine's package (`scripts/push-packages.sh UNIT build/runtimes/*.deb`), and start it from the menu. Bring back, as in "What to bring back": did it draw, take the pad, make sound, return with Select+Start held 2 s; and the `== runtimes ==` section of `r3i6nos-report`.
+
 ## Not a download: the lists and the lifecycle (free)
 
 - **Hidden or flagged (checked on the unit, 2026-11-18, all three as they should be):** `toziuha2` (needs 2 GB), `shovel.knight` (armhf only) and **`nanosaur`** (needs `opengl`) are not in PortMaster's list; "Shovel Knight Pocket Dungeon" is a different port and is listed. **`opengl` is real desktop GL**: `device_info.txt` adds it only when Mesa's DRI drivers and a `libGL` that is not gl4es or the Mali blob are installed. The R36S has only the Mali GLES blob, so every port that needs `opengl` (2 in the catalogue: `nanosaur`, `bugdom`) is correctly hidden; ports that carry gl4es are the ones to test.
