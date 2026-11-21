@@ -26,7 +26,8 @@ docker run --rm --platform linux/arm64 -v "$PWD:/src:ro" debian:12-slim bash -eu
   if sh /src/apps/portmaster/shim/sudo mount $W/roms/ports/PortMaster/libs/bad_1.squashfs $W/home/bad 2>$W/bad.err; then fail "a device node was accepted"; fi
   wait
   grep -q "character device" $W/bad.err || fail "the refusal does not say why: $(cat $W/bad.err)"
-  [ ! -e $W/home/bad ] && [ -z "$(ls -A $W/cache)" ] || fail "a refused runtime left something"
+  [ ! -e $W/home/bad ] || fail "a refused runtime left something (home)"
+  [ -z "$(ls -A $W/cache)" ] || fail "a refused runtime left something (cache)"
   ( while [ ! -e $W/req/request ]; do sleep 0.1; done; $W/h apply ) &
   sh /src/apps/portmaster/shim/sudo mount $W/roms/ports/PortMaster/libs/test_1.squashfs $W/home/test || fail "shim mount"
   wait

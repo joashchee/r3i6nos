@@ -86,4 +86,4 @@ if [ -n "$MK" ]; then
     chk "ISO member bytes" grep -qx "hello" <<<"$out"
 else echo "SKIP: no genisoimage for the ISO case"; fi
 
-[ "$fail" = 0 ] && echo "arc bsdtar: ok" || exit 1
+if [ "$fail" = 0 ]; then echo "arc bsdtar: ok"; else exit 1; fi
