@@ -125,8 +125,11 @@ member out into a temporary file and opens it in the viewer, as any other file (
 **B** goes back to the list at the same member, and the temporary file is removed. **Start** (Tab, F1 or `s` on a keyboard) extracts
 the member into the other panel's folder under its own name, without its folders, and never over a file that is already there
 (it says so). A folder, a link, an encrypted member, one packed by a method that is not supported (ZIP's deflate and stored are) and
-one over 48 MiB say why they cannot be opened. A document in a ZIP (docx, odt, EPUB) still shows its text instead. A cpio (newc, CRC or old ASCII) opens the same way. RAR, Cabinet, LHA,
-ISO and 7-Zip list their members but cannot give them yet. Reopening the list after B reads the archive again, so a big
+one over 48 MiB say why they cannot be opened. A document in a ZIP (docx, odt, EPUB) still shows its text instead. A cpio (newc, CRC or old ASCII) opens the same way.
+**7-Zip, RAR, Cabinet, LHA, ISO, lzip and `.tar.bz2` go through `bsdtar`** (the image's `libarchive-tools`): Commander runs `bsdtar -tvf` to list (5,000 members, 4 MiB of text, 30 s) and
+`bsdtar -xOf` to take a member (48 MiB, 120 s), as an unprivileged child with a 700 MiB memory limit, then shows and extracts it as any other member. Without `bsdtar` those
+formats keep their details page (and the native RAR, Cabinet and ISO lists). A 7-Zip, RAR or Cabinet with a password, a damaged one or a method libarchive lacks says it could not be unpacked. A plain `.bz2`
+(no tar inside) is still only named: bsdtar cannot read it. (On the unit: untested.) Reopening the list after B reads the archive again, so a big
 `.tar.xz` takes the same few seconds on the way back as on the way in (on the unit: untested).
 
 **What it will and won't do:** copy and move go to the other panel's folder and **never overwrite unasked**: a name that already exists opens a dialog for it, **Overwrite**

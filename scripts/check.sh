@@ -119,6 +119,10 @@ if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     done
 else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
 
+step "Commander's archive members through bsdtar (apps/commander-native/arc_members.h)"
+if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then tests/test_arc_bsdtar.sh || fail=1
+else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
+
 step "xz and zstd decoders (apps/commander-native/lzma.h, zstd.h)"
 if command -v cc >/dev/null; then tests/test_unpack.sh || fail=1
 else echo "NOT RUN: needs a C compiler"; fi

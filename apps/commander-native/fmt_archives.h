@@ -1137,7 +1137,7 @@ static int info_archive(const FFile *f, int kind, FInfo *in) {
     case K_CAB: n = cab_list(f, NULL, &total); fmt_bytes(total, a, sizeof a); info_add(in, "Contents", "%d files, %s unpacked", n, a); return 1;
     case K_CPIO: n = cpio_list(f, NULL, &total); fmt_bytes(total, a, sizeof a); info_add(in, "Contents", "%d entries, %s", n, a); return 1;
     case K_LZH: n = lzh_list(f, NULL, &total); fmt_bytes(total, a, sizeof a); info_add(in, "Contents", "%d files, %s unpacked", n, a); return 1;
-    case K_7Z: if (f->hn > 8) info_add(in, "Version", "%d.%d", f->head[6], f->head[7]); info_add(in, "Contents", "not listed: 7-Zip's list is itself packed"); return 1;
+    case K_7Z: if (f->hn > 8) info_add(in, "Version", "%d.%d", f->head[6], f->head[7]); info_add(in, "Contents", "not listed here (the Contents tab lists it through bsdtar when the system has it)"); return 1;
     case K_BZIP2: if (f->hn > 4) info_add(in, "Block size", "%d00 KB", f->head[3] - '0'); return 1;
     case K_XZ:
         if (f->hn > 8) { static const char *chk[] = {"none", "CRC32", "", "", "CRC64", "", "", "", "", "", "SHA-256"}; int c = f->head[7] & 15; info_add(in, "Check", "%s", c <= 10 && chk[c][0] ? chk[c] : "other"); }
