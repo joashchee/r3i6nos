@@ -183,7 +183,8 @@ jobs:
           sudo apt-get install -y debootstrap debian-archive-keyring \
             qemu-user-static binfmt-support systemd zstd
 
-      - name: Register the arm64 binfmt handler (apt installs qemu but may not enable it: "Exec format error" in debootstrap stage 2)
+      # apt installs qemu but may not enable it; debootstrap stage 2 then fails with "Exec format error"
+      - name: Register the arm64 binfmt handler
         run: |
           sudo mount -t binfmt_misc binfmt_misc /proc/sys/fs/binfmt_misc 2>/dev/null || true
           sudo update-binfmts --enable qemu-aarch64 || true
