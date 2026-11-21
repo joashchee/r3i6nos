@@ -5,7 +5,7 @@ local M = {}
 
 M.TOOLS = os.getenv("R3I6NOS_TOOLS_DIR") or "/opt/loveos/bin"
 M.ROMS = os.getenv("R3I6NOS_ROMS") or "/roms"
--- PortMaster-New's runtimes.json as fetched 2026-11-19 (49 runtimes, each with an aarch64 build): name, the aarch64 file PortMaster downloads into
+-- PortMaster-New's runtimes.json as fetched 2026-11-19 and re-checked unchanged on 2026-11-21 (49 runtimes, each with an aarch64 build): name, the aarch64 file PortMaster downloads into
 -- <ports>/PortMaster/libs, and cmd for the three r3i6nos can run (extracted packages, docs/RUNTIMES.md). Refresh it by hand when the list changes.
 M.LIST = {
   { name = "PMJS v1", file = "pmjs_v1.aarch64.squashfs" },

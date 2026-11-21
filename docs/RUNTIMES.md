@@ -87,3 +87,18 @@ screen may ignore the pad. The sample games also quit on Start (Pyxel, Solarus) 
 
 ROADMAP section 33 step 5: one maker for each runtime that passes the unit run, in the order Pyxel, Ren'Py, Solarus, each its own repository and port following rules 8-14 and 16 (theme, device report with
 power, Rec demo, splash, hot-plug toast, data card). They write a game folder in the card's `Pyxel/`, `Renpy/` or `Solarus/` folder (through `r3_appdata_init`'s folder, rule 16) and start it by the same types.
+
+## The rest of PortMaster's runtimes: which could be added cheaply (checked 2026-11-21)
+
+PortMaster-New's `runtimes/runtimes.json` still lists the same 49 runtimes as on 2026-11-19 (the list is in `menu/portmaster.lua`, shown by the PortMaster notice). Sizes are the squashfs files in the repository's `runtimes/` folder. **"Cheap" means the same shape as Pyxel, Ren'Py and Solarus:** a gzip squashfs (extracted, never mounted, so no root), an aarch64 build whose libraries all resolve on the image, one `r3i6nos-run-<name>` command, a manifest in `tools/runtimes/<name>/`, a package on the card. I fetched five from the pinned commit `16a1a4b`, unpacked them in Debian 12 arm64 and ran `ldd` on every aarch64 ELF with the image's library set. **Nothing was run on a unit; none starts a window yet.**
+
+| Runtime | Download | Unpacked | `ldd` on the image's libraries | Verdict |
+|---|---|---|---|---|
+| **AGS 3.6** (Adventure Game Studio) | 3.1 MB | 7 MB | nothing missing | **Cheapest, and the best fit:** an engine, tiny, plays a large catalogue of adventure games (the person's own or freeware ones) |
+| **Godot/FRT 3.6** | 12.3 MB | 28 MB | nothing missing | **Cheap:** Godot 3 renders with GLES2, which suits the Mali; plays `.pck` games. One Godot 3 version is enough (3.5.3 and 3.6 are the newest; the older FRT builds only for old games) |
+| **Godot 4.3** | 23.5 MB | 57 MB | nothing missing | Same recipe, but Godot 4 needs GLES3 from the Mali blob: **not known to work, so try 3.6 first** |
+| **Real Live VM (rlvm)** | 8.3 MB | 18 MB | `libGL.so.1` missing, but it ships its own `gl4es` (GL on GLES) in its folder, which the command would put on `LD_LIBRARY_PATH` | Possible, **but it runs a commercial visual-novel engine's bytecode: an interpreter of someone else's engine, close to what "No emulators" means. Ask before adding** |
+
+**Not cheap, and why:** Java (JRE or JDK 47-55 MB each, a JVM on 1 GB), DotNet 3.1 and 8 and Mono (30 MB and up, a managed runtime), Westonpack (55 MB, an X11/Wayland layer: 84 ports use it; needs the DRM master), Mesapack (58 MB, software GL beside the Mali blob), Qt6/EGLFS (40 MB, apps), PMJS (53 MB), `python_3.11` (33 MB, links Debian 11 libraries; the image's own Python does what Pyxel needs, section above), GMToolkit (a GameMaker loader, **not checked**: its file is not in the repository listing under that name), the other Pyxel versions (same recipe as 2.2.8, but a second Pyxel beside the first only matters if a maker wants a newer one: 2.9.5 is the latest) and Ren'Py 8.1.3 (older than the shipped 8.3.4). armhf and x86_64 builds are out of scope.
+
+**What this does not do:** a package here lets r3i6nos run **games from a card folder through the menu**. It does **not** make PortMaster's own ports that name the runtime start: their launch scripts mount PortMaster's squashfs with `$ESUDO mount`, which needs root (docs/PORTMASTER.md, item 1). That is a different and not cheap change (a root helper).
