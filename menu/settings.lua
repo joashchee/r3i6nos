@@ -432,7 +432,9 @@ end
 function settings.openPortMaster(s, on_go)
   s.stack = {}
   local first = not portmaster.accepted()
-  push(s, { kind = "notice", title = "PortMaster", first = first, sel = 1, runtimes = portmaster.runtimes(), on_go = on_go })
+  local list = portmaster.runtimes()
+  local text = first and portmaster.TERMS or portmaster.REMINDER
+  push(s, { kind = "notice", title = "PortMaster", first = first, sel = 1, runtimes = list, page = 1, sizes = portmaster.pageSizes(#list, #text), on_go = on_go })
 end
 
 --- The card's first boot: the Date and time dialog on its own (docs/CLOCK.md). B is "Not now" and is remembered.
@@ -481,6 +483,10 @@ function settings.press(s, action)
     end
   elseif n.kind == "notice" then
     if action == "up" or action == "down" then n.sel = 3 - n.sel
+    elseif action == "left" or action == "pageup" then n.page = math.max(1, n.page - 1)
+    elseif action == "right" or action == "pagedown" then n.page = math.min(#n.sizes, n.page + 1)
+    elseif action == "home" then n.page = 1
+    elseif action == "end" then n.page = #n.sizes
     elseif action == "back" then pop(s)
     elseif action == "accept" then
       if n.sel == 1 then

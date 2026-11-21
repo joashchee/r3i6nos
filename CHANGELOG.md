@@ -5,7 +5,7 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
-- Menu: choosing PortMaster opens a notice first: the terms on the first launch (unsupported, no help from the PortMaster site or Discord, many ports will not run) which must be accepted, a short reminder on later launches, and the Pyxel / Ren'Py / Solarus runtimes' checklist both times (`menu/portmaster.lua`). Untested on a unit.
+- Menu: choosing PortMaster opens a notice first: the terms on the first launch (unsupported, no help from the PortMaster site or Discord, many ports will not run) which must be accepted, a short reminder on later launches, and the checklist of all 49 PortMaster runtimes both times, over pages: ticked when r3i6nos runs it, `!` when downloaded but unusable (`menu/portmaster.lua`; the list is the 2026-11-19 copy of `runtimes.json`). Untested on a unit.
 
 - PortMaster: decided which of rule 18 applies (only r3i6nos's own waits: the launcher's first-start copy has no bar; PortMaster's GUI and ports are third-party), recorded in `docs/PORTMASTER.md` (section 41 step 8). Docs only.
 

@@ -115,31 +115,46 @@ local function drawConfirm(scr, n)
   return n.hint
 end
 
--- PortMaster's notice: the terms (first time) or a reminder, the runtimes' checklist, then the two choices.
+-- PortMaster's notice: page 1 has the terms (first time) or a reminder, then the runtimes' checklist (every PortMaster runtime, two columns, whole pages:
+-- L1/R1 turn the page), and the two choices stay at the bottom of every page.
 local function drawNotice(scr, n)
   local pm = require("portmaster")
   local st = theme.STYLE
-  local text = n.first and pm.TERMS or pm.REMINDER
-  local w, h = 58, #text + #n.runtimes + 9
+  local w, h = 60, theme.DISPLAY_ROWS
   local col, row = centered(w, h)
-  scr:box(col, row, w, h, { title = n.title, foot = "A Choose  B Not now" })
-  local y = row + 2
-  for i, line in ipairs(text) do
-    local s = (i == 1) and st.warn or st.body
-    scr:text(col + 3, y, theme.fit(line, w - 6), s.fg, s.bg)
+  scr:box(col, row, w, h, { title = n.title, right = ("Page %d/%d"):format(n.page, #n.sizes), foot = "A Choose  L1/R1 Page  B Not now" })
+  local y = row + 1
+  if n.page == 1 then
+    for i, line in ipairs(n.first and pm.TERMS or pm.REMINDER) do
+      local s = (i == 1) and st.warn or st.body
+      scr:text(col + 3, y, theme.fit(line, w - 6), s.fg, s.bg)
+      y = y + 1
+    end
     y = y + 1
   end
-  y = y + 1
-  scr:text(col + 3, y, "Runtimes r3i6nos can run (installed as packages):", st.strong.fg, st.strong.bg)
-  y = y + 1
-  for _, r in ipairs(n.runtimes) do
-    scr:put(col + 5, y, r.installed and 251 or 32, st.body.fg, st.body.bg)
-    scr:text(col + 7, y, r.name, st.body.fg, st.body.bg)
-    scr:text(col + 20, y, r.installed and "installed" or "not installed", st.hint.fg, st.hint.bg)
-    y = y + 1
-  end
-  scr:text(col + 3, y, theme.fit(pm.OTHER, w - 6), st.hint.fg, st.hint.bg)
+  local installed = 0
+  for _, r in ipairs(n.runtimes) do if r.installed then installed = installed + 1 end end
+  scr:text(col + 3, y, theme.fit(("Runtimes: %d of %d run here"):format(installed, #n.runtimes), 29), st.strong.fg, st.strong.bg)
+  local lx = col + 33
+  scr:put(lx, y, 251, st.body.fg, st.body.bg)
+  scr:text(lx + 2, y, pm.LEGEND, st.hint.fg, st.hint.bg)
+  scr:put(lx, y + 1, 33, st.warn.fg, st.warn.bg)
+  scr:text(lx + 2, y + 1, pm.LEGEND2, st.hint.fg, st.hint.bg)
   y = y + 2
+  local first = 0
+  for p = 1, n.page - 1 do first = first + n.sizes[p] end
+  local per = math.ceil(n.sizes[n.page] / pm.COLS)
+  local cw = math.floor((w - 6) / pm.COLS)
+  for k = 1, n.sizes[n.page] do
+    local r = n.runtimes[first + k]
+    local c, rr = math.floor((k - 1) / per), (k - 1) % per
+    local x = col + 3 + c * cw
+    local mark, s = 32, st.hint
+    if r.state == "ok" then mark, s = 251, st.body elseif r.state == "downloaded" then mark, s = 33, st.warn end
+    scr:put(x, y + rr, mark, s.fg, s.bg)
+    scr:text(x + 2, y + rr, theme.fit(r.name, cw - 2), s.fg, s.bg)
+  end
+  y = row + h - 4
   local go = n.first and "I understand: accept and open" or "Open PortMaster"
   for i, label in ipairs({ go, "Not now" }) do
     local s = (n.sel == i) and st.select or st.strong
