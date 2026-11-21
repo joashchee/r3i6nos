@@ -367,7 +367,7 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
 - [x] **Committed** in the TinyNTT repo, Neumetik (removed) and here.
 - [x] **Rhythm** (2026-11-12, TinyNTT repo `b25033d`, `e5d2015`, `6038570`): a rhythm corpus, notations and tempos, a step sequencer, and Neumetik's rhythm notation module (Neumetik's `neumetik-midi` gained janggu, taiko syllable and Hydrogen readers on 2026-11-14). Rec demo now shows the sequencer (progress scale 2072 frames). **Untested on the unit:** the sequencer's screen and pad, the Fill dialog, `rhythm patterns` in the report; the Rec demo has not run with all six hero features ticked on this build.
 - [x] **Power section and idle loop** (2026-11-12 to 13, TinyNTT repo `78b5415`, `1d8db5c`, `fad32ea`): see section 23. Still open in TinyNTT's roadmap: the report on the new build with a song open, so the working window is measured.
-- [ ] [S] **A GitHub workflow** for the package.
+- [x] **A GitHub workflow** for the package (2026-11-21, TinyNTT repo `.github/workflows/r36s.yml`, as Neumetik's). **Not yet run on GitHub.**
 - [ ] [L] **Later:** velocity per note, swing, copy and paste of bars, more styles, Ogg or FLAC export, other platforms.
 
 ## 18. Rec demo: every R36S port records screenshots and a video of itself (CLAUDE.md rule 11; `docs/DEMO-RECORDINGS.md`)
