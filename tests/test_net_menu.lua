@@ -58,6 +58,13 @@ assert(id2 ~= id, "every request has its own id")
 eq(netclient.poll(id2), nil, "the earlier request's answer is not taken for the new one")
 f = io.open(dir .. "/out/result", "w"); f:write("id=" .. id2 .. "\nok=0\nL\tNo adapter\n"); f:close()
 eq(netclient.poll(id2).ok, false)
+-- a helper's progress file: only the request's own, whole, and sane
+eq(netclient.progress(id2), nil, "no progress file yet")
+f = io.open(dir .. "/out/progress", "w"); f:write("id=" .. id2 .. "\nstep=4\nsteps=6\ndoing=Making the file system\n"); f:close()
+local pr = assert(netclient.progress(id2)); eq(pr.step, 4); eq(pr.steps, 6); eq(pr.doing, "Making the file system")
+eq(netclient.progress(id), nil, "another request's progress is not taken")
+f = io.open(dir .. "/out/progress", "w"); f:write("id=" .. id2 .. "\nstep=9\nsteps=6\n"); f:close()
+eq(netclient.progress(id2), nil, "a step past the end is not believed")
 netclient.DIR = dir .. "/missing"
 local bad, err = netclient.request("status", {}); eq(bad, nil); assert(err)
 os.execute("rm -rf '" .. dir .. "'")

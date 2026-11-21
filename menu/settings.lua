@@ -62,7 +62,7 @@ local function ask(s, title, verb, args, on_result)
   local id, err = s.io.request(verb, args or {})
   if not id then return show(s, title, { "Could not ask for it:", tostring(err) }, false) end
   push(s, {
-    kind = "busy", title = title, id = id, verb = verb, elapsed = 0,
+    kind = "busy", title = title, id = id, verb = verb, elapsed = 0, why = "The helper does not say how far it is.",
     timeout = settings.TIMEOUT[verb] or settings.TIMEOUT.default, on_result = on_result,
   })
 end
@@ -330,8 +330,8 @@ local function formatCard(s, f)
   local id, err = dc.client.request("format", { fs = f.fs })
   if not id then return show(s, title, { "Could not ask for it:", tostring(err) }, false) end
   push(s, {
-    kind = "busy", title = title, id = id, elapsed = 0, timeout = dc.WAIT, waiting = "Formatting the card, please wait...",
-    poll = function(b) return dc.client.poll(b.id) end,
+    kind = "busy", title = title, id = id, elapsed = 0, timeout = dc.WAIT, waiting = "Formatting the card...", foot = "B Back (the format goes on)",
+    poll = function(b) b.prog = dc.client.progress(b.id); return dc.client.poll(b.id) end,
     lost = { "No answer from the format helper.", "", "It may still be working. Look at Status in a", "few minutes, or restart the unit." },
     on_result = function(sx, res)
       if res.ok then sx.rescan = true end -- the card's old games are gone: the menu's list is read again
@@ -369,7 +369,7 @@ local function aboutMenu(s)
         local ok, err = ab.startCheck()
         if not ok then return show(sx, "Updates", { "Could not check:", tostring(err) }, false) end
         push(sx, {
-          kind = "busy", title = "Checking for updates", elapsed = 0, timeout = ab.WAIT, waiting = "Asking GitHub...",
+          kind = "busy", title = "Checking for updates", elapsed = 0, timeout = ab.WAIT, waiting = "Asking GitHub...", why = "The answer's time is up to the network.",
           poll = function() return ab.poll() end, lost = ab.CHECK_LOST,
           on_result = function(sy, res) show(sy, "Updates", res.lines, res.ok) end,
         })
@@ -391,7 +391,7 @@ local function setClock(s, n)
   local id, err = clk.client.request("set", clk.request(n.c))
   if not id then return show(s, n.title, { "Could not ask for it:", tostring(err) }, false) end
   push(s, {
-    kind = "busy", title = n.title, id = id, elapsed = 0, timeout = clk.WAIT, waiting = "Setting the clock...",
+    kind = "busy", title = n.title, id = id, elapsed = 0, timeout = clk.WAIT, waiting = "Setting the clock...", why = "The helper does not say how far it is.",
     poll = function(b) return clk.client.poll(b.id) end,
     lost = { "No answer from the clock helper.", "", "The clock was not set. Try again from", "Settings > Date and time." },
     on_result = function(sx, res) show(sx, n.title, res.lines, res.ok) end,

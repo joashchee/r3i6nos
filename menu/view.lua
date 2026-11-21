@@ -78,29 +78,31 @@ local function drawOsk(scr, n)
   return o.error or "Type with the pad, or a keyboard"
 end
 
--- A wait. With n.prog (a device report's progress): what it is doing, a bar when it says its steps, and the time so far.
+-- A wait (rule 18). With n.prog (a report's or the format's progress): what it is doing, a bar of its steps, and the time so far. Without
+-- steps the total is truly unknown (a Wi-Fi join, a question to GitHub, a helper that says nothing): a moving indicator, the seconds, and n.why.
 local function drawBusy(scr, n)
   local p = n.prog
-  local w, h = 50, p and 9 or 7
+  local stepped = p and p.step and p.steps
+  local w, h = 50, (p or n.why) and 9 or 7
   local col, row = centered(w, h)
   scr:box(col, row, w, h, { title = n.title, foot = n.foot or "B Stop waiting" })
   local st = theme.STYLE
+  local bw = w - 6
   scr:text(col + 3, row + 2, n.waiting or "Waiting for the network helper...", st.body.fg, st.body.bg)
   local secs = ("%d s"):format(math.floor(n.elapsed))
-  if not p then
-    scr:text(col + 3, row + 4, secs, st.hint.fg, st.hint.bg)
-    return "Working: " .. n.title
+  if p then
+    local doing = p.doing and p.doing ~= "done" and p.doing or "starting"
+    if #doing > bw then doing = doing:sub(1, bw - 1) .. "~" end
+    scr:text(col + 3, row + 3, doing, st.hint.fg, st.hint.bg)
   end
-  local doing = p.doing and p.doing ~= "done" and p.doing or "starting"
-  if #doing > w - 6 then doing = doing:sub(1, w - 7) .. "~" end
-  scr:text(col + 3, row + 3, doing, st.hint.fg, st.hint.bg)
-  local bw = w - 6
-  if p.step and p.steps then
-    theme.progressBar(scr, col + 3, row + 5, bw, 100 * p.step / p.steps, st.body)      -- the theme's one bar (rule 18)
+  if stepped then
+    theme.progressBar(scr, col + 3, row + 5, bw, 100 * p.step / p.steps, st.body)      -- the theme's one bar
     scr:text(col + 3, row + 6, ("step %d of %d   %s"):format(p.step, p.steps, secs), st.hint.fg, st.hint.bg)
   else
-    scr:text(col + 3, row + 5, "This report does not say its steps.", st.hint.fg, st.hint.bg)
-    scr:text(col + 3, row + 6, secs .. "; this screen changes when it is done.", st.hint.fg, st.hint.bg)
+    theme.progressMoving(scr, col + 3, row + 5, bw, math.floor(n.elapsed), st.body)
+    scr:text(col + 3, row + 6, secs, st.hint.fg, st.hint.bg)
+    local why = p and "This one does not say its steps." or n.why
+    if why then scr:text(col + 3, row + 7, why, st.hint.fg, st.hint.bg) end
   end
   return "Working: " .. n.title
 end

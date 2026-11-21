@@ -263,6 +263,17 @@ function T.progressBar(scr, col, row, width, percent, style)
   for i = 0, width - 1 do scr:put(col + i, row, i < full and 219 or 176, st.fg, st.bg) end
 end
 
+--- A wait whose total nobody knows (rule 18's moving indicator): a block of `width / 4` cells bouncing along light shade, one step for each `tick`
+--- (call it with the whole seconds waited, so it moves with the counter beside it).
+function T.progressMoving(scr, col, row, width, tick, style)
+  local st = style or T.STYLE.hint
+  local blk = math.max(2, math.floor(width / 4))
+  local span = width - blk
+  local pos = span > 0 and (tick % (2 * span)) or 0
+  if pos > span then pos = 2 * span - pos end
+  for i = 0, width - 1 do scr:put(col + i, row, (i >= pos and i < pos + blk) and 219 or 176, st.fg, st.bg) end
+end
+
 --- "[#####.....] 45%", the same bar as text (the command line's prompt).
 function T.progressText(percent)
   percent = math.max(0, math.min(100, math.floor(percent)))

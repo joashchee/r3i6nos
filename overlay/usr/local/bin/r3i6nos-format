@@ -213,7 +213,7 @@ def wait_partition(disk, start, size, tries=50):
     return False
 
 
-def make_filesystem(disk, fs):
+def make_filesystem(disk, fs, folders_now=None):
     """Format partition 1, and make the folders on it (a temporary mount). Raises Refused with the reason."""
     p, info = part_dev(disk, 1), FS[fs]
     r = run(info["mkfs"] + [str(p)], 900)
@@ -225,6 +225,8 @@ def make_filesystem(disk, fs):
     r = run(["mount", "-t", "exfat" if fs == "exfat" else "ext4", "-o", info["mount"], str(p), str(mnt)], 60)
     if r.returncode != 0:
         raise Refused(f"The card was formatted but could not be opened: {(r.stderr or r.stdout).strip()[:100]}")
+    if folders_now:
+        folders_now()
     try:
         for f in FOLDERS:
             d = mnt / f
@@ -256,7 +258,24 @@ def gigabytes(sectors):
     return f"{sectors * SECTOR / 1e9:.1f} GB"
 
 
-def handle(req):
+STEPS = 6
+
+
+def progress(rid, step, doing):
+    """The menu's bar (CLAUDE.md rule 18): OUT_DIR/progress, id= step= steps= doing=, written whole. Never fails the format."""
+    try:
+        OUT_DIR.mkdir(parents=True, exist_ok=True)
+        os.chmod(OUT_DIR, 0o755)
+        tmp = OUT_DIR / f"progress.{os.getpid()}"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | os.O_NOFOLLOW, 0o644)
+        with os.fdopen(fd, "w") as f:
+            f.write(f"id={rid}\nstep={step}\nsteps={STEPS}\ndoing={doing}\n")
+        os.replace(tmp, OUT_DIR / "progress")
+    except OSError:
+        pass
+
+
+def handle(req, rid="0"):
     """(ok, reboot, lines) for one request."""
     try:
         if req.get("verb") != "format":
@@ -266,19 +285,24 @@ def handle(req):
             raise Refused("Choose exFAT or ext4.")
         disk = data_disk()
         steps = []
+        progress(rid, 1, "Closing the card's files")
         unmount_all(disk)
+        progress(rid, 2, "Erasing the card and writing its partition")
         sig, size = write_table(disk, fs, steps.append)
         try:
             PENDING.unlink()
         except OSError:
             pass
+        progress(rid, 3, "Waiting for the new partition")
         reread(DEV / disk)
         if not wait_partition(disk, START, size):
             # The kernel still holds the old table: leave a marker, and `finish` formats the partition at the next boot.
             write_atomic(PENDING, f"disk={disk}\nsig={sig.hex()}\nfs={fs}\n")
             return True, True, ["The card is erased and its new partition is written,", "but the system cannot see it until it restarts.",
                                 "On restart the card is formatted and opened."]
-        make_filesystem(disk, fs)
+        progress(rid, 4, f"Making the {FS[fs]['name']} file system (the slow part)")
+        make_filesystem(disk, fs, lambda: progress(rid, 5, "Making the folders"))
+        progress(rid, 6, "Opening the card")
         at = mount_now(disk)
         name, big = FS[fs]["name"], gigabytes(size)
         if at is None:
@@ -369,7 +393,7 @@ def apply():
         pass
     req = parse_request(text)
     rid = re.sub(r"[^0-9A-Za-z._-]", "", req.get("id", "0"))[:40] or "0"
-    ok, reboot, lines = handle(req)
+    ok, reboot, lines = handle(req, rid)
     write_result(rid, ok, reboot, lines)
     return 0
 

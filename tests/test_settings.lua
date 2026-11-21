@@ -417,7 +417,7 @@ end
 
 -- ---- Settings > Data card: format the card in the second slot (docs/STORAGE.md) ----
 do
-  local sent, answers = {}, {}
+  local sent, answers, progressOf = {}, {}, {}
   local fakedc = {
     FORMATS = { { fs = "exfat", label = "exFAT", hint = "h1" }, { fs = "ext4", label = "ext4", hint = "h2" } },
     WAIT = 100, ABOUT = { "about" },
@@ -426,6 +426,7 @@ do
   fakedc.client = {
     request = function(verb, args) sent[#sent + 1] = { verb = verb, args = args }; return "f" .. #sent end,
     poll = function(id) return answers[id] end,
+    progress = function(id) return progressOf[id] end,
   }
   local d = settings.new(fake(), nil, nil, nil, nil, nil, nil, nil, fakedc); settings.open(d)
   choose(d, "Data card"); eq(title(d), "Data card")
@@ -436,7 +437,9 @@ do
   settings.press(d, "accept"); eq(#sent, 0, "No asks nothing"); eq(title(d), "Data card")
   choose(d, "Format as ext4"); settings.press(d, "up"); eq(settings.node(d).sel, 1); settings.press(d, "accept")
   eq(#sent, 1); eq(sent[1].verb, "format"); eq(sent[1].args.fs, "ext4"); eq(kind(d), "busy")
-  settings.tick(d, 1); eq(kind(d), "busy", "still waiting")
+  settings.tick(d, 1); eq(kind(d), "busy", "still waiting"); eq(settings.node(d).prog, nil, "no steps said yet")
+  progressOf.f1 = { step = 4, steps = 6, doing = "Making the ext4 file system" }
+  settings.tick(d, 1); eq(settings.node(d).prog.step, 4, "the format's steps reach the wait"); eq(settings.node(d).prog.steps, 6)
   answers.f1 = { ok = true, lines = { "The data card is formatted (ext4, 31.9 GB) and open at /roms2." } }
   settings.tick(d, 1); eq(kind(d), "pages"); assert(not settings.node(d).bad); assert(d.rescan, "the list is read again")
   settings.press(d, "back"); eq(title(d), "Data card")

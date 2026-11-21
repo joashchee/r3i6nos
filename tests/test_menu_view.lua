@@ -133,7 +133,14 @@ has(table.concat(rows, "\n"), "Network"); has(table.concat(rows, "\n"), "Wired s
 snap("network menu")
 pick("Status"); rows = draw()                                   -- waiting
 has(table.concat(rows, "\n"), "Waiting for the network helper"); has(table.concat(rows, "\n"), "B Stop waiting"); has(rows[22], "Working")
+has(table.concat(rows, "\n"), "does not say how far"); has(table.concat(rows, "\n"), "0 s")   -- no total: a moving indicator, the seconds and why (rule 18)
+local first = draw(); settings.node(dialog).elapsed = 3; local later = draw()
+assert(table.concat(first, "\n") ~= table.concat(later, "\n"), "the indicator moves with the seconds")
 snap("busy")
+settings.node(dialog).prog = { step = 4, steps = 6, doing = "Making the exFAT file system" }; settings.node(dialog).elapsed = 12
+rows = draw(); has(table.concat(rows, "\n"), "step 4 of 6   12 s"); has(table.concat(rows, "\n"), "Making the exFAT file system")
+snap("busy with steps")
+settings.node(dialog).prog = nil; settings.node(dialog).elapsed = 0
 io_.answers.i1 = { ok = true, lines = { "eth0  wired  up", "  cable    plugged in", "[ok] looks like a test line", "[FAIL] and a failed one" }, nets = {} }
 settings.tick(dialog, 1); rows = draw()
 has(rows[3], "eth0  wired  up"); has(rows[5], "[ok]"); has(rows[6], "[FAIL]")

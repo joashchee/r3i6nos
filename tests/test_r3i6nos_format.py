@@ -120,6 +120,9 @@ class Format(unittest.TestCase):
         head, lines = self.ask("id=a1\nverb=format\nfs=exfat\n")
         self.assertEqual((head["id"], head["ok"], head["reboot"]), ("a1", "1", "0"), lines)
         self.assertIn("formatted (exFAT", lines[0])
+        prog = dict(l.split("=", 1) for l in (self.t / "out/progress").read_text().splitlines())
+        self.assertEqual((prog["id"], prog["step"], prog["steps"]), ("a1", "6", "6"), "the menu's bar reaches the last step (rule 18)")
+        self.assertEqual(prog["doing"], "Opening the card")
         self.assertIn("/roms2", lines[0])
         self.assertFalse((self.t / "req/request").exists(), "the request is deleted first")
         # unmounted before it was written to, and mounted again by the cards helper at the end

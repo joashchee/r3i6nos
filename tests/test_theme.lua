@@ -157,5 +157,10 @@ do
   eq(full, 5, "45% of 10 cells rounds to 5")
   T.progressBar(scr, 0, 0, 10, 250); eq(cells[9], 219, "clamped to full")
   T.progressBar(scr, 0, 0, 10, -5); eq(cells[0], 176, "clamped to empty")
+  local mv = {}
+  local mscr = { put = function(_, c, r, ch) mv[c] = ch end }
+  T.progressMoving(mscr, 0, 0, 20, 0); eq(mv[0], 219, "starts at the left"); eq(mv[19], 176)
+  T.progressMoving(mscr, 0, 0, 20, 15); eq(mv[15], 219, "reaches the right end"); eq(mv[0], 176)
+  T.progressMoving(mscr, 0, 0, 20, 30); eq(mv[0], 219, "and comes back")
   eq(T.progressText(45), "[####......] 45%"); eq(T.progressText(0), "[..........] 0%"); eq(T.progressText(100), "[##########] 100%")
 end

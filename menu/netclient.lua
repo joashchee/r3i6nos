@@ -64,7 +64,23 @@ local function poll(out, id)
   return r
 end
 
+--- How far request id has got, from `progress` in folder out (written by the helper: id=, step=, steps=, doing=): { step, steps, doing }, or nil
+--- while there is none (or it is another request's). A helper that does not write one gives nil, and the wait shows a moving indicator.
+local function progress(out, id)
+  local f = io.open(out .. "/progress", "r")
+  if not f then return nil end
+  local text = f:read("*a")
+  f:close()
+  local kv = {}
+  for k, v in text:gmatch("(%w+)=([^\n]*)") do kv[k] = v end
+  if kv.id ~= id then return nil end
+  local step, steps = tonumber(kv.step), tonumber(kv.steps)
+  if not step or not steps or steps < 1 or step < 0 or step > steps then return nil end
+  return { step = step, steps = steps, doing = kv.doing }
+end
+
 function M.request(verb, args) return request(M.DIR, verb, args) end
+function M.progress(id) return progress(M.OUT, id) end
 function M.poll(id) return poll(M.OUT, id) end
 
 --- A client of another root helper with the same two-file protocol (r3i6nos-clock: /run/loveos/clock, /run/r3i6nos-clock).
@@ -72,6 +88,7 @@ function M.new(dir, out)
   return {
     request = function(verb, args) return request(dir, verb, args) end,
     poll = function(id) return poll(out, id) end,
+    progress = function(id) return progress(out, id) end,
   }
 end
 

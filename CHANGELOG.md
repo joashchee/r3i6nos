@@ -5,6 +5,8 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- The menu's waits on a helper show a bar (section 41 step 4): Settings > Data card's format reports 6 steps (`r3i6nos-format` writes `progress`), every other helper wait (Wi-Fi, SSH, network test, update check, clock) shows a moving indicator, the seconds and why the total is unknown (`T.progressMoving`). Untested on a unit.
+
 - ROADMAP section 41 step 1: the audit of every app's waits is written down (menu helper waits incl. Data card format, MusiCue's song load, Commander's blocking opens, IO Checker's card test have no bar); steps 4-9 added. Read from the code, not run on a unit.
 
 - **One progress bar for every wait: `r3_wait_screen` and `T.progressBar`** (2026-11-20, CLAUDE.md rule 18, ROADMAP section 41 step 3). C: `r3_progress_text` and `r3_wait_screen` in `theme/r3i6nos_ansiapps.h`; the report's draw callback now gets the report (`r3_report_percent`, `r3_report_secs`, `r3_report_window` for a bar that moves inside a long step). MusiCue's report and Rec demo screens, the IO Checker's and Commander's reports all draw through it (MusiCue lost its own copy; its Rec demo's wait screen now has the theme's top bar, not the gradient one). Lua: `T.progressBar` and `T.progressText`, used by the menu's wait and the app-data move. `tests/test_themes.c` checks the wait screen in all 13 themes. Full check passes; Debian 12 arm64 smoke tests of MusiCue, the IO Checker and Commander pass; **not seen on a unit**. The audit of every other wait (step 1) is still open.
