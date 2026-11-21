@@ -342,7 +342,7 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
 - [x] **The release terms** (2026-11-11, maintainer: every R36S port gets Neumetik's free grant): the DRAFT marker is out of `r36s/package/copyright`.
 - [ ] [S] **Decide the pad mapping** (maintainer, after playing it): rows by button, columns by shoulder, Select as M (`docs/CHORDICA-PORT.md`, section 3).
 - [x] **Committed in the Chordica repo** (2026-11-10, maintainer's request): after the work in progress there, in its own commit (decision 8).
-- [ ] [S] **A GitHub workflow** for the package (Chordica's repo has no CI yet).
+- [x] **A GitHub workflow** for the package (2026-11-21, Chordica repo `.github/workflows/r36s.yml`, modelled on Neumetik's: Neumetik and r3i6nos checked out beside it, arm64 build and qemu smoke test in Debian 12, `Chordica.deb` artifact). **Not yet run on GitHub.**
 - [ ] [XL] **Later:** the mode keyboard on the pad, SoundFonts from the card, the metronome, takes and the score, sessions over Wi-Fi.
 
 ## 17. TinyNTT (a new native app; code in the TinyNTT repo, `r36s/`; plan and decisions: `docs/TINYNTT.md`)
