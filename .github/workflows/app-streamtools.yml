@@ -50,6 +50,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y qemu-user-static binfmt-support
+          # apt's handler can be missing, and then docker --platform linux/arm64 fails with "Exec format error" (the rootfs job's failure, 2026-11-21)
+          docker run --privileged --rm tonistiigi/binfmt --install arm64
 
       # The minimal ffmpeg the packages join streams with (and the test decodes with). The key is build.yml's, so a build there serves this job and the other way round.
       - uses: actions/cache@v6
