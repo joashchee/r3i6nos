@@ -177,6 +177,7 @@ typedef struct {
     /* files, system, report */
     Row files[56];
     int nfiles, files_run;
+    int files_total, files_done;                    /* the card test's cards and how many are finished (its bar, rule 18) */
     R3Item sys[28];
     int nsys;
     char report_file[96];
@@ -606,6 +607,8 @@ static int mount_of(const char *path, char *fs, size_t fcap, char *dev, size_t d
     return found;
 }
 
+static void files_wait(App *a, const char *card, const char *doing, int phase);
+
 static void add_row(App *a, const char *status, const char *card, const char *item, const char *fmt, ...) {
     if (a->nfiles >= (int)(sizeof a->files / sizeof a->files[0])) return;
     Row *r = &a->files[a->nfiles++];
@@ -628,6 +631,7 @@ static int write_text(const char *path, const char *text) {
 /* The checks on one card, in its IO_Checker folder (the same as apps/io-checker-love/probe.lua). */
 static void card_check(App *a, const char *label, const char *path) {
     char fs[64] = "?", dev[256] = "?";
+    files_wait(a, label, "Checking files", 0);
     int exact = 0;
     mount_of(path, fs, sizeof fs, dev, sizeof dev, &exact);
     add_row(a, "INFO", label, "where", "%s, %s, %s", path, fs, dev);
@@ -661,6 +665,7 @@ static void card_check(App *a, const char *label, const char *path) {
     for (size_t i = 0; i < chunk; i++) data[i] = (unsigned char)i;
     char sp[PATH_MAX + 32];
     snprintf(sp, sizeof sp, "%s/.io-check-speed.tmp", dir);
+    files_wait(a, label, "Writing the speed test file", 1);
     double t0 = r3_report_ms();
     int fd = open(sp, O_WRONLY | O_CREAT | O_TRUNC, 0644), ok = fd >= 0;
     for (int i = 0; ok && i < mb; i++) ok = write(fd, data, chunk) == (ssize_t)chunk;
@@ -673,6 +678,7 @@ static void card_check(App *a, const char *label, const char *path) {
         return;
     }
     add_row(a, "INFO", label, "write speed", "%.1f MB/s (%d MB + sync)", mb * 1.048576 / (tw > 0.001 ? tw / 1000 : 1e-6), mb);
+    files_wait(a, label, "Reading it back", 2);
     t0 = r3_report_ms();
     fd = open(sp, O_RDONLY);
     long long n = 0;
@@ -703,17 +709,23 @@ static void card_check(App *a, const char *label, const char *path) {
 static void run_files(App *a) {
     a->nfiles = 0;
     const char *roms = env_or("R3I6NOS_ROMS", "/roms"), *roms2 = env_or("R3I6NOS_ROMS2", "/roms2");
-    card_check(a, "Games card", roms);
     char fs[64], dev[256];
     int exact = 0;
-    if ((mount_of(roms2, fs, sizeof fs, dev, sizeof dev, &exact) && exact) || getenv("R3I6NOS_ROMS2")) card_check(a, "Data card", roms2);
+    int has2 = (mount_of(roms2, fs, sizeof fs, dev, sizeof dev, &exact) && exact) || getenv("R3I6NOS_ROMS2");
     UioDisk disks[8];
     int nd = uio_usb_disks(disks, 8);
+    a->files_total = 1 + (has2 ? 1 : 0);
+    for (int i = 0; i < nd; i++) a->files_total += disks[i].mount[0] ? 1 : 0;
+    a->files_done = 0;
+    card_check(a, "Games card", roms);
+    a->files_done++;
+    if (has2) { card_check(a, "Data card", roms2); a->files_done++; }
     for (int i = 0; i < nd; i++) {
         if (!disks[i].mount[0]) continue;
         char label[24];
         snprintf(label, sizeof label, "USB %.15s", disks[i].dev);
         card_check(a, label, disks[i].mount);
+        a->files_done++;
     }
     a->files_run = 1;
     int bad = 0;
@@ -2382,6 +2394,19 @@ static unsigned nap_ms(App *a, const R3Video *v) {
 struct Loop { SDL_Renderer *r; R3Video *video; R3Screen screen; };
 
 /* The part of a pass that draws, shared by the main loop and the idle window below, so the report measures the real thing. */
+/* Rule 18: the card test blocks for seconds (8 MB written and synced on each card), so each card has three marks (check, write, read) on a
+ * determinate bar. Not drawn when there is no window (--report, self-test) or when a Device report's own bar is up. */
+static void files_wait(App *a, const char *card, const char *doing, int phase) {
+    if (!a->loop || !a->loop->video || !a->loop->r || r3_reportbar_active || a->files_total <= 0) return;
+    int total = a->files_total * 3, at = a->files_done * 3 + phase, pct = at * 100 / total;
+    char l1[96], stat[64];
+    R3Screen s;
+    snprintf(l1, sizeof l1, "%s (card %d of %d)", card, a->files_done + 1, a->files_total);
+    snprintf(stat, sizeof stat, "step %d of %d", at + 1, total);
+    r3_wait_screen(&s, "IO Checker", "Files", "Testing the cards", l1, "Writes and reads a test file on each card.", doing, pct, stat, NULL);
+    r3_video_draw(a->loop->video, a->loop->r, &s, 1);
+}
+
 static void draw_frame(App *a, Uint32 now) {
     compose(a, &a->loop->screen, now);
     r3_toast_draw(&a->toast, &a->loop->screen);
