@@ -292,6 +292,7 @@ The boot card (TF1) stays in; the card in TF2 takes what a person adds. Five ste
   - [ ] **When an app's formats change**, run `scripts/build_corpus.sh` and add the new format to `scripts/corpus_extra.py`'s `FORMATS`
     (the manifest test fails until it is).
   - [ ] **Neumetik's new readers, 2026-11-14 (not yet in the corpus, not checked here):** MDSDRV (the BGM fade-in requests and `mds_command`), NSF and MGS (reference-player checks, `$4015` length counters, never-returning play routines) and the rhythm formats (Korean janggu, taiko syllables, Hydrogen). Decide which of them a generator can write, add them to `FORMATS`, and check Commander's list of kinds; rebuild `nttplay` first (section 27).
+  - [ ] **A JPEG, a TIFF and a WebP with EXIF, and a self-test that checks Commander's Info page shows it** (2026-11-21, maintainer's question). Commander's Info tab does read EXIF (`fmt_media.h` `tiff_ifd`: camera make and model, lens, date taken, exposure, aperture, ISO, focal length, flash, orientation, software, artist, copyright, GPS present), but **the corpus has no file with an EXIF block and no check asserts a field**, so it is written and untested. Make one original JPEG with known tags (a script, no real person's photo or GPS), add it to `scripts/corpus_extra`, and check each field in `--info`. Also not read: the GPS position itself (only "has GPS position"), MakerNotes, XMP fields beyond "yes".
 
 
 ## 15. Crunchy (a native port; code in the Crunchy repo, `r36s/`; plan and decisions: `docs/CRUNCHY-PORT.md`)
