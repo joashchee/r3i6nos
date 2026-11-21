@@ -5,6 +5,8 @@ whenever a change lands, dated the day it was made.
 
 ## Unreleased
 
+- ROADMAP: every open item has an effort rating (`[S]` `[M]` `[L]` `[XL]`) so phases can be picked by least or most effort; `scripts/roadmap_effort.py` lists and totals them and `scripts/check.sh` fails on an unrated open item; the rule is in CLAUDE.md.
+
 - Runtimes: Adventure Game Studio 3.6 and Godot 3.6 (FRT) join Pyxel, Ren'Py and Solarus as packages (`r3i6nos-runtime-ags`, `r3i6nos-runtime-godot`), with menu types for games in a card's `AGS/` and `Godot/` folders and the report's smoke tests. Both engines start in Debian 12 arm64; no sample game, untested on a unit.
 
 - Package installs show a bar: `deb_watcher.py` writes `/run/loveos/pkg-progress` while it extracts (one step for each package), `r3i6nos-pkg` prints a bar on a terminal, and the open menu shows it on its command line (section 41 step 9). Untested on a unit.

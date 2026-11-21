@@ -30,6 +30,9 @@ python3 -I scripts/build_mirror_page.py --check || fail=1
 step "boot logo BMP up to date (docs/brand/boot-logo.png)"
 python3 -I scripts/make_boot_logo.py --check || fail=1
 
+step "every open ROADMAP item has an effort rating (CLAUDE.md)"
+python3 -I scripts/roadmap_effort.py || fail=1
+
 step "python tests"
 python3 -I -m unittest discover -s tests -v || fail=1
 

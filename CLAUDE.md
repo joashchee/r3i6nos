@@ -8,7 +8,14 @@ architectural change. This file is the condensed operating rules only.
 
 **`CHANGELOG.md`**: add a bullet whenever a change lands.
 **`ROADMAP.md`**: tick items in the same commit as the work, and say what
-is blocked and on what.
+is blocked and on what. **Every open item carries an effort rating right after
+its checkbox, `- [ ] [S] ...`**, so a phase can be picked by least or most
+effort (`scripts/roadmap_effort.py --list S`, `--count`; `scripts/check.sh`
+fails on an open item without one): **S** an hour or less, **M** a few hours
+to a day, **L** several days, **XL** a week or more. It rates the hands-on work
+left once nothing blocks it; what blocks it (a unit run, a decision, another
+item) is said beside the item, not folded into the rating. A new item is
+rated when it is written; rerate one when what is left changes size.
 
 ## Layout
 
