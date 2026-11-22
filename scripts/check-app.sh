@@ -2,7 +2,7 @@
 # scripts/check-app.sh APP [--theme]      (also: scripts/check.sh --app APP [--theme])
 #
 # The checks for one native app, without the rest of the repository's: what `scripts/check.sh` does for that app and nothing else, so a
-# change to MusiCue is checked in a minute, not in the ten the whole run takes. APP is the folder under apps/ (musicue-native).
+# change to one app is checked in a minute, not in the ten the whole run takes. APP is the folder under apps/ (commander-native).
 #   1. the app compiles (-Werror under clang) and its --selftest prints the R3I6NOS_SMOKE line (the same command as check.sh's native step);
 #   2. the Python tests named for it (tests/test_<app>*.py, without "-native"), run as `python3 -I`;
 #   3. bash -n and shellcheck on the scripts named for it (scripts/*<app>*.sh);

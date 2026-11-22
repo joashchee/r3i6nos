@@ -40,7 +40,7 @@ compulsory ones are never renamed, reordered or moved elsewhere; **Benchmark is 
 | **Quit** | Leaves the app. |
 
 - **Quit is how an app is left, and leaving is a deliberate choice: only the main menu's Quit (or the system closing the app) leaves the desktop or the
-  launcher. No one-touch button, and no keyboard key such as Esc, quits an app** (2026-11-20). r3i6nos apps do not use Select + Start to leave (it was the old
+  launcher. No pad button or chord, and no keyboard key (Esc, Q, Ctrl+Q, Cmd+Q-style shortcuts a desktop build adds, Select + Start, a function key) quits an app** (2026-11-20; made a mapping rule 2026-11-22 at the maintainer's request, "always make the app quit by the main menu"). **A desktop build's keyboard map has no quit key either**; what the operating system does to a window (its close button, the system's Quit or shutdown) is the system closing the app, not the app's map. r3i6nos apps do not use Select + Start to leave (it was the old
   convention; each app's own map may now use Select and Start for its function). An app still leaves cleanly when the system closes it (shutdown, the menu's power-off).
 - **This is rule 17 in `CLAUDE.md`** (2026-11-19). It is to be built into the theme (`docs/R3I6NOS-ANSIAPPS-THEME.md`) as one menu structure both the
   LÖVE and C themes provide, so a new app gets the items by calling it, and a self-test checks them (ROADMAP section 39). Not built yet.
@@ -51,7 +51,7 @@ compulsory ones are never renamed, reordered or moved elsewhere; **Benchmark is 
 
 | Chord | Does | Notes |
 |---|---|---|
-| **L1 + R1** | Opens the **main menu / settings** | The app's own menu (its Start menu items, Settings) or, in the boot menu, its Settings. **Keyboard: the backquote key (`` ` ``)** (settled 2026-11-20; it replaces the proposed F10, which an app may already use for its own). |
+| **L1 + R1** | Opens the **main menu / settings** | The app's own menu (its Start menu items, Settings) or, in the boot menu, its Settings. **Keyboard: the backquote key (`` ` ``)** (settled 2026-11-20; see "The keyboard bindings"; it replaces the proposed F10, which an app may already use for its own). |
 | **L2 + R2** | Opens the **contextual menu** | For the focus: the selected item, or the panel in focus when nothing is selected. **Keyboard: the backslash key (`\`)** (settled 2026-11-20). |
 | **Fn** | Next panel | The app's panels turn in a **carousel**: 1, 2, 3, ..., last, then 1 again. |
 | **L1 + Fn** | Jump to the **first panel** | Usually the app's main panel. |
@@ -71,17 +71,17 @@ mouse.
 
 | Input | Default | Keyboard equivalent |
 |---|---|---|
-| **A** | Accept, activate, choose | Enter |
+| **A** | Accept, activate, choose | Enter or Z |
 | **B** | Back, cancel, close | Esc |
-| **X** | Delete the selected item, or the character before the cursor | Backspace / Delete |
-| **Y** | Next field or control, "more" (a menu of further actions) | Tab |
-| **Right stick** | Moves the **selection** (the highlighted item or key) | Arrow keys |
+| **X** | Delete the selected item, or the character before the cursor | X (Backspace deletes in a text field) |
+| **Y** | Next field or control, "more" (a menu of further actions) | Tab or Y |
+| **Right stick** | Moves the **selection** (the highlighted item or key) | I K J L (up, down, left, right) |
 | **D-pad** | Moves the **selection**, the same as the right stick | Arrow keys |
 | **Left stick** | Moves the **cursor**: the text cursor in a field, the **pointer** when it is on | Mouse or text cursor |
-| **Select** | **Left mouse button**, when the pointer is on | Left click |
-| **Start** | **Right mouse button**, when the pointer is on | Right click |
-| **L3** (press the left stick) | Toggle the **virtual mouse** on and off, **where the app has one** | |
-| **R3** (press the right stick) | Toggle the **virtual keyboard** on and off, **where the app has one** | |
+| **Select** | **Left mouse button**, when the pointer is on | Backspace |
+| **Start** | **Right mouse button**, when the pointer is on | Space |
+| **L3** (press the left stick) | Toggle the **virtual mouse** on and off, **where the app has one** | P |
+| **R3** (press the right stick) | Toggle the **virtual keyboard** on and off, **where the app has one** | V |
 
 - **Whether an app has the virtual mouse and the virtual keyboard is specified per app** (its README and its code say which). An app without one
   ignores L3 or R3 (a short reply on the command line is allowed, never a silent no-op that looks like a bug).
@@ -101,6 +101,42 @@ mouse.
   nothing by default.
 - Raw numbers, from the measured mapping (LÖVE counts from 1, SDL from 0): B 1, A 2, X 3, Y 4; L1 5, R1 6, L2 7, R2 8; D-pad 9-12; Select 13, Start 14;
   L3 15, R3 16; Fn 17; left stick axes 1-2, right stick axes 3-4. **A is 2 and B is 1**: the pad is not laid out like SDL's mapping.
+
+## The keyboard bindings (permanent defaults for every app, 2026-11-22)
+
+**Settled by the maintainer on 2026-11-22: these keyboard bindings are the permanent defaults of every r3i6nos app that runs with a keyboard (a desktop build, a USB keyboard on the unit).** Every pad input has a key, so
+nothing is out of reach from a keyboard; an app does not choose other keys for these inputs (a panel's own remap of the one-touch buttons, above, changes what a button does, never which key is the button).
+
+| Pad input | Key |
+|---|---|
+| D-pad | Arrow keys |
+| **A** | Enter, or **Z** |
+| **B** | Esc |
+| **X** | **X** |
+| **Y** | **Tab**, or **Y** |
+| **Select** | Backspace |
+| **Start** | Space |
+| **L1** (held) | **Left Ctrl** |
+| **R1** (held) | **Left Shift** |
+| **L2** (held) | **Left Alt** (Option) |
+| **R2** (held) | **Right Alt** (Option) |
+| **L1 + R1** (main menu) | Backquote (`` ` ``) |
+| **L2 + R2** (contextual menu) | Backslash (`\`), or Left Alt + Right Alt |
+| **Fn** (next panel) | **Caps Lock** |
+| **L3** | **P** |
+| **R3** | **V** |
+| Right stick (the selection) | **I** up, **K** down, **J** left, **L** right |
+| Left stick | none (the pointer and the text cursor are the mouse and the text field) |
+
+- **Fn is Caps Lock, never Tab.** Tab is Y. A Mac keyboard's own Fn key is not seen by programs, which is why Fn is on Caps Lock. Caps Lock is a toggle on macOS: it sends one event for each press (a key-down
+  turning it on, a key-up turning it off), so **either event is one tap of Fn**; the Caps Lock light follows the presses and means nothing. Fn is a tap, never held, so a toggle loses nothing. L1 + Fn and R1 + Fn
+  work with L1 and R1 held as usual. **Untested on a real keyboard** beyond the self-tests.
+- **A text field first.** While a text field, the id field or the virtual keyboard has the focus, letters, digits and Backspace type or delete in it and are not the bindings above; the bindings return when it
+  closes. (This is why X, Y, P, V, I, K, J and L are safe as keys.)
+- **No key quits** (Esc, Q, any function key, Ctrl+Q: none). Quit is the main menu's (the rule above).
+- **Keys a desktop adds for its own sake are the system's, not the map's:** the operating system's shortcuts (Cmd+Tab, Mission Control's Ctrl+arrows, Ctrl+Space for the input source) can take a chord before the app
+  sees it; an app says so in its README rather than binding other keys. Where one clashes, the fix is a system setting, not another key here.
+- **Every app's Keymap page and About screen list these keys** on a desktop build, and a self-test is to check that each pad input in the table has exactly one key and that no two inputs share a key (not built yet).
 
 ## The Keymap (a compulsory main-menu item, 2026-11-20)
 
@@ -179,7 +215,8 @@ layers (abc, ABC, #+=), the text shown, optionally hidden. The map above drives 
 
 ## Where today's code differs
 
-- **MusiCue (2026-11-20)** follows the mapping through the C reader and main menu too (its own one-touch map for Start, Rec mode, the D-pad, A-B on R1, the Jump panel and the Piano, `docs/MUSICUE.md`); its Device report and Rec demo items say not built yet.
+- **Keyboard bindings (2026-11-22):** only MusiCue's desktop build has them so far (`key_button` in `../musicue/src/musicue.c`), and there I K J L move the selection only in the player; the C theme's own `r3_key_action` and the other apps still have their own keys and are to follow the table in "The keyboard bindings".
+- **MusiCue (2026-11-20)** follows the mapping through the C reader and main menu too (its own one-touch map for Start, Rec mode, the D-pad, A-B on R1, the Jump panel and the Piano, `../musicue/docs/MUSICUE.md`); its Device report and Rec demo items say not built yet.
 - **Built so far (2026-11-20): the C theme's reader and main menu** (`theme/r3i6nos_input.h`, `theme/r3i6nos_mainmenu.h`, `tests/test_input.c`) and **the native IO Checker**, which
   uses them (the six-item menu, R1 held for pages and Home/End, the chords, the right stick's rate, **R3i6nos Mapping** to try every input on the unit, Select+Start no longer leaving). Nothing here
   has run on a unit. Everything else below is still as written.
@@ -192,7 +229,7 @@ layers (abc, ABC, #+=), the text shown, optionally hidden. The map above drives 
 - **Only the native IO Checker has the six compulsory menu items** (its Rec demo item says it is not built yet; its Benchmark is the Motion frame rate and the cards' speed). No other app does. The menu has About and Device reports in Settings, not as one list; MusiCue's L1 + R1 menu
   has its own items; none has Colour theme, Rec demo and Benchmark together, and no app has a Benchmark item at all.
 - **FM1-NTT** (`fm1ntt/README.md`, "The pad on MACHINE") already has L1 + R1 for the menu, Fn for the panels, the sticks as knobs and L1, L2 and R2 as modifiers, the dead zone this map takes. It differs in one place: **L1 + Fn there is "next scale" and the panel stays**, where this map's L1 + Fn is "first panel"; and its Select + Start are OCT- and OCT+, which this map allows (per-app buttons).
-- **MusiCue** (2026-11-20) follows this map (`docs/MUSICUE.md`, "The pad, the panels and Tempo" and "The Jump panel, the Piano ..."): the six-item menu, L2 + R2, the Fn chords and R1 held as it says, with its own Start, Select, D-pad and face buttons (which this map allows). It has the virtual keyboard (2026-11-21, `theme/r3i6nos_osk.h`: R3 in the player names the selected marker) and no virtual mouse.
+- **MusiCue** (2026-11-20) follows this map (`../musicue/docs/MUSICUE.md`, "The pad, the panels and Tempo" and "The Jump panel, the Piano ..."): the six-item menu, L2 + R2, the Fn chords and R1 held as it says, with its own Start, Select, D-pad and face buttons (which this map allows). It has the virtual keyboard (2026-11-21, `theme/r3i6nos_osk.h`: R3 in the player names the selected marker) and no virtual mouse.
 - **The menu's Wi-Fi keyboard** (`menu/osk.lua`) is opened by choosing an item, not by R3.
 - **Commander, KlamANSI, NoCoGaMa and the others** (the IO Checker's native build now follows the mapping; its LÖVE builds do not) have their own maps, none of them with the pointer, the carousel or the chords;
   the theme's `r3_pad_action` (`theme/`) is where one shared reading of the pad would live.

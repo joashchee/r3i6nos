@@ -258,7 +258,7 @@ bash tests/test_portmaster_unpack.sh || fail=1
 bash tests/test_image.sh || fail=1
 
 step "shell syntax"
-for f in overlay/usr/local/bin/run_app.sh overlay/usr/local/bin/loveos-session apps/portmaster/portmaster apps/portmaster/shim/sudo scripts/*.sh tests/*.sh tests/runtimes/*.sh tests/streamtools/*.sh tools/runtimes/*/run tools/streamtools/build.sh tools/streamtools/*/run tools/qjs-node/*.sh tools/stretch-proto/*.sh tools/stretch-proto/stretch-proto-report; do
+for f in overlay/usr/local/bin/run_app.sh overlay/usr/local/bin/loveos-session apps/portmaster/portmaster apps/portmaster/shim/sudo scripts/*.sh tests/*.sh tests/runtimes/*.sh tests/streamtools/*.sh tools/runtimes/*/run tools/streamtools/build.sh tools/streamtools/*/run tools/qjs-node/*.sh; do
     bash -n "$f" || fail=1
 done
 
@@ -268,7 +268,7 @@ sc2015=$(grep -nE '^[[:space:]]*(\[|test )[^|]*\][[:space:]]*&&[^|]*\|\|' tests/
 if [ -n "$sc2015" ]; then echo "$sc2015"; echo "FAIL: 'A && B || C' (SC2015 on CI): split it into one check per line"; fail=1; fi
 step "shellcheck"
 if command -v shellcheck >/dev/null; then
-    shellcheck overlay/usr/local/bin/run_app.sh overlay/usr/local/bin/loveos-session apps/portmaster/portmaster apps/portmaster/shim/sudo overlay/etc/profile.d/*.sh scripts/*.sh tests/*.sh tests/runtimes/*.sh tests/streamtools/*.sh tools/runtimes/*/run tools/streamtools/build.sh tools/streamtools/*/run tools/qjs-node/*.sh tools/stretch-proto/*.sh tools/stretch-proto/stretch-proto-report || fail=1
+    shellcheck overlay/usr/local/bin/run_app.sh overlay/usr/local/bin/loveos-session apps/portmaster/portmaster apps/portmaster/shim/sudo overlay/etc/profile.d/*.sh scripts/*.sh tests/*.sh tests/runtimes/*.sh tests/streamtools/*.sh tools/runtimes/*/run tools/streamtools/build.sh tools/streamtools/*/run tools/qjs-node/*.sh || fail=1
 else echo "NOT RUN: shellcheck not installed"; fi
 
 exit $fail

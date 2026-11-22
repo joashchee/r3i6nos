@@ -29,7 +29,7 @@ SMOKE=""
 CONF="$REPO/apps/$APP_DIR/app.conf"
 [ -f "$CONF" ] || { echo "build_native_app: no $CONF" >&2; exit 1; }
 
-TYPE=native NAME="" BIN="" PKG="" SRC="" THEME=0 DESC="" EXTRA_FILES="" RENDER_HELPER=0
+TYPE=native NAME="" BIN="" PKG="" SRC="" THEME=0 DESC="" EXTRA_FILES=""
 # shellcheck disable=SC1090  # the app's own manifest
 . "$CONF"
 [ "$TYPE" = native ] || { echo "build_native_app: $CONF is not TYPE=native (a LÖVE app: scripts/build_love_app.sh)" >&2; exit 1; }
@@ -52,7 +52,6 @@ dpkg --add-architecture arm64
 apt-get update
 pkgs="ca-certificates pkg-config dpkg-dev file crossbuild-essential-arm64 libsdl2-dev:arm64"
 [ -n "$SMOKE" ] && pkgs="$pkgs qemu-user-static"
-[ "$RENDER_HELPER" = 1 ] && pkgs="$pkgs git"
 # shellcheck disable=SC2086  # a list of package names
 apt-get install -y --no-install-recommends $pkgs
 
@@ -86,31 +85,6 @@ for entry in $EXTRA_FILES; do
     mkdir -p "$pkgdir/$(dirname "$dest")"
     install -m "$mode" "$REPO/apps/$APP_DIR/$src" "$pkgdir/$dest"
 done
-
-# RENDER_HELPER=1 (MusiCue): the Key-and-Tempo renderer, a C++ program (tools/stretch-proto/musicue_render.cpp) built here from Signalsmith Stretch and Signalsmith
-# Linear (MIT, pinned in tools/stretch-proto/pins.conf, checked after the clone), packed as usr/lib/musicue/musicue-render with its libstdc++ linked in.
-if [ "$RENDER_HELPER" = 1 ]; then
-    # shellcheck disable=SC1091  # the pins
-    . "$REPO/tools/stretch-proto/pins.conf"
-    src_dir="$(mktemp -d)"
-    for dep in "signalsmith-stretch:$STRETCH_COMMIT:ss" "linear:$LINEAR_COMMIT:linear"; do
-        name="${dep%%:*}"; rest="${dep#*:}"; commit="${rest%%:*}"; dir="${rest#*:}"
-        git clone --quiet "https://github.com/Signalsmith-Audio/$name" "$src_dir/$dir"
-        git -C "$src_dir/$dir" checkout --quiet "$commit"
-        [ "$(git -C "$src_dir/$dir" rev-parse HEAD)" = "$commit" ] || { echo "build_native_app: $name is not at the pinned commit $commit" >&2; exit 1; }
-    done
-    mkdir -p "$pkgdir/usr/lib/musicue"
-    echo "[*] Compiling musicue-render (arm64)..."
-    "$HOST-g++" -std=c++17 -O3 -mcpu=cortex-a35 -Wall -Wextra -pthread -static-libstdc++ -static-libgcc -I "$src_dir/ss" -I "$src_dir/ss/include/signalsmith-stretch" \
-        -I "$src_dir/linear/include" -o "$pkgdir/usr/lib/musicue/musicue-render" "$REPO/tools/stretch-proto/musicue_render.cpp"
-    "$HOST-strip" "$pkgdir/usr/lib/musicue/musicue-render"
-    file "$pkgdir/usr/lib/musicue/musicue-render" | grep -q 'ARM aarch64' || { echo "build_native_app: musicue-render is not an arm64 binary" >&2; exit 1; }
-    cp "$src_dir/ss/LICENSE.txt" "$pkgdir/usr/share/doc/$BIN/LICENSE.signalsmith-stretch"
-    cp "$src_dir/linear/LICENSE.txt" "$pkgdir/usr/share/doc/$BIN/LICENSE.signalsmith-linear"
-    printf 'musicue-render is built from Signalsmith Stretch %s (MIT, https://github.com/Signalsmith-Audio/signalsmith-stretch)\nand Signalsmith Linear %s (MIT, https://github.com/Signalsmith-Audio/linear). Their licence texts are in this folder.\n' \
-        "$STRETCH_COMMIT" "$LINEAR_COMMIT" > "$pkgdir/usr/share/doc/$BIN/NOTICE.render"
-    rm -rf "$src_dir"
-fi
 
 cp "$REPO/LICENSE" "$pkgdir/usr/share/doc/$BIN/copyright"
 if [ "$THEME" = 1 ]; then
