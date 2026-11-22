@@ -40,7 +40,7 @@ compulsory ones are never renamed, reordered or moved elsewhere; **Benchmark is 
 | **Quit** | Leaves the app. |
 
 - **Quit is how an app is left, and leaving is a deliberate choice: only the main menu's Quit (or the system closing the app) leaves the desktop or the
-  launcher. No pad button or chord, and no keyboard key (Esc, Q, Ctrl+Q, Cmd+Q-style shortcuts a desktop build adds, Select + Start, a function key) quits an app** (2026-11-20; made a mapping rule 2026-11-22 at the maintainer's request, "always make the app quit by the main menu"). **A desktop build's keyboard map has no quit key either**; what the operating system does to a window (its close button, the system's Quit or shutdown) is the system closing the app, not the app's map. r3i6nos apps do not use Select + Start to leave (it was the old
+  launcher. No pad button or chord, and no keyboard key (Esc, Ctrl+Q, Cmd+Q-style shortcuts a desktop build adds, Select + Start, a function key) quits an app** (2026-11-20; made a mapping rule 2026-11-22 at the maintainer's request, "always make the app quit by the main menu"). **A desktop build's keyboard map has no quit key either**; what the operating system does to a window (its close button, the system's Quit or shutdown) is the system closing the app, not the app's map. r3i6nos apps do not use Select + Start to leave (it was the old
   convention; each app's own map may now use Select and Start for its function). An app still leaves cleanly when the system closes it (shutdown, the menu's power-off).
 - **This is rule 17 in `CLAUDE.md`** (2026-11-19). It is to be built into the theme (`docs/R3I6NOS-ANSIAPPS-THEME.md`) as one menu structure both the
   LÖVE and C themes provide, so a new app gets the items by calling it, and a self-test checks them (ROADMAP section 39). Not built yet.
@@ -71,15 +71,15 @@ mouse.
 
 | Input | Default | Keyboard equivalent |
 |---|---|---|
-| **A** | Accept, activate, choose | Enter or Z |
+| **A** | Accept, activate, choose | L, Enter or Space |
 | **B** | Back, cancel, close | Esc |
-| **X** | Delete the selected item, or the character before the cursor | X (Backspace deletes in a text field) |
-| **Y** | Next field or control, "more" (a menu of further actions) | Tab or Y |
-| **Right stick** | Moves the **selection** (the highlighted item or key) | I K J L (up, down, left, right) |
-| **D-pad** | Moves the **selection**, the same as the right stick | Arrow keys |
+| **X** | Delete the selected item, or the character before the cursor | I or Backspace (Backspace deletes in a text field) |
+| **Y** | Next field or control, "more" (a menu of further actions) | J or Tab |
+| **Right stick** | Moves the **selection** (the highlighted item or key) | Arrow keys (up, down, left, right) |
+| **D-pad** | Moves the **selection**, the same as the right stick | W A S D |
 | **Left stick** | Moves the **cursor**: the text cursor in a field, the **pointer** when it is on | Mouse or text cursor |
-| **Select** | **Left mouse button**, when the pointer is on | Backspace |
-| **Start** | **Right mouse button**, when the pointer is on | Space |
+| **Select** | **Left mouse button**, when the pointer is on | F |
+| **Start** | **Right mouse button**, when the pointer is on | H |
 | **L3** (press the left stick) | Toggle the **virtual mouse** on and off, **where the app has one** | P |
 | **R3** (press the right stick) | Toggle the **virtual keyboard** on and off, **where the app has one** | V |
 
@@ -102,38 +102,40 @@ mouse.
 - Raw numbers, from the measured mapping (LÖVE counts from 1, SDL from 0): B 1, A 2, X 3, Y 4; L1 5, R1 6, L2 7, R2 8; D-pad 9-12; Select 13, Start 14;
   L3 15, R3 16; Fn 17; left stick axes 1-2, right stick axes 3-4. **A is 2 and B is 1**: the pad is not laid out like SDL's mapping.
 
-## The keyboard bindings (permanent defaults for every app, 2026-11-22)
+## The keyboard bindings (permanent defaults for every app, 2026-11-23)
 
-**Settled by the maintainer on 2026-11-22: these keyboard bindings are the permanent defaults of every r3i6nos app that runs with a keyboard (a desktop build, a USB keyboard on the unit).** Every pad input has a key, so
-nothing is out of reach from a keyboard; an app does not choose other keys for these inputs (a panel's own remap of the one-touch buttons, above, changes what a button does, never which key is the button).
+**Settled by the maintainer on 2026-11-23 (replacing the 2026-11-22 map): these keyboard bindings are the permanent defaults of every r3i6nos app that runs with a keyboard (a desktop build, a USB keyboard on the unit).** Every pad input has a key, so
+nothing is out of reach from a keyboard; an app does not choose other keys for these inputs (a panel's own remap of the one-touch buttons, above, changes what a button does, never which key is the button). The left hand has the D-pad, the shoulders
+and the system buttons; the right hand has the face buttons and the arrow keys (the right stick).
 
 | Pad input | Key |
 |---|---|
-| D-pad | Arrow keys |
-| **A** | Enter, or **Z** |
-| **B** | Esc |
-| **X** | **X** |
-| **Y** | **Tab**, or **Y** |
-| **Select** | Backspace |
-| **Start** | Space |
-| **L1** (held) | **Left Ctrl** |
-| **R1** (held) | **Left Shift** |
-| **L2** (held) | **Left Alt** (Option) |
-| **R2** (held) | **Right Alt** (Option) |
-| **L1 + R1** (main menu) | Backquote (`` ` ``) |
-| **L2 + R2** (contextual menu) | Backslash (`\`), or Left Alt + Right Alt |
-| **Fn** (next panel) | **Caps Lock** |
-| **L3** | **P** |
-| **R3** | **V** |
-| Right stick (the selection) | **I** up, **K** down, **J** left, **L** right |
+| D-pad | **W** up, **S** down, **A** left, **D** right |
+| Right stick (the selection) | **Arrow keys** (Up and Down with R1 held: Page up and down) |
+| **X** | **I**, or Backspace |
+| **Y** | **J**, or Tab |
+| **B** | **K**, or Esc |
+| **A** | **L**, or Enter, or Space |
+| **Select** | **F** |
+| **Fn** (next panel) | **T** (a tap) |
+| **Start** | **H** |
+| **L1** (held) | **Q** |
+| **L2** (held) | **E** |
+| **R1** (held) | **O** |
+| **R2** (held) | **U** |
+| **L3** | **R** |
+| **R3** | **Y** |
+| **L1 + R1** (main menu) | Backquote (`` ` ``), or Q + O |
+| **L2 + R2** (contextual menu) | Backslash (`\`), or E + U |
 | Left stick | none (the pointer and the text cursor are the mouse and the text field) |
 
-- **Fn is Caps Lock, never Tab.** Tab is Y. A Mac keyboard's own Fn key is not seen by programs, which is why Fn is on Caps Lock. Caps Lock is a toggle on macOS: it sends one event for each press (a key-down
-  turning it on, a key-up turning it off), so **either event is one tap of Fn**; the Caps Lock light follows the presses and means nothing. Fn is a tap, never held, so a toggle loses nothing. L1 + Fn and R1 + Fn
-  work with L1 and R1 held as usual. **Untested on a real keyboard** beyond the self-tests.
+The face buttons I J K L sit as the pad's diamond does: I (X) above, J (Y) left, L (A) right, K (B) below.
+
+- **Fn is T**, a tap, never held (no Caps Lock: it is a toggle on macOS and was unreliable). A Mac keyboard's own Fn key is not seen by programs. L1 + Fn and R1 + Fn work with Q and O held as usual.
+- **No Shift, Ctrl, Alt or Caps Lock binding.** They are free for the system and for typing. **Untested on a real keyboard** beyond the self-tests.
 - **A text field first.** While a text field, the id field or the virtual keyboard has the focus, letters, digits and Backspace type or delete in it and are not the bindings above; the bindings return when it
-  closes. (This is why X, Y, P, V, I, K, J and L are safe as keys.)
-- **No key quits** (Esc, Q, any function key, Ctrl+Q: none). Quit is the main menu's (the rule above).
+  closes. (This is why every letter above is safe as a key.)
+- **No key quits** (Esc, any function key, Ctrl+Q: none; Q is L1). Quit is the main menu's (the rule above).
 - **Keys a desktop adds for its own sake are the system's, not the map's:** the operating system's shortcuts (Cmd+Tab, Mission Control's Ctrl+arrows, Ctrl+Space for the input source) can take a chord before the app
   sees it; an app says so in its README rather than binding other keys. Where one clashes, the fix is a system setting, not another key here.
 - **Every app's Keymap page and About screen list these keys** on a desktop build, and a self-test is to check that each pad input in the table has exactly one key and that no two inputs share a key (not built yet).
