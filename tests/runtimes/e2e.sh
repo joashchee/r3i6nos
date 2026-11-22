@@ -3,7 +3,7 @@
 # deb_watcher.py into a scratch root, then each engine run through its r3i6nos-run-* command. Prints "E2E <name> PASS|FAIL|SKIP ...".
 set -u
 apt-get update -qq >/dev/null 2>&1
-apt-get install -y -qq --no-install-recommends python3-minimal libpython3-stdlib libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-ttf-2.0-0 libopenal1 libphysfs1 zlib1g libstdc++6 libvorbisfile3 libmodplug1 libfreetype6 libasound2 dpkg xvfb xauth libgl1-mesa-dri libglx-mesa0 libgl1 >/dev/null 2>&1 || { echo "E2E setup FAIL apt"; exit 1; }
+apt-get install -y -qq --no-install-recommends python3-minimal libpython3-stdlib libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-ttf-2.0-0 libopenal1 libphysfs1 zlib1g libstdc++6 libvorbisfile3 libmodplug1 libfreetype6 libasound2 dpkg xvfb xauth libegl1 libgles2 libgl1-mesa-dri libglx-mesa0 libgl1 >/dev/null 2>&1 || { echo "E2E setup FAIL apt"; exit 1; }
 mkdir -p /t/debs /t/apps /t/launch /t/bin
 cp /debs/*.deb /t/debs/
 export R3I6NOS_DEB_DIR=/t/debs R3I6NOS_DEB_DIR2=/nonexistent R3I6NOS_DEFAULT_DEB_DIR=/nonexistent R3I6NOS_APP_ROOT=/t/apps R3I6NOS_LAUNCHER_DIR=/t/launch R3I6NOS_TOOLS_DIR=/t/bin
@@ -46,10 +46,12 @@ if grep -q QUEST-STARTED /g/sq.out; then echo "E2E solarus PASS"
 elif grep -q "bad light userdata pointer" /g/sq.out && grep -q "Opening quest" /g/sq.out; then echo "E2E solarus SKIP engine loads and opens the quest; LuaJIT panics on this host's 48-bit address space (needs the unit)"
 else echo "E2E solarus FAIL"; tail -3 /g/sq.out; fi
 
-# the three samples (tools/runtimes/samples, mounted at /s): Pyxel draws and quits by its own hook, Ren'Py reaches the first line, Solarus loads its Lua
+# the samples (tools/runtimes/samples, mounted at /s): Pyxel draws and quits by its own hook, Ren'Py reaches the first line, Solarus loads its Lua
 if [ -d /s ]; then
     if R3I6NOS_SAMPLE_FRAMES=12 timeout 90 xvfb-run -a -s "-screen 0 640x480x24" r3i6nos-run-pyxel /s/Pyxel/Hello_Pyxel >/g/spy.out 2>&1; then echo "E2E sample-pyxel PASS"; else echo "E2E sample-pyxel FAIL"; tail -3 /g/spy.out; fi
     if R3I6NOS_SAMPLE_AUTOQUIT=1 timeout 150 xvfb-run -a -s "-screen 0 640x480x24" r3i6nos-run-renpy /s/Renpy/Hello_Renpy >/g/srp.out 2>&1; then echo "E2E sample-renpy PASS"; else echo "E2E sample-renpy FAIL"; tail -3 /g/srp.out; fi
+    # Godot: the pack's three text files load, the scene runs on GLES2 (Mesa's llvmpipe here), 12 frames, quit by its own hook
+    if R3I6NOS_SAMPLE_FRAMES=12 SDL_AUDIODRIVER=dummy timeout 120 xvfb-run -a -s "-screen 0 640x480x24" r3i6nos-run-godot /s/Godot/Hello_Godot.pck >/g/sgd.out 2>&1 && grep -q "HELLO_GODOT quit frames frames=12" /g/sgd.out; then echo "E2E sample-godot PASS"; else echo "E2E sample-godot FAIL"; tail -3 /g/sgd.out; fi
     R3I6NOS_SAMPLE_AUTOQUIT=1 timeout 90 xvfb-run -a -s "-screen 0 640x480x24" r3i6nos-run-solarus /s/Solarus/Hello_Solarus >/g/ssq.out 2>&1
     if grep -q "Opening quest" /g/ssq.out && ! grep -q "Cannot find" /g/ssq.out; then echo "E2E sample-solarus PASS opens the quest (see the solarus line above for the LuaJIT note)"; else echo "E2E sample-solarus FAIL"; tail -3 /g/ssq.out; fi
 fi

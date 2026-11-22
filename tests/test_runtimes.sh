@@ -104,4 +104,9 @@ if echo "$a" | grep -q "GLES2"; then fail "godot: a chosen driver was overridden
 if "$S/godot/usr/bin/r3i6nos-run-godot" "$G/emptygd" >/dev/null 2>"$T/e6"; then fail "godot ran a folder with no .pck"; fi
 grep -q "no .pck" "$T/e6" || fail "godot: no message"
 grep -q "Artistic-2.0" "$S/ags/usr/share/doc/r3i6nos-runtime-ags/NOTICE" || fail "ags NOTICE does not name the licence"
+# the Godot sample pack is what its builder makes from the sources (so the committed binary is not a stray), and carries the three files, text
+python3 -I tools/runtimes/godot-sample/build-pck.py "$T/fresh.pck" >/dev/null
+cmp -s "$T/fresh.pck" tools/runtimes/samples/Godot/Hello_Godot.pck || fail "tools/runtimes/samples/Godot/Hello_Godot.pck is not what godot-sample/build-pck.py makes: run it"
+head -c 4 "$T/fresh.pck" | grep -q GDPC || fail "the sample pack has no GDPC magic"
+for f in res://project.godot res://main.tscn res://main.gd; do grep -aq "$f" "$T/fresh.pck" || fail "the sample pack lacks $f"; done
 echo "runtimes OK"

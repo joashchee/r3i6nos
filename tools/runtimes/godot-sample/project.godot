@@ -1,0 +1,16 @@
+; Hello_Godot: the r3i6nos sample for the Godot runtime (docs/RUNTIMES.md). Original, public domain (CC0).
+config_version=4
+
+[application]
+
+config/name="Hello Godot"
+run/main_scene="res://main.tscn"
+
+[display]
+
+window/size/width=640
+window/size/height=480
+
+[rendering]
+
+quality/driver/driver_name="GLES2"

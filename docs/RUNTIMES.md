@@ -14,7 +14,7 @@ the comparison is in ROADMAP section 33.)
 | The manifests: pinned source, sha256, trim, licences | `tools/runtimes/<name>/runtime.conf` |
 | The command each package installs | `tools/runtimes/<name>/run` (`r3i6nos-run-pyxel`, `-renpy`, `-solarus`) |
 | One command to build all five | `scripts/build-runtimes.sh` (`--stage-only`, or names): `build/runtimes/r3i6nos-runtime-<name>.deb` |
-| Sample games to try on the unit | `tools/runtimes/samples/{Pyxel,Renpy,Solarus}/` (original, CC0) |
+| Sample games to try on the unit | `tools/runtimes/samples/{Pyxel,Renpy,Solarus,Godot}/` (original, CC0); `Godot/Hello_Godot.pck` is made by `tools/runtimes/godot-sample/build-pck.py` from the three text files beside it; **AGS has none** (`samples/AGS/README.txt` says why) |
 | The menu | `menu/scan.lua` lists a game in a card folder `Pyxel/`, `Renpy/` or `Solarus/`; `run_app.sh` types `pyxel`, `renpy`, `solarus` |
 | The unit check | `== runtimes ==` in `r3i6nos-report` (Settings > Device reports > r3i6nos) |
 | Tests | `tests/test_runtimes.sh`, `tests/test_run_app_runtime.sh`, `tests/test_runtimes_docker.sh` (Docker), `tests/test_scan.lua`, `tests/test_r3i6nos_report.py` |
@@ -24,7 +24,8 @@ the comparison is in ROADMAP section 33.)
 Two more runtimes of the same shape, chosen from the cheap list below (maintainer's request 2026-11-21): **AGS 3.6** (`r3i6nos-runtime-ags`, `r3i6nos-run-ags`, Artistic-2.0, source https://github.com/adventuregamestudio/ags) and **Godot 3.6** as PortMaster's FRT build (`r3i6nos-runtime-godot`, `r3i6nos-run-godot`, MIT, source https://github.com/efornara/frt). Each is one aarch64 executable from the pinned PortMaster-New commit (sha256 in `tools/runtimes/<name>/runtime.conf`): AGS has SDL2 built in (it needs only libc and libstdc++), FRT links the system's SDL2 and zlib. 3.1 MB and 12.3 MB downloads, 7 MB and 28 MB unpacked. The upstream squashfs carries no licence files, so the notice gives the licence and source (not legal advice: check before a release).
 - **Games:** AGS: `<card>/AGS/<Game>/` holding `ac2game.dat`, an `.ags` or an `.exe`; the command goes to that folder and draws with AGS's **software renderer** unless `--gfxdriver` is given (the Mali's OpenGL ES through AGS's driver is untested). Godot: an exported game, `<card>/Godot/<Game>.pck` or a folder holding one; the command asks for **OpenGL ES 2** (`--video-driver GLES2`) unless told otherwise, and the game keeps its saves where Godot puts them (a third-party game is exempt from rule 16). The menu lists them with the types `ags` and `godot` (`run_app.sh`, `menu/scan.lua`).
 - **Checked (Debian 12 arm64, Docker):** both engines start and print their version (AGS 3.6.3.0, Godot `3.6.stable.frt.8ca803cce`); with a game that is not valid they say so and exit (Godot: cannot open the pack); the five packages install through the real `deb_watcher.py` (`tests/test_runtimes_docker.sh`). `tests/test_runtimes.sh` covers the launchers (game found, directory, renderer default and override, no game) and the notice; `== runtimes ==` in `r3i6nos-report` runs `--version` for each.
-- **Not done, untested:** **no sample game for either** (an AGS game or a Godot export cannot be made here: bring one), no window shown, no pad, no sound, no GLES on the Mali, no memory figure, nothing on a unit.
+- **Sample games (2026-11-22):** **Godot: `Hello_Godot.pck`** (CC0; `tools/runtimes/godot-sample/` holds `project.godot`, `main.tscn` and `main.gd`, and `build-pck.py` packs them into a Godot 3 pack with the standard library only, byte for byte the same each time; no assets, the square is drawn and the note is made in the script). D-pad or arrows move the square, A (or Enter) changes its colour and plays a note, Start or Esc quits; `R3I6NOS_SAMPLE_FRAMES=n` quits after n frames. **Run on the real FRT 3.6 in Debian 12 arm64 under Xvfb: the pack loads, the scene runs on GLES2 (Mesa's llvmpipe), 12 frames, quits by its own hook** (`tests/runtimes/e2e.sh`, in `tests/test_runtimes_docker.sh`; `tests/test_runtimes.sh` checks the committed pack against the builder). **AGS: no sample.** A game is a compiled `ac2game.dat` made by the AGS Editor (Windows), which cannot be run here, and one from elsewhere is not ours to ship (rule 2): bring a freeware one, or make a tiny one with the Editor and release it CC0 (`samples/AGS/README.txt`).
+- **Not done, untested:** no AGS game has been started; no window on the Mali, no pad, no real sound, no GLES on the unit, no memory figure, nothing on a unit.
 
 ## How a runtime is packed
 
@@ -78,10 +79,10 @@ The image has no `libGL` (SDL's KMS/DRM driver gives GLES): **whether Pyxel's re
 ## On the unit (the next step, needs the maintainer)
 
 1. Build and put the packages on the card: `scripts/build-runtimes.sh` then copy `build/runtimes/*.deb` to `native_deb/` (or `scripts/push-packages.sh UNIT build/runtimes/*.deb`).
-2. Copy the samples to the card's games partition: `cp -R tools/runtimes/samples/* /Volumes/EASYROMS/` (adds `Pyxel/`, `Renpy/`, `Solarus/`).
+2. Copy the samples to the card's games partition: `cp -R tools/runtimes/samples/* /Volumes/EASYROMS/` (adds `Pyxel/`, `Renpy/`, `Solarus/` and `Godot/`, plus a note in `AGS/`: AGS has no sample, bring a freeware game to `AGS/<Game>/`).
 3. Boot, run **Settings > Device reports > r3i6nos**, and give `r3i6nos/r36s-report.txt` to Claude: the `== runtimes ==` section says whether each runtime links and starts, the kernel's squashfs options,
    the address-space size and `/dev/uinput`.
-4. Start each sample from the menu (types **Pyxel**, **Ren'Py**, **Solarus**) and say: does a picture appear, do the d-pad and buttons work, is there sound, how long to the first frame, does holding Select and Start
+4. Start each sample from the menu (types **Pyxel**, **Ren'Py**, **Solarus**, **Godot**, and **AGS** if you brought a game) and say: does a picture appear, do the d-pad and buttons work, is there sound, how long to the first frame, does holding Select and Start
    (2 seconds) return to the menu. Ren'Py and Solarus may need an SDL renderer or pad tweak (`RENPY_RENDERER`, Solarus's joypad settings): that is what the unit run is for.
 5. If a runtime fails, it is dropped (order of expected difficulty: Pyxel, Solarus, Ren'Py) and the maker for it is not started (ROADMAP section 33, step 5).
 
