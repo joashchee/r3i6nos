@@ -73,14 +73,47 @@ run_runtime() {
     fi
     local quit="${R3I6NOS_PORTQUIT:-/usr/local/bin/r3i6nos-portquit}"
     if command -v setsid >/dev/null 2>&1 && [ -x "$quit" ]; then
-        setsid "$cmd" "$TARGET" <&0 &
+        # The first runs on the unit (2026-11-22): only Pyxel ran, Ren'Py, Solarus and Godot hung with no way back. Nothing recorded why, so every launch now writes
+        # r3i6nos/runtime-<type>.log on the data card (else the system card): the engine's own output, and every 5 s for the first two minutes the process's state
+        # (R running, S waiting, D stuck in the kernel, which is what a GPU hang looks like and which SIGKILL cannot end), its CPU and what it waits on.
+        local log="" d
+        for d in "${R3I6NOS_LOG_DIR:-}" /roms2/r3i6nos /roms/r3i6nos; do
+            if [ -n "$d" ] && [ -d "$d" ] && [ -w "$d" ]; then log="$d/runtime-$TYPE.log"; break; fi
+        done
+        local began
+        began="$(date +%s)"
+        if [ -n "$log" ]; then
+            { echo "== $(date '+%Y-%m-%d %H:%M:%S') $TYPE $TARGET"; echo "cmd: $cmd"; } > "$log" 2>/dev/null || log=""
+        fi
+        if [ -n "$log" ]; then
+            setsid "$cmd" "$TARGET" <&0 >>"$log" 2>&1 &
+        else
+            setsid "$cmd" "$TARGET" <&0 &
+        fi
         local game_pid=$!
-        "$quit" "$game_pid" &
+        "$quit" "$game_pid" >>"${log:-/dev/null}" 2>&1 &
         local quit_pid=$!
+        local watch_pid=""
+        if [ -n "$log" ]; then
+            (
+                i=0
+                while [ "$i" -lt 24 ] && kill -0 "$game_pid" 2>/dev/null; do
+                    sleep 5
+                    i=$((i + 1))
+                    st="$(awk '{print $3, "cpu_ticks=" $14+$15, "threads=" $20}' "/proc/$game_pid/stat" 2>/dev/null)"
+                    dthreads="$(grep -l '^State:.D' /proc/"$game_pid"/task/*/status 2>/dev/null | wc -l)"
+                    echo "t=$((i * 5))s state=${st:-gone} D_threads=$dthreads wchan=$(cat "/proc/$game_pid/wchan" 2>/dev/null) rss_kb=$(awk '/VmRSS/{print $2}' "/proc/$game_pid/status" 2>/dev/null)" >> "$log"
+                    sync "$log" 2>/dev/null || true
+                done
+            ) &
+            watch_pid=$!
+        fi
         wait "$game_pid"
         local rc=$?
+        [ -z "$log" ] || echo "== exit $rc after $(( $(date +%s) - began )) s" >> "$log"
         kill "$quit_pid" 2>/dev/null
         wait "$quit_pid" 2>/dev/null
+        if [ -n "$watch_pid" ]; then kill "$watch_pid" 2>/dev/null; wait "$watch_pid" 2>/dev/null; fi
         exit "$rc"
     fi
     "$cmd" "$TARGET"

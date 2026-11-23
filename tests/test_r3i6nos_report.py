@@ -542,7 +542,7 @@ class RuntimesSection(Fake):
 
     def test_a_good_ags_and_a_good_godot(self):
         self.package("ags", {"ags_3.6.aarch64": b"#!/bin/sh\necho 'Engine version 3.6.3.0, 64-bit LE'\n"})
-        self.package("godot", {"frt_3.6": b"#!/bin/sh\necho 3.6.stable.frt.abc\n"})
+        self.package("godot", {"frt_3.6": b"#!/bin/sh\necho 3.6.stable.frt.abc; exit 255\n"})  # the real FRT exits 255 after --version
         s = self.section()
         for n in ("ags", "godot"):
             self.assertIn(f"INFO {n} package: 9.9-r3i6nos1", s)

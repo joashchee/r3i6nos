@@ -239,28 +239,26 @@ static double pb_report_ffmpeg(R3Report *r, const char *ff, const char *work, ch
                        secs, *has_audio ? "with AAC sound" : "no sound: this ffmpeg cannot encode AAC or read WAV", mk.wall, mk.wall > 0 ? 100.0 * mk.cpu / mk.wall : 0);
     }
     /* the variants, each one change from the player's own command */
-    const char *base = PL_VIDEO_VF("neighbor");
-    PbVar app = pb_variant(r, ff, clip_out, secs, "app path", NULL, NULL, base, "bgra", 1);
-    PbVar t1 = pb_variant(r, ff, clip_out, secs, "decoder threads 1", "-threads", "1", base, "bgra", 1);
-    PbVar t2 = pb_variant(r, ff, clip_out, secs, "decoder threads 2", "-threads", "2", base, "bgra", 1);
-    PbVar t4 = pb_variant(r, ff, clip_out, secs, "decoder threads 4", "-threads", "4", base, "bgra", 1);
-    PbVar bil = pb_variant(r, ff, clip_out, secs, "scale fast_bilinear", NULL, NULL, PL_VIDEO_VF("fast_bilinear"), "bgra", 0);
-    PbVar bl2 = pb_variant(r, ff, clip_out, secs, "scale bilinear", NULL, NULL, PL_VIDEO_VF("bilinear"), "bgra", 0);
-    PbVar skip = pb_variant(r, ff, clip_out, secs, "skip loop filter", "-skip_loop_filter", "all", base, "bgra", 0);
-    PbVar yuv = pb_variant(r, ff, clip_out, secs, "yuv420p, no scale, no BGRA", NULL, NULL, "fps=30", "yuv420p", 1);
+    const char *base = PL_VIDEO_VF("neighbor");        /* the old BGRA path (before 2026-11-23), kept as the comparison */
+    char yvf[96] = "fps=30";                           /* the player's own command now: YUV at the picture's size (player.h, pl_yuv_size) */
+    {   int cw = 0, ch = 0, yw, yh;
+        if (pl_probe_size(ff, clip_out, &cw, &ch, NULL) == 0) pl_yuv_size(cw, ch, &yw, &yh, yvf, sizeof yvf);
+    }
+    PbVar app = pb_variant(r, ff, clip_out, secs, "app path", NULL, NULL, yvf, "yuv420p", 1);
+    PbVar old = pb_variant(r, ff, clip_out, secs, "old BGRA path", NULL, NULL, base, "bgra", 1);
+    PbVar t1 = pb_variant(r, ff, clip_out, secs, "decoder threads 1", "-threads", "1", yvf, "yuv420p", 1);
+    PbVar t2 = pb_variant(r, ff, clip_out, secs, "decoder threads 2", "-threads", "2", yvf, "yuv420p", 1);
+    PbVar t4 = pb_variant(r, ff, clip_out, secs, "decoder threads 4", "-threads", "4", yvf, "yuv420p", 1);
+    PbVar skip = pb_variant(r, ff, clip_out, secs, "skip loop filter", "-skip_loop_filter", "all", yvf, "yuv420p", 0);
     if (app.ok) {
-        r3_report_line(r, app.x >= PB_GOAL_X ? R3_PASS : R3_FAIL, "480p app path", "%.1fx real time with the player's own command (goal at least %.1fx); below 1x the picture falls behind the sound", app.x, PB_GOAL_X);
+        r3_report_line(r, app.x >= PB_GOAL_X ? R3_PASS : R3_FAIL, "480p app path", "%.1fx real time with the player's own command (YUV at the picture's size, the GPU scales it; goal at least %.1fx); below 1x the picture falls behind the sound", app.x, PB_GOAL_X);
         if (t1.ok && t4.ok) {
             double g = t4.x / t1.x;
-            if (g < 1.15) r3_report_line(r, R3_INFO, "advice threads", "decoding on 4 threads is only %.2fx the speed of 1: the decode does not spread over the cores (a stream with one slice per frame cannot), so the spare cores are free for the picture's conversion and the sound", g);
+            if (g < 1.15) r3_report_line(r, R3_INFO, "advice threads", "decoding on 4 threads is only %.2fx the speed of 1: the decode does not spread over the cores (a stream with one slice per frame cannot), so the spare cores are free for the picture and the sound", g);
             else r3_report_line(r, R3_INFO, "advice threads", "decoding on 4 threads is %.2fx the speed of 1 (2 threads: %.2fx): ffmpeg's default (every core) is right; capping it would trade speed for the other cores", g, t2.ok ? t2.x / t1.x : 0.0);
         }
-        if (yuv.ok && yuv.x > app.x * 1.25)
-            r3_report_line(r, R3_INFO, "advice pixel format", "leaving the picture as YUV at its own size is %.2fx faster than scaling and converting to BGRA in ffmpeg (%.1fx against %.1fx), and the pipe carries %.1f MB/s instead of %.1f: ship yuv420p and let an SDL IYUV texture be scaled by the GPU (the screen lines below give its cost)", yuv.x / app.x, yuv.x, app.x, yuv.mbps, app.mbps);
-        else if (yuv.ok) r3_report_line(r, R3_INFO, "advice pixel format", "YUV at the picture's own size is %.2fx the speed of the BGRA path: the scaler and the conversion are not what limits it, the decode is", yuv.x / app.x);
-        if (bil.ok && bl2.ok)
-            r3_report_line(r, R3_INFO, "advice scaler", "neighbor %.1fx, fast_bilinear %.1fx, bilinear %.1fx: %s", app.x, bil.x, bl2.x,
-                           bl2.x >= app.x * 0.9 ? "bilinear costs under 10% and looks better: use it" : bil.x >= app.x * 0.9 ? "fast_bilinear costs under 10% and looks better" : "neighbor is the only one that is cheap here");
+        if (old.ok)
+            r3_report_line(r, R3_INFO, "advice pixel format", "the YUV path is %.2fx the speed of the old scale-and-BGRA path (%.1fx against %.1fx), and the pipe carries %.1f MB/s instead of %.1f", app.x / old.x, app.x, old.x, app.mbps, old.mbps);
         if (skip.ok && skip.x > app.x * 1.2) r3_report_line(r, R3_INFO, "advice loop filter", "skipping the H.264 loop filter is %.2fx faster (a softer picture): a fallback for a unit that does not keep up, not a default", skip.x / app.x);
     }
     return secs;

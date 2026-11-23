@@ -14,7 +14,7 @@ the comparison is in ROADMAP section 33.)
 | The manifests: pinned source, sha256, trim, licences | `tools/runtimes/<name>/runtime.conf` |
 | The command each package installs | `tools/runtimes/<name>/run` (`r3i6nos-run-pyxel`, `-renpy`, `-solarus`) |
 | One command to build all five | `scripts/build-runtimes.sh` (`--stage-only`, or names): `build/runtimes/r3i6nos-runtime-<name>.deb` |
-| Sample games to try on the unit | `tools/runtimes/samples/{Pyxel,Renpy,Solarus,Godot}/` (original, CC0); `Godot/Hello_Godot.pck` is made by `tools/runtimes/godot-sample/build-pck.py` from the three text files beside it; **AGS has none** (`samples/AGS/README.txt` says why) |
+| Sample games to try on the unit | `tools/runtimes/samples/{Pyxel,Renpy,Solarus,Godot}/` and, for the LÖVE runtimes, `Love 11.5/Hello_Love_11.5/` and `Love 12.0/Hello_Love_12.0/` (original, CC0; `tests/test_love_samples.sh`); `Godot/Hello_Godot.pck` is made by `tools/runtimes/godot-sample/build-pck.py` from the three text files beside it; **AGS has none** (`samples/AGS/README.txt` says why) |
 | The menu | `menu/scan.lua` lists a game in a card folder `Pyxel/`, `Renpy/` or `Solarus/`; `run_app.sh` types `pyxel`, `renpy`, `solarus` |
 | The unit check | `== runtimes ==` in `r3i6nos-report` (Settings > Device reports > r3i6nos) |
 | Tests | `tests/test_runtimes.sh`, `tests/test_run_app_runtime.sh`, `tests/test_runtimes_docker.sh` (Docker), `tests/test_scan.lua`, `tests/test_r3i6nos_report.py` |
@@ -76,10 +76,18 @@ The image has no `libGL` (SDL's KMS/DRM driver gives GLES): **whether Pyxel's re
   unit's 4.4 kernel is probably 39-bit (an arm64 default of that era, **unread**: the report prints it), and LÖVE, which uses LuaJIT too, runs on it. **Untested on the unit.**
 - Not tested: GLES on the Mali, the pad, sound, memory, time to the first frame.
 
+## The launch log (2026-11-23)
+
+**First samples on the unit (2026-11-22): Pyxel ran; Ren'Py, Solarus and Godot hung, the pad did nothing and the menu did not come back.** Nothing recorded why, so `run_app.sh` now writes
+`r3i6nos/runtime-<type>.log` (`runtime-renpy.log`, `runtime-solarus.log`, `runtime-godot.log`, ...) on the data card, else the system card: the engine's own output (stdout and stderr), the
+quit watcher's messages, and **a state line every 5 s for the first two minutes** (`state` R running, S waiting, **D stuck in the kernel**; `cpu_ticks`; `D_threads`; `wchan`; `rss_kb`) and `== exit <rc> after <s> s`.
+How to read it: `D` and a `wchan` naming a Mali or DRM function is a GPU or driver hang (Select+Start cannot end it: SIGKILL does nothing to a task stuck in the kernel); `R` with `cpu_ticks` climbing is a busy loop or a long load
+(Ren'Py compiled a one-line script in 25.7 s on the unit and the first start of a game compiles more); `S` and no growth is a wait (an audio or input device). Send the logs back.
+
 ## On the unit (the next step, needs the maintainer)
 
 1. Build and put the packages on the card: `scripts/build-runtimes.sh` then copy `build/runtimes/*.deb` to `native_deb/` (or `scripts/push-packages.sh UNIT build/runtimes/*.deb`).
-2. Copy the samples to the card's games partition: `cp -R tools/runtimes/samples/* /Volumes/EASYROMS/` (adds `Pyxel/`, `Renpy/`, `Solarus/` and `Godot/`, plus a note in `AGS/`: AGS has no sample, bring a freeware game to `AGS/<Game>/`).
+2. Copy the samples to the card's games partition: `cp -R tools/runtimes/samples/* /Volumes/EASYROMS/` (adds `Pyxel/`, `Renpy/`, `Solarus/`, `Godot/`, `Love 11.5/` and `Love 12.0/`, plus a note in `AGS/`: AGS has no sample, bring a freeware game to `AGS/<Game>/`).
 3. Boot, run **Settings > Device reports > r3i6nos**, and give `r3i6nos/r36s-report.txt` to Claude: the `== runtimes ==` section says whether each runtime links and starts, the kernel's squashfs options,
    the address-space size and `/dev/uinput`.
 4. Start each sample from the menu (types **Pyxel**, **Ren'Py**, **Solarus**, **Godot**, and **AGS** if you brought a game) and say: does a picture appear, do the d-pad and buttons work, is there sound, how long to the first frame, does holding Select and Start

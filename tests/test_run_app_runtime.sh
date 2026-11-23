@@ -24,4 +24,19 @@ if R3I6NOS_PORTQUIT="$T/quit" timeout 20 overlay/usr/local/bin/run_app.sh pyxel 
 rm "$T/bin/r3i6nos-run-solarus"
 if err="$(overlay/usr/local/bin/run_app.sh solarus "$T/game" 2>&1)"; then fail "ran without the runtime"; fi
 echo "$err" | grep -q "r3i6nos-runtime-solarus" || fail "no package named: $err"
+if command -v setsid >/dev/null 2>&1; then   # the guarded launch (and so the log) needs setsid, which macOS has not; CI and the unit do
+# the log: the engine's output and its exit are written to r3i6nos/runtime-<type>.log, and the state lines come while it runs
+mkdir -p "$T/log"
+printf '#!/bin/bash\necho "ENGINE SAYS HI"\necho "ENGINE ERR" >&2\nexit 4\n' > "$T/bin/r3i6nos-run-godot"
+printf '#!/bin/bash\nsleep 0.2\n' > "$T/quit-idle"; chmod +x "$T/quit-idle"
+R3I6NOS_LOG_DIR="$T/log" R3I6NOS_PORTQUIT="$T/quit-idle" overlay/usr/local/bin/run_app.sh godot "$T/game" >/dev/null 2>&1 && fail "godot exit 4 lost"
+grep -q "ENGINE SAYS HI" "$T/log/runtime-godot.log" || fail "the engine's output is not in the log"
+grep -q "ENGINE ERR" "$T/log/runtime-godot.log" || fail "the engine's errors are not in the log"
+grep -q "== exit 4 after" "$T/log/runtime-godot.log" || fail "the exit is not in the log"
+head -1 "$T/log/runtime-godot.log" | grep -q "godot $T/game" || fail "the log has no header"
+# a game that runs longer than 5 s gets a state line (stop it with the fake quit)
+printf '#!/bin/bash\nsleep 7\n' > "$T/bin/r3i6nos-run-godot"
+R3I6NOS_LOG_DIR="$T/log" R3I6NOS_PORTQUIT="$T/quit-idle" overlay/usr/local/bin/run_app.sh godot "$T/game" >/dev/null 2>&1 || fail "a 7 s game failed"
+grep -q "^t=5s state=" "$T/log/runtime-godot.log" || fail "no state line after 5 s: $(cat "$T/log/runtime-godot.log")"
+fi
 echo "run_app runtime types OK"

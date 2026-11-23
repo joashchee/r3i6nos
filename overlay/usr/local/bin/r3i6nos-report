@@ -533,7 +533,8 @@ def runtimes(r):
                     ok, why = "Engine version" in p.stdout + p.stderr, (re.search(r"Engine version [^\n]*", p.stdout + p.stderr) or ["answers --version"])[0] if "Engine version" in p.stdout + p.stderr else (p.stderr.strip().splitlines() or ["no answer"])[-1]
                 elif name == "godot":
                     p = subprocess.run([str(rt / "frt_3.6"), "--version"], capture_output=True, text=True, timeout=60, env=e)
-                    ok, why = p.returncode == 0 and bool(p.stdout.strip()), f"version {p.stdout.strip()}" if p.returncode == 0 else (p.stderr.strip().splitlines() or ["no answer"])[-1]
+                    # Godot's --version prints the version and exits 255 (found 2026-11-22: a unit report showed a false FAIL), so the version on stdout is the test, not the exit code
+                    ok, why = bool(p.stdout.strip()), f"version {p.stdout.strip()}" if p.stdout.strip() else (p.stderr.strip().splitlines() or [f"no answer, exit {p.returncode}"])[-1]
                 else:
                     r.line("SKIP", f"{name} smoke test", "no test for this runtime yet")
                     continue

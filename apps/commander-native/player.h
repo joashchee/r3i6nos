@@ -49,8 +49,22 @@ typedef struct {
     /* frames from ffmpeg */
     int vfd, afd;                   /* pipes; -1 when none */
     pid_t vpid, apid;
-    unsigned char *vbuf;
-    size_t vgot;
+    unsigned char *vbuf;            /* a ring of `rn` frames read ahead from the pipe (so ffmpeg, now one process for picture and sound, is never held up by a picture that is not due yet) */
+    size_t vgot;                    /* bytes of the frame being read, in the slot after the last full one */
+    int rn, rhead, rcount;          /* ring size, oldest frame, frames held */
+    /* read-ahead and start-up buffer (R3I6NOS_FM_AHEAD: the ring's frames, default 8; R3I6NOS_FM_PREBUF: frames to hold before playing starts, default 0), and what the
+     * report counts to judge them */
+    int prebuf, hold;               /* hold: still filling before the start */
+    double open_ms, hold_since, first_ms;     /* when it opened, when the hold began, ms from open to the first picture */
+    unsigned late, underruns;       /* pictures shown more than 50 ms after they were due; times the sound's queue ran dry while playing */
+    double max_late_ms;
+    int sound_dry;
+    /* YUV path (2026-11-23): ffmpeg writes yuv420p at the picture's own (even, at most 854 x 480) size and the GPU scales it, instead of ffmpeg scaling and converting to
+     * 640 x 400 BGRA (the unit's playback report: 6.7x real time against 3.3x). vw x vh is that size; ybuf is the frame now (planes Y, U, V); yseq changes with every frame. */
+    int yuv, vw, vh;
+    size_t yframe;
+    unsigned char *ybuf;
+    unsigned yseq;
     long vidx;
     int v_eof, a_eof;
     /* sound */
@@ -61,6 +75,8 @@ typedef struct {
     unsigned long long fed;         /* bytes queued so far */
     int primed;
 } Player;
+
+static unsigned pl_yseq_counter;   /* one count for every player, so a new video never repeats the last frame's number */
 
 static void pl_zero(Player *p) {
     memset(p, 0, sizeof *p);
@@ -94,6 +110,7 @@ static void pl_close(Player *p) {
     free(p->px);
     free(p->full);
     free(p->vbuf);
+    free(p->ybuf);
     pl_zero(p);
 }
 
@@ -139,6 +156,41 @@ static int pl_spawn(char *const argv[], int *fd, pid_t *pid) {
     close(fds[1]);
     fcntl(fds[0], F_SETFL, fcntl(fds[0], F_GETFL) | O_NONBLOCK);
     *fd = fds[0];
+    *pid = c;
+    return 0;
+}
+
+/* Starts argv with the standard output on one non-blocking pipe (the picture) and file descriptor 3 on another (the sound): ONE ffmpeg, so the file is opened,
+ * read and demuxed once (the unit's report: two processes read it twice). 0 and both read ends, or -1. */
+static int pl_spawn2(char *const argv[], int *vfd, int *afd, pid_t *pid) {
+    int vp[2], ap[2];
+    if (pipe(vp) != 0) return -1;
+    if (pipe(ap) != 0) { close(vp[0]); close(vp[1]); return -1; }
+#if defined(__linux__)
+    (void)fcntl(vp[0], F_SETPIPE_SZ, 1024 << 10);
+    (void)fcntl(ap[0], F_SETPIPE_SZ, 1024 << 10);
+#endif
+    pid_t c = fork();
+    if (c < 0) { close(vp[0]); close(vp[1]); close(ap[0]); close(ap[1]); return -1; }
+    if (c == 0) {
+        int hv = fcntl(vp[1], F_DUPFD, 70), ha = fcntl(ap[1], F_DUPFD, 70);     /* out of the way, so the two dup2 below cannot trample each other */
+        if (hv < 0 || ha < 0) _exit(127);
+        dup2(hv, 1);
+        dup2(ha, 3);
+        int nul = open("/dev/null", O_RDWR);
+        if (nul >= 0) { dup2(nul, 2); dup2(nul, 0); }
+        for (int i = 4; i < 64; i++) close(i);
+        close(hv);
+        close(ha);
+        execv(argv[0], argv);
+        _exit(127);
+    }
+    close(vp[1]);
+    close(ap[1]);
+    fcntl(vp[0], F_SETFL, fcntl(vp[0], F_GETFL) | O_NONBLOCK);
+    fcntl(ap[0], F_SETFL, fcntl(ap[0], F_GETFL) | O_NONBLOCK);
+    *vfd = vp[0];
+    *afd = ap[0];
     *pid = c;
     return 0;
 }
@@ -233,7 +285,7 @@ static void pl_audio_feed(Player *p) {
         if (SDL_QueueAudio(p->dev, buf, (Uint32)n) != 0) { p->a_eof = 1; break; }
         p->fed += (unsigned)n;
     }
-    if (!p->primed && (p->fed >= want / 2 || p->a_eof)) { p->primed = 1; if (p->playing) SDL_PauseAudioDevice(p->dev, 0); }
+    if (!p->primed && (p->fed >= want / 2 || p->a_eof)) { p->primed = 1; if (p->playing && !p->hold) SDL_PauseAudioDevice(p->dev, 0); }
 }
 
 /* Draws the 640x480 render of `cur` into px at 5/6 size (533 x 400, centred, black either side). */
@@ -278,14 +330,119 @@ static int pl_open_wav(Player *p, const char *path, const char **why) {
     return 0;
 }
 
+
+/* The size of the first video stream, from the text `ffmpeg -i FILE` prints on stderr (this ffmpeg has no ffprobe): the first " NNNxNNN" after "Video:" that is a
+ * plausible picture (so a hex tag like 0x31637661 does not count). 0 and *w, *h, or -1. Reads for at most 5 s. */
+static int pl_parse_size(const char *txt, int *w, int *h) {
+    const char *v = strstr(txt, "Video:");
+    if (!v) return -1;
+    for (const char *c = v; *c; c++) {
+        if ((c == v || c[-1] == ' ') && c[0] >= '1' && c[0] <= '9') {
+            char *e;
+            long a = strtol(c, &e, 10);
+            if (*e == 'x' && e[1] >= '1' && e[1] <= '9') {
+                char *e2;
+                long b = strtol(e + 1, &e2, 10);
+                if (a >= 16 && a <= 8192 && b >= 16 && b <= 8192 && (*e2 == ',' || *e2 == ' ' || *e2 == '[' || *e2 == 0 || *e2 == '\n')) { *w = (int)a; *h = (int)b; return 0; }
+            }
+        }
+    }
+    return -1;
+}
+
+static int pl_probe_size(const char *ff, const char *path, int *w, int *h, int *has_audio) {
+    int fds[2];
+    if (pipe(fds) != 0) return -1;
+    pid_t c = fork();
+    if (c < 0) { close(fds[0]); close(fds[1]); return -1; }
+    if (c == 0) {
+        dup2(fds[1], 2);
+        int nul = open("/dev/null", O_RDWR);
+        if (nul >= 0) { dup2(nul, 1); dup2(nul, 0); }
+        for (int i = 3; i < 64; i++) close(i);
+        char *argv[] = {(char *)ff, (char *)"-hide_banner", (char *)"-i", (char *)path, NULL};
+        execv(ff, argv);
+        _exit(127);
+    }
+    close(fds[1]);
+    char txt[8192];
+    size_t n = 0;
+    double t0 = (double)SDL_GetTicks();
+    fcntl(fds[0], F_SETFL, fcntl(fds[0], F_GETFL, 0) | O_NONBLOCK);
+    for (;;) {
+        ssize_t r = n < sizeof txt - 1 ? read(fds[0], txt + n, sizeof txt - 1 - n) : 0;
+        if (r > 0) { n += (size_t)r; continue; }
+        if (r == 0) break;
+        if (errno != EAGAIN && errno != EINTR) break;
+        if ((double)SDL_GetTicks() - t0 > 5000.0) break;
+        usleep(5000);
+    }
+    txt[n] = 0;
+    close(fds[0]);
+    kill(c, SIGKILL);
+    waitpid(c, NULL, 0);
+    if (has_audio) *has_audio = strstr(txt, "Audio:") != NULL;
+    return pl_parse_size(txt, w, h);
+}
+
+/* The decode size: the picture's own, made even (an IYUV texture needs it) and fitted inside 854 x 480 so the pipe carries no more than the old 640 x 400 BGRA did
+ * (0.6 MB a frame in YUV against 1 MB). Fills the filter: fps=30, plus a nearest-neighbour scale when the size changes. */
+static void pl_yuv_size(int sw, int sh, int *w, int *h, char *vf, size_t cap) {
+    int tw = sw & ~1, th = sh & ~1;
+    if (tw > 854 || th > 480) {
+        double k = 854.0 / sw < 480.0 / sh ? 854.0 / sw : 480.0 / sh;
+        tw = ((int)(sw * k)) & ~1;
+        th = ((int)(sh * k)) & ~1;
+    }
+    if (tw < 2) tw = 2;
+    if (th < 2) th = 2;
+    *w = tw;
+    *h = th;
+    if (tw != sw || th != sh) snprintf(vf, cap, "scale=%d:%d:flags=neighbor,fps=30", tw, th);
+    else snprintf(vf, cap, "fps=30");
+}
+
+/* An integer from the environment, clamped; `def` when unset. */
+static int pl_env_int(const char *name, int def, int lo, int hi) {
+    const char *e = getenv(name);
+    int v = e && *e ? atoi(e) : def;
+    return v < lo ? lo : v > hi ? hi : v;
+}
+
 static int pl_ffmpeg_start(Player *p, const char *path, int video, const char **why) {
     char ff[PATH_MAX];
     if (!pl_find_ffmpeg(ff, sizeof ff)) { *why = "needs ffmpeg, not installed here"; return -1; }
     char *vf = PL_VIDEO_VF("neighbor");
-    if (video) {
+    char yvf[96];
+    int sw = 0, sh = 0, aud = 1;
+    if (video && !getenv("R3I6NOS_FM_BGRA") && pl_probe_size(ff, path, &sw, &sh, &aud) == 0) {    /* the YUV path; R3I6NOS_FM_BGRA forces the old one, for the report's comparison */
+        pl_yuv_size(sw, sh, &p->vw, &p->vh, yvf, sizeof yvf);
+        p->yframe = (size_t)p->vw * p->vh * 3 / 2;
+        p->rn = pl_env_int("R3I6NOS_FM_AHEAD", 8, 2, 60);
+        p->prebuf = pl_env_int("R3I6NOS_FM_PREBUF", 0, 0, p->rn);
+        p->hold = p->prebuf > 0;
+        p->vbuf = (unsigned char *)malloc(p->yframe * (size_t)p->rn);
+        p->ybuf = (unsigned char *)calloc(1, p->yframe);
+        if (!p->vbuf || !p->ybuf) { *why = "out of memory"; return -1; }
+        p->yuv = 1;
+        p->has_video = 1;
+        if (aud) {      /* one ffmpeg, two outputs: the picture on its standard output, the sound on descriptor 3 */
+            char *argv[] = {ff, "-v", "error", "-i", (char *)path, "-map", "0:v:0", "-an", "-vf", yvf, "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1",
+                            "-map", "0:a:0", "-vn", "-f", "s16le", "-ar", "44100", "-ac", "2", "pipe:3", NULL};
+            if (pl_spawn2(argv, &p->vfd, &p->afd, &p->vpid) != 0) { *why = "ffmpeg would not start"; return -1; }
+            p->apid = 0;    /* the same process: pl_stop_child on vpid ends it */
+            p->has_audio = 1;
+            pl_audio_open(p, 44100, 2, 16);
+        } else {        /* a silent video: the picture alone, the clock is the wall clock */
+            char *argv[] = {ff, "-v", "error", "-i", (char *)path, "-an", "-vf", yvf, "-pix_fmt", "yuv420p", "-f", "rawvideo", "pipe:1", NULL};
+            if (pl_spawn(argv, &p->vfd, &p->vpid) != 0) { *why = "ffmpeg would not start"; return -1; }
+        }
+        return 0;
+    } else if (video) {
         char *argv[] = {ff, "-v", "error", "-i", (char *)path, "-an", "-vf", vf, "-f", "rawvideo", "-pix_fmt", "bgra", "pipe:1", NULL};
         if (pl_spawn(argv, &p->vfd, &p->vpid) != 0) { *why = "ffmpeg would not start"; return -1; }
-        p->vbuf = (unsigned char *)malloc(PL_FRAME_BYTES);
+        p->rn = 3;
+        p->vbuf = (unsigned char *)malloc(PL_FRAME_BYTES * (size_t)p->rn);
         p->has_video = 1;
         if (!p->vbuf) { *why = "out of memory"; return -1; }
     }
@@ -365,6 +522,9 @@ static int pl_ntt_start(Player *p, const char *path, const char **why) {
 static int pl_open(Player *p, const char *path, int mode, double now_ms, const char **why) {
     pl_close(p);
     pl_zero(p);
+    p->open_ms = now_ms;
+    p->first_ms = -1;
+    p->hold_since = -1;
     p->mode = mode;
     snprintf(p->path, sizeof p->path, "%s", path);
     p->px = (uint32_t *)calloc(1, PL_FRAME_BYTES);
@@ -436,6 +596,19 @@ static void pl_clock(Player *p, double now_ms) {
     p->last_ms = now_ms;
 }
 
+/* Reads whole frames from the pipe into the ring, due or not, until the ring is full or the pipe has nothing more. */
+static void pl_ring_fill(Player *p, size_t fb) {
+    while (!p->v_eof && p->rcount < p->rn) {
+        unsigned char *slot = p->vbuf + (size_t)((p->rhead + p->rcount) % p->rn) * fb;
+        ssize_t n = read(p->vfd, slot + p->vgot, fb - p->vgot);
+        if (n > 0) p->vgot += (size_t)n;
+        else if (n == 0) { p->v_eof = 1; break; }
+        else if (errno != EAGAIN && errno != EINTR) { p->v_eof = 1; break; }
+        else break;
+        if (p->vgot == fb) { p->rcount++; p->vgot = 0; }
+    }
+}
+
 /* Advances: feeds the sound, takes the frames that are due. Returns 1 when the picture or the position changed (the caller redraws). */
 static int pl_pump(Player *p, double now_ms) {
     if (!p->mode || p->ended) return 0;
@@ -443,28 +616,45 @@ static int pl_pump(Player *p, double now_ms) {
     double before = p->now;
     int changed = 0;
     pl_audio_feed(p);
+    if (p->hold) {      /* filling before the start: the sound is queued but not playing, the clock stands, no picture is taken */
+        size_t fbh = p->yuv ? p->yframe : PL_FRAME_BYTES;
+        if (p->hold_since < 0) p->hold_since = now_ms;
+        if (p->has_video && p->mode != PL_R3F) pl_ring_fill(p, fbh);
+        if (p->rcount >= p->prebuf || p->v_eof || now_ms - p->hold_since > 5000.0) {     /* full, or nothing more is coming, or ffmpeg is slow: go */
+            p->hold = 0;
+            if (p->dev && p->primed) SDL_PauseAudioDevice(p->dev, 0);
+        } else { p->last_ms = now_ms; return 0; }
+    }
     pl_clock(p, now_ms);
+    if (p->dev && p->primed && !p->a_eof) {     /* the sound's queue running dry while it plays is a gap the ear hears */
+        int dry = SDL_GetQueuedAudioSize(p->dev) == 0;
+        if (dry && !p->sound_dry) p->underruns++;
+        p->sound_dry = dry;
+    }
     if (p->mode == PL_R3F) {
         long f = (long)(p->now * PL_FPS);
         while (f >= p->frame_end && p->rec_left > 0) changed |= pl_r3f_next(p);
         if (f >= p->frame_end && p->rec_left <= 0) p->ended = 1;
     } else if (p->has_video) {
-        for (int guard = 0; guard < 16 && !p->v_eof; guard++) {
-            if (p->vgot < PL_FRAME_BYTES) {
-                ssize_t n = read(p->vfd, p->vbuf + p->vgot, PL_FRAME_BYTES - p->vgot);
-                if (n > 0) p->vgot += (size_t)n;
-                else if (n == 0) { p->v_eof = 1; break; }
-                else if (errno != EAGAIN && errno != EINTR) { p->v_eof = 1; break; }
-                else break;
-            }
-            if (p->vgot < PL_FRAME_BYTES) break;
+        size_t fb = p->yuv ? p->yframe : PL_FRAME_BYTES;
+        for (int guard = 0; guard < 16; guard++) {
+            pl_ring_fill(p, fb);
+            if (p->rcount == 0) break;
             if ((double)p->vidx / PL_FPS > p->now) break;    /* not due yet: hold it */
-            memcpy(p->px, p->vbuf, PL_FRAME_BYTES);
-            p->vgot = 0;
+            {   double lateness = p->now - (double)p->vidx / PL_FPS;       /* seconds past its due time when it is shown */
+                if (lateness > 0.05) { p->late++; if (lateness * 1000.0 > p->max_late_ms) p->max_late_ms = lateness * 1000.0; }
+                if (p->first_ms < 0) p->first_ms = now_ms - p->open_ms;
+            }
+            const unsigned char *head = p->vbuf + (size_t)p->rhead * fb;
+            if (p->yuv) { memcpy(p->ybuf, head, fb); p->yseq = ++pl_yseq_counter; }
+            else memcpy(p->px, head, PL_FRAME_BYTES);
+            p->rhead = (p->rhead + 1) % p->rn;
+            p->rcount--;
             p->vidx++;
             changed = 1;
         }
-        if (p->v_eof && (!p->has_audio || !p->dev || p->a_eof) && (!p->dev || SDL_GetQueuedAudioSize(p->dev) == 0)) p->ended = 1;
+        /* the picture is over once the frames read ahead are shown */
+        if (p->v_eof && p->rcount == 0 && (!p->has_audio || !p->dev || p->a_eof) && (!p->dev || SDL_GetQueuedAudioSize(p->dev) == 0)) p->ended = 1;
     }
     if (!p->has_video || p->mode == PL_WAV) {   /* sound only: done when the sound is */
         if (p->a_eof && (!p->dev || SDL_GetQueuedAudioSize(p->dev) == 0)) p->ended = 1;

@@ -2112,7 +2112,16 @@ static void draw_pane(const App *a, R3Screen *s, int idx) {
     }
 }
 
+/* The top bar's free space. app_compose runs every loop, and a statvfs on a big exFAT card is not free (the unit's first power report, 2026-11-22: idle at
+ * 2.3% of a core and 62 wake-ups/s, goal 2 and 25; this call is the suspect, not yet measured), so the answer is kept for 5 s for the same path. */
 static void free_space(const char *path, char *out, size_t cap) {
+    static char kept_path[PATH_MAX], kept_txt[48];
+    static Uint32 kept_at;
+    Uint32 now = SDL_GetTicks();
+    if (kept_txt[0] && now - kept_at < 5000 && strcmp(kept_path, path) == 0) {
+        snprintf(out, cap, "%s", kept_txt);
+        return;
+    }
     struct statvfs sv;
     out[0] = 0;
     if (statvfs(path, &sv) == 0) {
@@ -2120,6 +2129,9 @@ static void free_space(const char *path, char *out, size_t cap) {
         fmt_size((unsigned long long)sv.f_bavail * sv.f_frsize, sz, sizeof sz);
         snprintf(out, cap, "%s free", sz);
     }
+    snprintf(kept_path, sizeof kept_path, "%s", path);
+    snprintf(kept_txt, sizeof kept_txt, "%s", out);
+    kept_at = now;
 }
 
 static void centered_list(R3Screen *s, const char *title, const R3Item *items, int n, int sel, const char *foot, int w) {
@@ -2315,11 +2327,45 @@ static void app_render(const App *a, const R3Screen *s, uint32_t *px) {
     if (a->mode == M_VIEW) viewer_overlay(&a->view, px);
 }
 
-/* r3_video_draw, with the viewer's pixels: a change of picture or page redraws even when the cells stay the same. */
+/* A video's picture on the GPU: the IYUV texture of the Player's own size (player.h, the YUV path), scaled by the renderer into the display view with black either
+ * side (the same fit ffmpeg's scale and pad made on the old BGRA path). `tex` is made again when the size changes; `last` is the frame number it holds. */
+typedef struct { SDL_Texture *tex; int w, h; unsigned last; } YuvView;
+
+static int yuv_upload(YuvView *y, SDL_Renderer *r, const Player *p) {
+    if (!y->tex || y->w != p->vw || y->h != p->vh) {
+        if (y->tex) SDL_DestroyTexture(y->tex);
+        y->tex = SDL_CreateTexture(r, SDL_PIXELFORMAT_IYUV, SDL_TEXTUREACCESS_STREAMING, p->vw, p->vh);
+        y->w = p->vw;
+        y->h = p->vh;
+        y->last = 0;
+    }
+    if (!y->tex) return 0;
+    if (p->yseq != y->last) {
+        const unsigned char *Y = p->ybuf, *U = Y + (size_t)p->vw * p->vh, *V = U + (size_t)(p->vw / 2) * (p->vh / 2);
+        SDL_UpdateYUVTexture(y->tex, NULL, Y, p->vw, U, p->vw / 2, V, p->vw / 2);
+        y->last = p->yseq;
+    }
+    return 1;
+}
+
+static void yuv_copy(YuvView *y, SDL_Renderer *r) {
+    double k = 640.0 / y->w < 400.0 / y->h ? 640.0 / y->w : 400.0 / y->h;
+    SDL_Rect dst = {0, 0, (int)(y->w * k), (int)(y->h * k)};
+    dst.x = (PIC_W - dst.w) / 2;
+    dst.y = PIC_Y + (PIC_H - dst.h) / 2;
+    SDL_RenderCopy(r, y->tex, NULL, &dst);
+}
+
+/* r3_video_draw, with the viewer's pixels: a change of picture or page redraws even when the cells stay the same. A playing video's new frame is not a change of
+ * the cells: it uploads the YUV frame and presents, without composing and uploading the 640 x 480 screen again (the cost of the old path). */
 static void app_video_draw(R3Video *v, SDL_Renderer *r, const R3Screen *s, const App *a, int force) {
     static unsigned last_gen = ~0u;
-    unsigned gen = a->mode == M_VIEW ? a->view.gen * 2 + 1 : 0;
+    static YuvView yv;
+    const Player *pl = (a->mode == M_VIEW && a->view.ntabs && a->view.tab[a->view.cur].kind == TAB_PLAY) ? &a->view.pl : NULL;
+    int yuv = pl && pl->yuv && pl->ybuf;
+    unsigned gen = a->mode == M_VIEW && !yuv ? a->view.gen * 2 + 1 : 0;
     int changed = force || !v->have_prev || gen != last_gen || memcmp(&v->prev, s, sizeof *s) != 0;
+    int fresh = yuv && pl->yseq != yv.last;     /* a new picture (or a new size) to show */
     if (changed) {
         app_render(a, s, v->px);
         SDL_UpdateTexture(v->tex, NULL, v->px, R3_W * (int)sizeof(uint32_t));
@@ -2327,10 +2373,11 @@ static void app_video_draw(R3Video *v, SDL_Renderer *r, const R3Screen *s, const
         v->have_prev = 1;
         last_gen = gen;
     }
-    if (r3_video_due(v, changed)) {
+    if (r3_video_due(v, changed || fresh)) {
         SDL_SetRenderDrawColor(r, 0, 0, 0, 255);
         SDL_RenderClear(r);
         SDL_RenderCopy(r, v->tex, NULL, NULL);
+        if (yuv && pl->yseq && yuv_upload(&yv, r, pl)) yuv_copy(&yv, r);
         SDL_RenderPresent(r);
     }
 }
@@ -3747,7 +3794,18 @@ static void test_play(const char *root) {
     path_join(ff, sizeof ff, root, "fake-ffmpeg");
     FILE *fx = fopen(ff, "w");
     if (fx) {
-        fputs("#!/bin/sh\nexport LC_ALL=C\ncase \"$*\" in\n *-an*) head -c $((640*400*4*10)) /dev/zero | tr '\\000' '\\377' ;;\n *) head -c 176400 /dev/zero ;;\nesac\n", fx);
+        fputs("#!/bin/sh\n"
+              "export LC_ALL=C\n"
+              "case \"$*\" in\n"
+              " *-hide_banner*) if [ -n \"$FAKE_VIDEO_SIZE\" ]; then echo \"  Stream #0:0(und): Video: h264 (avc1 / 0x31637661), yuv420p, $FAKE_VIDEO_SIZE [SAR 1:1 DAR 4:3], 30 fps\" >&2; [ -n \"$FAKE_NO_AUDIO\" ] || echo \"  Stream #0:1(und): Audio: aac, 44100 Hz, stereo\" >&2; fi; exit 1 ;;\n"
+              " *yuv420p*) [ -n \"$FAKE_LOG\" ] && echo run >> \"$FAKE_LOG\"\n"
+              "   case \"$*\" in *pipe:3*) head -c 176400 /dev/zero >&3 ;; esac\n"
+              "   fb=${FAKE_FB:-$((64*48*3/2))}\n"
+              "   head -c $((fb*${FAKE_FRAMES:-10})) /dev/zero | tr '\\000' '\\377'\n"
+              "   if [ -n \"$FAKE_STALL\" ]; then sleep $FAKE_STALL; head -c $((fb*${FAKE_FRAMES2:-10})) /dev/zero | tr '\\000' '\\377'; fi ;;\n"
+              " *-an*) head -c $((640*400*4*10)) /dev/zero | tr '\\000' '\\377' ;;\n"
+              " *) head -c 176400 /dev/zero ;;\n"
+              "esac\n", fx);
         fclose(fx);
         chmod(ff, 0755);
     }
@@ -3769,6 +3827,121 @@ static void test_play(const char *root) {
     CHECK(pl->ended, "the video ends when ffmpeg's output does");
     app_action(&a, R3_BACK);
     CHECK(a.view.pl.vpid == 0 && a.view.pl.vfd <= 0, "closing leaves no ffmpeg running");
+    /* the same video where ffmpeg reports a size: the YUV path (even size, planes kept for the GPU), not the BGRA one */
+    char flog[PATH_MAX];
+    path_join(flog, sizeof flog, root, "fake-ffmpeg.log");
+    setenv("FAKE_LOG", flog, 1);
+    setenv("FAKE_VIDEO_SIZE", "65x48", 1);
+    CHECK(start_viewer(&a, mp4, 0, 0) == 0 && viewer_tab(&a.view)->kind == TAB_PLAY, "a video with a known size opens on Play");
+    pl = &a.view.pl;
+    CHECK(pl->vpid > 0 && pl->apid == 0 && pl->afd >= 0 && pl->has_audio, "picture and sound come from one ffmpeg (one pid, two pipes)");
+    CHECK(pl->yuv && pl->vw == 64 && pl->vh == 48 && pl->yframe == 64 * 48 * 3 / 2, "YUV path: an odd width is made even (%dx%d)", pl->vw, pl->vh);
+    t0 = pl->last_ms;
+    for (int i = 0; i < 200 && pl->vidx < 3; i++) { usleep(20000); pl_pump(pl, t0 + 400 + 50.0 * i); }
+    CHECK(pl->vidx >= 3 && pl->yseq != 0 && pl->ybuf[0] == 0xFF && pl->ybuf[pl->yframe - 1] == 0xFF, "YUV frames arrive and are kept (%d)", pl->ybuf ? pl->ybuf[0] : -1);
+    app_compose(&a, &s);
+    CHECK(dump_has(&s, "Commander"), "the screen still composes with a YUV video playing");
+    for (int i = 0; i < 200 && !pl->ended; i++) { usleep(20000); pl_pump(pl, t0 + 400 + 50.0 * (200 + i)); }
+    CHECK(pl->ended, "the YUV video ends when ffmpeg's output does");
+    app_action(&a, R3_BACK);
+    CHECK(a.view.pl.ybuf == NULL && a.view.pl.vfd <= 0 && a.view.pl.afd <= 0, "closing frees the YUV frame and leaves no ffmpeg running");
+    {   FILE *lf = fopen(flog, "r");
+        int runs = 0, ch;
+        while (lf && (ch = fgetc(lf)) != EOF) if (ch == '\n') runs++;
+        if (lf) fclose(lf);
+        CHECK(runs == 1, "ffmpeg ran once for the picture and the sound (%d)", runs);
+    }
+    /* a video with no sound stream: the picture alone from one process, the clock is the wall clock */
+    setenv("FAKE_NO_AUDIO", "1", 1);
+    CHECK(start_viewer(&a, mp4, 0, 0) == 0 && viewer_tab(&a.view)->kind == TAB_PLAY, "a silent video opens on Play");
+    pl = &a.view.pl;
+    CHECK(pl->yuv && !pl->has_audio && pl->afd < 0, "a silent video has no sound pipe");
+    t0 = pl->last_ms;
+    for (int i = 0; i < 300 && !pl->ended; i++) { usleep(20000); pl_pump(pl, t0 + 400 + 50.0 * i); }
+    CHECK(pl->ended && pl->vidx == 10, "and plays all ten frames (%ld)", pl->vidx);
+    app_action(&a, R3_BACK);
+    unsetenv("FAKE_NO_AUDIO");
+    {   int w = 0, h = 0;
+        CHECK(pl_parse_size("Stream #0:0: Video: h264 (avc1 / 0x31637661), yuv420p(tv), 1920x1080 [SAR 1:1 DAR 16:9], 30 fps", &w, &h) == 0 && w == 1920 && h == 1080, "the size is read past a hex tag");
+        char vf[96]; int yw, yh;
+        pl_yuv_size(1920, 1080, &yw, &yh, vf, sizeof vf);
+        CHECK(yw == 852 && yh == 480 && strstr(vf, "scale=852:480") != NULL, "a big picture is scaled to fit inside 854 x 480, to even sizes (%dx%d %s)", yw, yh, vf);
+        pl_yuv_size(640, 480, &yw, &yh, vf, sizeof vf);
+        CHECK(yw == 640 && yh == 480 && strcmp(vf, "fps=30") == 0, "a picture that fits is left alone");
+        CHECK(pl_parse_size("Audio: aac, 44100 Hz", &w, &h) != 0, "no video, no size");
+    }
+
+    /* a start-up buffer: with R3I6NOS_FM_PREBUF the clock stands and no picture is taken until the ring holds that many frames; it also goes when the video ends first
+     * or ffmpeg is too slow (5 s on the caller's clock) */
+    setenv("FAKE_VIDEO_SIZE", "64x48", 1);
+    setenv("FAKE_NO_AUDIO", "1", 1);
+    setenv("R3I6NOS_FM_AHEAD", "8", 1);
+    setenv("R3I6NOS_FM_PREBUF", "6", 1);
+    CHECK(start_viewer(&a, mp4, 0, 0) == 0 && viewer_tab(&a.view)->kind == TAB_PLAY, "a video opens with a start-up buffer");
+    pl = &a.view.pl;
+    CHECK(pl->hold && pl->prebuf == 6 && pl->rn == 8, "it starts holding for 6 frames (ring %d)", pl->rn);
+    t0 = pl->last_ms;
+    {   int held_clean = 1, released = 0;
+        for (int i = 0; i < 300 && !released; i++) {
+            usleep(10000);
+            int was = pl->hold;
+            pl_pump(pl, t0 + 40.0 * (i + 1));
+            if (was && pl->hold && (pl->vidx != 0 || pl->now != 0)) held_clean = 0;
+            if (!pl->hold) released = 1;
+        }
+        CHECK(released && held_clean, "no picture and no clock while it holds, then it goes");
+        CHECK(pl->vidx >= 1 && pl->first_ms >= 0, "the first picture follows the release (%.0f ms)", pl->first_ms);
+    }
+    app_action(&a, R3_BACK);
+    setenv("FAKE_FRAMES", "3", 1);
+    CHECK(start_viewer(&a, mp4, 0, 0) == 0, "a video shorter than the buffer opens");
+    pl = &a.view.pl;
+    t0 = pl->last_ms;
+    for (int i = 0; i < 300 && pl->hold; i++) { usleep(10000); pl_pump(pl, t0 + 40.0 * (i + 1)); }
+    CHECK(!pl->hold && pl->v_eof && pl->rcount <= 3, "the hold ends when the video does (%d frames)", pl->rcount);
+    app_action(&a, R3_BACK);
+    setenv("FAKE_FRAMES", "2", 1);
+    setenv("FAKE_FRAMES2", "0", 1);
+    setenv("FAKE_STALL", "8", 1);
+    CHECK(start_viewer(&a, mp4, 0, 0) == 0, "a slow ffmpeg opens");
+    pl = &a.view.pl;
+    t0 = pl->last_ms;
+    for (int i = 0; i < 40; i++) { usleep(10000); pl_pump(pl, t0 + 100.0 * (i + 1)); }
+    CHECK(pl->hold && pl->rcount == 2, "it is still holding at 4 s of the caller's clock (%d frames)", pl->rcount);
+    pl_pump(pl, t0 + 6000.0);
+    CHECK(!pl->hold, "and goes after 5 s with fewer frames than asked");
+    app_action(&a, R3_BACK);
+    unsetenv("FAKE_STALL"); unsetenv("FAKE_FRAMES"); unsetenv("FAKE_FRAMES2");
+    unsetenv("R3I6NOS_FM_PREBUF");
+
+    /* does a deeper read-ahead absorb a stall in the decoder? 45 frames of 320 x 240, a 0.8 s stall, 20 more, played on the real clock: with 8 frames of read-ahead
+     * (the ring and the pipe hold about 0.6 s) the picture falls behind when it stalls, with 45 (1.8 s) it does not */
+    setenv("FAKE_VIDEO_SIZE", "320x240", 1);
+    setenv("FAKE_FB", "115200", 1);
+    setenv("FAKE_FRAMES", "45", 1);
+    setenv("FAKE_FRAMES2", "20", 1);
+    setenv("FAKE_STALL", "0.8", 1);
+    unsigned late_at[2] = {0, 0};
+    double worst_at[2] = {0, 0};
+    for (int v = 0; v < 2; v++) {
+        setenv("R3I6NOS_FM_AHEAD", v ? "45" : "8", 1);
+        CHECK(start_viewer(&a, mp4, 0, 0) == 0, "the stalling decoder opens (read-ahead %s)", v ? "45" : "8");
+        pl = &a.view.pl;
+        double ts = (double)SDL_GetTicks();
+        pl->last_ms = ts;
+        while (!pl->ended && (double)SDL_GetTicks() - ts < 8000.0) { pl_pump(pl, (double)SDL_GetTicks()); usleep(4000); }
+        late_at[v] = pl->late;
+        worst_at[v] = pl->max_late_ms;
+        CHECK(pl->ended && pl->vidx == 65, "all 65 frames play (%ld)", pl->vidx);
+        app_action(&a, R3_BACK);
+    }
+    fprintf(stderr, "selftest buffer: read-ahead 8: %u late, worst %.0f ms; read-ahead 45: %u late, worst %.0f ms\n", late_at[0], worst_at[0], late_at[1], worst_at[1]);
+    CHECK(late_at[0] >= 2 && worst_at[0] > 100.0, "with 8 frames of read-ahead the stall shows (%u late, worst %.0f ms)", late_at[0], worst_at[0]);
+    CHECK(late_at[1] < late_at[0] && worst_at[1] < worst_at[0], "with 45 it is absorbed or smaller (%u late, worst %.0f ms)", late_at[1], worst_at[1]);
+    unsetenv("FAKE_STALL"); unsetenv("FAKE_FRAMES"); unsetenv("FAKE_FRAMES2"); unsetenv("FAKE_FB");
+    unsetenv("R3I6NOS_FM_AHEAD"); unsetenv("FAKE_NO_AUDIO");
+    unsetenv("FAKE_VIDEO_SIZE");
+    unsetenv("FAKE_LOG");
 
     /* MIDI through nttplay, with a stand-in: probe says one second, decode writes a second of sound; a file whose name has "bad" in it is refused */
     {
@@ -4058,17 +4231,27 @@ static void pb_report_screen(R3Report *rep, ReportCtx *c) {
 }
 
 /* The real Player on the clip for `secs` of the real clock, drawing each new frame as the viewer does (an upload, a copy and a present). */
-static void pb_report_player(R3Report *rep, ReportCtx *c, const char *clip, double secs) {
+/* `full`: the main run, with the power and drift lines. Otherwise a short run with the read-ahead `ahead` frames and a start-up hold of `prebuf` frames
+ * (R3I6NOS_FM_AHEAD, R3I6NOS_FM_PREBUF: player.h), which writes one line of what the buffer did: ms to the first picture, pictures shown more than 50 ms late,
+ * the worst lateness, the sound running dry, the memory the ring takes. Whether a buffer helps is answered by comparing those lines. */
+static void pb_report_player(R3Report *rep, ReportCtx *c, const char *clip, double secs, int full, int ahead, int prebuf) {
+    char ev[16];
+    if (ahead > 0) { snprintf(ev, sizeof ev, "%d", ahead); setenv("R3I6NOS_FM_AHEAD", ev, 1); }
+    else unsetenv("R3I6NOS_FM_AHEAD");
+    snprintf(ev, sizeof ev, "%d", prebuf);
+    if (prebuf > 0) setenv("R3I6NOS_FM_PREBUF", ev, 1);
+    else unsetenv("R3I6NOS_FM_PREBUF");
     Player *p = calloc(1, sizeof *p);
     if (!p) return;
     pl_zero(p);
     const char *why = NULL;
     double start = (double)SDL_GetTicks();
     if (pl_open(p, clip, PL_VIDEO, start, &why) != 0) { r3_report_line(rep, R3_FAIL, "whole path", "the Player would not open the clip: %s", why ? why : "?"); free(p); return; }
-    SDL_Texture *t = SDL_CreateTexture(c->r, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, PL_W, PL_H);
+    SDL_Texture *t = p->yuv ? NULL : SDL_CreateTexture(c->r, SDL_PIXELFORMAT_ARGB8888, SDL_TEXTUREACCESS_STREAMING, PL_W, PL_H);
     SDL_Rect dst = {0, R3_DISPLAY_TOP * R3_CELL_H, PL_W, PL_H};
+    YuvView yv = {NULL, 0, 0, 0};       /* the YUV path draws as the viewer does (an IYUV texture, scaled by the GPU) */
     R3Power pw;
-    r3_power_begin(&pw);
+    if (full) r3_power_begin(&pw);
     long frames = 0, tick = 0;
     double now = start, next_sample = 10000.0;
     char lags[160] = "";
@@ -4076,13 +4259,22 @@ static void pb_report_player(R3Report *rep, ReportCtx *c, const char *clip, doub
     int have_lag = 0;
     while (now - start < secs * 1000.0 && !p->ended) {
         now = (double)SDL_GetTicks();
-        if (pl_pump(p, now) && t) {
+        int moved = pl_pump(p, now);
+        if (moved && p->yuv) {
+            if (yuv_upload(&yv, c->r, p)) {
+                SDL_SetRenderDrawColor(c->r, 0, 0, 0, 255);
+                SDL_RenderClear(c->r);
+                yuv_copy(&yv, c->r);
+                SDL_RenderPresent(c->r);
+                frames++;
+            }
+        } else if (moved && t) {
             SDL_UpdateTexture(t, NULL, p->px, PL_W * 4);
             SDL_RenderCopy(c->r, t, NULL, &dst);
             SDL_RenderPresent(c->r);
             frames++;
         }
-        if ((++tick & 31) == 0) r3_power_sample(&pw);
+        if (full && (++tick & 31) == 0) r3_power_sample(&pw);
         if (now - start >= next_sample) {       /* how far behind the sound the picture is, every 10 s: a number that grows is a drift */
             double lg = p->now - (double)p->vidx / PL_FPS;
             size_t u = strlen(lags);
@@ -4096,13 +4288,23 @@ static void pb_report_player(R3Report *rep, ReportCtx *c, const char *clip, doub
     }
     double wall = ((double)SDL_GetTicks() - start) / 1000.0;
     R3PowerResult res;
-    r3_report_power_end(rep, &pw, "playing", 0, 0, &res);
+    if (full) r3_report_power_end(rep, &pw, "playing", 0, 0, &res);
     double lag = p->now - (double)p->vidx / PL_FPS;
+    if (!full) {
+        r3_report_line(rep, R3_INFO, "buffer test", "read-ahead %d frames, hold %d before the start: first picture after %.0f ms, %u of %ld pictures more than 50 ms late (worst %.0f ms), the sound ran dry %u times, the ring holds %.1f MB, %.1f s played",
+                       p->rn, prebuf, p->first_ms, p->late, p->vidx, p->max_late_ms, p->underruns, (double)p->rn * (double)(p->yuv ? p->yframe : PL_FRAME_BYTES) / 1e6, wall);
+        if (t) SDL_DestroyTexture(t);
+        if (yv.tex) SDL_DestroyTexture(yv.tex);
+        pl_close(p);
+        free(p);
+        return;
+    }
     if (have_lag)
         r3_report_line(rep, last_lag - first_lag > 0.1 ? R3_FAIL : R3_PASS, "sync drift", "the picture's lag behind the sound every 10 s: %s ms (a rise of more than 100 ms between the first and the last is a drift: the sound's clock and the picture's are not the same rate)", lags);
-    r3_report_line(rep, lag <= 0.25 ? R3_PASS : R3_FAIL, "whole path", "the Player on %s for %.1f s: %ld picture changes and %ld frames taken, picture %.0f ms behind the %s clock (goal 250 ms or less)%s%s",
-                   clip, wall, frames, p->vidx, lag * 1000.0, p->dev ? "sound" : "wall", p->note[0] ? "; " : "", p->note);
+    r3_report_line(rep, lag <= 0.25 ? R3_PASS : R3_FAIL, "whole path", "the Player on %s for %.1f s: %ld picture changes and %ld frames taken, picture %.0f ms behind the %s clock (goal 250 ms or less); first picture after %.0f ms, %u pictures more than 50 ms late (worst %.0f ms), the sound ran dry %u times%s%s",
+                   clip, wall, frames, p->vidx, lag * 1000.0, p->dev ? "sound" : "wall", p->first_ms, p->late, p->max_late_ms, p->underruns, p->note[0] ? "; " : "", p->note);
     if (t) SDL_DestroyTexture(t);
+    if (yv.tex) SDL_DestroyTexture(yv.tex);
     pl_close(p);
     free(p);
 }
@@ -4131,7 +4333,15 @@ static void report_playback(R3Report *rep, ReportCtx *c, char **list, int n) {
     pb_report_screen(rep, c);
     r3_report_at(rep, 7, "Playback: the whole player on a clip");
     double play = getenv("R3I6NOS_PLAYBACK_PLAY_S") && atof(getenv("R3I6NOS_PLAYBACK_PLAY_S")) > 0 ? atof(getenv("R3I6NOS_PLAYBACK_PLAY_S")) : (secs < 6 ? secs : 6);
-    if (secs > 0) pb_report_player(rep, c, clip, play);
+    if (secs > 0) {
+        pb_report_player(rep, c, clip, play, 1, 0, 0);
+        /* does a buffer help? the same clip with a deeper read-ahead and a hold before the start (0.5 s and 1 s of picture); compare the "buffer test" lines with "whole path" */
+        pb_report_player(rep, c, clip, play, 0, 8, 0);
+        pb_report_player(rep, c, clip, play, 0, 30, 15);
+        pb_report_player(rep, c, clip, play, 0, 45, 30);
+        unsetenv("R3I6NOS_FM_AHEAD");
+        unsetenv("R3I6NOS_FM_PREBUF");
+    }
     if (work[0]) {
         char p[PATH_MAX + 32];
         snprintf(p, sizeof p, "%s/clip480.mp4", work); unlink(p);
