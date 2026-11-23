@@ -587,22 +587,15 @@ class NeedsDialog(unittest.TestCase):
     def head(self):
         return SRC.read_text().splitlines()[:80]   # the menu reads the first 80 lines (menu/reports.lua M.HEAD)
 
-    def test_the_report_declares_its_runs_and_setups_for_the_menu(self):
+    def test_the_report_declares_its_one_setup_for_the_menu(self):
         head = self.head()
-        self.assertIn("# RUNS: 3", head)
-        runs = {}
-        for ln in head:
-            m = re.match(r"# RUN (\d): ?(.*)$", ln)
-            if m:
-                runs.setdefault(int(m.group(1)), []).append(m.group(2))
-        self.assertEqual(sorted(runs), [1, 2, 3], "a setup for each of the three runs")
-        self.assertIn("OTG", " ".join(runs[1])); self.assertIn("charger", " ".join(runs[1]))
-        self.assertIn("Ethernet adapter", " ".join(runs[2]))
-        self.assertIn("USB cable", " ".join(runs[3]))
+        self.assertFalse([ln for ln in head if re.match(r"# RUNS?\b", ln)], "one run does it all (three until 2026-11-23): no # RUNS or # RUN k lines")
         needs = [ln[len("# NEEDS:"):].lstrip(" ") for ln in head if ln.startswith("# NEEDS:")]
-        every = [x for v in runs.values() for x in v] + needs
+        text = " ".join(needs)
+        self.assertIn("OTG", text)
+        self.assertIn("charger", text)
         # the dialog has 60 columns of room (menu/view.lua FULL.w - 4); a line that is too long would be cut
-        self.assertTrue(all(len(x) <= 56 for x in every), [x for x in every if len(x) > 56])
+        self.assertTrue(all(len(x) <= 56 for x in needs), [x for x in needs if len(x) > 56])
         self.assertTrue(any(ln.startswith('APP = "r3i6nos"') for ln in head), "APP must stay inside the lines the menu reads")
 
 
@@ -973,6 +966,14 @@ class SavedSettingsSection(Fake):
         a = text.index("== saved settings ==")
         b = text.find("== ", a + 5)
         return text[a:b if b > 0 else None]
+
+    def test_a_crash_of_the_helper_names_the_error_and_the_file(self):
+        fake = self.t / "bin/r3i6nos-persist"
+        fake.write_text("#!/bin/sh\ncat >&2 <<'EOF'\nTraceback (most recent call last):\n  File \"/usr/local/bin/r3i6nos-persist\", line 12, in <module>\n    main()\n  File \"/usr/local/bin/r3i6nos-persist\", line 7, in main\n    open(\"/nonexistent\")\nFileNotFoundError: [Errno 2] No such file or directory: '/nonexistent'\nEOF\nexit 1\n")
+        fake.chmod(0o755)
+        s = self.section()
+        self.assertIn("SKIP r3i6nos-persist: did not run: FileNotFoundError: [Errno 2] No such file or directory: '/nonexistent' (File \"/usr/local/bin/r3i6nos-persist\", line 7, in main)", s)
+        self.assertNotIn("did not run: Traceback (most recent call last):", s)
 
     def test_in_step_is_all_pass(self):
         self.persist()

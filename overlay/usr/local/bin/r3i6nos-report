@@ -1,12 +1,7 @@
 #!/usr/bin/env python3
-# RUNS: 3
+# NEEDS: Nothing in the USB-C (OTG) port, the charger out
+# NEEDS: (the power numbers need the battery).
 # NEEDS: Leave the pad alone while it runs (a minute or two).
-# RUN 1: Nothing in the USB-C (OTG) port, charger out
-# RUN 1: (the power numbers need the battery).
-# RUN 2: The wired Ethernet adapter in the port, its
-# RUN 2: cable to a router or a computer.
-# RUN 3: A plain USB cable from the port to a computer
-# RUN 3: (it charges, so power is skipped: that is fine).
 """r3i6nos-report - the device report of r3i6nos itself (docs/DEVICE-REPORTS.md, docs/STORAGE.md).
 
     r3i6nos-report [--from-settings] [--quiet]
@@ -14,8 +9,8 @@
 Checks and measures what only the unit can answer about the system, and writes r3i6nos/r36s-report.txt on the data card when one is
 mounted (so the boot card can stay in), else on the system card, for Claude to read in the r3i6nos repo. Settings > Device reports
 starts it (it is linked into /opt/loveos/bin as a report); over SSH, run `r3i6nos-report`. It runs as loveos and needs no root.
-It must be run three times, once for each USB setup (the `# RUNS` and `# RUN k` lines at the top, which the menu shows); the menu passes
-R3I6NOS_REPORT_SETUP=k/3, and each run writes r36s-report-run<k>.txt (r36s-report.txt is a copy of the latest).
+One run does it all (it was run three times, once for each USB setup, until 2026-11-23: the OTG data cable and the Ethernet adapter are settled, ROADMAP
+section 28). Settings > Device reports shows the setup (the `# NEEDS` lines at the top) and waits for A. It writes r36s-report.txt.
 
 Sections: system (the build, kernel, CPU, memory), setup (whether r3i6nos-setup made this card, docs/TWO-SLOT-SETUP.md), boot (units that failed, how long boot took), sound (the RK817's Playback
 Path, the headphone jack, the volume keys and the mixer, from r3i6nos-sound), clock (r3i6nos-clock status), storage (every mmc disk and slot, what
@@ -28,8 +23,8 @@ mirror needs, ROADMAP section 28, docs/SCREEN-MIRROR.md; read-only, from /proc a
 saved settings (whether the Wi-Fi network, time zone, clock, sound levels and battery history are kept on the data card, what the last sync did, how each item
 compares with the card's copy, who can read the Wi-Fi key there; r3i6nos-persist, docs/SAVED-SETTINGS.md),
 video hardware (the VPU and RGA as the kernel shows them: device tree, /dev nodes, modules loaded, on disk or never autoloaded, userspace libraries, the DRAM size and type clues;
-read-only, no root) and video decode (how fast the CPU decodes a synthetic H.264 clip at 240p, 360p, 480p and 720p the way Commander's player asks ffmpeg, with a goal for 480p; run 1 of 3
-only; docs/VIDEO-DECODE.md, ROADMAP section 35).
+read-only, no root) and video decode (how fast the CPU decodes a synthetic H.264 clip at 240p, 360p, 480p and 720p the way Commander's player asks ffmpeg, with a goal for 480p;
+docs/VIDEO-DECODE.md, ROADMAP section 35).
 
 Standard library only. Overrides, for tests: R3I6NOS_ETC (/etc), R3I6NOS_PROC (/proc), R3I6NOS_SYS (/sys), R3I6NOS_DEV (/dev),
 R3I6NOS_CARDS_STATE (/run/r3i6nos/cards), R3I6NOS_REPORT_DIR (the folder to write in), R3I6NOS_REPORT_MB (16: the speed test's size),
@@ -191,12 +186,15 @@ def run(cmd, timeout=10):
 
 
 def run_full(cmd, timeout=10):
-    """(exit status or None, stdout, the first line of stderr): for checks that should say why they failed."""
+    """(exit status or None, stdout, the first line of stderr, or for a Python traceback its last line and the innermost file: for checks that should say why they failed)."""
     try:
         r = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
     except (OSError, subprocess.SubprocessError) as e:
         return None, "", str(e)
     err = (r.stderr or "").strip().splitlines()
+    if err and err[0].startswith("Traceback"):      # a crash: the first line is only "Traceback (most recent call last):" (the saved-settings SKIP of 2026-11-22): say the error and where
+        where = next((ln.strip() for ln in reversed(err[:-1]) if ln.strip().startswith("File ")), "")
+        return r.returncode, r.stdout, err[-1] + (f" ({where})" if where else "")
     return r.returncode, r.stdout, err[0] if err else ""
 
 

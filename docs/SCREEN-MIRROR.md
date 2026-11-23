@@ -100,9 +100,7 @@ while the code is built in, so only a config proves an absence); **PASS** means 
 - the tools a link would need (`ip`, `modprobe`, `udhcpd`, `dnsmasq`, `busybox`);
 - the verdict, `wired mirror verdict`: the gadget, the adapter, neither (a Wi-Fi dongle is the fallback), or undecided.
 
-**To get every answer, run it three times** (Settings > Device reports > r3i6nos, which counts the runs ("run 1 of 3"), shows each run's setup and waits for A, and writes `r36s-report-run1.txt`, `-run2.txt` and `-run3.txt` (give Claude all three); read `r3i6nos/r36s-report.txt` on the data card), each time reading
-the two sections: (1) nothing on the OTG port; (2) the Ethernet adapter plugged in, with the cable to a router or computer; (3) a plain USB cable from
-the OTG port to a computer. Whatever the report cannot say (for example, a UDC that appears only when a cable puts the port in device mode) it says in a
+**One run answers it** (Settings > Device reports > r3i6nos shows the setup, nothing in the OTG port and the charger out, and waits for A; it writes `r3i6nos/r36s-report.txt` on the data card). It was run three times, once for each USB setup, until 2026-11-23: the Ethernet adapter works as a host device (2026-11-13 and 2026-11-15) and no cable was ever seen in the OTG port in three tries, so the gadget over it is not pursued (ROADMAP section 28). Whatever the report cannot say it says in a
 SKIP line with the next step.
 
 ## What the report does not do
