@@ -47,6 +47,16 @@ t, k = ind(8, "Charging"); eq(k, "charging", "charging is never 'low'"); eq(t, "
 t, k = ind(100, "Full"); eq(t, "FULL █████ 100%"); eq(k, "charging")
 t, k = ind(40, "Unknown"); eq(t, "BAT ██░░░ 40%")
 eq(B.indicator(nil), nil, "no battery, no indicator")
+-- the same as R3i6nos Mono glyph names: quarters of charge, a bolt while charging
+do
+  local g, kind = B.glyphs({ pct = 87, status = "Discharging" })
+  eq(g.names[1], "sys.bat.4"); eq(#g.names, 1); eq(g.text, "87%"); eq(kind, "normal")
+  eq(B.glyphs({ pct = 25, status = "Discharging" }).names[1], "sys.bat.1"); eq(B.glyphs({ pct = 26, status = "Discharging" }).names[1], "sys.bat.2")
+  eq(B.glyphs({ pct = 0, status = "Discharging" }).names[1], "sys.bat.0")
+  g, kind = B.glyphs({ pct = 8, status = "Charging" }); eq(g.names[1], "sys.bat.charge"); eq(g.names[2], "sys.bat.1"); eq(kind, "charging", "charging is never 'low'")
+  eq(select(2, B.glyphs({ pct = 9, status = "Discharging" })), "low"); eq(select(2, B.glyphs({ pct = 100, status = "Full" })), "charging")
+  eq(B.glyphs(nil), nil)
+end
 
 -- ---- the history. Columns: v boot up epoch event detail pct status mV full design temp cycles
 local function row(boot, up, event, detail, pct, status)

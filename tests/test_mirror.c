@@ -1,5 +1,6 @@
 /* theme/r3i6nos_mirror.h: the datagrams the screen mirror's daemon (overlay/usr/local/bin/r3i6nos-mirror) reads, and when they are sent;
  * the C twin of tests/test_mirror.lua. Build: cc -std=c11 -Wall -Wextra -I theme $(sdl2-config --cflags) tests/test_mirror.c $(sdl2-config --libs) -lm */
+#define R3_WITH_MONO
 #include "r3i6nos_ansiapps.h"
 
 static int failures;
@@ -126,6 +127,34 @@ int main(void) {
     hook_on = 1; hook_now++;
     r3_mirror_tap(&d, &c);
     CHECK(sent_n == 4 && sent[3][0] == 'F', "and when it comes back, the whole screen again");
+
+    /* R3i6nos Mono cells: the frame holds the stand-in 254, an E datagram the code point */
+    {
+        static R3Screen m, n0;
+        r3_clear(&m);
+        r3_puts_mono(&m, 3, 2, R3I_ICON_APP_HYDROLIK, R3_YELLOW, R3_RED);
+        unsigned int cp0 = m.ux[2 * 64 + 3];
+        CHECK(cp0 >= 0x10F000 && m.ux[2 * 64 + 4] == cp0 + 1, "an icon is two adjacent code points");
+        r3_mirror_full(&m, buf);
+        CHECK(buf[1 + 2 * (2 * 64 + 3)] == 254, "a full frame holds 254 for a font cell");
+        size_t e = r3_mirror_ext(&m, NULL, buf);
+        CHECK(e == 1 + 3 + 2 * 4 && buf[0] == 'E' && buf[1] * 256 + buf[2] == 2 * 64 + 3 && buf[3] == 2, "one run of two cells");
+        CHECK((unsigned)(buf[4] << 16 | buf[5] << 8 | buf[6]) == cp0 && buf[7] == (R3_YELLOW | (R3_RED << 4)), "the code point and the attribute");
+        CHECK((unsigned)(buf[8] << 16 | buf[9] << 8 | buf[10]) == cp0 + 1, "the second half");
+        r3_clear(&n0);
+        CHECK(r3_mirror_ext(&n0, NULL, buf) == 0, "no font cell, no E");
+        n0 = m;
+        CHECK(r3_mirror_ext(&m, &n0, buf) == 0, "nothing changed, nothing sent");
+        R3Screen m2 = m;
+        r3_put_mono(&m2, 3, 2, cp0 + 100, R3_YELLOW, R3_RED);
+        CHECK(r3_mirror_delta(&m2, &m, buf) > 0, "another font glyph in a cell is a change although both are 254");
+        CHECK(r3_mirror_ext(&m2, &m, buf) == 1 + 3 + 4, "and its E carries that one cell");
+        sent_n = 0; hook_on = 1; hook_now += 5;
+        r3_mirror_tap(&m, NULL);
+        CHECK(sent_n == 2 && sent[0][0] == 'F' && sent[1][0] == 'E', "a font cell: the frame, then its E");
+        r3_mirror_tap(&m2, &m);
+        CHECK(sent_n == 4 && sent[2][0] == 'D' && sent[3][0] == 'E', "a changed font cell: the delta, then its E");
+    }
 
     if (failures) { printf("test_mirror: %d failure(s)\n", failures); return 1; }
     printf("ok: test_mirror.c\n");

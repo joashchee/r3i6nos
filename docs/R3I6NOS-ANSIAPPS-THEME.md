@@ -40,7 +40,10 @@ lines and blocks join across cells exactly as in the 8x16 original (tested). No 
 The theme's CP437 glyphs above are also the first 256 glyphs of **R3i6nos Mono** (`theme/font/r3i6nos-mono/`, `docs/R3I6NOS-MONO-FONT.md`), which adds box, block and Braille sets, symbols,
 music, gamepad, keyboard, UI and icon glyphs by name. A native app that defines `R3_WITH_MONO` before `r3i6nos_ansiapps.h` can put any of them in a cell: `r3_put_mono(s, col, row, cp, fg, bg)`
 for one code point, `r3_puts_mono(s, col, row, r3mono_name("icon.app.hydrolik"), fg, bg)` for a named glyph (a two-cell icon is one string). The cell keeps `ch` = 254 as a stand-in for the
-mirror. The Lua theme does not draw them yet (ROADMAP section 43).
+mirror (a datagram `E` after the frame carries the code points). **The Lua theme draws them since 2026-11-24:** a cell is a CP437 index (0-255) or `T.EXT + code point`; an app calls
+`T.useMono(true)` once (it checks the font folder; the table loads on the first glyph), after which `T.decode` draws what CP437 lacks and `scr:glyph(col, row, "icon.app.hydrolik", fg, bg)` or `T.glyph(name)` (a
+list of cells, two for an icon) draws a named glyph; `T.monoBitmap(cell)` is the 10 x 20 bitmap and `T.mono()` the table (nil on an image whose theme folder has no font folder: the app then draws its text
+stand-ins). The menu does this for its top bar. Details and tests: `docs/R3I6NOS-MONO-FONT.md`, `tests/test_theme.lua`.
 
 ## Colour
 
@@ -178,7 +181,7 @@ loading step, and put any load error in `what`. There is no Lua version yet.
 `theme/r3i6nos_mirror.lua` (called by `T.draw`) and `theme/r3i6nos_mirror.h` (called by `r3_video_draw`) hand the cells that changed to the
 screen mirror (`docs/SCREEN-MIRROR.md`) when one is on. An app does nothing: the tap runs when a screen has changed and is about to be
 remembered as the previous one, and with no mirror it costs one test of a flag file, at most once a second. An app that draws its own screen
-without `T.draw` or `r3_video_draw` is not mirrored. The Lua module is optional (`pcall(require)`), so an image's theme folder that predates it still works.
+without `T.draw` or `r3_video_draw` is not mirrored. Cells of R3i6nos Mono are sent as the stand-in 254 and then as an `E` datagram (code point and attribute), which the page draws. The Lua module is optional (`pcall(require)`), so an image's theme folder that predates it still works.
 
 
 ## Scrolling text (native C, 2026-11-19)

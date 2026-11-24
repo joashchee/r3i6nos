@@ -4,6 +4,7 @@ import base64
 import importlib.machinery
 import importlib.util
 import os
+import shutil
 import socket
 import struct
 import subprocess
@@ -378,6 +379,73 @@ class Refusals(unittest.TestCase):
             self.assertEqual(r.stdout, "")
 
 
+def ext_run(start, cells):
+    """One run of an E datagram: u16 start, u8 count, then (u24 code point, u8 attribute)."""
+    return struct.pack(">HB", start, len(cells)) + b"".join(cp.to_bytes(3, "big") + bytes([at]) for cp, at in cells)
+
+
+class ExtendedCells(unittest.TestCase):
+    """Cells drawn from R3i6nos Mono (docs/SCREEN-MIRROR.md): E sets them, an F or a D that covers them makes them ordinary."""
+
+    def setUp(self):
+        self.m = load()
+        self.st, self.ext = bytearray(self.m.BLANK), {}
+
+    def feed(self, data):
+        return self.m.parse_datagram(self.st, data, self.ext)
+
+    def test_e_sets_code_points_and_the_stand_in(self):
+        self.assertEqual(self.feed(b"E" + ext_run(5, [(0x10F000, 0x1E), (0x10F001, 0x1E)])), "ext")
+        self.assertEqual(self.ext, {5: 0x10F000, 6: 0x10F001})
+        self.assertEqual(bytes(self.st[10:14]), bytes([254, 0x1E, 254, 0x1E]))
+
+    def test_a_delta_or_a_full_frame_makes_a_cell_ordinary_again(self):
+        self.feed(b"E" + ext_run(5, [(0x10F000, 0x1E), (0x10F001, 0x1E), (0x2500, 7)]))
+        self.assertEqual(self.feed(b"D" + run_len(6, [(65, 7)])), "delta")
+        self.assertEqual(self.ext, {5: 0x10F000, 7: 0x2500})
+        self.assertEqual(self.feed(b"F" + bytes(self.m.BLANK)), "full")
+        self.assertEqual(self.ext, {})
+
+    def test_a_malformed_e_changes_nothing(self):
+        self.assertIsNone(self.feed(b"E" + struct.pack(">HB", 5, 3) + bytes(8)))                       # runs short
+        self.assertIsNone(self.feed(b"E" + ext_run(5, [(0x110000, 7)])))                                # past Unicode
+        self.assertIsNone(self.feed(b"E" + struct.pack(">HB", CELLS - 1, 2) + bytes(8)))                # off the screen
+        self.assertIsNone(self.feed(b"E"))
+        self.assertEqual((bytes(self.st), self.ext), (bytes(self.m.BLANK), {}))
+        self.assertIsNone(self.m.parse_datagram(self.st, b"E" + ext_run(1, [(0x2500, 7)])), "without a place to keep them E is ignored")
+
+    def test_the_body_rebuilds_what_a_new_page_needs(self):
+        cells = [(0x10F000 + k, 0x1E) for k in range(300)] + [(0x2500, 7)]
+        self.feed(b"E" + ext_run(0, cells[:255]) + ext_run(255, cells[255:300]) + ext_run(900, cells[300:]))
+        body = self.m.ext_body(self.st, self.ext)
+        st2, ext2 = bytearray(self.m.BLANK), {}
+        self.assertEqual(self.m.parse_datagram(st2, b"E" + body, ext2), "ext")
+        self.assertEqual((ext2, bytes(st2)), (self.ext, bytes(self.st)))
+        self.assertEqual(self.m.ext_body(bytearray(self.m.BLANK), {}), b"")
+
+    def test_a_hub_gives_a_new_page_the_extended_cells_after_the_full_screen(self):
+        hub = self.m.Hub()
+        hub.feed(b"F" + bytes(self.m.BLANK))
+        hub.feed(b"E" + ext_run(5, [(0x10F000, 0x1E)]))
+        q = hub.join()
+        self.assertEqual(q.get_nowait()[0], "full")
+        self.assertEqual(q.get_nowait(), ("ext", ext_run(5, [(0x10F000, 0x1E)])))
+        self.assertEqual(q.get_nowait()[0], "info")
+        hub.feed(b"E" + ext_run(9, [(0x10F002, 0x1E)]))
+        self.assertEqual(q.get_nowait(), ("ext", ext_run(9, [(0x10F002, 0x1E)])))
+        hub.feed(b"F" + bytes(self.m.BLANK))
+        self.assertEqual(q.get_nowait()[0], "full")
+        self.assertEqual(hub.ext, {})
+
+    def test_the_test_card_gives_way_to_a_screen_that_starts_with_e(self):
+        hub = self.m.Hub()
+        q = hub.join()
+        q.get_nowait(); q.get_nowait()
+        hub.feed(b"E" + ext_run(5, [(0x10F000, 0x1E)]))
+        self.assertEqual(q.get_nowait()[0], "full")
+        self.assertEqual(q.get_nowait(), ("ext", ext_run(5, [(0x10F000, 0x1E)])))
+
+
 class Page(unittest.TestCase):
     def test_the_committed_page_is_what_the_font_and_template_give(self):
         r = subprocess.run([sys.executable, "-I", str(ROOT / "scripts/build_mirror_page.py"), "--check"], capture_output=True, text=True)
@@ -389,8 +457,17 @@ class Page(unittest.TestCase):
         self.assertIn("VileR", html)
         for forbidden in ("XMLHttpRequest", "fetch(", "WebSocket", "sendBeacon", ".send("):
             self.assertNotIn(forbidden, html, "the page must send nothing to the unit")
-        font = html.split('b64("', 1)[1].split('"', 1)[0]
-        self.assertEqual(len(base64.b64decode(font)), 256 * 16)
+        glyphs, cmap, cp437 = (html.split(f'b64("', k)[k].split('"', 1)[0] for k in (1, 2, 3))
+        self.assertEqual(len(base64.b64decode(glyphs)) % 40, 0)
+        self.assertEqual(len(base64.b64decode(cmap)) % 5, 0)
+        self.assertEqual(len(base64.b64decode(cp437)), 512)
+
+    def test_the_page_paints_the_font_cells_in_node(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is not installed")
+        r = subprocess.run([node, str(ROOT / "tests/test_mirror_page.js")], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
 
 
 if __name__ == "__main__":

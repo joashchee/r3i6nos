@@ -91,12 +91,36 @@ function M.key(t)
   return false
 end
 
+--- The R3i6nos Mono status glyph (by name) a toast's text calls for, or nil: the hot-plug service's words (r3i6nos-hotplug) tell what changed.
+--- The C twin is r3_toast_icon in r3i6nos_toast.h; both are tested with the same texts.
+function M.icon(text)
+  local w = (text or ""):lower()
+  if w:find("^headphone") then return "sys.headphones" end
+  if w:find("^battery") then return w:find("full", 1, true) and "sys.bat.4" or "sys.bat.0" end
+  if w:find("^dc power") or w:find("^usb power") or w:find("^charg") then return "sys.dc" end
+  if w:find("^usb") then return "sys.usb" end
+  if w:find("^volume") then
+    local n = tonumber(w:match("(%d+)%%"))
+    if not n then return "sys.vol.2" end
+    return n == 0 and "sys.mute" or ("sys.vol." .. (n < 34 and 1 or (n < 67 and 2 or 3)))
+  end
+  if w:find("^pad") or w:find("^gamepad") or w:find("^controller") then return "sys.pad" end
+  if w:find("^tf") or w:find("^card") or w:find("^sd ") then return "sys.card" end
+  if w:find("^wi%-?fi") or w:find("^network") then return "sys.wifi.3" end
+  return nil
+end
+
+M.icons = true     -- an app may turn the glyph off; it also needs the theme's font folder (an older image has none: the text is shown alone)
+
 --- Over the top bar (row 0): black on light green for a change, white on red for a failure, which says how to clear it.
 function M.draw(t, scr)
   if not t.showing then return end
   local fg, bg = t.error and T.WHITE or T.BLACK, t.error and T.RED or T.LIGHT_GREEN
   scr:fill(0, T.TOP_ROW, T.COLS, 1, 32, fg, bg)
-  scr:text(1, T.TOP_ROW, T.fit(t.text, t.error and T.COLS - 18 or T.COLS - 2), fg, bg)
+  local col, room = 1, t.error and T.COLS - 18 or T.COLS - 2
+  local name = M.icons and T.mono() and M.icon(t.text)
+  if name then col, room = scr:glyph(1, T.TOP_ROW, name, fg, bg) + 1, room - 2 end   -- the glyph, then a space
+  scr:text(col, T.TOP_ROW, T.fit(t.text, room), fg, bg)
   if t.error then scr:textRight(T.COLS - 2, T.TOP_ROW, T.decode("Press a key"), fg, bg) end
 end
 

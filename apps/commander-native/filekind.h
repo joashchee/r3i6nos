@@ -42,4 +42,45 @@ static inline int fk_of(const char *name, int is_dir, int is_link) {
     return R3_FK_PLAIN;
 }
 
+#ifdef R3_WITH_MONO
+/* The R3i6nos Mono icon (two cells, a string to print as one) of a name in a panel: the kind's picture, finer where the kinds are broad (a MIDI file, a tracker
+ * module, a text file, a font). The ".." row is the open folder. NULL when the font has no such name (it always does: tests/test_r3font.py). */
+static inline const char *fk_icon_name(const char *name, int is_dir, int is_link) {
+    if (is_dir) return !strcmp(name, "..") ? "icon.file.folder.open" : "icon.file.folder";
+    if (is_link) return "icon.file.link";
+    if (name[0] == '.') return "icon.file";
+    const char *dot = strrchr(name, '.');
+    char key[16] = " ";
+    if (dot && dot[1] && strlen(dot + 1) <= 9) {
+        int n = 1;
+        for (const char *c = dot + 1; *c; c++) key[n++] = (char)((*c >= 'A' && *c <= 'Z') ? *c + 32 : *c);
+        key[n++] = ' ';
+        key[n] = 0;
+    } else key[0] = 0;
+    if (key[0]) {
+        if (strstr(" mid midi kar rmi ", key)) return "icon.file.midi";
+        if (strstr(" mod xm s3m it 669 med mtm stm ult umx fur mds ", key)) return "icon.file.tracker";
+        if (strstr(" txt md markdown rst log nfo diz asc 1st man ", key)) return "icon.file.text";
+        if (strstr(" ttf otf woff woff2 bdf pcf psf fnt ", key)) return "icon.file.font";
+        if (strstr(" csv tsv json yaml yml toml ini cfg conf xml sql ", key)) return "icon.file.data";
+    }
+    switch (fk_of(name, 0, 0)) {
+    case R3_FK_ARCHIVE: return "icon.file.archive";
+    case R3_FK_IMAGE: return "icon.file.image";
+    case R3_FK_AUDIO: return "icon.file.music";
+    case R3_FK_VIDEO: return "icon.file.video";
+    case R3_FK_DOC: return "icon.file.doc";
+    case R3_FK_CODE: return "icon.file.code";
+    case R3_FK_DISK: return "icon.file.disk";
+    case R3_FK_EXEC: return "icon.file.exec";
+    default: return "icon.file";
+    }
+}
+
+/* The icon string for r3_puts_mono, or NULL. */
+static inline const char *file_icon(const char *name, int is_dir, int is_link) {
+    return r3mono_name(fk_icon_name(name, is_dir, is_link));
+}
+#endif
+
 #endif /* COMMANDER_FILEKIND_H */

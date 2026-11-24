@@ -55,6 +55,45 @@ def bdf(R):
     return "\n".join(out) + "\n"
 
 
+def psf_codes(R):
+    """The Linux console's 512 glyphs, as a list of the code points each slot answers to: slots 0-255 are CP437 by byte (the console's own
+    order, also U+F000 + byte), then the lines, blocks, Latin accents, arrows and Powerline that CP437 lacks, until 512."""
+    from . import base
+    _, uni = base.cp437()
+    slots = []
+    for i in range(256):
+        cps = [uni[i], 0xF000 + i]
+        if i == 0x20:
+            cps.append(0xA0)
+        slots.append(cps)
+    seen = {c for s in slots for c in s}
+    later = (list(range(0x2500, 0x25A0)) + list(range(0xA1, 0x100)) + list(range(0xE0B0, 0xE0B4)) + list(range(0x2190, 0x21A0))
+             + list(range(0x2713, 0x2718)) + list(range(0x100, 0x180)))
+    for cp in later:
+        if len(slots) == 512:
+            break
+        if cp in seen or cp not in R.g and cp not in R.alias:
+            continue
+        slots.append([cp])
+        seen.add(cp)
+    return slots
+
+
+def psf(R):
+    """PSF2 (Linux console), 10 x 20, 512 glyphs with a Unicode table. Bytes, deterministic."""
+    slots = psf_codes(R)
+    bpr = (CW + 7) // 8
+    out = bytearray(struct.pack("<8I", 0x864AB572, 0, 32, 1, len(slots), bpr * CH, CH, CW))
+    for cps in slots:
+        for r in R.glyph(cps[0]).rows_int():
+            out += (r << (8 * bpr - CW)).to_bytes(bpr, "big")
+    for cps in slots:
+        for cp in cps:
+            out += chr(cp).encode("utf-8")
+        out.append(0xFF)
+    return bytes(out)
+
+
 def png_rgba(path, w, h, alpha_rows):
     raw = b"".join(b"\x00" + b"".join(b"\xff\xff\xff" + bytes([255 if v else 0]) for v in r) for r in alpha_rows)
 

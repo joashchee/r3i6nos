@@ -1,30 +1,42 @@
 #!/usr/bin/env python3
-"""Make overlay/usr/share/r3i6nos/mirror/page.html (the page r3i6nos-mirror serves) from scripts/mirror_page.template.html and the
-VGA font in theme/vga8x16.lua, with the font embedded as base64 (4096 bytes), so the unit serves one file and needs no font.
+"""Make overlay/usr/share/r3i6nos/mirror/page.html (the page r3i6nos-mirror serves) from scripts/mirror_page.template.html and
+R3i6nos Mono (theme/font/r3i6nos-mono/r3i6nos-mono.json, which has CP437 as the theme draws it) with the glyphs, the code point map and the
+code page 437 table embedded as base64, so the unit serves one file and needs no font.
 
 Standard library only. Usage: scripts/build_mirror_page.py [--check]  (--check writes nothing and exits 1 if the committed page differs.)
 The font is CC BY-SA 4.0 (theme/font/, NOTICE): the page carries the credit and the licence note in its own comment and footer.
 """
 import base64
+import json
 import re
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE = ROOT / "scripts" / "mirror_page.template.html"
-FONT = ROOT / "theme" / "vga8x16.lua"
+FONT = ROOT / "theme" / "vga8x16.lua"          # its `unicode` list says which code point each code page 437 byte is
+MONO = ROOT / "theme" / "font" / "r3i6nos-mono" / "r3i6nos-mono.json"
 OUT = ROOT / "overlay" / "usr" / "share" / "r3i6nos" / "mirror" / "page.html"
 
 
-def font_bytes():
-    glyphs = re.findall(r'^\s*"([0-9a-f]{32})",\s*$', FONT.read_text().split("  unicode = ", 1)[0], re.M)
-    if len(glyphs) != 256:
-        raise SystemExit(f"expected 256 glyphs in {FONT}, found {len(glyphs)}")
-    return bytes.fromhex("".join(glyphs))
+def font_parts():
+    """(glyphs, cmap, cp437) as bytes: 40 bytes a glyph (20 rows of 16 bits), 5 bytes a code point (u24 + u16 glyph), 2 bytes a CP437 byte."""
+    d = json.loads(MONO.read_text())
+    if d["width"] != 10 or d["height"] != 20 or any(len(g) != 60 for g in d["glyphs"]):
+        raise SystemExit(f"{MONO}: not the 10x20 table this page reads")
+    glyphs = b"".join(int(g[i:i + 3], 16).to_bytes(2, "big") for g in d["glyphs"] for i in range(0, 60, 3))   # 20 rows of 3 hex digits
+    cmap = b"".join(int(cp).to_bytes(3, "big") + int(g).to_bytes(2, "big") for cp, g in sorted(d["cmap"].items(), key=lambda kv: int(kv[0])))
+    uni = [int(n) for n in re.search(r"unicode = \{(.*?)\}", FONT.read_text(), re.S).group(1).replace("\n", " ").split(",") if n.strip()]
+    if len(uni) != 256:
+        raise SystemExit(f"expected 256 code points in {FONT}, found {len(uni)}")
+    cp437 = b"".join((cp if i else 0x20).to_bytes(2, "big") for i, cp in enumerate(uni))   # byte 0 is shown as a blank
+    return glyphs, cmap, cp437
 
 
 def build():
-    return TEMPLATE.read_text().replace("@FONT@", base64.b64encode(font_bytes()).decode())
+    glyphs, cmap, cp437 = font_parts()
+    enc = lambda b: base64.b64encode(b).decode()  # noqa: E731
+    return TEMPLATE.read_text().replace("@GLYPHS@", enc(glyphs)).replace("@CMAP@", enc(cmap)).replace("@CP437@", enc(cp437))
 
 
 def main(argv):

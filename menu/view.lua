@@ -242,8 +242,22 @@ function view.dialog(scr, d)
 end
 
 --- The battery at the top right (state.battery is a reading from battery.read(), nil when there is none). Low and discharging: white on red.
+--- The cells of the top bar's battery as glyphs: the charge glyph (a bolt) when charging, the battery in quarters, then the percent. nil with no battery.
+local function batteryCells(reading)
+  local g, kind = battery.glyphs(reading)
+  if not g then return nil end
+  local cells = {}
+  for _, name in ipairs(g.names) do for _, c in ipairs(theme.glyph(name)) do cells[#cells + 1] = c end end
+  cells[#cells + 1] = 32
+  for _, c in ipairs(theme.decode(g.text)) do cells[#cells + 1] = c end
+  return cells, kind
+end
+
 function view.battery(scr, reading)
+  local cells, gkind
+  if theme.monoEnabled() then cells, gkind = batteryCells(reading) end
   local text, kind = battery.indicator(reading)
+  if cells then text, kind = cells, gkind end
   if not text then return end
   local fg, bg = theme.STYLE.bar.fg, theme.STYLE.bar.bg
   if kind == "low" then fg, bg = theme.WHITE, theme.RED
@@ -256,6 +270,17 @@ function view.net(scr, net, reading)
   local text = netstatus.indicator(net)
   if not text then return end
   local bat = battery.indicator(reading)
+  if theme.monoEnabled() then
+    local g = netstatus.glyphs(net)
+    local cells = {}
+    if g.wired then cells[#cells + 1] = 137 end
+    for _, name in ipairs(g.names) do
+      if #cells > 0 then cells[#cells + 1] = 32 end
+      for _, c in ipairs(theme.glyph(name)) do cells[#cells + 1] = c end
+    end
+    text = cells
+    bat = batteryCells(reading)
+  end
   local right = theme.COLS - 2
   if bat then right = right - theme.width(bat) - 1 end
   scr:textRight(right, theme.TOP_ROW, text, theme.STYLE.bar.fg, theme.STYLE.bar.bg)

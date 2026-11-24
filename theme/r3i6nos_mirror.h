@@ -2,6 +2,8 @@
  * mirror is on, hand the CELLS THAT CHANGED to the daemon r3i6nos-mirror as UDP datagrams to 127.0.0.1:
  *   'F' + 3072 bytes                                       the whole screen: cell i is bytes 2i (character), 2i+1 (fg | bg << 4)
  *   'D' + runs of (u16 big-endian start, u8 count, count x 2 bytes)   the changed cells
+ *   'E' + runs of (u16 start, u8 count, count x (u24 code point, u8 attribute))   the cells of R3i6nos Mono (R3_WITH_MONO), sent after the F or D
+ *       that carries their stand-in (character 254): the daemon makes every cell ordinary on an F and the ones a D covers
  * A screen is presented (and so tapped) only when a cell changed; with no mirror the cost of that is one stat() of the flag file, at most
  * once a second: no timer, no keyframe on a timer, no polling. Nothing here may break an app: a failed send is ignored.
  *
@@ -47,6 +49,9 @@ static inline size_t r3_mirror_full(const R3Screen *s, unsigned char *out) {
 }
 
 static inline int r3_mirror_differs(const R3Screen *s, const R3Screen *p, int i) {
+#ifdef R3_WITH_MONO
+    if (s->ux[i] != p->ux[i]) return 1;     /* two R3i6nos Mono glyphs both have the stand-in character 254 */
+#endif
     return s->ch[i] != p->ch[i] || s->fg[i] != p->fg[i] || s->bg[i] != p->bg[i];
 }
 
@@ -77,6 +82,35 @@ static inline size_t r3_mirror_delta(const R3Screen *s, const R3Screen *prev, un
     if (changed > R3_MIRROR_CELLS / 2) return r3_mirror_full(s, out);
     return n;
 }
+
+#ifdef R3_WITH_MONO
+/* The extended cells (R3i6nos Mono) as an 'E' datagram into out (R3_MIRROR_MAX bytes): with prev only those that differ from it, without every one.
+ * 0 when there are none. A run is contiguous cells, at most 255; the worst case, a screen of them, is 1 + 7 runs x 3 + 1536 x 4 bytes. */
+static inline size_t r3_mirror_ext(const R3Screen *s, const R3Screen *prev, unsigned char *out) {
+    size_t n = 1;
+    out[0] = 'E';
+    int any = 0;
+    for (int i = 0; i < R3_MIRROR_CELLS;) {
+        if (!s->ux[i] || (prev && prev->ux[i] == s->ux[i] && prev->fg[i] == s->fg[i] && prev->bg[i] == s->bg[i])) { i++; continue; }
+        int first = i, count = 0;
+        size_t head = n;
+        n += 3;
+        while (i < R3_MIRROR_CELLS && count < 255 && s->ux[i] && !(prev && prev->ux[i] == s->ux[i] && prev->fg[i] == s->fg[i] && prev->bg[i] == s->bg[i])) {
+            out[n++] = (unsigned char)(s->ux[i] >> 16);
+            out[n++] = (unsigned char)(s->ux[i] >> 8);
+            out[n++] = (unsigned char)s->ux[i];
+            out[n++] = r3_mirror_attr(s, i);
+            count++;
+            i++;
+        }
+        out[head] = (unsigned char)(first >> 8);
+        out[head + 1] = (unsigned char)(first & 255);
+        out[head + 2] = (unsigned char)count;
+        any = 1;
+    }
+    return any ? n : 0;
+}
+#endif
 
 static inline int r3_mirror_flag(void) {
     if (r3_mirror_st.on_hook) return r3_mirror_st.on_hook();
@@ -125,6 +159,12 @@ static inline void r3_mirror_tap(const R3Screen *s, const R3Screen *prev) {
     if (prev && r3_mirror_st.sent_full) n = r3_mirror_delta(s, prev, buf);
     else { n = r3_mirror_full(s, buf); r3_mirror_st.sent_full = 1; }
     if (n) r3_mirror_send(buf, n);
+#ifdef R3_WITH_MONO
+    if (n) {   /* a delta that fell back to a whole frame has made every cell ordinary: send them all again */
+        size_t e = r3_mirror_ext(s, buf[0] == 'D' ? prev : NULL, buf);
+        if (e) r3_mirror_send(buf, e);
+    }
+#endif
 }
 
 #endif

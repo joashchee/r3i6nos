@@ -14,7 +14,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from r3font import core, emit, icons, latin, music, pad, ui  # noqa: E402
+from r3font import core, emit, greek, icons, latin, music, pad, ui  # noqa: E402
 from r3font.registry import Registry  # noqa: E402
 from r3font.render import sheet  # noqa: E402
 
@@ -24,7 +24,7 @@ OUT = ROOT / "theme" / "font" / "r3i6nos-mono"
 def build():
     R = Registry()
     core.build(R)
-    miss = latin.build(R)
+    miss = greek.build(R, latin.build(R))
     pad.build(R)
     ui.build(R)
     music.build(R)
@@ -57,7 +57,8 @@ def outputs(R, miss):
     o = {"r3i6nos-mono.json": emit.json_table(R, store, cmap), "r3i6nos_mono10x20.h": emit.c_header(R, store, cmap),
          "r3i6nos_mono10x20.lua": emit.lua_table(R, store, cmap), "r3i6nos_mono_names.h": emit.names_h(R),
          "r3i6nos_mono_names.lua": emit.names_lua(R), "R3i6nosMono-Regular.bdf": emit.bdf(R), "r3i6nos-mono.css": emit.css(),
-         "glyph-coverage-report.txt": emit.coverage(R, miss), "specimen.html": specimen_html(R)}
+         "glyph-coverage-report.txt": emit.coverage(R, miss), "specimen.html": specimen_html(R),
+         "R3i6nosMono-10x20.psf": emit.psf(R)}
     return o
 
 
@@ -71,7 +72,7 @@ def main(argv=None):
     if check:
         for n, text in o.items():
             p = OUT / n
-            if not p.exists() or p.read_text() != text:
+            if not p.exists() or (p.read_bytes() != text if isinstance(text, bytes) else p.read_text() != text):
                 stale.append(n)
         import tempfile
         with tempfile.TemporaryDirectory() as d:
@@ -91,7 +92,7 @@ def main(argv=None):
         print(f"build_r3_font: up to date ({len(R.all_cps())} code points, {len(R.names)} names)")
         return 0
     for n, text in o.items():
-        (OUT / n).write_text(text)
+        (OUT / n).write_bytes(text) if isinstance(text, bytes) else (OUT / n).write_text(text)
     emit.bmfont(R, OUT / "R3i6nosMono-Regular.fnt", OUT / "R3i6nosMono-Regular.png")
     R.save_lock()
     cps = R.all_cps()

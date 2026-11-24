@@ -19,6 +19,7 @@ the games card.
 How the cells arrive: the foreground app (theme/r3i6nos_mirror.lua or .h) sends UDP datagrams to 127.0.0.1:INGEST_PORT, only while
 the flag file DIR/on exists, so with no mirror the cost in an app is one file test when its screen changes. A datagram is
     F + 3072 bytes                     the whole screen: cell i is bytes 2i (character) and 2i+1 (attribute)
+    E + runs of (u16 start, u8 count, count x (u24 code point, u8 attribute))   cells drawn from R3i6nos Mono (their character byte is 254)
     D + runs of (u16 start, u8 count, count x 2 bytes)   the changed cells
 The daemon keeps the current screen, sends a page the whole of it when it connects, then each change. The stream is Server-Sent
 Events (one way, unit to page). There is no heartbeat and no timer: the process blocks on its socket and costs nothing at rest.
@@ -102,8 +103,9 @@ def info_text(hub):
 
 # ---- the cells ------------------------------------------------------------------------------------------------------------------
 
-def apply_delta(state, body):
-    """Apply a delta body (runs) to the bytearray `state`. Returns True when it was well formed (nothing is applied otherwise)."""
+def apply_delta(state, body, ext=None):
+    """Apply a delta body (runs) to the bytearray `state`. Returns True when it was well formed (nothing is applied otherwise).
+    `ext` (a dict, cell -> R3i6nos Mono code point) loses the cells the runs cover: an ordinary cell replaces an extended one."""
     runs, i = [], 0
     while i < len(body):
         if i + 3 > len(body):
@@ -117,16 +119,67 @@ def apply_delta(state, body):
         i = end
     for start, data in runs:
         state[start * 2:start * 2 + len(data)] = data
+        if ext:
+            for k in range(start, start + len(data) // 2):
+                ext.pop(k, None)
     return True
 
 
-def parse_datagram(state, data):
-    """One datagram from an app: returns "full", "delta" or None (ignored). `state` is updated in place."""
+def apply_ext(state, ext, body):
+    """Apply an extended-cell body to `state` and `ext`: runs of (u16 start, u8 count, count x 4 bytes: u24 code point, u8 attribute). The cell's
+    character byte becomes 254 (the stand-in a daemon or page without the font shows) and its attribute the one sent. Well formed or nothing."""
+    runs, i = [], 0
+    while i < len(body):
+        if i + 3 > len(body):
+            return False
+        start, count = struct.unpack(">HB", body[i:i + 3])
+        i += 3
+        end = i + count * 4
+        if count == 0 or end > len(body) or start + count > CELLS:
+            return False
+        for k in range(count):
+            if int.from_bytes(body[i + 4 * k:i + 4 * k + 3], "big") > 0x10FFFF:
+                return False
+        runs.append((start, body[i:end]))
+        i = end
+    for start, data in runs:
+        for k in range(len(data) // 4):
+            cp = int.from_bytes(data[4 * k:4 * k + 3], "big")
+            state[(start + k) * 2], state[(start + k) * 2 + 1] = 254, data[4 * k + 3]
+            if cp:
+                ext[start + k] = cp
+            else:
+                ext.pop(start + k, None)
+    return True
+
+
+def ext_body(state, ext):
+    """The extended-cell body (the E datagram without its letter) that rebuilds `ext` on a page that has the full screen: b"" when there are none."""
+    out, cells = bytearray(), sorted(ext)
+    i = 0
+    while i < len(cells):
+        j = i
+        while j + 1 < len(cells) and cells[j + 1] == cells[j] + 1 and j + 1 - i < 255:
+            j += 1
+        out += struct.pack(">HB", cells[i], j - i + 1)
+        for c in cells[i:j + 1]:
+            out += ext[c].to_bytes(3, "big") + bytes([state[c * 2 + 1]])
+        i = j + 1
+    return bytes(out)
+
+
+def parse_datagram(state, data, ext=None):
+    """One datagram from an app: returns "full", "delta", "ext" or None (ignored). `state` (and `ext`, the extended cells, when given) is updated in
+    place. A full frame or a delta that covers a cell makes it an ordinary one; `E` sets extended cells and needs `ext`."""
     if data[:1] == b"F" and len(data) == 1 + FRAME:
         state[:] = data[1:]
+        if ext is not None:
+            ext.clear()
         return "full"
     if data[:1] == b"D" and len(data) > 1:
-        return "delta" if apply_delta(state, data[1:]) else None
+        return "delta" if apply_delta(state, data[1:], ext) else None
+    if data[:1] == b"E" and len(data) > 1 and ext is not None:
+        return "ext" if apply_ext(state, ext, data[1:]) else None
     return None
 
 
@@ -138,6 +191,7 @@ class Hub:
     def __init__(self):
         self.lock = threading.Lock()
         self.state = bytearray(testcard())   # the test card, until an app sends its screen
+        self.ext = {}                        # cell -> R3i6nos Mono code point, for the cells whose character is not code page 437
         self.viewers = set()
         self.on_count = None  # called with the viewer count when it changes
         self.on_real = None   # called once, when the first screen arrives from an app
@@ -152,6 +206,8 @@ class Hub:
                 return None
             q = queue.Queue(QUEUE_DEPTH)
             q.put(("full", bytes(self.state)))
+            if self.ext:
+                q.put(("ext", ext_body(self.state, self.ext)))
             q.put(("info", info_text(self)))
             self.viewers.add(q)
             n = len(self.viewers)
@@ -171,12 +227,13 @@ class Hub:
         first = False
         with self.lock:
             if self.real:
-                kind = parse_datagram(self.state, data)
+                kind = parse_datagram(self.state, data, self.ext)
             else:   # the test card is still showing: a delta must land on a blank screen, not on the card
-                fresh = bytearray(BLANK)
-                kind = parse_datagram(fresh, data)
+                fresh, fresh_ext = bytearray(BLANK), {}
+                kind = parse_datagram(fresh, data, fresh_ext)
                 if kind is not None:
                     self.state[:] = fresh
+                    self.ext = fresh_ext
                     kind = "full"
             if kind is None:
                 self.bad += 1
@@ -184,8 +241,12 @@ class Hub:
             self.received += 1
             if not self.real:
                 self.real, first = True, True
-            event = ("full", bytes(self.state)) if kind == "full" else ("delta", bytes(data[1:]))
-            events = [event] + ([("info", info_text(self))] if first else [])
+            event = ("full", bytes(self.state)) if kind == "full" else (kind, bytes(data[1:]))
+            events = [event]
+            if event[0] == "full" and self.ext:      # the test card gave way to a screen that is only extended cells: the page needs them too
+                events.append(("ext", ext_body(self.state, self.ext)))
+            if first:
+                events.append(("info", info_text(self)))
             for q in self.viewers:
                 try:
                     for ev in events:
@@ -197,6 +258,8 @@ class Hub:
                         except queue.Empty:
                             break
                     q.put_nowait(("full", bytes(self.state)))
+                    if self.ext:
+                        q.put_nowait(("ext", ext_body(self.state, self.ext)))
                     q.put_nowait(("info", info_text(self)))
         if first and self.on_real:
             self.on_real()

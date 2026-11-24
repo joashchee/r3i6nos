@@ -111,6 +111,16 @@ static inline int r3_osk_sdlkey(R3Osk *o, SDL_Keycode k, int *result) {
     return k >= 32 && k < 127;
 }
 
+#ifdef R3_WITH_MONO
+/* The two-cell key cap of R3i6nos Mono for a key (raised, or pressed for the cursor), or NULL. */
+static inline const char *r3_osk_cap(char ch, int pressed) {
+    char name[32];
+    if (ch == ' ') snprintf(name, sizeof name, "key.space.%s", pressed ? "dn" : "up");
+    else snprintf(name, sizeof name, "key.u%04x.%s", (unsigned)(unsigned char)ch, pressed ? "dn" : "up");
+    return r3mono_name(name);
+}
+#endif
+
 /* Draw the entry as a box over the display view: the prompt, the text with its caret, the error, the keys with the cursor, the layer and the keys' help.
  * The cursor key uses the theme's select pair, so every pair passes 4.5:1 in every theme. Rows 4 to 16. */
 static inline void r3_osk_draw(R3Screen *s, const R3Osk *o) {
@@ -134,6 +144,14 @@ static inline void r3_osk_draw(R3Screen *s, const R3Osk *o) {
         for (int c = 0; c < R3_OSK_COLS; c++) {
             char ch = R3_OSK_KEYS[o->layer][r][c];
             int sel = r == o->row && c == o->col, col = bx + 3 + c * 4;
+#ifdef R3_WITH_MONO     /* an app that opted into R3i6nos Mono draws every key as a cap, the cursor's pressed */
+            const char *cap = r3_osk_cap(ch, sel);
+            if (cap) {
+                if (sel) r3_puts_mono(s, col, by + 6 + r, cap, R3_ST(R3_ST_SELECT));
+                else r3_puts_mono(s, col, by + 6 + r, cap, R3_ST(R3_ST_BODY));
+                continue;
+            }
+#endif
             if (sel) { r3_put(s, col, by + 6 + r, 32, R3_ST(R3_ST_SELECT)); r3_put(s, col + 1, by + 6 + r, ch == ' ' ? 250 : (unsigned char)ch, R3_ST(R3_ST_SELECT)); r3_put(s, col + 2, by + 6 + r, 32, R3_ST(R3_ST_SELECT)); }
             else r3_put(s, col + 1, by + 6 + r, ch == ' ' ? 250 : (unsigned char)ch, R3_ST(R3_ST_BODY));
         }

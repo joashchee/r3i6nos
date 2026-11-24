@@ -1,6 +1,7 @@
 /* theme/r3i6nos_toast.h: the hot-plug toast (docs/HOTPLUG.md). Run by scripts/check.sh. */
 #define _POSIX_C_SOURCE 200809L
 #define _GNU_SOURCE
+#define R3_WITH_MONO
 #include <SDL.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -107,6 +108,31 @@ int main(void) {
 
     /* the toast's colours pass the theme's 4.5:1 */
     CHECK(r3_contrast(R3_BLACK, R3_LIGHT_GREEN) >= 4.5 && r3_contrast(R3_WHITE, R3_RED) >= 4.5, "the toast's two colour pairs are readable");
+
+    /* the status glyph before the words (R3_WITH_MONO), chosen as the Lua twin chooses (tests/test_toast.lua) */
+    {
+        static const char *pairs[][2] = { { "Headphones connected", "sys.headphones" }, { "Battery low: 12%", "sys.bat.0" }, { "Battery full", "sys.bat.4" },
+            { "DC power connected", "sys.dc" }, { "USB power connected", "sys.dc" }, { "USB device attached", "sys.usb" }, { "Volume 0%", "sys.mute" },
+            { "Volume 20%", "sys.vol.1" }, { "Volume 50%", "sys.vol.2" }, { "Volume 90%", "sys.vol.3" }, { "Pad connected", "sys.pad" },
+            { "TF2 card removed", "sys.card" }, { "Wi-Fi joined", "sys.wifi.3" } };
+        for (size_t i = 0; i < sizeof pairs / sizeof pairs[0]; i++) {
+            const char *got = r3_toast_icon(pairs[i][0]);
+            CHECK(got && !strcmp(got, pairs[i][1]), "%s -> %s", pairs[i][0], got ? got : "(none)");
+            CHECK(r3mono_name(pairs[i][1]) != NULL, "%s is a glyph name", pairs[i][1]);
+        }
+        CHECK(r3_toast_icon("Something else") == NULL && r3_toast_icon("") == NULL, "no guess for other texts");
+        static R3Screen s2;
+        R3Toast tt;
+        memset(&tt, 0, sizeof tt);
+        tt.showing = 1;
+        snprintf(tt.text, sizeof tt.text, "Headphones connected");
+        r3_clear(&s2);
+        r3_toast_draw(&tt, &s2);
+        CHECK(s2.ux[1] != 0 && s2.ux[1] >= 0x10F000, "the glyph is in column 1");
+        char d[R3_ROWS][R3_COLS + 1];
+        r3_dump(&s2, d);
+        CHECK(strncmp(d[0] + 3, "Headphones connected", 20) == 0, "and the words after a space");
+    }
 
     char cmd[600];
     snprintf(cmd, sizeof cmd, "rm -rf '%s'", dir);

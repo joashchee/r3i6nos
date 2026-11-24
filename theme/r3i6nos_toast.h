@@ -146,12 +146,45 @@ static inline int r3_toast_key(R3Toast *t) {
     return 1;
 }
 
+/* The R3i6nos Mono status glyph (by name) a toast's text calls for, or NULL: the hot-plug service's words tell what changed. The Lua twin is
+ * M.icon in r3i6nos_toast.lua; both are tested with the same texts. */
+static inline const char *r3_toast_icon(const char *text) {
+    char w[40];
+    size_t i = 0;
+    for (; text && text[i] && i < sizeof w - 1; i++) w[i] = (char)((text[i] >= 'A' && text[i] <= 'Z') ? text[i] + 32 : text[i]);
+    w[i] = 0;
+#define R3T_STARTS(p) (strncmp(w, p, strlen(p)) == 0)
+    if (R3T_STARTS("headphone")) return "sys.headphones";
+    if (R3T_STARTS("battery")) return strstr(w, "full") ? "sys.bat.4" : "sys.bat.0";
+    if (R3T_STARTS("dc power") || R3T_STARTS("usb power") || R3T_STARTS("charg")) return "sys.dc";
+    if (R3T_STARTS("usb")) return "sys.usb";
+    if (R3T_STARTS("volume")) {
+        const char *pc = strchr(w, '%');
+        const char *d = pc;
+        if (!pc) return "sys.vol.2";
+        while (d > w && d[-1] >= '0' && d[-1] <= '9') d--;
+        if (d == pc) return "sys.vol.2";
+        int n = atoi(d);
+        return n == 0 ? "sys.mute" : n < 34 ? "sys.vol.1" : n < 67 ? "sys.vol.2" : "sys.vol.3";
+    }
+    if (R3T_STARTS("pad") || R3T_STARTS("gamepad") || R3T_STARTS("controller")) return "sys.pad";
+    if (R3T_STARTS("tf") || R3T_STARTS("card") || R3T_STARTS("sd ")) return "sys.card";
+    if (R3T_STARTS("wi-fi") || R3T_STARTS("wifi") || R3T_STARTS("network")) return "sys.wifi.3";
+#undef R3T_STARTS
+    return NULL;
+}
+
 /* Over the top bar (row 0): black on light green for a change, white on red for a failure, which says how to clear it. */
 static inline void r3_toast_draw(const R3Toast *t, R3Screen *s) {
     if (!t->showing) return;
     int fg = t->error ? R3_WHITE : R3_BLACK, bg = t->error ? R3_RED : R3_LIGHT_GREEN;
     for (int c = 0; c < R3_COLS; c++) r3_put(s, c, R3_TOP_ROW, ' ', fg, bg);
-    r3_text_fit(s, 1, R3_TOP_ROW, t->text, t->error ? R3_COLS - 18 : R3_COLS - 2, fg, bg);
+    int col = 1, room = t->error ? R3_COLS - 18 : R3_COLS - 2;
+#ifdef R3_WITH_MONO     /* an app that opted into R3i6nos Mono gets the status glyph before the words */
+    const char *name = r3_toast_icon(t->text), *glyph = name ? r3mono_name(name) : NULL;
+    if (glyph) { col = 1 + r3_puts_mono(s, 1, R3_TOP_ROW, glyph, fg, bg) + 1; room -= col - 1; }
+#endif
+    r3_text_fit(s, col, R3_TOP_ROW, t->text, room, fg, bg);
     if (t->error) r3_text_fit(s, R3_COLS - 16, R3_TOP_ROW, "Press a key", 15, fg, bg);
 }
 

@@ -67,5 +67,26 @@ toast.hold(t, true); toast.hold(t, false); toast.poll(t, 9002)
 assert(t.showing and t.error, "a failure that was up comes back")
 assert(T.contrast(T.BLACK, T.LIGHT_GREEN) >= 4.5 and T.contrast(T.WHITE, T.RED) >= 4.5, "readable")
 
+-- the status glyph before the words (R3i6nos Mono): chosen by what the hot-plug service says; the same table as r3_toast_icon in C
+for text, want in pairs({ ["Headphones connected"] = "sys.headphones", ["Headphones removed"] = "sys.headphones", ["Battery low: 12%"] = "sys.bat.0",
+    ["Battery critically low: 4%. Plug in power or save now"] = "sys.bat.0", ["Battery full"] = "sys.bat.4", ["DC power connected"] = "sys.dc",
+    ["USB power connected"] = "sys.dc", ["USB device attached"] = "sys.usb", ["Volume 0%"] = "sys.mute", ["Volume 20%"] = "sys.vol.1",
+    ["Volume 50%"] = "sys.vol.2", ["Volume 90%"] = "sys.vol.3", ["Pad connected"] = "sys.pad", ["TF2 card removed"] = "sys.card", ["Wi-Fi joined"] = "sys.wifi.3" }) do
+  assert(toast.icon(text) == want, text .. " -> " .. tostring(toast.icon(text)) .. ", want " .. want)
+end
+assert(toast.icon("Something else") == nil and toast.icon("") == nil and toast.icon(nil) == nil, "no guess for other texts")
+do
+  local scr = T.screen()
+  local tt = toast.new(dir .. "/none")
+  tt.showing, tt.error, tt.text = true, false, "Headphones connected"
+  toast.draw(tt, scr)
+  assert(scr.ch[1 + 1] >= T.EXT, "the glyph is in column 1")
+  assert(scr:dump()[1]:sub(4, 23) == "Headphones connected", "and the words after a space")
+  toast.icons = false
+  scr = T.screen(); toast.draw(tt, scr)
+  assert(scr:dump()[1]:sub(2, 21) == "Headphones connected", "an app can turn the glyph off")
+  toast.icons = true
+end
+
 os.execute("rm -rf '" .. dir .. "'")
 print("toast: ok")

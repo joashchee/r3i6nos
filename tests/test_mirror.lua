@@ -191,4 +191,39 @@ do -- the IPv4 socket is asked for by name: socket.udp() refused every send on t
   eq(M.newSocket({}), nil, "no socket library function: no socket, no error")
 end
 
+do -- R3i6nos Mono cells: the frame carries the stand-in 254, an E datagram the code point (daemon: tests/test_r3i6nos_mirror.py)
+  eq(M.EXT, T.EXT, "the mirror and the theme agree on the extended cell")
+  T.useMono(true)
+  local a = T.screen()
+  a:glyph(3, 2, "icon.app.hydrolik", T.YELLOW, T.RED)
+  local ic = T.glyph("icon.app.hydrolik")
+  local f = M.full(a)
+  eq(f:byte(1 + 2 * (2 * 64 + 3) + 1), 254, "a full frame holds 254 for an extended cell")
+  eq(f:byte(1 + 2 * (2 * 64 + 3) + 2), T.YELLOW + 16 * T.RED)
+  local e = M.ext(a, nil)
+  eq(e:sub(1, 1), "E"); eq(#e, 1 + 3 + 2 * 4, "one run of two cells")
+  eq(e:byte(2) * 256 + e:byte(3), 2 * 64 + 3); eq(e:byte(4), 2)
+  local cp = ic[1] - T.EXT
+  eq(e:byte(5) * 65536 + e:byte(6) * 256 + e:byte(7), cp); eq(e:byte(8), T.YELLOW + 16 * T.RED)
+  eq(e:byte(9) * 65536 + e:byte(10) * 256 + e:byte(11), cp + 1, "the second half of the icon")
+  eq(M.ext(T.screen(), nil), nil, "no extended cell, no E")
+  local same_ = T.screen(); same_:glyph(3, 2, "icon.app.hydrolik", T.YELLOW, T.RED)
+  eq(M.ext(a, same_), nil, "nothing changed, nothing sent")
+  local b = T.screen(); b:glyph(3, 2, "icon.app.klamansi", T.YELLOW, T.RED)
+  eq(M.ext(b, a):byte(8), T.YELLOW + 16 * T.RED, "a different glyph in the same cells is sent")
+  local d = M.delta(b, a)
+  assert(d and d:sub(1, 1) == "D", "...with a delta that carries 254")
+  -- tap: the E follows the frame that carries the stand-in, a full frame gets every extended cell
+  M.reset(); flag = true; now = now + 5; sent = {}
+  M.sys.send = function(x) sent[#sent + 1] = x end
+  M.tap(a, nil)
+  eq(#sent, 2); eq(sent[1]:sub(1, 1), "F"); eq(sent[2]:sub(1, 1), "E")
+  M.tap(b, a)
+  eq(#sent, 4); eq(sent[3]:sub(1, 1), "D"); eq(sent[4]:sub(1, 1), "E")
+  local plain = T.screen(); plain:text(3, 2, "ab", T.WHITE)
+  M.tap(plain, b)
+  eq(#sent, 5, "extended cells replaced by ordinary ones: the delta alone, the daemon forgets them"); eq(sent[5]:sub(1, 1), "D")
+  T.useMono(false)
+end
+
 print("ok: test_mirror.lua")

@@ -77,4 +77,12 @@ function N.indicator(r)
   return table.concat(parts, " ")
 end
 
+--- The same as R3i6nos Mono glyphs: { names = {"sys.wifi.3"}, wired = true } (wired is the CP437 "ë", which has no glyph of its own), nil with no link.
+function N.glyphs(r)
+  if not r or not (r.wired or r.wifi) then return nil end
+  local names = {}
+  if r.wifi then names[1] = "sys.wifi." .. math.max(0, math.min(3, r.cells or 1)) end
+  return { names = names, wired = r.wired and true or false }
+end
+
 return N

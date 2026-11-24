@@ -42,6 +42,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#define R3_WITH_MONO 1                  /* the file icons are R3i6nos Mono glyphs (docs/R3I6NOS-MONO-FONT.md) */
 #include "r3i6nos_ansiapps.h"
 #include "r3i6nos_themes.h"
 #include "r3i6nos_toast.h"
@@ -1132,12 +1133,12 @@ static void viewer_overlay(const Viewer *w, uint32_t *px) {
 /* ---- the application ---------------------------------------------------------------------------------------------------------- */
 
 enum { M_BROWSE, M_MENU, M_CONFIRM, M_INPUT, M_VIEW, M_JOB, M_THEME, M_CONFLICT, M_MAIN, M_ABOUT, M_KEYMAP, M_RPTASK };
-enum { C_VIEW, C_COPY, C_MOVE, C_RENAME, C_MKDIR, C_DELETE, C_TAGALL, C_UNTAG, C_SORT, C_HIDDEN, C_SWAP, C_SAME, C_FILECOLORS, C_COUNT };
+enum { C_VIEW, C_COPY, C_MOVE, C_RENAME, C_MKDIR, C_DELETE, C_TAGALL, C_UNTAG, C_SORT, C_HIDDEN, C_SWAP, C_SAME, C_FILECOLORS, C_FILEICONS, C_COUNT };
 
 static const struct { const char *label, *key; } MENU[C_COUNT] = {
     {"View", "F3"}, {"Copy", "F5"}, {"Move", "F6"}, {"Rename", "F2"}, {"Make directory", "F7"}, {"Delete", "F8"},
     {"Tag all", ""}, {"Untag all", ""}, {"Sort by", ""}, {"Hidden files", ""}, {"Swap panels", ""},
-    {"Other panel: this folder", ""}, {"File colours", ""},
+    {"Other panel: this folder", ""}, {"File colours", ""}, {"File icons", ""},
 };
 
 #define VIEW_DEPTH 4
@@ -1181,7 +1182,7 @@ typedef struct {
     R3Keymap km;
     int mm_from, pending_report;
     /* colour: the theme in use (an index into r3_themes), the one the picker is on, and whether files are coloured by kind (0: yes) */
-    int theme, theme_sel, no_file_colors;
+    int theme, theme_sel, no_file_colors, no_file_icons;
     /* where a blocking open draws its wait screen (set by main; NULL in tests and unattended runs, which just run it), and a test's stand-in */
     R3Video *wait_video; SDL_Renderer *wait_r; void (*wait_hook)(const R3Screen *); int wait_threaded;
     Uint32 job_t0;
@@ -1217,11 +1218,12 @@ static void settings_path(char *out, size_t cap) {
     snprintf(out, cap, "%s/settings.conf", dir);
 }
 
-/* "theme=<name>" and "file_colours=on|off", one a line; anything else is ignored. Sets the palette. No file, or a name no theme has: the defaults. */
+/* "theme=<name>", "file_colours=on|off" and "file_icons=on|off", one a line; anything else is ignored. Sets the palette. No file, or a name no theme has: the defaults. */
 static void load_settings(App *a) {
     char path[PATH_MAX], line[256];
     a->theme = 0;
     a->no_file_colors = 0;
+    a->no_file_icons = 0;
     settings_path(path, sizeof path);
     FILE *f = fopen(path, "r");
     if (f) {
@@ -1229,6 +1231,7 @@ static void load_settings(App *a) {
             line[strcspn(line, "\r\n")] = 0;
             if (!strncmp(line, "theme=", 6)) { int t = r3_theme_find(line + 6); if (t >= 0) a->theme = t; }
             else if (!strcmp(line, "file_colours=off")) a->no_file_colors = 1;
+            else if (!strcmp(line, "file_icons=off")) a->no_file_icons = 1;
         }
         fclose(f);
     }
@@ -1245,7 +1248,7 @@ static int save_settings(const App *a) {
     snprintf(tmp, sizeof tmp, "%s.tmp", path);
     FILE *f = fopen(tmp, "w");
     if (!f) return -1;
-    int ok = fprintf(f, "theme=%s\nfile_colours=%s\n", r3_themes[a->theme].name, a->no_file_colors ? "off" : "on") > 0;
+    int ok = fprintf(f, "theme=%s\nfile_colours=%s\nfile_icons=%s\n", r3_themes[a->theme].name, a->no_file_colors ? "off" : "on", a->no_file_icons ? "off" : "on") > 0;
     ok = fclose(f) == 0 && ok;
     if (!ok || rename(tmp, path) != 0) { unlink(tmp); return -1; }
     return 0;
@@ -1712,6 +1715,11 @@ static void run_cmd(App *a, int cmd) {
         if (save_settings(a) == 0) say(a, R3_ST_OK, "File colours %s", a->no_file_colors ? "off" : "on");
         else say(a, R3_ST_WARN, "File colours %s (not saved: cannot write the settings)", a->no_file_colors ? "off" : "on");
         break;
+    case C_FILEICONS:
+        a->no_file_icons = !a->no_file_icons;
+        if (save_settings(a) == 0) say(a, R3_ST_OK, "File icons %s", a->no_file_icons ? "off" : "on");
+        else say(a, R3_ST_WARN, "File icons %s (not saved: cannot write the settings)", a->no_file_icons ? "off" : "on");
+        break;
     case C_TAGALL:
         for (int i = 0; i < p->n; i++) p->e[i].tagged = strcmp(p->e[i].name, "..") != 0;
         say(a, R3_ST_HINT, "%d tagged", pane_tagged(p));
@@ -1856,6 +1864,7 @@ static void menu_values(const App *a, R3Item *items) {
     copy_str(items[C_SORT].value, sizeof items[C_SORT].value, SORT_NAMES[a->opt.sort]);
     copy_str(items[C_HIDDEN].value, sizeof items[C_HIDDEN].value, a->opt.hidden ? "shown" : "hidden");
     copy_str(items[C_FILECOLORS].value, sizeof items[C_FILECOLORS].value, a->no_file_colors ? "off" : "on");
+    copy_str(items[C_FILEICONS].value, sizeof items[C_FILEICONS].value, a->no_file_icons ? "off" : "on");
 }
 
 /* One action (a button or a key already mapped) in whatever mode the app is in. */
@@ -2103,7 +2112,12 @@ static void draw_pane(const App *a, R3Screen *s, int idx) {
         r3_put(s, x, y, e->tagged ? '*' : ' ', R3_ST(st));
         char label[300];
         snprintf(label, sizeof label, "%s%s", e->is_dir ? "/" : "", e->name);
-        r3_text_fit(s, x + 1, y, label, 21, ink, r3_styles[st][1]);
+        int lx = x + 1, lw = 21;
+        if (!a->no_file_icons) {   /* a two-cell R3i6nos Mono icon of the file's kind, then a space: the name has 3 cells less */
+            const char *ic = file_icon(e->name, e->is_dir, e->is_link);
+            if (ic) { r3_puts_mono(s, lx, y, ic, ink, r3_styles[st][1]); lx += 3; lw -= 3; }
+        }
+        r3_text_fit(s, lx, y, label, lw, ink, r3_styles[st][1]);
         char size[24];
         if (!strcmp(e->name, "..")) copy_str(size, sizeof size, "UP--DIR");
         else if (e->is_dir) copy_str(size, sizeof size, "<DIR>");
@@ -2751,20 +2765,36 @@ static void test_colour(const char *root) {
     /* a row takes its kind's colour; with file colours off it does not */
     unsigned g0 = r3_pal_gen;
     app_compose(&a, &s);
-    int row = -1;
-    for (int r = 0; r < R3_DISPLAY_ROWS - 2; r++) {
-        unsigned char cells[40];
-        for (int c = 0; c < 20; c++) cells[c] = s.ch[(R3_DISPLAY_TOP + 1 + r) * R3_COLS + 1 + c];
-        if (!memcmp(cells + 1, "a.zip", 5)) { row = R3_DISPLAY_TOP + 1 + r; break; }
-    }
+    int row = -1, namecol = -1;
+    for (int r = 0; r < R3_DISPLAY_ROWS - 2 && row < 0; r++)
+        for (int c = 1; c < 12; c++)
+            if (!memcmp(&s.ch[(R3_DISPLAY_TOP + 1 + r) * R3_COLS + c], "a.zip", 5)) { row = R3_DISPLAY_TOP + 1 + r; namecol = c; break; }
     CHECK(row >= 0, "a.zip is in the panel");
     if (row >= 0) {
-        int cell = row * R3_COLS + 2;
+        /* file icons (R3i6nos Mono): a two-cell icon of the kind, a space, then the name; off, the name is where it was */
+        CHECK(namecol == 5 && s.ux[row * R3_COLS + 2] != 0 && s.ux[row * R3_COLS + 3] == s.ux[row * R3_COLS + 2] + 1,
+              "a.zip has its archive icon (two adjacent glyphs) and its name 3 cells on (name at column %d)", namecol);
+        const char *want = r3mono_name("icon.file.archive");
+        const unsigned char *u = (const unsigned char *)want;
+        unsigned cp = (unsigned)(u[0] & 7) << 18 | (unsigned)(u[1] & 63) << 12 | (unsigned)(u[2] & 63) << 6 | (unsigned)(u[3] & 63);
+        CHECK(s.ux[row * R3_COLS + 2] == cp, "the icon is icon.file.archive (U+%X, not U+%X)", s.ux[row * R3_COLS + 2], cp);
+        int cell = row * R3_COLS + namecol;
         CHECK(s.fg[cell] == r3_fk_slot(R3_FK_ARCHIVE), "a.zip is in the archive colour (slot %d)", s.fg[cell]);
         a.no_file_colors = 1;
         app_compose(&a, &s);
         CHECK(s.fg[cell] == R3_LIGHT_GRAY, "file colours off: the body colour");
         a.no_file_colors = 0;
+        a.no_file_icons = 1;
+        app_compose(&a, &s);
+        CHECK(!memcmp(&s.ch[row * R3_COLS + 2], "a.zip", 5) && s.ux[row * R3_COLS + 2] == 0, "file icons off: the name is where it was");
+        a.no_file_icons = 0;
+        CHECK(!strcmp(fk_icon_name("x.mid", 0, 0), "icon.file.midi") && !strcmp(fk_icon_name("x.XM", 0, 0), "icon.file.tracker") &&
+              !strcmp(fk_icon_name("..", 1, 0), "icon.file.folder.open") && !strcmp(fk_icon_name("d", 1, 0), "icon.file.folder") &&
+              !strcmp(fk_icon_name("l", 0, 1), "icon.file.link") && !strcmp(fk_icon_name("a.txt", 0, 0), "icon.file.text") &&
+              !strcmp(fk_icon_name("a.ttf", 0, 0), "icon.file.font") && !strcmp(fk_icon_name("Makefile", 0, 0), "icon.file") &&
+              !strcmp(fk_icon_name("a.mp3", 0, 0), "icon.file.music") && !strcmp(fk_icon_name("run.sh", 0, 0), "icon.file.code"),
+              "the icons by kind and by extension");
+        for (int k = 0; k < R3_FK_COUNT; k++) CHECK(file_icon("a.zip", 0, 0) != NULL && file_icon("x", 1, 0) != NULL, "every icon name exists in the font");
     }
     CHECK(g0 == r3_pal_gen, "drawing does not change the palette");
 
@@ -2796,11 +2826,14 @@ static void test_colour(const char *root) {
     CHECK(a.mode == M_BROWSE && a.theme == 2 && access(conf, F_OK) == 0, "A keeps the theme and saves it");
     run_cmd(&a, C_FILECOLORS);
     CHECK(a.no_file_colors == 1, "the menu turns file colours off");
+    run_cmd(&a, C_FILEICONS);
+    CHECK(a.no_file_icons == 1, "the menu turns file icons off");
     App b;
     app_init(&b, dir, dir);
     r3_theme_apply(0);
     load_settings(&b);
     CHECK(b.theme == 2 && b.no_file_colors == 1 && r3_pal[R3_LIGHT_GRAY] == (0xFF000000u | r3_themes[2].vga[R3_LIGHT_GRAY]), "the next start loads the theme and the file colours");
+    CHECK(b.no_file_icons == 1, "...and the file icons setting");
     FILE *f = fopen(conf, "w");
     if (f) { fputs("theme=No Such Theme\nfile_colours=on\njunk\n", f); fclose(f); }
     load_settings(&b);

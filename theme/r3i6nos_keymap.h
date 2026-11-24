@@ -27,6 +27,55 @@ typedef struct {
     int test_panel;                          /* which of the app's pages the test reads (the one it was opened over, 1-based after the system page) */
 } R3Keymap;
 
+#ifdef R3_WITH_MONO
+/* The R3i6nos Mono glyph of a button as the Keymap names it ("A", "L1", "Up", "Select", "Fn"...), `on` for pressed; NULL for a name that is not a
+ * button. A, B, X and Y are one cell, every other button two (a two-cell glyph is printed as one string, never split). */
+static inline const char *r3_km_glyph(const char *btn, int on) {
+    char key[40];
+    static const char *const shoulders[] = {"L1", "R1", "L2", "R2", "L3", "R3"};
+    const char *st = on ? "on" : "off";
+    if (!btn || !*btn) return NULL;
+    if (strlen(btn) == 1 && strchr("ABXY", btn[0])) snprintf(key, sizeof key, "pad.btn.%c.%s", btn[0], st);
+    else if (!strcmp(btn, "Select")) snprintf(key, sizeof key, "pad.pill.sel.%s", st);
+    else if (!strcmp(btn, "Start")) snprintf(key, sizeof key, "pad.pill.sta.%s", st);
+    else if (!strcmp(btn, "Fn")) snprintf(key, sizeof key, "pad.pill.fn.%s", st);
+    else if (!strcmp(btn, "Up") || !strcmp(btn, "Down") || !strcmp(btn, "Left") || !strcmp(btn, "Right")) {
+        snprintf(key, sizeof key, "pad.dpad.%c%s", btn[0] + 32, btn + 1);   /* the D-pad glyph shows the direction pressed: no off state */
+    } else {
+        int found = 0;
+        for (size_t i = 0; i < sizeof shoulders / sizeof shoulders[0]; i++) if (!strcmp(btn, shoulders[i])) found = 1;
+        if (!found) return NULL;
+        snprintf(key, sizeof key, "pad.shoulder.%c%c.%s", btn[0] + 32, btn[1], st);
+    }
+    return r3mono_name(key);
+}
+
+/* A label made only of button names joined by "+" ("L1+R1", "R1+Fn") as glyphs with a "+" between, from (col, row); returns the cells used, 0 when the label
+ * is anything else (the caller draws it as text). */
+static inline int r3_km_chord_glyphs(R3Screen *s, int col, int row, const char *label, int on, int fg, int bg) {
+    char part[24];
+    const char *p = label;
+    const char *g[4];
+    int n = 0;
+    while (*p) {
+        size_t len = strcspn(p, "+");
+        if (len == 0 || len >= sizeof part || n == 4) return 0;
+        memcpy(part, p, len);
+        part[len] = 0;
+        if (!(g[n] = r3_km_glyph(part, on))) return 0;
+        n++;
+        p += len;
+        if (*p == '+') p++;
+    }
+    int used = 0;
+    for (int i = 0; i < n; i++) {
+        if (i) { r3_put(s, col + used, row, '+', fg, bg); used++; }
+        used += r3_puts_mono(s, col + used, row, g[i], fg, bg);
+    }
+    return used;
+}
+#endif
+
 /* The system's inputs: the same in every app. */
 static const R3KmRow R3KM_SYSTEM[] = {
     {"L1+R1", "Main menu (keyboard: ` backquote)"}, {"L2+R2", "Contextual menu (keyboard: \\ backslash)"}, {"Fn", "Next panel (a carousel)"},
@@ -87,7 +136,12 @@ static inline void r3_km_draw(R3Screen *s, const R3Keymap *k) {
     const R3KmPage *p = &k->pages[k->page];
     if (!r3_km_on_test(k)) {
         for (int i = 0; i < p->n && i < R3KM_ROWS; i++) {
+#ifdef R3_WITH_MONO     /* an app that opted into R3i6nos Mono sees the buttons as they are on the pad: a chord of button names is glyphs */
+            int used = r3_km_chord_glyphs(s, col + 2, row + 1 + i, p->rows[i].btn, 0, R3_ST(R3_ST_STRONG));
+            if (!used) r3_text_fit(s, col + 2, row + 1 + i, p->rows[i].btn, 12, R3_ST(R3_ST_STRONG));
+#else
             r3_text_fit(s, col + 2, row + 1 + i, p->rows[i].btn, 12, R3_ST(R3_ST_STRONG));
+#endif
             r3_text_fit(s, col + 15, row + 1 + i, p->rows[i].what, w - 17, R3_ST(R3_ST_BODY));
         }
         return;
@@ -102,6 +156,13 @@ static inline void r3_km_draw(R3Screen *s, const R3Keymap *k) {
     for (int b = 0; b < R3_BTN_COUNT; b++) if (k->held[b]) { strncat(held, r3_button_name(b), sizeof held - strlen(held) - 2); strcat(held, " "); any = 1; }
     if (!any) strcat(held, "nothing");
     r3_text_fit(s, col + 2, row + 5, held, w - 4, R3_ST(R3_ST_BODY));
+#ifdef R3_WITH_MONO     /* ...and the held buttons again as the pad's own glyphs, in their pressed state, on the next row */
+    int x = col + 2;
+    for (int b = 0; b < R3_BTN_COUNT; b++) {
+        const char *g = k->held[b] ? r3_km_glyph(r3_button_name(b), 1) : NULL;
+        if (g && x + 3 < col + w - 2) x += r3_puts_mono(s, x, row + 7, g, R3_ST(R3_ST_HINT)) + 1;
+    }
+#endif
 }
 
 /* "The help pages are in order and the test is last": 0, else 1 with msg. */

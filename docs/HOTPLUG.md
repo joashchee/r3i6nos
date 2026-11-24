@@ -47,6 +47,9 @@ the last it has seen. A reader that starts **does not replay** what is in the fi
   screen is composed, `r3_toast_active` to keep the loop awake). Test: `tests/test_toast.c`.
 - **LÖVE (and the menu):** `theme/r3i6nos_toast.lua` (`toast.new()`, `toast.poll(t, seconds)`, `toast.key(t)`, `toast.draw(t, screen)`). Test: `tests/test_toast.lua`.
 - The colours are black on light green (a change) and white on red (a failure): both pass 4.5:1.
+- **A status glyph before the words** (2026-11-24, R3i6nos Mono; untested on a unit): `M.icon` / `r3_toast_icon` choose it from what the text starts with: `Headphones` `sys.headphones`, `Battery` `sys.bat.0`
+  (`sys.bat.4` for "full"), `DC power` / `USB power` `sys.dc`, `USB` `sys.usb`, `Volume NN%` `sys.mute` / `sys.vol.1-3` (steps at 34 and 67), `Pad` `sys.pad`, `TF` / `Card` `sys.card`, `Wi-Fi` `sys.wifi.3`; any other
+  text has none. A Lua app shows it when the theme's font folder is there (`toast.icons = false` turns it off), a native app when it defines `R3_WITH_MONO`. Tests: `tests/test_toast.lua`, `tests/test_toast.c`.
 - The key that clears a failure is **consumed**: it must not also press a button in the app (so an error never makes a game jump). A change toast never
   consumes a key. In the IO Checkers the consumed key is not counted as a press in the input test.
 - **Where it is wired now:** the menu, the IO Checker (LÖVE and native), Commander, TinyNTT. The other ports (Neumetik, KlamANSI, Crunchy, Chordica, Composer,

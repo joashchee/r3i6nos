@@ -32,4 +32,10 @@ eq(N.indicator(N.read()), "¥███")
 eq(N.cells(-75), 2); eq(N.cells(-90), 1); eq(N.cells(nil, 30), 2); eq(N.cells(nil, 10), 1); eq(N.cells(nil, nil), 1)
 eq(N.indicator({ wifi = true, cells = 1 }), "¥█░░"); eq(N.indicator({ wifi = true, cells = 2 }), "¥██░")
 os.execute('rm -rf "' .. root .. '"')
+-- as R3i6nos Mono glyph names
+eq(N.glyphs(nil), nil); eq(N.glyphs({ wired = false, wifi = false }), nil)
+eq(N.glyphs({ wifi = true, cells = 2 }).names[1], "sys.wifi.2"); eq(N.glyphs({ wifi = true, cells = 2 }).wired, false)
+eq(N.glyphs({ wifi = true, cells = 9 }).names[1], "sys.wifi.3", "clamped")
+eq(#N.glyphs({ wired = true }).names, 0); eq(N.glyphs({ wired = true }).wired, true)
+
 print("netstatus: ok")

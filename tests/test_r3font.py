@@ -142,9 +142,14 @@ class Names(unittest.TestCase):
 class Coverage(unittest.TestCase):
     def test_latin_one_and_the_typographic_marks(self):
         for cp in list(range(0xA0, 0x100)) + [0x2018, 0x2019, 0x201C, 0x201D, 0x2013, 0x2014, 0x2026, 0x20AC, 0x2122]:
-            if cp in (0xDE, 0xF0, 0xFE):         # Þ ð þ: still to be drawn (docs/R3I6NOS-MONO-FONT.md)
-                continue
             self.assertIn(cp, R.all_cps(), f"U+{cp:04X}")
+
+    def test_every_latin_extended_a_letter_and_the_greek_alphabet(self):
+        self.assertEqual(MISS, [])
+        for cp in range(0x100, 0x180):
+            self.assertIn(cp, R.all_cps(), f"U+{cp:04X}")
+        for ch in "ΑΒΓΔΕΖΗΘΙΚΛΜΝΞΟΠΡΣΤΥΦΧΨΩαβγδεζηθικλμνξοπρςστυφχψω":
+            self.assertIn(ord(ch), R.all_cps(), ch)
 
     def test_the_perplexity_guide_symbols(self):
         text = "☺☻♥♦♣♠•◘○◙♂♀♪♫☼►◄↕‼¶§▬↨↑↓→←∟↔▲▼αßΓπΣσµτΦΘΩδ∞φε∩≡±≥≤⌠⌡÷≈°∙·√ⁿ²■░▒▓█▄▀╭╮╯╰▢□■▪▫◻◼○●◦◉◯◌◍◆◇◈△▽▷◁✓✔✗✘☐☑☒⚠⚡★☆✦✧"
@@ -200,6 +205,22 @@ class Outputs(unittest.TestCase):
         text = (OUT / "R3i6nosMono-Regular.bdf").read_text()
         self.assertIn(f"CHARS {len(R.all_cps())}", text)
         self.assertEqual(text.count("STARTCHAR"), len(R.all_cps()))
+
+    def test_psf_is_a_console_font_of_512_glyphs(self):
+        import struct
+        d = (OUT / "R3i6nosMono-10x20.psf").read_bytes()
+        magic, ver, hs, flags, n, cs, h, w = struct.unpack("<8I", d[:32])
+        self.assertEqual((magic, ver, hs, flags, n, cs, h, w), (0x864AB572, 0, 32, 1, 512, 40, 20, 10))
+        table = d[32 + n * cs:].split(b"\xff")
+        self.assertEqual(len(table), n + 1)                      # one entry a glyph, and the empty rest
+        for i in range(n):
+            rows = [int.from_bytes(d[32 + i * cs + 2 * y:34 + i * cs + 2 * y], "big") >> 6 for y in range(20)]
+            for cp in table[i].decode("utf-8"):
+                self.assertEqual(R.glyph(ord(cp)).rows_int(), rows, f"slot {i} U+{ord(cp):04X}")
+        _, uni = base.cp437()
+        for i in range(1, 256):
+            self.assertIn(chr(uni[i]), table[i].decode(), i)       # slots 0-255 are CP437 by byte
+        self.assertIn("\u2500", "".join(t.decode() for t in table))   # lines it lacks come after
 
     def test_name_tables_use_safe_escapes(self):
         h = (OUT / "r3i6nos_mono_names.h").read_text()

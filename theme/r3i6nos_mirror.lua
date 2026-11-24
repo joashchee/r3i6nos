@@ -15,13 +15,16 @@ M.CELLS = M.COLS * M.ROWS
 M.RECHECK = 1        -- seconds between looks for the flag file while a screen keeps changing
 
 local char = string.char
+M.EXT = 0x110000     -- the theme's extended cell (T.EXT): EXT + a code point of R3i6nos Mono; the datagrams carry 254 in its place, and E the code point
+
+local function byteOf(ch) return ch >= M.EXT and 254 or ch % 256 end
 
 local function attr(scr, i) return (scr.fg[i] % 16) + (scr.bg[i] % 16) * 16 end
 
 --- The whole screen as one datagram.
 function M.full(scr)
   local out = { "F" }
-  for i = 1, M.CELLS do out[#out + 1] = char(scr.ch[i] % 256, attr(scr, i)) end
+  for i = 1, M.CELLS do out[#out + 1] = char(byteOf(scr.ch[i]), attr(scr, i)) end
   return table.concat(out)
 end
 
@@ -40,7 +43,7 @@ function M.delta(scr, prev)
         j = j + 1
       end
       local cells = {}
-      for k = first, last do cells[#cells + 1] = char(scr.ch[k] % 256, attr(scr, k)) end
+      for k = first, last do cells[#cells + 1] = char(byteOf(scr.ch[k]), attr(scr, k)) end
       out[#out + 1] = char(math.floor((first - 1) / 256), (first - 1) % 256, last - first + 1) .. table.concat(cells)
       changed = changed + (last - first + 1)
       i = last + 1
@@ -50,6 +53,26 @@ function M.delta(scr, prev)
   end
   if changed == 0 then return nil end
   if changed > M.CELLS / 2 then return M.full(scr) end
+  return table.concat(out)
+end
+
+--- The extended cells as one datagram (nil when there are none): `E` and runs of (u16 start, u8 count, count x (u24 code point, u8 attribute)).
+--- With prev, only the extended cells that differ from it; without, every one (after a full frame, which makes every cell ordinary).
+function M.ext(scr, prev)
+  local out, n, run = { "E" }, 0, nil
+  local function flush() if run then out[#out + 1] = char(math.floor(run.first / 256), run.first % 256, #run.cells) .. table.concat(run.cells); run = nil end end
+  for i = 1, M.CELLS do
+    local ch = scr.ch[i]
+    if ch >= M.EXT and (not prev or ch ~= prev.ch[i] or scr.fg[i] ~= prev.fg[i] or scr.bg[i] ~= prev.bg[i]) then
+      local cp = ch - M.EXT
+      if run and (run.first + #run.cells ~= i - 1 or #run.cells >= 255) then flush() end
+      run = run or { first = i - 1, cells = {} }
+      run.cells[#run.cells + 1] = char(math.floor(cp / 65536), math.floor(cp / 256) % 256, cp % 256, attr(scr, i))
+      n = n + 1
+    end
+  end
+  flush()
+  if n == 0 then return nil end
   return table.concat(out)
 end
 
@@ -106,7 +129,12 @@ function M.tap(scr, prev)
     if not mirrored() then return end
     local data
     if prev and state.sent_full then data = M.delta(scr, prev) else data = M.full(scr); state.sent_full = true end
-    if data then M.sys.send(data); M.stats.sent = M.stats.sent + 1 end
+    if data then
+      M.sys.send(data); M.stats.sent = M.stats.sent + 1
+      -- cells from R3i6nos Mono follow the frame that carries their stand-in (a delta that fell back to a full frame has made every cell ordinary)
+      local e = M.ext(scr, (data:sub(1, 1) == "D") and prev or nil)
+      if e then M.sys.send(e); M.stats.sent = M.stats.sent + 1 end
+    end
   end)
   if not ok then
     M.stats.failed = M.stats.failed + 1

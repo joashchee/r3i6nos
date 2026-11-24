@@ -69,6 +69,7 @@ end
 function love.load()
   love.mouse.setVisible(false)
   theme.init()
+  theme.useMono(true)   -- R3i6nos Mono: the top bar's battery and Wi-Fi are glyphs, and a title with a letter CP437 lacks is drawn (the table loads on the first glyph)
   screen = theme.screen()
   splash(0, 3, "Starting")
   -- Packages waiting to be extracted (a new card's first boot: the default apps): loveos-session left the watcher to this splash so there is a bar (rule 18)

@@ -71,7 +71,95 @@ local REVERSE = {}
 for i = 2, 256 do REVERSE[font.unicode[i]] = i - 1 end -- index 0 (NUL) is not a picture
 REVERSE[0x3B2], REVERSE[0x3BC] = 225, 230 -- Greek beta and mu stand in for sharp s and micro
 
+-- ---- R3i6nos Mono: the extended glyphs (docs/R3I6NOS-MONO-FONT.md) ----------------------------------------------------------------------
+--
+-- A cell holds a code page 437 index (0-255), as always, or an EXTENDED cell: T.EXT + a Unicode code point, drawn from R3i6nos Mono (the 2,887
+-- code points, and the named gamepad, key, piano, UI, music, status and icon glyphs in Plane 16). Nothing changes for an app that never asks:
+-- T.decode keeps turning an unknown character into "?" until the app calls T.useMono(true). Glyphs are printed by NAME (T.glyph("pad.btn.A.on"));
+-- a two-cell icon is a list of two cells that stays together (Screen:text prints a list as is, one cell each, never split).
+
+T.EXT = 0x110000          -- above every Unicode code point, so an extended cell never equals a CP437 index
+local mono, monoNames, monoOn = nil, nil, false
+
+local function themeDir()
+  local p = package.searchpath and package.searchpath("r3i6nos_ansiapps", package.path)
+  return p and p:match("^(.*)/[^/]*$") or "."
+end
+
+local function loadTable(file)
+  local f = loadfile(themeDir() .. "/font/r3i6nos-mono/" .. file)
+  local ok, t = pcall(f or error)
+  return ok and type(t) == "table" and t or nil
+end
+
+--- The font table (glyphs, cmap), loaded the first time it is needed; nil when the theme folder has no font folder (an older image).
+function T.mono()
+  if mono == nil then mono = loadTable("r3i6nos_mono10x20.lua") or false end
+  return mono or nil
+end
+
+--- Let T.decode draw the characters CP437 lacks from R3i6nos Mono (an app's choice, once, before it prints). Returns whether the font is there.
+--- The table itself (205 KB of Lua) is read the first time a glyph is wanted, not here: an app that turns this on pays for it when it draws one.
+function T.useMono(on)
+  monoOn = false
+  if on then
+    local f = io.open(themeDir() .. "/font/r3i6nos-mono/r3i6nos_mono10x20.lua", "r")
+    if f then f:close(); monoOn = true end
+  end
+  return monoOn
+end
+
+--- Is the font in use (T.useMono(true) and the font folder is there)? What an app checks before it prints a status glyph instead of its text stand-in.
+function T.monoEnabled() return monoOn end
+
+--- The extended cell of a code point, or nil when the font has no glyph for it.
+function T.cell(cp)
+  local m = T.mono()
+  return m and m.cmap[cp] and (T.EXT + cp) or nil
+end
+
+local function utf8cps(s)
+  local out, i, n = {}, 1, #s
+  while i <= n do
+    local b = s:byte(i)
+    local len = b < 0x80 and 1 or (b < 0xE0 and 2 or (b < 0xF0 and 3 or 4))
+    local cp = len == 1 and b or b - (len == 2 and 0xC0 or (len == 3 and 0xE0 or 0xF0))
+    for k = 1, len - 1 do cp = cp * 64 + ((s:byte(i + k) or 0x80) - 0x80) end
+    out[#out + 1] = cp
+    i = i + len
+  end
+  return out
+end
+
+--- The cells of a named glyph ("pad.btn.A.on", "icon.app.hydrolik"): one, or two for an icon, to be printed together (Screen:text, Screen:glyph).
+--- An unknown name, or an image without the font, is a single "?" and never an error.
+function T.glyph(name)
+  if monoNames == nil then monoNames = loadTable("r3i6nos_mono_names.lua") or false end
+  local u = monoNames and monoNames[name]
+  if not u or not T.mono() then return { 63 } end
+  local out = {}
+  for _, cp in ipairs(utf8cps(u)) do out[#out + 1] = T.cell(cp) or 63 end
+  return out
+end
+
+--- The 10x20 bitmap of an extended cell (or a code point): rows[0..19][0..9] of 0 or 1; nil when the font lacks it.
+function T.monoBitmap(cell)
+  local m = T.mono()
+  local cp = cell >= T.EXT and cell - T.EXT or cell
+  local gi = m and m.cmap[cp]
+  local hex = gi and m.glyphs[gi]
+  if not hex then return nil end
+  local rows = {}
+  for y = 0, T.CELL_H - 1 do
+    local v, row = tonumber(hex:sub(y * 3 + 1, y * 3 + 3), 16), {}
+    for x = 0, T.CELL_W - 1 do row[x] = math.floor(v / 2 ^ (T.CELL_W - 1 - x)) % 2 end
+    rows[y] = row
+  end
+  return rows
+end
+
 --- A UTF-8 string as a list of code page 437 indices. Tabs and other controls are spaces.
+--- With T.useMono(true) a character CP437 lacks becomes an extended cell when R3i6nos Mono has it.
 function T.decode(s)
   if type(s) == "table" then return s end
   local out, i, n = {}, 1, #s
@@ -90,7 +178,7 @@ function T.decode(s)
     i = i + len
     if cp < 0x20 or cp == 0x7F then out[#out + 1] = 32
     elseif cp < 0x7F then out[#out + 1] = cp
-    else out[#out + 1] = REVERSE[cp] or 63 end
+    else out[#out + 1] = (monoOn and cp == 0x3B2 and T.cell(cp)) or REVERSE[cp] or (monoOn and T.cell(cp)) or 63 end
   end
   return out
 end
@@ -188,6 +276,11 @@ function Screen:text(col, row, s, fg, bg)
     col = col + 1
   end
   return col
+end
+
+--- A named R3i6nos Mono glyph (T.glyph) from (col, row): its cells stay together, one to two. Returns the next column.
+function Screen:glyph(col, row, name, fg, bg)
+  return self:text(col, row, T.glyph(name), fg, bg)
 end
 
 --- Text whose last cell is at col.
@@ -410,6 +503,43 @@ function T.init()
   gfx.prev = nil
 end
 
+-- The extended glyphs' atlas: 32 x 32 slots of 10 x 20 filled on first use (a screen shows few of the 2,887), so an app that never prints one pays nothing.
+local MX_COLS, MX_SLOTS = 32, 1024
+
+local function monoSlot(cp)
+  local m = gfx.mono
+  if not m then
+    m = { slot = {}, n = 0, dirty = false, quads = {} }
+    m.data = love.image.newImageData(MX_COLS * T.CELL_W, (MX_SLOTS / MX_COLS) * T.CELL_H)
+    gfx.mono = m
+  end
+  local q = m.quads[cp]
+  if q then return q end
+  local rows = T.monoBitmap(cp)
+  if not rows or m.n >= MX_SLOTS then return nil end          -- not in the font, or the atlas is full: the caller draws "?"
+  local ox, oy = (m.n % MX_COLS) * T.CELL_W, math.floor(m.n / MX_COLS) * T.CELL_H
+  m.n = m.n + 1
+  for y = 0, T.CELL_H - 1 do
+    for x = 0, T.CELL_W - 1 do
+      if rows[y][x] == 1 then m.data:setPixel(ox + x, oy + y, 1, 1, 1, 1) end
+    end
+  end
+  m.dirty = true
+  q = love.graphics.newQuad(ox, oy, T.CELL_W, T.CELL_H, MX_COLS * T.CELL_W, (MX_SLOTS / MX_COLS) * T.CELL_H)
+  m.quads[cp] = q
+  return q
+end
+
+local function monoSync()
+  local m = gfx.mono
+  if not m or not m.dirty then return end
+  if gfx.mimage then gfx.mimage:release() end
+  gfx.mimage = love.graphics.newImage(m.data)
+  gfx.mimage:setFilter("nearest", "nearest")
+  gfx.mbatch = love.graphics.newSpriteBatch(gfx.mimage, T.COLS * T.ROWS, "stream")
+  m.dirty = false
+end
+
 local function same(scr, prev)
   if not prev then return false end
   for i = 1, T.COLS * T.ROWS do
@@ -437,11 +567,20 @@ local function render(scr)
     end
   end
   gfx.batch:clear()
+  local ext = {}                                    -- extended cells, drawn from their own atlas after the CP437 ones
   for row = 0, T.ROWS - 1 do
     for col = 0, T.COLS - 1 do
       local i = at(col, row)
       local ch = scr.ch[i]
-      if ch ~= 32 and ch ~= 0 and ch ~= 255 then
+      if ch >= T.EXT then
+        local q = monoSlot(ch - T.EXT)
+        if q then ext[#ext + 1] = { col, row, q, scr.fg[i] }
+        else
+          local rgb = T.RGB[scr.fg[i]]
+          gfx.batch:setColor(rgb[1] / 255, rgb[2] / 255, rgb[3] / 255, 1)
+          gfx.batch:add(gfx.quads[63], col * T.CELL_W, row * T.CELL_H)
+        end
+      elseif ch ~= 32 and ch ~= 0 and ch ~= 255 then
         local rgb = T.RGB[scr.fg[i]]
         gfx.batch:setColor(rgb[1] / 255, rgb[2] / 255, rgb[3] / 255, 1)
         gfx.batch:add(gfx.quads[ch], col * T.CELL_W, row * T.CELL_H)
@@ -450,6 +589,17 @@ local function render(scr)
   end
   love.graphics.setColor(1, 1, 1, 1)
   love.graphics.draw(gfx.batch)
+  if #ext > 0 then
+    monoSync()
+    gfx.mbatch:clear()
+    for _, e in ipairs(ext) do
+      local rgb = T.RGB[e[4]]
+      gfx.mbatch:setColor(rgb[1] / 255, rgb[2] / 255, rgb[3] / 255, 1)
+      gfx.mbatch:add(e[3], e[1] * T.CELL_W, e[2] * T.CELL_H)
+    end
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(gfx.mbatch)
+  end
   love.graphics.setCanvas()
 end
 

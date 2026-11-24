@@ -164,3 +164,33 @@ do
   T.progressMoving(mscr, 0, 0, 20, 30); eq(mv[0], 219, "and comes back")
   eq(T.progressText(45), "[####......] 45%"); eq(T.progressText(0), "[..........] 0%"); eq(T.progressText(100), "[##########] 100%")
 end
+
+-- R3i6nos Mono in the Lua theme: an extended cell is T.EXT + a code point; nothing changes until an app asks
+do
+  eq(T.decode("é")[1], 130, "CP437 first, as always")
+  eq(T.decode("Þ")[1], 63, "an unknown character is still ? when mono is off")
+  eq(T.useMono(true), true, "the font folder is in the theme")
+  eq(T.decode("Þ")[1], T.EXT + 0xDE, "...and the thorn when it is on")
+  eq(T.decode("é")[1], 130, "CP437 stays CP437 with mono on")
+  eq(T.decode("β")[1], T.EXT + 0x3B2, "the Greek beta is its own letter now, not the sharp s")
+  eq(T.decode("\u{1F600}")[1], 63, "a character the font lacks is ?")
+  local a = T.glyph("pad.btn.A.on")
+  eq(#a, 1); assert(a[1] >= T.EXT, "a pad button is an extended cell")
+  local ic = T.glyph("icon.app.hydrolik")
+  eq(#ic, 2, "an icon is two cells"); eq(ic[2], ic[1] + 1, "...adjacent code points, so a pair"); assert(ic[1] >= T.EXT)
+  eq(T.glyph("no.such.name")[1], 63, "an unknown name is ?")
+  -- the bitmap of an extended cell is the font's: the CP437 'A' is the theme's own scaled glyph, pixel for pixel
+  local A, want = T.monoBitmap(T.EXT + 65), T.glyph10x20(65)
+  for y = 0, 19 do for x = 0, 9 do eq(A[y][x], want[y][x], ("A at %d,%d"):format(x, y)) end end
+  local p = T.monoBitmap(a[1]); local ink = 0
+  for y = 0, 19 do for x = 0, 9 do ink = ink + p[y][x] end end
+  assert(ink > 10, "a pad button has ink")
+  eq(T.monoBitmap(T.EXT + 0x1F600), nil, "no glyph, no bitmap")
+  -- a screen keeps extended cells whole, and a two-cell icon lands in two adjacent cells
+  local scr = T.screen()
+  local nx = scr:glyph(3, 2, "icon.app.hydrolik", T.WHITE)
+  eq(nx, 5, "an icon takes two columns"); eq(scr.ch[2 * T.COLS + 3 + 1], ic[1]); eq(scr.ch[2 * T.COLS + 4 + 1], ic[2])
+  eq(scr:dump()[3]:sub(4, 5), "??", "the text dump shows pictures as ?")
+  T.useMono(false)
+  eq(T.decode("Þ")[1], 63, "off again")
+end

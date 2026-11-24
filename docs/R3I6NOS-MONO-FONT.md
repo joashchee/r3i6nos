@@ -7,14 +7,14 @@ Made 2026-11-24 at the maintainer's request, from the guide `docs/making-cp437-f
 ## What it is
 
 - **One cell, 10 x 20 px**, advance 10, ascent 15, descent 5 (capitals rows 3-14, x-height rows 7-14, descenders to row 18). 64 x 24 cells fill 640 x 480.
-- **2,834 code points, 868 named glyphs.** `theme/font/r3i6nos-mono/glyph-coverage-report.txt` is the live count; `overview.png` and `specimen.html` show all of it.
+- **2,887 code points, 868 named glyphs.** `theme/font/r3i6nos-mono/glyph-coverage-report.txt` is the live count; `overview.png` and `specimen.html` show all of it.
 - **CP437 is the theme's own, pixel for pixel**: the 256 glyphs are `theme/vga8x16.lua` scaled 8x16 to 10x20 by the theme's rule, so text-mode art does not change
   (`tests/test_r3font.py`). `U+F000 + byte` addresses a CP437 character by its byte, as the Linux console and the screen mirror do.
 - **Generated, not drawn, where geometry matters:** all of U+2500-257F (the light/double lines are CP437's own; heavy, mixed, dashed, rounded arcs and diagonals are
   generated from the theme's measured strokes and a test checks the generator reproduces the VGA's light lines exactly), the block elements, quadrants, sextants
   (U+1FB00-3B), the eighths (U+1FB70-8B) and all 256 Braille patterns (2x2 px dots on a 5 px pitch, so the gap is 3 px inside a cell and across cells).
 - **Symbols CP437 lacks**: geometric shapes, arrows, check and ballot marks, math and logic, typographic punctuation, super and subscripts, circled digits,
-  control pictures, the whole of Latin-1 and Latin Extended-A except 12 letters (composed from the CP437 letters and accent marks), Greek and Cyrillic letters that are Latin shapes.
+  control pictures, the whole of Latin-1 and Latin Extended-A (the accented ones composed from the CP437 letters and accent marks; `Þ þ ð ĳ Ĳ ĸ Ŀ ŀ ŉ Ŋ ŋ Œ œ ſ` drawn in `scripts/r3font/greek.py`), the whole Greek alphabet (the Latin shapes aliased; `Λ Ξ Π Ψ β γ ζ η θ ι κ λ ξ ς χ ψ` drawn, the tonos and dialytika forms composed), and the Cyrillic letters that are Latin shapes. **The drawn letters are first drafts** in the CP437 style, for the maintainer to redraw.
 - **Music**: the Unicode musical symbols Neumetik's formats print (notes, rests, clefs, accidentals, barlines, repeats, fermata, segno, coda), transport symbols, and
   private-use staff cells (below).
 - **Coding**: Powerline (U+E0A0-E0A3, E0B0-E0BF), VCS, debugger, diagnostics, fold marks, file tree.
@@ -52,13 +52,15 @@ for the maintainer to redraw; their names will not change.
 
 | Runtime | Use | Tried |
 |---|---|---|
-| LÖVE 11.5 | `love.graphics.newFont("R3i6nosMono-Regular.ttf", 20, "none")`, or the BMFont `.fnt` | LÖVE 11.5's rasteriser draws all 2,831 code points exactly at hinting normal, light, mono and none (`tests/test_r3font_love.sh`); **not drawn on a screen** (no display here) |
+| LÖVE 11.5, the theme (`theme/r3i6nos_ansiapps.lua`) | `T.useMono(true)`, then `T.decode` draws what CP437 lacks and `scr:glyph(col, row, "pad.btn.A.on")` a named glyph (below); or `love.graphics.newFont("R3i6nosMono-Regular.ttf", 20, "none")`, or the BMFont `.fnt` | LÖVE 11.5's rasteriser draws all 2,887 code points exactly at hinting normal, light, mono and none (`tests/test_r3font_love.sh`); the theme's own drawing (a staging atlas, `monoSlot`) is **not drawn on a screen** (no display here); its cells, names and bitmaps are tested (`tests/test_theme.lua`) |
 | LÖVE 12.0, Godot, Defold | the same TTF or BMFont | not tried |
-| Web apps, the screen mirror | `r3i6nos-mono.css` + `.woff2`; or draw `r3i6nos-mono.json` bitmaps on a canvas | WOFF2 checked through FreeType; no browser tried |
+| Web apps | `r3i6nos-mono.css` + `.woff2`; or draw `r3i6nos-mono.json` bitmaps on a canvas | WOFF2 checked through FreeType; **Chrome (2026-11-24): the specimen page loads the WOFF2 and five glyphs drawn on a canvas at 20 px match the font's bitmap, 1,000 of 1,000 pixels** |
+| The screen mirror's page | the glyph table embedded in `page.html` (`scripts/build_mirror_page.py`), drawn on a 640 x 480 canvas; the unit sends the code point of every glyph CP437 lacks (`docs/SCREEN-MIRROR.md`) | the page's own script runs in node against a stub canvas and every pixel is compared with the font (`tests/test_mirror_page.js`); **no browser tried** |
 | Native C / SDL2 | `#define R3_WITH_MONO` before `r3i6nos_ansiapps.h`; `r3_put_mono`, `r3_puts_mono`; or `r3mono_find(cp)` in `r3i6nos_mono10x20.h` | the IO Checker (below) and `tests/test_r3font.py` (compiled lookup) |
-| Pyxel, X11 tools | `R3i6nosMono-Regular.bdf` | not tried |
-| Ren'Py, Solarus | the TTF | not tried |
-| Linux console | a PSF export is not made yet | roadmap |
+| Pyxel, X11 tools | `R3i6nosMono-Regular.bdf` | **Pyxel 2.2.8 (Debian 12 arm64, Docker): 1,000 of 1,000 pixels of five glyphs match; `text_width` is 10 a letter** |
+| Solarus and the SDL engines | the TTF through SDL2_ttf (hinting mono) | **SDL2_ttf: 1,200 of 1,200 pixels of six glyphs match, advance 10** (Solarus itself not run: LuaJIT panics on this host) |
+| Ren'Py, Godot | the TTF | not tried |
+| Linux console | `R3i6nosMono-10x20.psf`: PSF2, 10 x 20, 512 glyphs (CP437 by byte, then the lines, blocks, Latin accents and Powerline CP437 lacks), with a Unicode table (`setfont R3i6nosMono-10x20.psf`; the table also answers `U+F000 + byte`) | the file is parsed back and every glyph compared with the font (`tests/test_r3font.py`); **no console tried** |
 
 The TTF has a trivial `prep` program on purpose: FreeType auto-hints any TrueType font with no instructions, and the auto-hinter moves pixel-aligned outlines (found and fixed
 2026-11-24). Its `hmtx` left side bearings equal each glyph's `xMin` (FreeType trims the blank columns otherwise: also found and fixed).
@@ -80,7 +82,30 @@ made with `R3I6NOS_IO_SHOTS=dir io-checker-native --selftest`.
 Braille gaps, name locking, coverage of the Perplexity guide's symbols, the C header compiled and queried). To add a glyph: draw it in the matching `scripts/r3font/` module with a
 new name, run `scripts/build-r3-font.sh`, commit `glyph-names.json` with it.
 
+## In the apps (added 2026-11-24, all untested on a unit)
+
+- **The Lua theme**: a cell holds a CP437 index (0-255) or an extended cell, `T.EXT` (0x110000) plus a code point. Nothing changes until an app calls `T.useMono(true)` (it only checks
+  the font folder is there; the 205 KB table is read when the first glyph is wanted): then `T.decode` turns a character CP437 lacks into an extended cell when the font has it
+  (otherwise `?`, as before; the Greek beta is its own letter, no longer the sharp s). `T.glyph("icon.app.hydrolik")` is the cells of a name (two for an icon: print them together,
+  `Screen:glyph(col, row, name, fg, bg)` does), `T.monoBitmap(cell)` the 10 x 20 bitmap. Drawing uses a second atlas filled on first use (1,024 slots, a screen shows few), so an app
+  that never prints one pays nothing. The mirror sends 254 for an extended cell and an `E` datagram after it.
+- **The menu**: the top bar's battery is a glyph in quarters (`sys.bat.0-4`, a bolt `sys.bat.charge` while it charges) and the percent, the Wi-Fi `sys.wifi.0-3` (wired keeps CP437's `ë`).
+  With the font folder missing (an older image) the text stand-ins (`BAT ███░░ 62%`) are drawn as before.
+- **The hot-plug toast** (`theme/r3i6nos_toast.{lua,h}`, `docs/HOTPLUG.md`): a status glyph before the words, chosen from them (`M.icon`, `r3_toast_icon`: headphones, battery, power, USB, volume in
+  steps, pad, TF card, Wi-Fi); a Lua app gets it when the font folder is there (`toast.icons = false` turns it off), a native app when it defines `R3_WITH_MONO`.
+- **The Keymap** (`theme/r3i6nos_keymap.h`, `R3_WITH_MONO`): the system page's chords (`L1+R1`, `L2+R2`, `L1+Fn`, `R1+Fn`) and any row of button names are the pad's glyphs, and the test page
+  shows the held buttons as pressed glyphs. **The on-screen keyboard** (`theme/r3i6nos_osk.h`): every key is a two-cell cap, the cursor's pressed.
+- **Commander** (`apps/commander-native`): each row has a two-cell icon of its kind (`file_icon`: folder, open folder for `..`, link, text, doc, code, image, music, MIDI, tracker module, video, archive,
+  disk image, program, font, data), the name 3 cells shorter; Commands > File icons turns it off (saved in `settings.conf`).
+- **MusiCue's Piano** keeps its labelled keys (each shows its note and the button that plays it, which the glyph piano cannot carry). **Hydrolik's transport** and **a coding app's Powerline
+  segments** are the apps' own roadmaps.
+
+## Tried in the engines (2026-11-24)
+
+`tests/runtimes/e2e.sh` (Debian 12 arm64 in Docker, `tests/test_runtimes_docker.sh`): the BDF in **Pyxel 2.2.8** and the TTF in **SDL2_ttf** (what Solarus and the SDL engines load, hinting mono): five or six glyphs
+(the letter A, a box corner, a pad button, `Þ`, `θ`, a sextant) drawn and every pixel compared with the font's bitmap: all matched. A Chrome check of the WOFF2 is in the table above. **Ren'Py and Godot have not been tried.**
+
 ## Not done (ROADMAP section 43)
 
-The `Þ ð þ ĳ ĸ Ŀ ŉ Ŋ ŋ Œ œ ſ` letters; Greek letters that are not Latin shapes; Latin Extended-B and Vietnamese; the Lua theme (`theme/r3i6nos_ansiapps.lua`) drawing these glyphs; the
-screen mirror sending them (a font cell sends 254 for now); a PSF export; hand-redrawn music art (the treble clef is rough) and icons; true-colour themes for glyph groups; an italic or bold.
+Latin Extended-B and Vietnamese; Cyrillic letters that are not Latin shapes; hand-redrawn music art (the treble clef is rough), the Greek and Latin letters drawn here, and the icons; true-colour themes for glyph groups; an
+italic or bold; the look of the IO Checker's R3i6nos Mono page on a real screen.

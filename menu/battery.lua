@@ -85,6 +85,19 @@ function B.indicator(r)
   return ("BAT %s %d%%"):format(bar, r.pct), r.pct <= B.LOW and "low" or "normal"
 end
 
+--- The top bar's battery as R3i6nos Mono glyphs (the theme's T.glyph names): { names = {"sys.bat.charge"?, "sys.bat.N"}, text = "87%" }, and the same kind
+--- as indicator ("low", "charging", "normal"). N is 0-4 quarters of charge. nil with no battery. indicator() is the stand-in when the font is not there.
+function B.glyphs(r)
+  if not r then return nil end
+  local q = math.min(4, math.ceil(r.pct / 25))
+  local status = (r.status or ""):lower()
+  local names = {}
+  if status == "charging" then names[#names + 1] = "sys.bat.charge" end
+  names[#names + 1] = "sys.bat." .. q
+  local kind = (status == "charging" or status == "full") and "charging" or (r.pct <= B.LOW and "low" or "normal")
+  return { names = names, text = ("%d%%"):format(r.pct) }, kind
+end
+
 -- ---- the history -----------------------------------------------------------------------------------------------------------
 
 --- Parse the history's text into a list of samples, oldest first. Lines that do not parse are skipped.

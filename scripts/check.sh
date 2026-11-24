@@ -204,6 +204,16 @@ if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     rm -f "$osk_bin"
 else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
 
+step "Keymap with R3i6nos Mono glyphs (theme/r3i6nos_keymap.h)"
+if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
+    kmg_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-kmg.XXXXXX")"
+    # shellcheck disable=SC2046,SC2086  # sdl2-config prints separate flags; $werror is empty or one flag
+    if cc -std=c11 -Wall -Wextra $werror -O2 -I theme $(sdl2-config --cflags) -o "$kmg_bin" tests/test_keymap_glyphs.c $(sdl2-config --libs) -lm; then
+        "$kmg_bin" || fail=1
+    else echo "FAIL: tests/test_keymap_glyphs.c does not compile"; fail=1; fi
+    rm -f "$kmg_bin"
+else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
+
 step "screen mirror tap (theme/r3i6nos_mirror.h)"
 if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     mirror_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-mirror.XXXXXX")"
