@@ -18,7 +18,10 @@
 #include <string.h>
 
 #include "r3i6nos_vga8x16.h"
-#ifdef R3_WITH_MONO     /* opt in (an app defines it before this header): cells may hold any glyph of R3i6nos Mono, docs/R3I6NOS-MONO-FONT.md */
+#if !defined(R3_WITH_MONO) && !defined(R3_NO_MONO)    /* R3i6nos Mono is the font of every app (2026-11-24); an app that must not carry it defines R3_NO_MONO */
+#define R3_WITH_MONO 1
+#endif
+#ifdef R3_WITH_MONO     /* cells may hold any glyph of R3i6nos Mono, docs/R3I6NOS-MONO-FONT.md */
 #include "font/r3i6nos-mono/r3i6nos_mono10x20.h"
 #include "font/r3i6nos-mono/r3i6nos_mono_names.h"
 #endif

@@ -480,6 +480,7 @@ local gfx = { }
 
 --- Build the glyph atlas and the canvas. Call once, from love.load.
 function T.init()
+  T.useMono(true)   -- R3i6nos Mono is the font of every app (2026-11-24); T.useMono(false) turns it off (the table loads on the first glyph)
   local aw, ah = 16 * T.CELL_W, 16 * T.CELL_H
   local data = love.image.newImageData(aw, ah)
   for i = 0, 255 do

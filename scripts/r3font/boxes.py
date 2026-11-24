@@ -58,8 +58,10 @@ def dash(weight, n, horizontal):
     return b
 
 
-def arc(name, weight="l"):
-    """The down-and-right rounded corner: an elliptical path from the vertical stroke to the horizontal one.
+def arc(name, weight="l", left=False, up=False):
+    """A rounded corner (down-and-right; `left` and `up` make the other three, drawn on their own geometry, not flipped, because the cell is not symmetric:
+    the vertical stroke is columns 4-6 and the horizontal one row 9, so a mirror would put the stem a column left and the line a row down).
+    The down-and-right one: an elliptical path from the vertical stroke to the horizontal one.
 
     The theme's light strokes are 3 px wide upright and 1 px tall flat, so the brush follows the tangent: as wide as the vertical
     stroke where the path runs up and down, as thin as the horizontal one where it runs across. The path reaches the cell's right
@@ -69,19 +71,22 @@ def arc(name, weight="l"):
     y0, y1 = HY[weight]
     wv, th = x1 - x0 + 1, y1 - y0 + 1                      # vertical stroke width, horizontal stroke thickness
     cx0, cy0 = (x0 + x1 + 1) / 2, (y0 + y1 + 1) / 2
-    rx, ry = CW - cx0, 5.0
-    ccx, ccy = cx0 + rx, cy0 + ry
+    rx, ry = (cx0 if left else CW - cx0), 5.0
+    ccx, ccy = (cx0 - rx if left else cx0 + rx), (cy0 - ry if up else cy0 + ry)
     b = Bmp()
     steps = 200
     for i in range(steps + 1):
         t = math.pi / 2 * i / steps
-        px, py = ccx - rx * math.cos(t), ccy - ry * math.sin(t)
+        px, py = (ccx + rx * math.cos(t) if left else ccx - rx * math.cos(t)), (ccy + ry * math.sin(t) if up else ccy - ry * math.sin(t))
         dx, dy = rx * math.sin(t), ry * math.cos(t)          # tangent
         vert = abs(dy) / (abs(dx) + abs(dy))
         w = int(round(th + (wv - th) * vert))
         h = int(round(th + (th - th) * vert))
         b.rect(int(round(px - w / 2.0)), int(round(py - h / 2.0 - 0.0)), w, h)
-    b.rect(x0, int(ccy), wv, CH - int(ccy))                  # the straight part below
+    if up:
+        b.rect(x0, 0, wv, int(ccy) + 1)                      # the straight part above
+    else:
+        b.rect(x0, int(ccy), wv, CH - int(ccy))              # the straight part below
     return b
 
 
@@ -112,13 +117,7 @@ def box_glyphs():
             n = 2 if "DOUBLE" in nm else 3 if "TRIPLE" in nm else 4
             out[cp] = (nm.lower(), dash(w, n, "HORIZONTAL" in nm))
         elif "ARC" in nm:
-            g = arc(nm)
-            if "UP AND LEFT" in nm:
-                g = g.flip_h().flip_v()
-            elif "UP AND RIGHT" in nm:
-                g = g.flip_v()
-            elif "DOWN AND LEFT" in nm:
-                g = g.flip_h()
+            g = arc(nm, left="LEFT" in nm, up="UP" in nm)
             out[cp] = (nm.lower(), g)
         elif "DIAGONAL" in nm:
             out[cp] = (nm.lower(), diag("x" if "CROSS" in nm else "up" if "UPPER RIGHT" in nm else "down"))

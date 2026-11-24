@@ -812,6 +812,7 @@ Why: one font for text-mode drawing, coding, music, gamepad and keyboard glyphs 
 - [x] **5. A PSF export** (2026-11-24): `R3i6nosMono-10x20.psf` (PSF2, 512 glyphs, Unicode table), parsed back in `tests/test_r3font.py`. No console tried.
 - [x] **6. Glyphs in the ports built here** (2026-11-24): Keymap and on-screen keyboard (`R3_WITH_MONO`), the toast's status glyphs (Lua and C), Commander's file icons (Commands > File icons), the menu top bar. Untested on a unit.
 - [ ] [M] **Glyphs in the ports of other repositories**: Hydrolik's transport (`../hydrolik/r36s/host`), a coding app's Powerline segments (PocketIDE), Rec demo and Device report progress glyphs. MusiCue's Piano keeps its labelled keys (decided: a glyph piano cannot show the note and button tag).
+- [x] **6b. The font is every app's default** (2026-11-24): `R3_WITH_MONO` on by default in the C theme (`R3_NO_MONO` opts out), `T.useMono(true)` in the Lua `T.init`. The ansiapps repositories take it with their next theme copy. Untested on a unit.
 - [x] **7. Tried in engines** (2026-11-24): the BDF in Pyxel and the TTF in SDL2_ttf (`tests/runtimes/e2e.sh`), the WOFF2 in Chrome: every pixel matches.
 - [ ] [S] **Try the TTF in Ren'Py and Godot** (a sample each in `tools/runtimes/samples/`, section 33).
 - [ ] [L] **Latin Extended-B and Additional, Vietnamese, and an italic or bold** if an app needs them.

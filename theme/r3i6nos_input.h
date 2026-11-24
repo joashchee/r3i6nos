@@ -104,6 +104,33 @@ static inline int r3_input_button(R3Input *in, int b, int down) {
 /* A keyboard key as an action: r3_key_action's, the backquote key for the main menu and the backslash key for the contextual menu (settled 2026-11-20). */
 static inline int r3_input_key(SDL_Keycode k) { return k == SDLK_BACKQUOTE ? R3_MENU : k == SDLK_BACKSLASH ? R3_CONTEXT : r3_key_action(k); }
 
+/* The pad button a keyboard key stands for, or -1: the permanent keyboard bindings of docs/r3i6nos-mapping.md ("The keyboard bindings", 2026-11-23).
+ * W S A D the D-pad, I (or Backspace) X, J (or Tab) Y, K (or Esc) B, L (or Enter, Space) A, F Select, H Start, T Fn (a tap), Q L1, E L2, O R1, U R2, R L3, Y R3.
+ * The arrow keys are the right stick's steps, backquote and backslash the menus: those are actions (r3_input_key), not buttons. A caller that wants Esc to mean
+ * something else (a test page's way back) checks it first. */
+static inline int r3_key_button(SDL_Keycode k) {
+    switch (k) {
+    case SDLK_w: return R3_BTN_UP;
+    case SDLK_s: return R3_BTN_DOWN;
+    case SDLK_a: return R3_BTN_LEFT;
+    case SDLK_d: return R3_BTN_RIGHT;
+    case SDLK_i: case SDLK_BACKSPACE: return R3_BTN_X;
+    case SDLK_j: case SDLK_TAB: return R3_BTN_Y;
+    case SDLK_k: case SDLK_ESCAPE: return R3_BTN_B;
+    case SDLK_l: case SDLK_RETURN: case SDLK_KP_ENTER: case SDLK_SPACE: return R3_BTN_A;
+    case SDLK_f: return R3_BTN_SELECT;
+    case SDLK_h: return R3_BTN_START;
+    case SDLK_t: return R3_BTN_FN;
+    case SDLK_q: return R3_BTN_L1;
+    case SDLK_e: return R3_BTN_L2;
+    case SDLK_o: return R3_BTN_R1;
+    case SDLK_u: return R3_BTN_R2;
+    case SDLK_r: return R3_BTN_L3;
+    case SDLK_y: return R3_BTN_R3;
+    default: return -1;
+    }
+}
+
 /* An axis moved: v in -1..1. */
 static inline void r3_input_axis(R3Input *in, int axis, float v) {
     if (axis >= 0 && axis < R3_AXIS_COUNT) in->axis[axis] = v > 1 ? 1 : v < -1 ? -1 : v;

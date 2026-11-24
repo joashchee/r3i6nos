@@ -131,6 +131,7 @@ and the system buttons; the right hand has the face buttons and the arrow keys (
 
 The face buttons I J K L sit as the pad's diamond does: I (X) above, J (Y) left, L (A) right, K (B) below.
 
+- **Built (2026-11-24):** `r3_key_button` in `theme/r3i6nos_input.h` and the native IO Checker (keys reach the same reader as the pad's buttons). The other native apps still use the older keys until each is moved over.
 - **Fn is T**, a tap, never held (no Caps Lock: it is a toggle on macOS and was unreliable). A Mac keyboard's own Fn key is not seen by programs. L1 + Fn and R1 + Fn work with Q and O held as usual.
 - **No Shift, Ctrl, Alt or Caps Lock binding.** They are free for the system and for typing. **Untested on a real keyboard** beyond the self-tests.
 - **A text field first.** While a text field, the id field or the virtual keyboard has the focus, letters, digits and Backspace type or delete in it and are not the bindings above; the bindings return when it

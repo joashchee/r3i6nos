@@ -80,7 +80,9 @@ int main(void) {
     r3_osk_draw(&s, &o);
     char dump[R3_ROWS][R3_COLS + 1];
     r3_dump(&s, dump);
-    CHECK(strstr(dump[7], "Chorus") && strstr(dump[10], "1") && strstr(dump[11], "q"), "the text and the keys are on the screen:\n%s\n%s", dump[7], dump[11]);
+    int caps = 0;
+    for (int i = 0; i < R3_COLS * R3_ROWS; i++) if (s.ux[i]) caps++;
+    CHECK(strstr(dump[7], "Chorus") && caps == 2 * R3_OSK_ROWS * R3_OSK_COLS, "the text is on the screen and every key is a two-cell cap (R3i6nos Mono, the default font): %d cells\n%s", caps, dump[7]);
     if (fails) { fprintf(stderr, "test_osk: %d failed\n", fails); return 1; }
     puts("test_osk: ok");
     return 0;

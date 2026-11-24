@@ -2365,6 +2365,19 @@ static void handle(App *a, const SDL_Event *e, Uint32 now) {
         const char *lname = k == SDLK_VOLUMEDOWN ? "volumedown" : k == SDLK_VOLUMEUP ? "volumeup" : k == SDLK_POWER ? "power" : k == SDLK_SLEEP ? "sleep" : name;
         event(a, -1, "key %.14s %s", lname, isdown ? "DOWN" : "UP");
         a->idle_since = now;
+        int kb = r3_key_button(k);          /* the keyboard bindings (docs/r3i6nos-mapping.md): a key is the pad button it stands for, through the same reader */
+        int keyboard_test = a->page == P_USBSUB && a->usb_sub == U_KEYBOARD;
+        if (kb >= 0 && !keyboard_test && !(TEST_PAGE(a->page) && k == SDLK_ESCAPE)) {   /* (a test page's own Esc is its way back, below) */
+            int ac = r3_input_button(&a->in, kb, isdown);
+            if (a->overlay == OV_KEYMAP) r3_km_button(&a->km, kb, isdown, NULL);
+            if (isdown) {
+                rec_key(a, lname);
+                if (a->page == P_MAPPING && !a->overlay) map_press(a, kb, ac);
+                else if (a->page == P_INPUT && ac != R3_MENU && ac != R3_CONTEXT) break;   /* the input test tests keys: only the chords that open the menus act */
+                else dispatch(a, ac, now);
+            }
+            break;
+        }
         if (!isdown) break;
         rec_key(a, lname);
         if (TEST_PAGE(a->page)) { if (k == SDLK_ESCAPE) go(a, P_HOME, now); break; }
@@ -2373,9 +2386,11 @@ static void handle(App *a, const SDL_Event *e, Uint32 now) {
             if (k == SDLK_ESCAPE) act(a, R3_BACK, now);
             break;
         }
-        if (k == SDLK_h) dispatch(a, R3_X, now);
-        else if (k == SDLK_n) dispatch(a, R3_Y, now);
-        else dispatch(a, r3_input_key(k), now);
+        {   /* the arrow keys are the right stick's steps: R1 held makes them page up and down, home and end */
+            int ac = r3_input_key(k);
+            if (r3_input_held(&a->in, R3_BTN_R1)) ac = k == SDLK_UP ? R3_PAGEUP : k == SDLK_DOWN ? R3_PAGEDOWN : k == SDLK_LEFT ? R3_HOME : k == SDLK_RIGHT ? R3_END : ac;
+            dispatch(a, ac, now);
+        }
         break;
     }
     }
@@ -3008,6 +3023,42 @@ static void selftest_mono(App *a) {
     dispatch(a, R3_PANEL_PREV, 1100); CHECK(a->mono.panel == 0, "R1+Fn is the previous panel");
     dispatch(a, R3_PANEL_PREV, 1100); CHECK(a->mono.panel == MONO_PANELS - 1, "...and wraps to the last");
     dispatch(a, R3_PANEL_FIRST, 1100); CHECK(a->mono.panel == 0, "L1+Fn is the first panel");
+    /* the keyboard bindings (docs/r3i6nos-mapping.md): T is Fn, O held with T is R1+Fn, Q held with T is L1+Fn; a key up releases the modifier */
+    {
+        SDL_Event kev;
+        SDL_zero(kev);
+        a->mono.panel = 0;
+        kev.type = SDL_KEYDOWN; kev.key.keysym.sym = SDLK_t; handle(a, &kev, 1200);
+        CHECK(a->mono.panel == 1, "keyboard: T is Fn, the next panel");
+        kev.key.keysym.sym = SDLK_o; handle(a, &kev, 1210);
+        kev.key.keysym.sym = SDLK_t; handle(a, &kev, 1220);
+        CHECK(a->mono.panel == 0, "keyboard: O held with T is R1+Fn, the previous panel");
+        kev.type = SDL_KEYUP; kev.key.keysym.sym = SDLK_o; handle(a, &kev, 1230);
+        CHECK(!r3_input_held(&a->in, R3_BTN_R1), "keyboard: O up releases R1");
+        a->mono.panel = 3;
+        kev.type = SDL_KEYDOWN; kev.key.keysym.sym = SDLK_q; handle(a, &kev, 1240);
+        kev.key.keysym.sym = SDLK_t; handle(a, &kev, 1250);
+        CHECK(a->mono.panel == 0, "keyboard: Q held with T is L1+Fn, the first panel");
+        kev.type = SDL_KEYUP; kev.key.keysym.sym = SDLK_q; handle(a, &kev, 1260);
+        a->overlay = OV_NONE;
+        kev.type = SDL_KEYDOWN; kev.key.keysym.sym = SDLK_q; handle(a, &kev, 1270);
+        kev.key.keysym.sym = SDLK_o; handle(a, &kev, 1280);
+        CHECK(a->overlay == OV_MENU, "keyboard: Q then O (L1+R1) opens the main menu (overlay %d)", a->overlay);
+        a->overlay = OV_NONE;
+        kev.type = SDL_KEYUP; kev.key.keysym.sym = SDLK_o; handle(a, &kev, 1290);
+        kev.key.keysym.sym = SDLK_q; handle(a, &kev, 1291);
+        a->overlay = OV_NONE;
+        kev.type = SDL_KEYDOWN; kev.key.keysym.sym = SDLK_o; handle(a, &kev, 1300);
+        kev.key.keysym.sym = SDLK_q; handle(a, &kev, 1310);
+        CHECK(a->overlay == OV_MENU, "keyboard: O then Q opens it too (overlay %d)", a->overlay);
+        a->overlay = OV_NONE;
+        kev.type = SDL_KEYUP; kev.key.keysym.sym = SDLK_o; handle(a, &kev, 1320);
+        kev.key.keysym.sym = SDLK_q; handle(a, &kev, 1321);
+        CHECK(r3_key_button(SDLK_w) == R3_BTN_UP && r3_key_button(SDLK_l) == R3_BTN_A && r3_key_button(SDLK_k) == R3_BTN_B && r3_key_button(SDLK_h) == R3_BTN_START &&
+              r3_key_button(SDLK_f) == R3_BTN_SELECT && r3_key_button(SDLK_i) == R3_BTN_X && r3_key_button(SDLK_j) == R3_BTN_Y && r3_key_button(SDLK_r) == R3_BTN_L3 &&
+              r3_key_button(SDLK_y) == R3_BTN_R3 && r3_key_button(SDLK_u) == R3_BTN_R2 && r3_key_button(SDLK_e) == R3_BTN_L2 && r3_key_button(SDLK_m) == -1,
+              "keyboard: the documented keys are the documented buttons");
+    }
     /* a two-cell icon is two consecutive code points, printed side by side, never apart */
     a->mono.panel = MONO_ICONS_A;
     compose(a, &s, 5000);

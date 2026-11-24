@@ -206,6 +206,17 @@ class Outputs(unittest.TestCase):
         self.assertIn(f"CHARS {len(R.all_cps())}", text)
         self.assertEqual(text.count("STARTCHAR"), len(R.all_cps()))
 
+    def test_rounded_corners_join_the_straight_lines(self):
+        v, h = R.glyph(0x2502), R.glyph(0x2500)
+        stem = [x for x in range(10) if v.p[0][x]]
+        line = [y for y in range(20) if h.p[y][0]]
+        for cp, top in ((0x256D, False), (0x256E, False), (0x2570, True), (0x256F, True)):
+            g = R.glyph(cp)
+            far = 0 if top else 19                        # the end of the stem, away from the corner
+            self.assertEqual([x for x in range(10) if g.p[far][x]], stem, f"U+{cp:04X}: stem columns")
+            edge = 9 if cp in (0x256D, 0x2570) else 0     # the side the line leaves by
+            self.assertEqual([y for y in range(20) if g.p[y][edge]], line, f"U+{cp:04X}: line row")
+
     def test_psf_is_a_console_font_of_512_glyphs(self):
         import struct
         d = (OUT / "R3i6nosMono-10x20.psf").read_bytes()
