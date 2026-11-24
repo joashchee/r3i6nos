@@ -14,13 +14,13 @@ TTF: the editor writes the cells it changed, and the font build (which already m
 
 ## The multi-cell glyphs
 
-R3i6nos Mono has **868 named glyphs; 492 of them are two cells**: the gamepad's shoulders, triggers, D-pads, sticks and pills, the on-screen keyboard's key caps, switches, waveforms, knobs, and every app, system and
+R3i6nos Mono has **884 named glyphs; 508 of them are two cells**: the gamepad's shoulders, triggers, D-pads, sticks and pills, the on-screen keyboard's key caps, switches, waveforms, knobs, and every app, system and
 file icon. A name such as `icon.app.hydrolik` is two consecutive code points (`U+10FD14`, `U+10FD15`), printed together as one string, and is **drawn as one 20 x 20 picture that is cut in half**: an edit that
 ignores the seam breaks the icon. So the editor opens a **name**, not a cell:
 
 - **The canvas is the whole group**, a pixel being two text cells, 20 x 20 pixels (40 columns) for a pair, drawn straight across the seam. The two cells are told apart by colour (white and green), so you always know which
   code point a pixel belongs to. A line, a box or a fill crosses the seam as if it were not there.
-- **The first panel (Multi-cell glyphs) is the list of those 492**, each row showing the glyph at its real size, so a pair is chosen by how it looks. **Fn** turns to Named glyphs (all 868), Code points (all 2,887) and Changed.
+- **The first panel (Multi-cell glyphs) is the list of those 508**, each row showing the glyph at its real size, so a pair is chosen by how it looks. **Fn** turns to Named glyphs (all 884), Code points (all 2,919) and Changed.
   Opening a code point that belongs to a name opens the whole name; **Y > Edit this cell alone** opens just that one.
 - **The side shows the group at its real size, in a line of text between H and x, and at three times**, and the **Sample** panel (Fn in the editor) shows it twice and three times the size, joined in a row, and beside
   a line of the font's own letters: so a change is judged at the size it is used, and how it joins to its neighbour is seen at once.
@@ -70,7 +70,7 @@ The file is text and diffable (`.` paper, `#` ink, 20 rows of 10, `cell <hex cod
 
 `fontedit --font FILE.bdf` opens a **monospace, cell-shaped BDF up to 16 x 20** (every glyph is placed into the `FONTBOUNDINGBOX` cell by its own `BBX`; pixels outside the cell are counted and said). There are no
 names, so the list is the code points. It is saved **as a BDF to `<app data>/<font name>.bdf`** with its header kept and every glyph written as a whole cell; **the file read is never written**. R3i6nos Mono's own
-BDF reads back the compiled font exactly (2,887 of 2,887, checked by the self-test), and a written BDF reads back equal. Not yet: proportional fonts, taller cells than 20 rows (a canvas that needs paging),
+BDF reads back the compiled font exactly (2,919 of 2,919, checked by the self-test), and a written BDF reads back equal. Not yet: proportional fonts, taller cells than 20 rows (a canvas that needs paging),
 names for a BDF's multi-cell glyphs (a sidecar file is the idea), other formats (PSF, TTF).
 
 ## What it does and does not do
@@ -106,7 +106,7 @@ screen clips the glyphs under it. The self-test compares the painted pixels with
 
 ## Checks
 
-`scripts/check.sh --app fontedit-native --theme`: compiles with `-Werror` and runs `--selftest`: the model (counts 2,887 / 868 / 492 multi-cell, two consecutive code points for a pair), every canvas tool across a seam,
+`scripts/check.sh --app fontedit-native --theme`: compiles with `-Werror` and runs `--selftest`: the model (counts 2,919 / 884 / 508 multi-cell, two consecutive code points for a pair), every canvas tool across a seam,
 undo and redo, the edits file (round trip, byte-identical, five kinds of bad file refused and the font left alone, the Python fixture), the BDF (read equals the compiled tables, written and read back, a 24 x 32 and a
 non-BDF refused), then the app through the pad's own buttons (open a pair, hold A and draw across the seam, undo through the commands, Box across the seam, the painted glyph against the model, the panels, revert
 asked first, the main menu, Keymap, theme, Quit, the card out, the report's steps). `tests/test_fontedit_edits.py` (9 tests) covers the Python side. Screens: `R3I6NOS_FE_SHOTS=dir fontedit --selftest`, or

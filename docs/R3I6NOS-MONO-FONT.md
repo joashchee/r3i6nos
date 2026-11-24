@@ -2,7 +2,7 @@
 
 ![Every glyph of R3i6nos Mono](../theme/font/r3i6nos-mono/overview.png)
 
-**R3i6nos Mono is the one font of every r3i6nos app and of the ansiapps family**: a 10 x 20 pixel monospace bitmap font, **2,887 code points** and **868 named glyphs**
+**R3i6nos Mono is the one font of every r3i6nos app and of the ansiapps family**: a 10 x 20 pixel monospace bitmap font, **2,919 code points** and **884 named glyphs**
 (gamepad buttons and states, on-screen keyboard caps, a piano, music notation, UI widgets, system status, coding symbols and two-cell app and file icons), with the whole of
 code page 437 pixel for pixel as the text-mode theme has always drawn it. It is licensed **CC BY-SA 4.0** (the CP437 letters are VileR's; see [Licence](#licence)).
 **Status:** built and checked on a Mac, in Debian (arm64 Docker), in LÖVE 11.5, Pyxel, SDL2_ttf and Chrome; the maintainer has looked at it in the IO Checker on a Mac;
@@ -72,7 +72,7 @@ text, `README.txt`) and `NOTICE`; a built page or file that embeds it (the scree
 Made 2026-11-24 at the maintainer's request, from the guide `docs/making-cp437-font.md`. Everything is generated from one source, `scripts/build_r3_font.py` and `scripts/r3font/`, and checked by tests.
 
 - **One cell, 10 x 20 px**, advance 10, ascent 15, descent 5 (capitals rows 3-14, x-height rows 7-14, descenders to row 18). 64 x 24 cells fill 640 x 480.
-- **2,887 code points, 868 named glyphs.** `theme/font/r3i6nos-mono/glyph-coverage-report.txt` is the live count; `overview.png` and `specimen.html` show all of it.
+- **2,919 code points, 884 named glyphs.** `theme/font/r3i6nos-mono/glyph-coverage-report.txt` is the live count; `overview.png` and `specimen.html` show all of it.
 - **CP437 is the theme's own, pixel for pixel**: the 256 glyphs are `theme/vga8x16.lua` scaled 8x16 to 10x20 by the theme's rule, so text-mode art does not change
   (`tests/test_r3font.py`). `U+F000 + byte` addresses a CP437 character by its byte, as the Linux console and the screen mirror do.
 - **Generated, not drawn, where geometry matters:** all of U+2500-257F (the light/double lines are CP437's own; heavy, mixed, dashed, rounded arcs and diagonals are
@@ -117,7 +117,7 @@ for the maintainer to redraw; their names will not change.
 
 | Runtime | Use | Tried |
 |---|---|---|
-| LÖVE 11.5, the theme (`theme/r3i6nos_ansiapps.lua`) | `T.useMono(true)`, then `T.decode` draws what CP437 lacks and `scr:glyph(col, row, "pad.btn.A.on")` a named glyph (below); or `love.graphics.newFont("R3i6nosMono-Regular.ttf", 20, "none")`, or the BMFont `.fnt` | LÖVE 11.5's rasteriser draws all 2,887 code points exactly at hinting normal, light, mono and none (`tests/test_r3font_love.sh`); the theme's own drawing (a staging atlas, `monoSlot`) is **not drawn on a screen** (no display here); its cells, names and bitmaps are tested (`tests/test_theme.lua`) |
+| LÖVE 11.5, the theme (`theme/r3i6nos_ansiapps.lua`) | `T.useMono(true)`, then `T.decode` draws what CP437 lacks and `scr:glyph(col, row, "pad.btn.A.on")` a named glyph (below); or `love.graphics.newFont("R3i6nosMono-Regular.ttf", 20, "none")`, or the BMFont `.fnt` | LÖVE 11.5's rasteriser draws all 2,919 code points exactly at hinting normal, light, mono and none (`tests/test_r3font_love.sh`); the theme's own drawing (a staging atlas, `monoSlot`) is **not drawn on a screen** (no display here); its cells, names and bitmaps are tested (`tests/test_theme.lua`) |
 | LÖVE 12.0, Godot, Defold | the same TTF or BMFont | not tried |
 | Web apps | `r3i6nos-mono.css` + `.woff2`; or draw `r3i6nos-mono.json` bitmaps on a canvas | WOFF2 checked through FreeType; **Chrome (2026-11-24): the specimen page loads the WOFF2 and five glyphs drawn on a canvas at 20 px match the font's bitmap, 1,000 of 1,000 pixels** |
 | The screen mirror's page | the glyph table embedded in `page.html` (`scripts/build_mirror_page.py`), drawn on a 640 x 480 canvas; the unit sends the code point of every glyph CP437 lacks (`docs/SCREEN-MIRROR.md`) | the page's own script runs in node against a stub canvas and every pixel is compared with the font (`tests/test_mirror_page.js`); **no browser tried** |

@@ -1,10 +1,10 @@
 /* Font Editor (native ARM64, C and SDL2): a controller-first bitmap font editor for the R36S (docs/FONT-EDITOR.md).
  *
  * It touches up R3i6nos Mono (the 10 x 20 font of every r3i6nos app, theme/font/r3i6nos-mono/) and, with --font FILE.bdf, any monospace cell-shaped
- * BDF up to 16 x 20. Its first job is the font's MULTI-CELL glyphs: the 492 two-cell icons, key caps, shoulders, sticks, triggers, D-pads and knobs of
+ * BDF up to 16 x 20. Its first job is the font's MULTI-CELL glyphs: the 508 two-cell icons, key caps, shoulders, sticks, triggers, D-pads and knobs of
  * R3i6nos Mono (a name such as icon.app.hydrolik is two code points printed together). The first panel lists them, and A opens a name on ONE canvas,
  * 2 columns of text cells a pixel, 20 x 20 pixels for a pair, drawn across the seam between the cells; the side shows it at the size it is used, in
- * a line of text and enlarged. Everything else (the 868 names, every code point, what has changed) is a panel away (Fn).
+ * a line of text and enlarged. Everything else (the 884 names, every code point, what has changed) is a panel away (Fn).
  *
  *   fontedit                              the editor
  *   fontedit --font FILE.bdf              edit another bitmap font (saved as <data folder>/<name>.bdf; the file read is never written)
@@ -715,7 +715,7 @@ static void write_report(App *a, const char *how) {
     int multi = 0, cells = 0, biggest = 0;
     for (int i = 0; i < f->ng; i++) { if (f->groups[i].n >= 2) { multi++; cells += f->groups[i].n; } if (f->groups[i].n > biggest) biggest = f->groups[i].n; }
     r3_report_line(&r, R3_INFO, "names", "%d, of which %d multi-cell (%d cells), the longest %d cells", f->ng, multi, cells, biggest);
-    r3_report_line(&r, f->builtin ? (f->ng == 868 && f->n == 2887 ? R3_PASS : R3_FAIL) : R3_SKIP, "font tables", f->builtin ? "2887 code points and 868 names expected" : "not R3i6nos Mono");
+    r3_report_line(&r, f->builtin ? (f->ng == 884 && f->n == 2919 ? R3_PASS : R3_FAIL) : R3_SKIP, "font tables", f->builtin ? "2919 code points and 884 names expected" : "not R3i6nos Mono");
     r3_report_line(&r, R3_INFO, "changed cells", "%d", fe_count_changed(f));
 
     r3_report_at(&r, 3, "Saving");
@@ -1027,10 +1027,10 @@ static int find_group(const FeFont *f, const char *name) {
 static void selftest_model(void) {
     FeFont f;
     CHECK(fe_load_builtin(&f) == 0, "R3i6nos Mono loads");
-    CHECK(f.n == 2887 && f.ng == 868 && f.w == 10 && f.h == 20, "the font has %d code points, %d names, %dx%d", f.n, f.ng, f.w, f.h);
+    CHECK(f.n == 2919 && f.ng == 884 && f.w == 10 && f.h == 20, "the font has %d code points, %d names, %dx%d", f.n, f.ng, f.w, f.h);
     int multi = 0, three = 0;
     for (int i = 0; i < f.ng; i++) { multi += f.groups[i].n >= 2; three += f.groups[i].n > 2; }
-    CHECK(multi == 492 && three == 0, "multi-cell names: %d (expected 492, none longer than 2)", multi);
+    CHECK(multi == 508 && three == 0, "multi-cell names: %d (expected 508, none longer than 2)", multi);
     int hy = find_group(&f, "icon.app.hydrolik");
     CHECK(hy >= 0 && f.groups[hy].n == 2 && f.cp[f.groups[hy].ci[1]] == f.cp[f.groups[hy].ci[0]] + 1, "icon.app.hydrolik is two consecutive code points");
     for (int i = 1; i < f.ng; i++) if (strcmp(f.groups[i - 1].name, f.groups[i].name) >= 0) { CHECK(0, "names not sorted at %d", i); break; }
@@ -1149,7 +1149,7 @@ static void selftest_model(void) {
         tried = 1;
         FeFont b;
         int n = fe_load_bdf(&b, bdfs[i], err, sizeof err);
-        CHECK(n == 2887 && b.w == 10 && b.h == 20 && b.base == 15 && b.clipped == 0, "the BDF reads: %d glyphs, %dx%d, base %d, %d clipped (%s)", n, b.w, b.h, b.base, b.clipped, err);
+        CHECK(n == 2919 && b.w == 10 && b.h == 20 && b.base == 15 && b.clipped == 0, "the BDF reads: %d glyphs, %dx%d, base %d, %d clipped (%s)", n, b.w, b.h, b.base, b.clipped, err);
         int diff = 0;
         for (int k = 0; k < b.n && k < f.n; k++) if (b.cp[k] != f.cp[k] || memcmp(b.rows[k], f.rows[k], sizeof b.rows[k])) diff++;
         CHECK(diff == fe_count_changed(&f), "the BDF's pictures are the compiled font's, except the two cells edited above (%d differ)", diff);
@@ -1160,7 +1160,7 @@ static void selftest_model(void) {
             b.rows[100][4] ^= 0x2A;
             CHECK(fe_save_bdf(&b, p2) == 0, "the BDF is written");
             FeFont b2;
-            CHECK(fe_load_bdf(&b2, p2, err, sizeof err) == 2887 && !memcmp(b2.rows, b.rows, (size_t)b.n * sizeof *b.rows), "the BDF written reads back the same: %s", err);
+            CHECK(fe_load_bdf(&b2, p2, err, sizeof err) == 2919 && !memcmp(b2.rows, b.rows, (size_t)b.n * sizeof *b.rows), "the BDF written reads back the same: %s", err);
             CHECK(b2.bdf_head && strstr(b2.bdf_head, "FAMILY_NAME") != NULL, "the BDF keeps its header");
             fe_free(&b2);
             rm_rf(d2);
@@ -1215,7 +1215,7 @@ static void selftest_app(const char *shots, SDL_Renderer *rend, R3Video *video) 
 
     compose(a, s);
     CHECK(screen_has(s, "Multi-cell glyphs") && screen_has(s, "Font Editor") && screen_has(s, "Panel 1/4"), "the browser opens on the multi-cell panel");
-    CHECK(a->nlist[PN_MULTI] == 492 && a->nlist[PN_NAMES] == 868 && a->nlist[PN_CODES] == 2887 && a->nlist[PN_CHANGED] == 0, "list sizes %d %d %d %d", a->nlist[0], a->nlist[1], a->nlist[2], a->nlist[3]);
+    CHECK(a->nlist[PN_MULTI] == 508 && a->nlist[PN_NAMES] == 884 && a->nlist[PN_CODES] == 2919 && a->nlist[PN_CHANGED] == 0, "list sizes %d %d %d %d", a->nlist[0], a->nlist[1], a->nlist[2], a->nlist[3]);
     CHECK(a->nov >= 3, "the list has glyphs to paint (%d)", a->nov);
 
     /* find the Hydrolik icon by stepping down the list: the pages are whole, nothing scrolls */

@@ -2,7 +2,7 @@
  * can drive all of it. The one font it ships with is R3i6nos Mono (the compiled tables of theme/font/r3i6nos-mono/); any monospace cell-shaped BDF
  * up to 16 x 20 opens as well (--font FILE.bdf).
  *
- * Everything is kept a code point at a time: a cell is the picture of one code point, and a NAME (R3i6nos Mono's 868 named glyphs) is a group of
+ * Everything is kept a code point at a time: a cell is the picture of one code point, and a NAME (R3i6nos Mono's 884 named glyphs) is a group of
  * one, two or more cells, edited together on one canvas, so a two-cell icon is drawn across its seam and not as two separate tiles. The pictures
  * the compiled tables share between code points (blank staff cells, the Greek capitals that are Latin shapes) are not shared here: an edit
  * changes the one code point, and the font builder (scripts/r3font/edits.py) lets the code points that alias it follow it.
