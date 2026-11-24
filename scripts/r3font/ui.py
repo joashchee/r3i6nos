@@ -77,6 +77,54 @@ def toggle(state):
     return b
 
 
+def _transpose(b):
+    o = Bmp(b.h, b.w)
+    for y in range(b.h):
+        for x in range(b.w):
+            o.p[x][y] = b.p[y][x]
+    return o
+
+
+def hourglass(frame):
+    """A 20x20 wait glyph, original art: a hourglass (caps, two bulbs, a neck). Frames 0-5 drain the sand from the top bulb (a thread of
+    sand falls through the neck); 6 is drained (all in the bottom); 7 is turned on its side with the sand split, so frame 0 (full, upright)
+    follows it as the turn completing."""
+    body = Bmp(20, 20).poly([(5, 3), (15, 3), (11, 9), (11, 11), (15, 17), (5, 17), (9, 11), (9, 9)])
+    glass = outline(body)
+    inner = body.copy().blit(glass, op="clear")
+    b = Bmp(20, 20).rect(3, 1, 14, 2).rect(3, 17, 14, 2).blit(glass)
+    drain = min(frame, 6)
+    for y in range(20):
+        for x in range(20):
+            if not inner.p[y][x]:
+                continue
+            if y < 10 and y >= 4 + drain and frame != 7:
+                b.p[y][x] = 1
+            elif y > 10 and y >= 17 - drain and frame != 7:
+                b.p[y][x] = 1
+    if frame != 7 and drain < 6:
+        b.rect(9, 10, 2, 1)                       # the thread of sand in the neck
+    if frame == 7:                                # on its side: sand left and right of the neck
+        for y in range(20):
+            for x in range(20):
+                if inner.p[y][x] and (y <= 6 or y >= 14):
+                    b.p[y][x] = 1
+        b = _transpose(b)
+    return b
+
+
+def orbit(frame):
+    """A 20x20 wait glyph: eight dots on a circle, the lead dot big and a tail that shrinks behind it."""
+    b = Bmp(20, 20)
+    for k in range(8):
+        a = math.radians(k * 45)
+        cx, cy = 10 + 7.6 * math.sin(a), 10 - 7.6 * math.cos(a)
+        age = (frame - k) % 8
+        r = (2.2, 1.9, 1.5, 1.0)[age] if age < 4 else 0.7
+        b.disc(cx, cy, r)
+    return b
+
+
 def build(R):
     R.section("modern UI")
     U1, U2 = "ui1", "ui2"
@@ -128,3 +176,7 @@ def build(R):
         R.one(U1, f"ui.frame.thin.round.{nm}", g)
     for st in ("off", "on", "dis"):
         R.two(U2, f"ui.switch.{st}", toggle(st))
+    # wait states: one 20x20 glyph each, printed in the same two cells every frame (CLAUDE.md rule 18)
+    for k in range(8):
+        R.two(U2, f"ui.wait.hourglass.{k}", hourglass(k))
+        R.two(U2, f"ui.wait.orbit.{k}", orbit(k))

@@ -137,7 +137,7 @@ class Names(unittest.TestCase):
         self.assertEqual(len(set(lock.values())), len(lock), "two names share a code point")
 
     def test_the_names_the_apps_rely_on_exist(self):
-        for n in ("pad.btn.A.on", "pad.btn.A.off", "pad.trig.l.4", "pad.dpad.up", "pad.stick.0.0", "key.u0041.up", "ui.switch.on",
+        for n in ("pad.btn.A.on", "pad.btn.A.off", "pad.trig.l.4", "pad.dpad.up", "pad.stick.0.0", "key.u0041.up", "ui.switch.on", "ui.wait.hourglass.0", "ui.wait.hourglass.7", "ui.wait.orbit.7",
                   "staff.note.q.4", "mus.wave.sine", "icon.app.hydrolik", "icon.app.klamansi", "sys.bat.4", "code.bp.on"):
             self.assertIn(n, R.names)
 

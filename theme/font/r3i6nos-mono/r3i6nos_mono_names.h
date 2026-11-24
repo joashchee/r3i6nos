@@ -873,6 +873,22 @@
 #define R3I_UI_VSLIDER_THUMB_8 "\364\217\230\252"
 #define R3I_UI_VSLIDER_THUMB_9 "\364\217\230\253"
 #define R3I_UI_VSLIDER_TRACK "\364\217\230\241"
+#define R3I_UI_WAIT_HOURGLASS_0 "\364\217\234\206\364\217\234\207"
+#define R3I_UI_WAIT_HOURGLASS_1 "\364\217\234\214\364\217\234\215"
+#define R3I_UI_WAIT_HOURGLASS_2 "\364\217\234\222\364\217\234\223"
+#define R3I_UI_WAIT_HOURGLASS_3 "\364\217\234\230\364\217\234\231"
+#define R3I_UI_WAIT_HOURGLASS_4 "\364\217\234\236\364\217\234\237"
+#define R3I_UI_WAIT_HOURGLASS_5 "\364\217\234\244\364\217\234\245"
+#define R3I_UI_WAIT_HOURGLASS_6 "\364\217\234\252\364\217\234\253"
+#define R3I_UI_WAIT_HOURGLASS_7 "\364\217\234\260\364\217\234\261"
+#define R3I_UI_WAIT_ORBIT_0 "\364\217\234\212\364\217\234\213"
+#define R3I_UI_WAIT_ORBIT_1 "\364\217\234\220\364\217\234\221"
+#define R3I_UI_WAIT_ORBIT_2 "\364\217\234\226\364\217\234\227"
+#define R3I_UI_WAIT_ORBIT_3 "\364\217\234\234\364\217\234\235"
+#define R3I_UI_WAIT_ORBIT_4 "\364\217\234\242\364\217\234\243"
+#define R3I_UI_WAIT_ORBIT_5 "\364\217\234\250\364\217\234\251"
+#define R3I_UI_WAIT_ORBIT_6 "\364\217\234\256\364\217\234\257"
+#define R3I_UI_WAIT_ORBIT_7 "\364\217\234\264\364\217\234\265"
 typedef struct { const char *name, *utf8; } R3MonoName;
 static const R3MonoName r3mono_names[] = {
     {"code.add", R3I_CODE_ADD},
@@ -1743,6 +1759,22 @@ static const R3MonoName r3mono_names[] = {
     {"ui.vslider.thumb.8", R3I_UI_VSLIDER_THUMB_8},
     {"ui.vslider.thumb.9", R3I_UI_VSLIDER_THUMB_9},
     {"ui.vslider.track", R3I_UI_VSLIDER_TRACK},
+    {"ui.wait.hourglass.0", R3I_UI_WAIT_HOURGLASS_0},
+    {"ui.wait.hourglass.1", R3I_UI_WAIT_HOURGLASS_1},
+    {"ui.wait.hourglass.2", R3I_UI_WAIT_HOURGLASS_2},
+    {"ui.wait.hourglass.3", R3I_UI_WAIT_HOURGLASS_3},
+    {"ui.wait.hourglass.4", R3I_UI_WAIT_HOURGLASS_4},
+    {"ui.wait.hourglass.5", R3I_UI_WAIT_HOURGLASS_5},
+    {"ui.wait.hourglass.6", R3I_UI_WAIT_HOURGLASS_6},
+    {"ui.wait.hourglass.7", R3I_UI_WAIT_HOURGLASS_7},
+    {"ui.wait.orbit.0", R3I_UI_WAIT_ORBIT_0},
+    {"ui.wait.orbit.1", R3I_UI_WAIT_ORBIT_1},
+    {"ui.wait.orbit.2", R3I_UI_WAIT_ORBIT_2},
+    {"ui.wait.orbit.3", R3I_UI_WAIT_ORBIT_3},
+    {"ui.wait.orbit.4", R3I_UI_WAIT_ORBIT_4},
+    {"ui.wait.orbit.5", R3I_UI_WAIT_ORBIT_5},
+    {"ui.wait.orbit.6", R3I_UI_WAIT_ORBIT_6},
+    {"ui.wait.orbit.7", R3I_UI_WAIT_ORBIT_7},
 };
 /* The string for a glyph name (sorted table, binary search), or NULL. */
 static inline const char *r3mono_name(const char *name) {

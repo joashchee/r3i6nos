@@ -257,6 +257,8 @@ static void mono_ui(R3Screen *s, unsigned now) {
     MP(s, 2, 9, "ui.switch.off"); MP(s, 5, 9, "ui.switch.on"); MP(s, 8, 9, "ui.switch.dis");
     snprintf(n, sizeof n, "ui.spinner.%d", (int)(now / 100 % 8)); MPS(s, 12, 9, n, R3_ST_OK);
     snprintf(n, sizeof n, "ui.ring.%d", (int)(now / 250 % 9)); MPS(s, 14, 9, n, R3_ST_OK);
+    snprintf(n, sizeof n, "ui.wait.hourglass.%d", (int)(now / 400 % 8)); MPS(s, 2, 10, n, R3_ST_OK);   // 20x20 wait glyphs: two cells, one string
+    snprintf(n, sizeof n, "ui.wait.orbit.%d", (int)(now / 100 % 8)); MPS(s, 5, 10, n, R3_ST_OK);
     MP(s, 17, 9, "ui.radio.off"); MP(s, 18, 9, "ui.radio.on"); MP(s, 20, 9, "ui.check.mixed"); mt(s, 22, 9, "☐☑☒", R3_ST_BODY);
     MP(s, 26, 9, "ui.badge.dot"); MP(s, 27, 9, "ui.badge.ring"); MP(s, 29, 9, "ui.chevron.up"); MP(s, 30, 9, "ui.chevron.down");
     MP(s, 31, 9, "ui.chevron.left"); MP(s, 32, 9, "ui.chevron.right"); MP(s, 34, 9, "ui.grip");
