@@ -18,6 +18,10 @@
 #include <string.h>
 
 #include "r3i6nos_vga8x16.h"
+#ifdef R3_WITH_MONO     /* opt in (an app defines it before this header): cells may hold any glyph of R3i6nos Mono, docs/R3I6NOS-MONO-FONT.md */
+#include "font/r3i6nos-mono/r3i6nos_mono10x20.h"
+#include "font/r3i6nos-mono/r3i6nos_mono_names.h"
+#endif
 
 enum {
     R3_COLS = 64, R3_ROWS = 24, R3_CELL_W = 10, R3_CELL_H = 20, R3_W = 640, R3_H = 480,
@@ -182,12 +186,18 @@ static inline uint32_t r3_glyph_hash(void) {
 
 typedef struct {
     unsigned char ch[R3_COLS * R3_ROWS], fg[R3_COLS * R3_ROWS], bg[R3_COLS * R3_ROWS];
+#ifdef R3_WITH_MONO
+    unsigned int ux[R3_COLS * R3_ROWS];     /* 0: the cell is CP437 character ch; else a code point of R3i6nos Mono (ch is then a stand-in, 254, for a mirror) */
+#endif
 } R3Screen;
 
 static inline void r3_clear(R3Screen *s) {
     memset(s->ch, 32, sizeof s->ch);
     memset(s->fg, R3_LIGHT_GRAY, sizeof s->fg);
     memset(s->bg, R3_BLACK, sizeof s->bg);
+#ifdef R3_WITH_MONO
+    memset(s->ux, 0, sizeof s->ux);
+#endif
 }
 
 /* One cell; bg < 0 keeps the cell's background. Off-screen is ignored. */
@@ -197,7 +207,19 @@ static inline void r3_put(R3Screen *s, int col, int row, int ch, int fg, int bg)
     s->ch[i] = (unsigned char)ch;
     s->fg[i] = (unsigned char)fg;
     if (bg >= 0) s->bg[i] = (unsigned char)bg;
+#ifdef R3_WITH_MONO
+    s->ux[i] = 0;
+#endif
 }
+
+#ifdef R3_WITH_MONO
+/* One cell of any R3i6nos Mono code point (a private-use icon half, a piano key, a Braille dot pattern ...). */
+static inline void r3_put_mono(R3Screen *s, int col, int row, unsigned int cp, int fg, int bg) {
+    if (col < 0 || col >= R3_COLS || row < 0 || row >= R3_ROWS) return;
+    r3_put(s, col, row, 254, fg, bg);
+    s->ux[row * R3_COLS + col] = cp;
+}
+#endif
 
 static inline void r3_fill(R3Screen *s, int col, int row, int w, int h, int ch, int fg, int bg) {
     for (int r = row; r < row + h; r++)
@@ -319,6 +341,18 @@ static inline void r3_text_right(R3Screen *s, int col, int row, const char *str,
     int n = r3_decode(str, g, (int)sizeof g);
     r3_put_cells(s, col - n + 1, row, g, n, fg, bg);
 }
+
+#ifdef R3_WITH_MONO
+/* Print a UTF-8 string of R3i6nos Mono glyphs one cell each, left to right, and return the cells used. A two-cell icon is two cells and
+ * is printed as one string (R3I_ICON_APP_HYDROLIK, or r3mono_name("icon.app.hydrolik")): never split the halves or put anything between. */
+static inline int r3_puts_mono(R3Screen *s, int col, int row, const char *utf8, int fg, int bg) {
+    if (!utf8) return 0;
+    const unsigned char *p = (const unsigned char *)utf8, *end = p + strlen(utf8);
+    int n = 0;
+    while (p < end) { r3_put_mono(s, col + n, row, r3_utf8_next(&p, end), fg, bg); n++; }
+    return n;
+}
+#endif
 
 typedef struct {
     int dbl;                /* 1: double lines (the default for dialogs and the active panel), 0: single */
@@ -611,8 +645,17 @@ static inline void r3_render(const R3Screen *s, uint32_t *px) {
         for (int col = 0; col < R3_COLS; col++) {
             int i = row * R3_COLS + col, ch = s->ch[i];
             uint32_t fg = pal[s->fg[i]], bg = pal[s->bg[i]];
+#ifdef R3_WITH_MONO
+            const unsigned short *mono = s->ux[i] ? r3mono_find(s->ux[i]) : NULL;     /* the glyph's 20 rows of 10 bits, already 10x20 */
+#endif
             for (int y = 0; y < R3_CELL_H; y++) {
                 uint32_t *line = px + (size_t)(row * R3_CELL_H + y) * R3_W + (size_t)col * R3_CELL_W;
+#ifdef R3_WITH_MONO
+                if (s->ux[i]) {
+                    for (int x = 0; x < R3_CELL_W; x++) line[x] = mono && (mono[y] >> (R3MONO_W - 1 - x) & 1) ? fg : bg;
+                    continue;
+                }
+#endif
                 for (int x = 0; x < R3_CELL_W; x++) line[x] = r3_glyph_bit(ch, x, y) ? fg : bg;
             }
         }

@@ -26,6 +26,7 @@
 #include <time.h>
 #include <unistd.h>
 
+#define R3_WITH_MONO 1                  /* cells may hold any R3i6nos Mono glyph (the R3i6nos Mono screen test) */
 #include "r3i6nos_ansiapps.h"
 #include "r3i6nos_themes.h"
 #include "r3i6nos_input.h"
@@ -64,12 +65,13 @@
 enum { L_B = 1, L_A, L_X, L_Y, L_L1, L_R1, L_L2, L_R2, L_UP, L_DOWN, L_LEFT, L_RIGHT, L_SELECT, L_START, L_L3, L_R3, L_FN };
 static const char *NAMES[18] = {"", "B", "A", "X", "Y", "L1", "R1", "L2", "R2", "Up", "Down", "Left", "Right", "Select", "Start", "L3", "R3", "Fn"};
 
-enum { P_HOME, P_INPUT, P_VIDEO, P_PATTERN, P_SOUND, P_FILES, P_SYSTEM, P_USB, P_USBSUB, P_MAPPING, P_COUNT };
-enum { H_INPUT, H_MAPPING, H_VIDEO, H_SOUND, H_FILES, H_USB, H_SYSTEM, H_REPORT, H_QUIT, H_COUNT, H_BENCH = 100 };   /* H_BENCH is a job, not a list row */
-static const char *HOME_LABEL[H_COUNT] = {"Buttons and sticks", "R3i6nos Mapping", "Video", "Sound", "Files", "USB and OTG", "System", "Device report", "Quit"};
+enum { P_HOME, P_INPUT, P_VIDEO, P_PATTERN, P_SOUND, P_FILES, P_SYSTEM, P_USB, P_USBSUB, P_MAPPING, P_MONO, P_COUNT };
+enum { H_INPUT, H_MAPPING, H_VIDEO, H_SOUND, H_FILES, H_USB, H_SYSTEM, H_MONO, H_REPORT, H_QUIT, H_COUNT, H_BENCH = 100 };   /* H_BENCH is a job, not a list row */
+static const char *HOME_LABEL[H_COUNT] = {"Buttons and sticks", "R3i6nos Mapping", "Video", "Sound", "Files", "USB and OTG", "System", "R3i6nos Mono", "Device report", "Quit"};
 /* The pages where every button, stick and chord is a test: nothing navigates on them (the mapping's chords are recorded, not obeyed). Select + Start
  * held for a second, or 15 s with no input, goes back to the list. */
 #define TEST_PAGE(p) ((p) == P_INPUT || (p) == P_MAPPING)
+#include "mono_page.h"                /* the R3i6nos Mono screen test: needs the L_ buttons above */
 /* The checks behind "USB and OTG": what the OTG port can bring (usb_io.h). */
 enum { U_DEVICES, U_VIDEO, U_MIDI, U_STORAGE, U_NETWORK, U_KEYBOARD, U_MOUSE, U_PADS, U_COUNT };
 static const char *HOME_ABOUT[H_COUNT][4] = {
@@ -86,6 +88,8 @@ static const char *HOME_ABOUT[H_COUNT][4] = {
     {"What the OTG port brings: every USB device and what it is,", "video out (HDMI or DisplayLink docks), MIDI in and out,",
      "USB storage, Ethernet, a keyboard, a mouse and game", "controllers. Plug one in and watch it appear."},
     {"The r3i6nos build, kernel, board, CPU, memory, battery,", "backlight, the pad's name and GUID, and the video and", "sound drivers.", NULL},
+    {"A screen test of the 10x20 R3i6nos Mono font: CP437 and the", "line, block and Braille sets, the gamepad drawn live, the",
+     "on-screen keyboard, a piano, UI widgets, music notation and", "the two-cell icons, each drawn the way an app should."},
     {"Runs the checks again and writes everything, with your", "heard / silent answers and the buttons you pressed, to",
      "IO_Checker/ on the data card (else the games card).", NULL},
     {"Back to the r3i6nos menu.", NULL, NULL, NULL},
@@ -232,6 +236,7 @@ typedef struct {
     /* benchmark */
     Uint32 bench_end;                               /* when the motion run ends (0: no benchmark running) */
     char bench_file[96];
+    MonoState mono;                                 /* the R3i6nos Mono page */
 } App;
 
 enum { OV_NONE, OV_MENU, OV_ABOUT, OV_THEME, OV_KEYMAP };
@@ -1880,12 +1885,31 @@ static void report_mapping(App *a, R3Report *r) {
     if (a->map_speed_max[0] > 1 && a->map_speed_max[1] > 1) r3_report_line(r, R3_INFO, "R1 gain", "x%.2f (the mapping says x%.1f at the same push)", a->map_speed_max[1] / a->map_speed_max[0], R3_R1_POINTER_X);
 }
 
+/* The R3i6nos Mono screen test (mono_page.h): the live part is what the pad is doing now. */
+static void mono_live_fill(const App *a, MonoLive *l) {
+    memset(l, 0, sizeof *l);
+    for (int b = 1; b <= L_FN; b++) l->down[b] = down(a, b) ? 1 : 0;
+    Uint8 h = a->hat;
+    l->dpad = (unsigned char)((down(a, L_UP) || (h & SDL_HAT_UP) ? 1 : 0) | (down(a, L_DOWN) || (h & SDL_HAT_DOWN) ? 2 : 0) |
+                              (down(a, L_LEFT) || (h & SDL_HAT_LEFT) ? 4 : 0) | (down(a, L_RIGHT) || (h & SDL_HAT_RIGHT) ? 8 : 0));
+    for (int i = 0; i < 4; i++) l->ax[i] = axis(a, i + 1);
+    l->have_pad = a->js != NULL;
+}
+
+static void page_mono(R3Screen *s, const App *a, Uint32 now) {
+    MonoLive l;
+    mono_live_fill(a, &l);
+    mono_draw(s, &a->mono, &l, now);
+    cmdline(s, a, "Fn next panel  R1+Fn previous  B back", a->js ? a->pad_name : "no pad found");
+}
+
 static void compose(App *a, R3Screen *s, Uint32 now) {
     r3_clear(s);
     r3_top_bar(s, "IO Checker", runtime());
     switch (a->page) {
     case P_INPUT: page_input(s, a, now); break;
     case P_MAPPING: page_mapping(s, a, now); break;
+    case P_MONO: page_mono(s, a, now); break;
     case P_VIDEO: page_video(s, a); break;
     case P_SOUND: page_sound(s, a); break;
     case P_FILES: page_files(s, a); break;
@@ -1970,6 +1994,7 @@ static void go(App *a, int page, Uint32 now) {
     a->force = 1;
     if (page == P_INPUT) say(a, R3_ST_HINT, "Press every button. Hold SELECT+START to go back.");
     if (page == P_MAPPING) { a->map_panel = a->map_prev = 0; a->map_ptr_have = 0; say(a, R3_ST_HINT, "Press every input. Hold SELECT+START to go back."); }
+    if (page == P_MONO) say(a, R3_ST_HINT, "Fn turns the panels. Every glyph is drawn the way an app should draw it.");
     if (page == P_SYSTEM) system_rows(a);
     if (page == P_SOUND) sound_status(a);
     if (page == P_USB || page == P_USBSUB) usb_scan(a, now);
@@ -2024,6 +2049,11 @@ static void act(App *a, int act_, Uint32 now) {
         }
         return;
     }
+    if (page == P_MONO) {
+        if (act_ == R3_BACK) go(a, P_HOME, now);
+        else if (mono_act(&a->mono, act_)) a->force = 1;
+        return;
+    }
     if (TEST_PAGE(page) || page < 0 || page >= P_COUNT) return;
     a->sel[page] = r3_list_step(a->sel[page], count_of(a, page), per_of(page), act_);
     int sel = a->sel[page];
@@ -2035,7 +2065,7 @@ static void act(App *a, int act_, Uint32 now) {
             else if (sel == H_REPORT) { a->pending = H_REPORT; say(a, R3_ST_WARN, "Writing the device report (the card test takes a few seconds)..."); }
             else if (sel == H_USB) go(a, P_USB, now);
             else if (sel == H_FILES) { go(a, P_FILES, now); if (!a->files_run) { a->pending = H_FILES; say(a, R3_ST_WARN, "Testing the cards..."); } }
-            else go(a, sel == H_INPUT ? P_INPUT : sel == H_MAPPING ? P_MAPPING : sel == H_VIDEO ? P_VIDEO : sel == H_SOUND ? P_SOUND : P_SYSTEM, now);
+            else go(a, sel == H_INPUT ? P_INPUT : sel == H_MAPPING ? P_MAPPING : sel == H_MONO ? P_MONO : sel == H_VIDEO ? P_VIDEO : sel == H_SOUND ? P_SOUND : P_SYSTEM, now);
         }
         break;
     case P_VIDEO:
@@ -2193,7 +2223,9 @@ static void dispatch(App *a, int action, Uint32 now) {
     switch (action) {
     case R3_MENU: r3_mm_open(&a->mm); a->overlay = OV_MENU; a->force = 1; return;
     case R3_CONTEXT: say(a, R3_ST_HINT, "No contextual menu here: A opens the selected check."); return;
-    case R3_PANEL_NEXT: case R3_PANEL_FIRST: case R3_PANEL_PREV: say(a, R3_ST_HINT, "No panels here: Fn turns them on R3i6nos Mapping."); return;
+    case R3_PANEL_NEXT: case R3_PANEL_FIRST: case R3_PANEL_PREV:
+        if (a->page == P_MONO) { act(a, action, now); return; }
+        say(a, R3_ST_HINT, "No panels here: Fn turns them on R3i6nos Mapping and R3i6nos Mono."); return;
     case R3_L3: say(a, R3_ST_HINT, "IO Checker has no virtual mouse."); return;
     case R3_R3: say(a, R3_ST_HINT, "IO Checker has no virtual keyboard."); return;
     case R3_START: return;
@@ -2383,7 +2415,7 @@ static void tick(App *a, Uint32 now) {
  * SDL_WaitEventTimeout: on a video driver without a native wait SDL turns it into a 1 ms polling loop (docs/POWER.md). */
 static unsigned nap_ms(App *a, const R3Video *v) {
     /* the pages where a person is pressing things and wants to see them at once keep the frame: the button test, the live USB checks */
-    if (TEST_PAGE(a->page) || r3_input_stick_active(&a->in) || (a->page == P_USBSUB && (a->usb_sub == U_KEYBOARD || a->usb_sub == U_MOUSE || a->usb_sub == U_PADS || a->usb_sub == U_MIDI))) return 16;
+    if (TEST_PAGE(a->page) || (a->page == P_MONO && mono_live(&a->mono)) || r3_input_stick_active(&a->in) || (a->page == P_USBSUB && (a->usb_sub == U_KEYBOARD || a->usb_sub == U_MOUSE || a->usb_sub == U_PADS || a->usb_sub == U_MIDI))) return 16;
     if (a->force || v->settle > 0 || r3_toast_active(&a->toast) || a->chord_since || a->pending || a->midi_off_at) return 16;
     return IDLE_NAP_MS;
 }
@@ -2732,6 +2764,11 @@ static void selftest_usb(void) {
         r3_report_mkdirs(shots);
         u->page = P_HOME; u->sel[P_HOME] = H_USB; compose(u, &sc, 0); snprintf(f, sizeof f, "%s/home.bmp", shots); save_bmp(&sc, f);
         u->page = P_USB; compose(u, &sc, 0); snprintf(f, sizeof f, "%s/usb.bmp", shots); save_bmp(&sc, f);
+        u->page = P_MONO;                                                  /* the R3i6nos Mono panels, with a chord and a few keys down */
+        u->mono.notes = (1ull << 0) | (1ull << 4) | (1ull << 7) | (1ull << 6); u->mono.pcur = 7; u->mono.kx = 3; u->mono.ky = 1; snprintf(u->mono.typed, sizeof u->mono.typed, "r3i6nos");
+        u->down[L_A] = u->down[L_L1] = u->down[L_L2] = u->down[L_UP] = 1; u->axis[1] = 0.9f; u->naxes = 4;
+        for (int p = 0; p < MONO_PANELS; p++) { u->mono.panel = p; compose(u, &sc, 2400); snprintf(f, sizeof f, "%s/mono%d.bmp", shots, p + 1); save_bmp(&sc, f); }
+        memset(u->down, 0, sizeof u->down);
         u->page = P_USBSUB;
         for (int sub = 0; sub < U_COUNT; sub++) {
             u->usb_sub = sub; u->sel[P_USBSUB] = 0;
@@ -2944,6 +2981,77 @@ static int splash_has(const R3Screen *s, const char *text) {
         if (strstr(row, text)) return 1;
     }
     return 0;
+}
+
+/* The R3i6nos Mono screen test: every panel draws, every glyph it asks for exists, the icons are two adjacent cells, and the piano and keyboard answer. */
+static void selftest_mono(App *a) {
+    R3Screen s;
+    CHECK(!strcmp(HOME_LABEL[H_MONO], "R3i6nos Mono") && H_MONO == H_SYSTEM + 1 && H_REPORT == H_MONO + 1, "R3i6nos Mono is the entry after System and before the report");
+    go(a, P_MONO, 1000);
+    CHECK(a->page == P_MONO, "go opens the R3i6nos Mono page");
+    for (int p = 0; p < MONO_PANELS; p++) {
+        a->mono.panel = p;
+        compose(a, &s, 5000);
+        int missing = 0, mono_cells = 0, qmarks = 0;
+        for (int i = 0; i < R3_COLS * R3_ROWS; i++) {
+            if (s.ux[i]) { mono_cells++; if (!r3mono_find(s.ux[i])) missing++; }
+            if (!s.ux[i] && s.ch[i] == '?' && s.fg[i] == r3_styles[R3_ST_ERROR][0]) qmarks++;
+        }
+        CHECK(missing == 0, "panel %d (%s) asks for %d glyph(s) the font does not have", p + 1, MONO_PANEL_NAME[p], missing);
+        CHECK(qmarks == 0, "panel %d (%s) uses %d glyph name(s) that do not exist", p + 1, MONO_PANEL_NAME[p], qmarks);
+        CHECK(p == MONO_TEXT || mono_cells >= 20, "panel %d (%s) draws font glyphs (%d cells)", p + 1, MONO_PANEL_NAME[p], mono_cells);
+        CHECK(screen_has(&s, MONO_PANEL_NAME[p]) && screen_has(&s, "R3i6nos Mono"), "panel %d says its name", p + 1);
+    }
+    /* Fn turns the panels in a carousel, R1+Fn goes back, L1+Fn is the first */
+    a->mono.panel = 0;
+    dispatch(a, R3_PANEL_NEXT, 1100); CHECK(a->mono.panel == 1, "Fn is the next panel");
+    dispatch(a, R3_PANEL_PREV, 1100); CHECK(a->mono.panel == 0, "R1+Fn is the previous panel");
+    dispatch(a, R3_PANEL_PREV, 1100); CHECK(a->mono.panel == MONO_PANELS - 1, "...and wraps to the last");
+    dispatch(a, R3_PANEL_FIRST, 1100); CHECK(a->mono.panel == 0, "L1+Fn is the first panel");
+    /* a two-cell icon is two consecutive code points, printed side by side, never apart */
+    a->mono.panel = MONO_ICONS_A;
+    compose(a, &s, 5000);
+    int pairs = 0, torn = 0;
+    for (int i = 0; i < R3_COLS * R3_ROWS - 1; i++)
+        if (s.ux[i] >= 0x10FD00 && s.ux[i] % 2 == 0 && s.ux[i] < 0x110000) {
+            if (s.ux[i + 1] == s.ux[i] + 1) pairs++; else torn++;
+        }
+    CHECK(pairs >= 30, "the icon panels print the icons as pairs of adjacent cells (%d pairs)", pairs);
+    CHECK(torn == 1, "only the deliberately split halves in the 'wrong' example are apart (%d)", torn);
+    /* the piano: A switches the note under the cursor, the key glyph and the indicator follow, Y adds a major chord, X clears */
+    a->mono.panel = MONO_PIANO;
+    a->mono.pcur = 0;
+    compose(a, &s, 5000);
+    CHECK(s.ux[5 * R3_COLS + 2] == (unsigned)0x10F800 + 0 || s.ux[5 * R3_COLS + 2] >= 0x10F800, "the piano's first key is a font glyph");
+    unsigned off_cp = s.ux[5 * R3_COLS + 2];
+    dispatch(a, R3_ACCEPT, 1200);
+    compose(a, &s, 5000);
+    CHECK((a->mono.notes & 1) && s.ux[5 * R3_COLS + 2] != off_cp, "A turns the C on: the key cell changes from off to on");
+    a->mono.pcur = 1; dispatch(a, R3_ACCEPT, 1210); compose(a, &s, 5000);
+    CHECK((a->mono.notes >> 1 & 1) && s.ux[4 * R3_COLS + 2] != 0, "a black key on: its indicator pair shows above (C#)");
+    unsigned bk_on = s.ux[4 * R3_COLS + 2];
+    a->mono.pcur = 1; dispatch(a, R3_ACCEPT, 1220); compose(a, &s, 5000);
+    CHECK(!(a->mono.notes >> 1 & 1) && s.ux[4 * R3_COLS + 2] != bk_on, "...and off again");
+    a->mono.pcur = 5; dispatch(a, R3_Y, 1230);
+    CHECK((a->mono.notes >> 5 & 1) && (a->mono.notes >> 9 & 1) && (a->mono.notes >> 12 & 1), "Y plays a major chord from the cursor (F A C)");
+    dispatch(a, R3_X, 1240); CHECK(a->mono.notes == 0, "X turns every note off");
+    for (int i = 0; i < 80; i++) dispatch(a, R3_RIGHT, 1300);
+    CHECK(a->mono.pcur >= 0 && a->mono.pcur < MONO_PIANO_SEMIS, "the cursor stays on the keyboard (%d)", a->mono.pcur);
+    /* the keyboard: A types, X deletes, Y changes the layer */
+    a->mono.panel = MONO_KEYS; a->mono.kx = 0; a->mono.ky = 1; a->mono.layer = 0; a->mono.typed[0] = 0;
+    dispatch(a, R3_ACCEPT, 1400); dispatch(a, R3_RIGHT, 1410); dispatch(a, R3_ACCEPT, 1420);
+    CHECK(!strcmp(a->mono.typed, "qw"), "A types the key under the cursor (%s)", a->mono.typed);
+    dispatch(a, R3_X, 1430); CHECK(!strcmp(a->mono.typed, "q"), "X deletes");
+    dispatch(a, R3_Y, 1440); CHECK(a->mono.layer == 1, "Y changes the layer");
+    compose(a, &s, 5000);
+    CHECK(screen_has(&s, "Typed:") && screen_has(&s, "q_"), "the typed text shows");
+    dispatch(a, R3_BACK, 1500); CHECK(a->page == P_HOME, "B leaves the page");
+    a->page = P_MONO; a->mono.panel = MONO_UI;
+    R3Video v = {0};
+    CHECK(nap_ms(a, &v) == 16, "the UI panel animates: a frame");
+    a->mono.panel = MONO_TEXT; a->force = 0;
+    CHECK(nap_ms(a, &v) == IDLE_NAP_MS, "the text panel is still: the long nap");
+    a->page = P_HOME;
 }
 
 static int selftest_logic(void) {
@@ -3331,6 +3439,7 @@ static int selftest_logic(void) {
         CHECK(nap_ms(a, &v) == IDLE_NAP_MS, "the system page is quiet: the long nap");
         a->page = P_HOME;
     }
+    selftest_mono(a);
     free(a);
     return bad;
 }

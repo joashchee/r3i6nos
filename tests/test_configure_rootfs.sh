@@ -59,6 +59,9 @@ if [ -f /usr/share/common-licenses/GPL-2 ]; then [ -s "$R/usr/share/ffmpeg-min/G
 [ -f "$R/opt/loveos/theme/r3i6nos_ansiapps.lua" ] || fail "theme not installed"
 [ -f "$R/opt/loveos/theme/vga8x16.lua" ]        || fail "theme font data not installed"
 [ -f "$R/opt/loveos/theme/font/LICENSE.TXT" ]    || fail "the font's licence must ship with the theme"
+[ -f "$R/opt/loveos/theme/font/r3i6nos-mono/README.txt" ]                 || fail "R3i6nos Mono's credit and licence must ship with it"
+[ -f "$R/opt/loveos/theme/font/r3i6nos-mono/R3i6nosMono-Regular.ttf" ]    || fail "R3i6nos Mono's TrueType file must ship with the theme"
+[ -f "$R/opt/loveos/theme/font/r3i6nos-mono/r3i6nos_mono10x20.lua" ]      || fail "R3i6nos Mono's Lua table must ship with the theme"
 [ -f "$R/opt/loveos/test-files/MANIFEST.tsv" ] || fail "the test corpus is not on the boot disk"
 [ -f "$R/opt/loveos/test-files/README.md" ]    || fail "the test corpus's README is not on the boot disk"
 for f in $(cd corpus/files && find . -type f | sed 's|^\./||'); do cmp -s "corpus/files/$f" "$R/opt/loveos/test-files/$f" || fail "test corpus file not installed: $f"; done

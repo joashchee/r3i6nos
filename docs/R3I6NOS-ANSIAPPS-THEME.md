@@ -35,6 +35,13 @@ At run time each 8x16 glyph becomes 10x20 by nearest neighbour: destination colu
 `floor(y*16/20)`. So source columns 0 and 4 and rows 0, 4, 8 and 12 are doubled. The map depends only on the position in the cell, so box
 lines and blocks join across cells exactly as in the 8x16 original (tested). No smoothing, no other font, no bold or italic.
 
+## R3i6nos Mono, the extended font
+
+The theme's CP437 glyphs above are also the first 256 glyphs of **R3i6nos Mono** (`theme/font/r3i6nos-mono/`, `docs/R3I6NOS-MONO-FONT.md`), which adds box, block and Braille sets, symbols,
+music, gamepad, keyboard, UI and icon glyphs by name. A native app that defines `R3_WITH_MONO` before `r3i6nos_ansiapps.h` can put any of them in a cell: `r3_put_mono(s, col, row, cp, fg, bg)`
+for one code point, `r3_puts_mono(s, col, row, r3mono_name("icon.app.hydrolik"), fg, bg)` for a named glyph (a two-cell icon is one string). The cell keeps `ch` = 254 as a stand-in for the
+mirror. The Lua theme does not draw them yet (ROADMAP section 43).
+
 ## Colour
 
 Only the 16 VGA colours (`theme.RGB`). The theme's own pairs are `theme.STYLE`, and **every text/background pair must pass 4.5:1**

@@ -10,6 +10,11 @@ IBM VGA 8x16 font (theme/font/, theme/vga8x16.lua, theme/r3i6nos_vga8x16.h, and 
   Changed: rasterised to 8x16 bitmaps (the two generated files) and scaled to 10x20 at run time.
   The generated files are adaptations and stay under CC BY-SA 4.0. Details: theme/font/README.txt.
 
+R3i6nos Mono (theme/font/r3i6nos-mono/, scripts/build_r3_font.py, scripts/r3font/)
+  The 10x20 text-mode font of r3i6nos and the ansiapps apps. Its code page 437 letters are the same VileR font as above (CC BY-SA 4.0), so the font
+  and every file in that folder are an adaptation under CC BY-SA 4.0; the scripts that make them are MIT. The glyphs added around the letters
+  were drawn for r3i6nos. Credit, changes and the licence: theme/font/r3i6nos-mono/README.txt.
+
 Test corpus (corpus/files, installed at /opt/loveos/test-files and copied to EASYROMS by flash-macos.sh)
   Made for r3i6nos on 2026-11-09 and 2026-11-11 by the maintainer's own apps (ansiapps): Neumetik's generators, writers and its tracker tests' hand-built
   songs, Composer, Painter and Animator; the rest (corpus/src, scripts/corpus_extra.py, scripts/corpus_formats.py) written for r3i6nos: pictures drawn

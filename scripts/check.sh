@@ -24,6 +24,9 @@ step "theme font up to date"
 if python3 -c "import PIL" 2>/dev/null; then python3 scripts/build_vga_font.py --check || fail=1
 else echo "NOT RUN: Pillow is not installed (the generated font files were not compared with the font)"; fi
 
+step "R3i6nos Mono font tables up to date (scripts/build_r3_font.py; the TrueType files are checked by scripts/build-r3-font.sh in Debian)"
+python3 -I scripts/build_r3_font.py --check || fail=1
+
 step "screen mirror page up to date (scripts/mirror_page.template.html and the font)"
 python3 -I scripts/build_mirror_page.py --check || fail=1
 
@@ -256,6 +259,7 @@ bash tests/test_streamtools.sh || fail=1
 bash tests/test_run_app_runtime.sh || fail=1
 bash tests/test_portmaster_unpack.sh || fail=1
 bash tests/test_image.sh || fail=1
+bash tests/test_r3font_love.sh || fail=1                   # R3i6nos Mono through LOVE's own rasteriser (prints SKIPPED without the desktop LOVE)
 
 step "shell syntax"
 for f in overlay/usr/local/bin/run_app.sh overlay/usr/local/bin/loveos-session apps/portmaster/portmaster apps/portmaster/shim/sudo scripts/*.sh tests/*.sh tests/runtimes/*.sh tests/streamtools/*.sh tools/runtimes/*/run tools/streamtools/build.sh tools/streamtools/*/run tools/qjs-node/*.sh; do
