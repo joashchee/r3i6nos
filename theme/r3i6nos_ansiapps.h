@@ -640,6 +640,12 @@ static inline int r3_video_due(R3Video *v, int changed) {
     return 1;
 }
 
+/* An app that draws something the cell grid cannot (an edited glyph, a picture) sets this: r3_render calls it last, with the finished 640x480 ARGB pixels
+ * and the app's pointer, so the drawing lands over the cells. The app must make the video repaint when what it draws changes (r3_video_draw's force):
+ * a screen compares cells only. A screen mirror sends cells, so it does not see what the hook draws. NULL (the default) draws nothing. */
+static void (*r3_render_hook)(uint32_t *px, void *ctx);
+static void *r3_render_hook_ctx;
+
 /* Paint every cell into 640x480 ARGB pixels. */
 static inline void r3_render(const R3Screen *s, uint32_t *px) {
     if (!r3_pal_ready) r3_pal_reset();
@@ -662,6 +668,7 @@ static inline void r3_render(const R3Screen *s, uint32_t *px) {
                 for (int x = 0; x < R3_CELL_W; x++) line[x] = r3_glyph_bit(ch, x, y) ? fg : bg;
             }
         }
+    if (r3_render_hook) r3_render_hook(px, r3_render_hook_ctx);
 }
 
 /* Make the texture; the renderer scales the 640x480 screen by a whole number, centred, with no smoothing. */

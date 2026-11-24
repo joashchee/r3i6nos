@@ -126,7 +126,7 @@ screen (`R3Screen`), text and boxes, the top bar, the command line, the list dia
 the cells into a texture and lets SDL scale it by a whole number. **Call `r3_video_draw` on every pass of the main loop**, not only after
 input: a change is presented `R3_VIDEO_SETTLE` (4) times over the next calls, because on the R36S a screen presented once stayed black
 (Commander and the IO Checker started blank, 2026-11-09); keep the loop short while `settle > 0` (Commander waits 16 ms then, 500 ms
-idle). `apps/commander-native/commander.c` is the reference app. The two themes
+idle). `apps/commander-native/commander.c` is the reference app. **`r3_render_hook`** (2026-11-24): a function pointer (NULL by default) that `r3_render` calls last with the finished 640 x 480 pixels, for an app that paints what the cell grid cannot (the Font Editor's edited glyphs, `docs/FONT-EDITOR.md`); the app must force a repaint when what it draws changes, since the video compares cells only, and a screen mirror, which sends cells, does not see it. The two themes
 cannot drift on the font: both hash all 256 scaled glyphs and the same number is in `tests/test_theme.lua` and in `r3i6nos_ansiapps.h`.
 The font data it builds on: `theme/r3i6nos_vga8x16.h` has the 256 glyphs (`r3i6nos_vga8x16[i][row]`, top bit leftmost) and the Unicode of each
 (`r3i6nos_cp437[i]`). Use the same 64x24 grid of 10x20 cells, the same row roles, colours and mapping from 8x16 to 10x20 as above.

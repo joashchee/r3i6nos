@@ -149,6 +149,13 @@ decoder checked against Pillow's pixels, and four Aseprite sprites made in code 
 `commander --info FILE` and `--content FILE` print the two pages as text, for trying formats on a laptop. **Not run on a real R36S:** the
 buttons, how it looks on the panel, speed on the SD card (and how long a big JPEG or a `.tar.gz` listing takes on the RK3326), and exFAT quirks (no permissions or links there, so copies of links to the card fail and say so).
 
+## Font Editor (`fontedit-native/`, not in the image)
+
+`native_deb/Font_Editor.deb` (C and SDL2, on the theme): touches up R3i6nos Mono with the pad, and other monospace bitmap fonts (`--font FILE.bdf`). Its first panel is the font's **multi-cell glyphs**
+(the 492 two-cell icons, key caps, shoulders, sticks and knobs), each opened whole on one canvas drawn across the seam between its cells. Edits are saved after every stroke to `FontEdit/edits-r3i6nos-mono.txt` and folded
+into the font by `scripts/merge_font_edits.py` and `scripts/build-r3-font.sh`. Controls, the file format, the rules it follows and what is untested: **`docs/FONT-EDITOR.md`**. Build: `scripts/build-native-local.sh fontedit-native`;
+check: `scripts/check.sh --app fontedit-native --theme`.
+
 ## Adding an app: its own build, apart from the firmware
 
 Each native app builds on its own; the firmware only bundles the results.

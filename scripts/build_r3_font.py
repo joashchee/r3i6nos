@@ -14,14 +14,14 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
-from r3font import core, emit, greek, icons, latin, music, pad, ui  # noqa: E402
+from r3font import core, edits, emit, greek, icons, latin, music, pad, ui  # noqa: E402
 from r3font.registry import Registry  # noqa: E402
 from r3font.render import sheet  # noqa: E402
 
 OUT = ROOT / "theme" / "font" / "r3i6nos-mono"
 
 
-def build():
+def build(with_edits=True):
     R = Registry()
     core.build(R)
     miss = greek.build(R, latin.build(R))
@@ -29,6 +29,8 @@ def build():
     ui.build(R)
     music.build(R)
     icons.build(R)
+    if with_edits:
+        edits.apply(R)      # the Font Editor's touch-ups (theme/font/r3i6nos-mono/edits.txt), last, so every output carries them
     return R, miss
 
 

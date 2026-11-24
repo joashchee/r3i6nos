@@ -13,11 +13,12 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "scripts"))
 
 import build_r3_font  # noqa: E402
-from r3font import base, boxes, emit  # noqa: E402
+from r3font import base, boxes, edits, emit  # noqa: E402
 from r3font.registry import BLOCKS  # noqa: E402
 
 OUT = ROOT / "theme" / "font" / "r3i6nos-mono"
 R, MISS = build_r3_font.build()
+EDITED = set(edits.parse(edits.EDITS.read_text())) if edits.EDITS.exists() else set()   # touched up by hand (docs/FONT-EDITOR.md): no longer the theme's pixels
 
 
 class Cp437(unittest.TestCase):
@@ -27,6 +28,8 @@ class Cp437(unittest.TestCase):
             self.assertIn(uni[i], R.all_cps(), f"byte {i}")
         by = base.by_unicode()
         for cp, g in by.items():
+            if cp in EDITED:
+                continue
             self.assertEqual(R.glyph(cp), g, f"U+{cp:04X} differs from the theme's 8x16 -> 10x20 mapping")
 
     def test_raw_bytes_mirror_the_code_page(self):

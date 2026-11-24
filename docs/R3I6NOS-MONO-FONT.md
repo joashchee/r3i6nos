@@ -58,6 +58,7 @@ local cells = T.glyph("icon.app.hydrolik")             -- the cells of a name, t
 | `r3i6nos_mono10x20.h`, `r3i6nos_mono10x20.lua`, `r3i6nos-mono.json` | the bitmaps as C, Lua and JSON tables (SDL2, LÖVE, web canvases, the screen mirror) |
 | `r3i6nos_mono_names.h`, `r3i6nos_mono_names.lua`, `glyph-names.json` | every named glyph and its code points (append only) |
 | `overview.png`, `specimen.html`, `glyph-coverage-report.txt` | to look at it, and the live count |
+| `edits.txt` (when there is one) | hand touch-ups made with the Font Editor, applied last by the build (below) |
 | `README.txt` | attribution, licence and the changes made |
 
 ## Licence
@@ -137,6 +138,12 @@ characters, lines, blocks, Braille, accents, symbols, Powerline), 2 the gamepad 
 keys indicated by pairs above), 5 UI widgets (animated bar, slider, spinner, ring, switches, knobs), 6 music (staffs, marks, waveforms), 7-8 icons (with a "right and wrong" example of
 splitting an icon). The selftest checks every glyph a panel asks for exists, the icons are adjacent pairs, the piano, keyboard and panels respond. **Untested on a unit**; screenshots
 made with `R3I6NOS_IO_SHOTS=dir io-checker-native --selftest`.
+
+## Touching it up by hand: the Font Editor
+
+A glyph can be redrawn on the R36S itself with **the Font Editor** (`apps/fontedit-native/`, `docs/FONT-EDITOR.md`), which opens the two-cell names as one picture across their seam. Its changes are not made in the generated
+files: they are kept in `edits.txt` here (a text file, one block a changed cell), which `scripts/build_r3_font.py` applies after every generator, so they reach the TTF, BDF, PSF and the C and Lua tables and survive the next
+build. `scripts/merge_font_edits.py FILE` folds a device's file in. Names and code points never change by an edit.
 
 ## Building, and what the checks cover
 
