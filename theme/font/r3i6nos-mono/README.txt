@@ -9,6 +9,7 @@ Files:       R3i6nosMono-Regular.ttf / .woff / .woff2   TrueType and web fonts (
              R3i6nosMono-Regular.bdf                     bitmap font (Pyxel, X11, many tools)
              r3i6nos_mono10x20.h / .lua, r3i6nos-mono.json   the bitmaps as C, Lua and JSON tables (SDL2, LOVE, web canvases, the screen mirror)
              r3i6nos_mono_names.h / .lua, glyph-names.json   every named glyph and its code points (never moved: append only)
+             R3i6nosMono-10x20.psf                       the Linux console (setfont)
              r3i6nos-mono.css, specimen.html, overview.png, glyph-coverage-report.txt
 
 Material:    The 256 code page 437 letters and symbols are "WebPlus IBM VGA 8x16" from The Ultimate Oldschool PC Font Pack v2.2,

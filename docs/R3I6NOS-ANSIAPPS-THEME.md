@@ -7,7 +7,7 @@ native app. It is the text-mode look of the ansiapps family fitted to the R36S's
 
 ## The screen
 
-IBM VGA 8x16 scaled up to **10x20**, so **64 columns by 24 rows** fill 640x480 exactly. Every character is a cell of the grid; the
+The font is **R3i6nos Mono** (10x20; **the default of every app since 2026-11-24**, guide and policy in `docs/R3I6NOS-MONO-FONT.md`), whose first 256 glyphs are IBM VGA 8x16 scaled up to **10x20**, so **64 columns by 24 rows** fill 640x480 exactly. Every character is a cell of the grid; the
 whole screen is drawn only with characters in cells (code page 437), in the 16 VGA colours. Nothing scrolls: a list that is too long
 turns whole pages (`Page 2/3` in its top edge).
 
@@ -35,10 +35,12 @@ At run time each 8x16 glyph becomes 10x20 by nearest neighbour: destination colu
 `floor(y*16/20)`. So source columns 0 and 4 and rows 0, 4, 8 and 12 are doubled. The map depends only on the position in the cell, so box
 lines and blocks join across cells exactly as in the 8x16 original (tested). No smoothing, no other font, no bold or italic.
 
-## R3i6nos Mono, the extended font
+## R3i6nos Mono, the font of every app (default since 2026-11-24)
+
+**Every app has it: new apps use it and print their icons, status and key glyphs from it, not their own art.** The C theme defines `R3_WITH_MONO` itself (`R3_NO_MONO` opts out) and the Lua theme's `T.init` turns it on. The full guide, the policy and the names are `docs/R3I6NOS-MONO-FONT.md`.
 
 The theme's CP437 glyphs above are also the first 256 glyphs of **R3i6nos Mono** (`theme/font/r3i6nos-mono/`, `docs/R3I6NOS-MONO-FONT.md`), which adds box, block and Braille sets, symbols,
-music, gamepad, keyboard, UI and icon glyphs by name. A native app that defines `R3_WITH_MONO` before `r3i6nos_ansiapps.h` can put any of them in a cell: `r3_put_mono(s, col, row, cp, fg, bg)`
+music, gamepad, keyboard, UI and icon glyphs by name. A native app can put any of them in a cell: `r3_put_mono(s, col, row, cp, fg, bg)`
 for one code point, `r3_puts_mono(s, col, row, r3mono_name("icon.app.hydrolik"), fg, bg)` for a named glyph (a two-cell icon is one string). The cell keeps `ch` = 254 as a stand-in for the
 mirror (a datagram `E` after the frame carries the code points). **The Lua theme draws them since 2026-11-24:** a cell is a CP437 index (0-255) or `T.EXT + code point`; an app calls
 `T.useMono(true)` once (it checks the font folder; the table loads on the first glyph), after which `T.decode` draws what CP437 lacks and `scr:glyph(col, row, "icon.app.hydrolik", fg, bg)` or `T.glyph(name)` (a

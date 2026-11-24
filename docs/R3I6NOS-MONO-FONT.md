@@ -1,10 +1,74 @@
-# R3i6nos Mono: the 10x20 font of r3i6nos and the ansiapps apps
+# R3i6nos Mono: the font of r3i6nos and the ansiapps apps
 
-Made 2026-11-24 at the maintainer's request, from the guide `docs/making-cp437-font.md` (Perplexity). **CC BY-SA 4.0** as a whole (its CP437 letters are VileR's font:
-`theme/font/r3i6nos-mono/README.txt`, `NOTICE`); the scripts that make it are MIT. Everything is generated from one source, `scripts/build_r3_font.py` and
-`scripts/r3font/`, and checked by tests. **Not yet seen on a real R36S** (rule 1): the checks below ran on a Mac and in Debian.
+![Every glyph of R3i6nos Mono](../theme/font/r3i6nos-mono/overview.png)
 
-## What it is
+**R3i6nos Mono is the one font of every r3i6nos app and of the ansiapps family**: a 10 x 20 pixel monospace bitmap font, **2,887 code points** and **868 named glyphs**
+(gamepad buttons and states, on-screen keyboard caps, a piano, music notation, UI widgets, system status, coding symbols and two-cell app and file icons), with the whole of
+code page 437 pixel for pixel as the text-mode theme has always drawn it. It is licensed **CC BY-SA 4.0** (the CP437 letters are VileR's; see [Licence](#licence)).
+**Status:** built and checked on a Mac, in Debian (arm64 Docker), in LÖVE 11.5, Pyxel, SDL2_ttf and Chrome; the maintainer has looked at it in the IO Checker on a Mac;
+**not yet looked at on a real R36S** (the theme, the menu, the mirror and the apps that use it are listed under [In the apps](#in-the-apps-added-2026-11-24-all-untested-on-a-unit)).
+
+## The policy: it is the default, for all future work
+
+1. **Every app made for r3i6nos, and every ansiapps text-mode app, draws with R3i6nos Mono.** A native C app gets it from `theme/r3i6nos_ansiapps.h`, which defines
+   `R3_WITH_MONO` itself (an app that must not carry the tables defines `R3_NO_MONO` first and says why in its README). A LÖVE app gets it from `theme/r3i6nos_ansiapps.lua`:
+   `T.init()` turns `T.useMono(true)` on. The menu is the reference app.
+2. **Text-mode art does not change.** The 256 CP437 glyphs are the theme's own, pixel for pixel; an app that only prints CP437 text looks exactly as before.
+3. **Print a glyph by name, never by code point.** Names are the interface and never move (`glyph-names.json` is append only). `r3_puts_mono(s, col, row, r3mono_name("pad.btn.A.on"), fg, bg)`
+   in C; `scr:glyph(col, row, "pad.btn.A.on", fg, bg)` in Lua.
+4. **A two-cell icon is one string**, printed together, never split or in two colours.
+5. **State is a glyph, not only a colour** (off, on, disabled; or a level).
+6. **A new glyph is added to the font, not drawn inside one app**: draw it in `scripts/r3font/`, give it a new name, run `scripts/build-r3-font.sh`, commit `glyph-names.json` with it
+   (see [Building and checking](#building-and-what-the-checks-cover)). An app never ships its own copy of the font or of a table of it: it uses the theme's.
+7. **Do not redraw the maintainer's logo** (the butterfly "3i6", `docs/BRAND.md`): the `icon.app.r3i6nos` glyph is a handheld, not the logo.
+8. **Say what was not run on a unit** (CLAUDE.md rule 1).
+
+## Quick start
+
+**C / SDL2 (native app).** Include the theme; nothing else to turn on.
+
+```c
+#include "r3i6nos_ansiapps.h"          // R3_WITH_MONO is already defined
+...
+r3_puts_mono(&s, 2, 5, r3mono_name("pad.btn.A.on"), R3_YELLOW, R3_BLACK);       // one cell, the A button pressed
+r3_puts_mono(&s, 4, 5, R3I_ICON_APP_HYDROLIK, R3_WHITE, R3_BLACK);              // a two-cell icon: one string, two cells
+r3_put_mono(&s, 8, 5, 0x2554, R3_LIGHT_GRAY, R3_BLACK);                        // any code point of the font (here ╔)
+```
+
+**LÖVE (Lua).** `T.init()` has already turned the font on.
+
+```lua
+local T = require("r3i6nos_ansiapps")
+scr:glyph(2, 5, "pad.btn.A.on", T.YELLOW, T.BLACK)     -- a named glyph; two cells for an icon
+scr:text(2, 6, "Þórr · Λόγος · ⠿", T.WHITE)             -- letters CP437 lacks are drawn when the font has them, else "?"
+local cells = T.glyph("icon.app.hydrolik")             -- the cells of a name, to place yourself
+```
+
+**Web or any engine.** Use `R3i6nosMono-Regular.woff2` / `.ttf` at 20, 40 or 60 px with `r3i6nos-mono.css` (anti-aliasing off), or the BDF (Pyxel, X11), the BMFont `.fnt` + `.png`
+(LÖVE, Godot, Defold) or the PSF (Linux console). The files are in `theme/font/r3i6nos-mono/`; the table below says which to pick.
+
+## Files (all in `theme/font/r3i6nos-mono/`)
+
+| File | For |
+|---|---|
+| `R3i6nosMono-Regular.ttf`, `.woff`, `.woff2`, `r3i6nos-mono.css` | LÖVE, Godot, Ren'Py, Solarus, browsers (use 20 / 40 / 60 px) |
+| `R3i6nosMono-Regular.fnt` + `.png` | BMFont: LÖVE, Godot, Defold |
+| `R3i6nosMono-Regular.bdf` | bitmap font: Pyxel, X11 tools |
+| `R3i6nosMono-10x20.psf` | the Linux console (`setfont`): CP437 by byte, then lines, blocks, Latin accents, Powerline |
+| `r3i6nos_mono10x20.h`, `r3i6nos_mono10x20.lua`, `r3i6nos-mono.json` | the bitmaps as C, Lua and JSON tables (SDL2, LÖVE, web canvases, the screen mirror) |
+| `r3i6nos_mono_names.h`, `r3i6nos_mono_names.lua`, `glyph-names.json` | every named glyph and its code points (append only) |
+| `overview.png`, `specimen.html`, `glyph-coverage-report.txt` | to look at it, and the live count |
+| `README.txt` | attribution, licence and the changes made |
+
+## Licence
+
+**CC BY-SA 4.0** for the font and every file in the font's folder. Its 256 code page 437 letters are *WebPlus IBM VGA 8x16* by VileR (*The Ultimate Oldschool PC Font Pack*,
+<https://int10h.org/oldschool-pc-fonts/>), scaled to 10 x 20; every other glyph was drawn or generated for r3i6nos. Anything that ships the font ships `theme/font/` (the licence
+text, `README.txt`) and `NOTICE`; a built page or file that embeds it (the screen mirror's page does) carries the credit. The scripts that make the font are MIT.
+
+## What it is (reference)
+
+Made 2026-11-24 at the maintainer's request, from the guide `docs/making-cp437-font.md`. Everything is generated from one source, `scripts/build_r3_font.py` and `scripts/r3font/`, and checked by tests.
 
 - **One cell, 10 x 20 px**, advance 10, ascent 15, descent 5 (capitals rows 3-14, x-height rows 7-14, descenders to row 18). 64 x 24 cells fill 640 x 480.
 - **2,887 code points, 868 named glyphs.** `theme/font/r3i6nos-mono/glyph-coverage-report.txt` is the live count; `overview.png` and `specimen.html` show all of it.

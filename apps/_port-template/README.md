@@ -19,3 +19,5 @@ Not an app: this folder has no `app.conf`, so no script or workflow picks it up.
 12. Show a **progress bar for every wait** (rule 18): a determinate bar (step, bar, time) from the moment a load, copy, render or install starts, and a self-test that checks the report's progress reaches its last step.
 
 A port is a user-installed `.deb` (card `native_deb/`), never part of the firmware image, and links only libraries the rootfs has.
+
+**Font:** the theme's font is R3i6nos Mono by default (`docs/R3I6NOS-MONO-FONT.md`): print icons and gamepad or key glyphs by name from it; do not ship your own art or font.
