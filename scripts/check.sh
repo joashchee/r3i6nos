@@ -61,6 +61,7 @@ if command -v luajit >/dev/null; then
     luajit tests/test_about.lua || fail=1
     luajit tests/test_net_menu.lua || fail=1
     luajit tests/test_theme.lua || fail=1
+    luajit tests/test_input.lua || fail=1
     luajit tests/test_menu_view.lua || fail=1
     luajit tests/test_portmaster_notice.lua || fail=1
     luajit tests/test_io_checker.lua || fail=1
@@ -81,6 +82,7 @@ elif command -v lua >/dev/null; then
     lua tests/test_menu_conf.lua || fail=1
     lua tests/test_net_menu.lua || fail=1
     lua tests/test_theme.lua || fail=1
+    lua tests/test_input.lua || fail=1
     lua tests/test_menu_view.lua || fail=1
     lua tests/test_portmaster_notice.lua || fail=1
     lua tests/test_io_checker.lua || fail=1

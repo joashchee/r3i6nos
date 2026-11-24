@@ -1,6 +1,6 @@
 -- Run with: luajit tests/test_settings.lua   (from the repo root)
 -- Settings: the list, Shutdown's confirmation, and the Network and SSH screens, driven with a fake helper client.
-package.path = "menu/?.lua;" .. package.path
+package.path = "menu/?.lua;theme/?.lua;" .. package.path
 local settings = require("settings")
 
 local function eq(a, b, m) assert(a == b, (m or "") .. (" want %s, got %s"):format(tostring(b), tostring(a))) end
@@ -37,24 +37,34 @@ local function choose(s, label)
   error("no item " .. label)
 end
 
--- ---- the list and Shutdown (as before)
+-- ---- the main menu (rule 17, docs/r3i6nos-mapping.md): the compulsory items in order, then the launcher's own; Quit powers off
 local s = new()
-eq(title(s), "Settings"); eq(settings.node(s).items[1].label, "Network"); eq(settings.node(s).items[2].label, "SSH")
-eq(settings.node(s).items[3].label, "Battery"); eq(settings.node(s).items[4].label, "Sound mixer"); eq(settings.node(s).items[5].label, "Date and time")
-eq(settings.node(s).items[6].label, "Device reports"); eq(settings.node(s).items[7].label, "Rec demos"); eq(settings.node(s).items[8].label, "Screen mirror"); eq(settings.node(s).items[9].label, "Data card"); eq(settings.node(s).items[10].label, "About"); eq(settings.node(s).items[11].label, "Shutdown")
-choose(s, "Shutdown")
+local labels = {}
+for i, it in ipairs(settings.node(s).items) do labels[i] = it.label end
+eq(title(s), "Main menu")
+local want = { "About", "Colour theme", "Keymap", "Device report", "Rec demo", "Quit",   -- Benchmark is hidden: the menu has nothing to measure
+  "Network", "SSH", "Battery", "Sound mixer", "Date and time", "Device reports", "Rec demos", "Screen mirror", "Data card" }
+eq(table.concat(labels, "|"), table.concat(want, "|"), "the main menu's items and their order")
+choose(s, "Quit")
 eq(kind(s), "confirm"); eq(settings.node(s).sel, 2, "the confirmation starts on No")
 assert(settings.press(s, "accept") == nil and kind(s) == "menu", "accepting the default (No) must not power off")
-choose(s, "Shutdown"); settings.press(s, "up")
+choose(s, "Quit"); settings.press(s, "up")
 eq(settings.node(s).sel, 1)
 eq(settings.press(s, "accept"), "poweroff"); assert(not settings.isOpen(s))
 
-s = new(); choose(s, "Shutdown")
+s = new(); choose(s, "Quit")
 assert(settings.press(s, "back") == nil and kind(s) == "menu"); settings.press(s, "back")
 assert(not settings.isOpen(s), "B backs out one level at a time")
 
-s = new(); choose(s, "Back"); assert(not settings.isOpen(s))
-s = new(); settings.press(s, "up"); eq(settings.node(s).items[settings.node(s).sel].label, "Back", "the list wraps")
+s = new(); settings.press(s, "up"); eq(settings.node(s).items[settings.node(s).sel].label, "Data card", "the list wraps")
+-- Colour theme: the one theme, with a way back; Keymap: help pages and a test page that acts on nothing; Rec demo says it is not built
+s = new(); choose(s, "Colour theme"); eq(title(s), "Colour theme"); eq(settings.node(s).items[1].label, "VGA Classic"); settings.press(s, "back"); eq(title(s), "Main menu")
+s = new(); choose(s, "Keymap"); eq(title(s), "Keymap"); choose(s, "Help"); eq(kind(s), "pages"); assert(#settings.node(s).pages >= 3, "system pages and the games list's page")
+settings.press(s, "back"); choose(s, "Test"); eq(kind(s), "keytest")
+settings.press(s, "up"); settings.press(s, "accept"); settings.press(s, "x")
+eq(#settings.node(s).t.log, 3, "the test logs every press"); eq(kind(s), "keytest", "and acts on none of them")
+settings.press(s, "menu"); eq(kind(s), "menu"); eq(title(s), "Keymap")
+s = new(); choose(s, "Rec demo"); eq(kind(s), "pages"); eq(settings.node(s).bad, true)
 s = settings.new(fake()); assert(settings.press(s, "accept") == nil and not settings.isOpen(s), "a closed dialog ignores input")
 -- "poweroff" is only ever the answer to a confirmed shutdown, never to opening a screen
 s = new(); assert(settings.press(s, "accept") == nil, "Network opens, it does not power off")
@@ -86,7 +96,7 @@ do
   choose(b, "Clear history"); settings.press(b, "up")
   assert(settings.press(b, "accept") == nil, "clearing is not a shutdown")
   assert(cleared, "Yes clears"); eq(kind(b), "pages"); eq(settings.node(b).pages[1][1], "The battery history is cleared.")
-  settings.press(b, "back"); eq(kind(b), "menu"); choose(b, "Back"); eq(title(b), "Settings")
+  settings.press(b, "back"); eq(kind(b), "menu"); choose(b, "Back"); eq(title(b), "Main menu")
   -- a failed clear says so
   fakebat.clear = function() return false end
   choose(b, "Battery"); choose(b, "Clear history"); settings.press(b, "up"); settings.press(b, "accept")
@@ -103,7 +113,7 @@ settings.tick(s, 0.5); eq(kind(s), "busy", "no answer yet")
 io_.answer({ ok = true, lines = { "eth0  wired  up", "  address  192.168.1.20/24" }, nets = {} })
 settings.tick(s, 0.5)
 eq(kind(s), "pages"); eq(settings.node(s).pages[1][1], "eth0  wired  up")
-settings.press(s, "back"); eq(title(s), "Network"); settings.press(s, "back"); eq(title(s), "Settings")
+settings.press(s, "back"); eq(title(s), "Network"); settings.press(s, "back"); eq(title(s), "Main menu")
 
 -- giving up: the wait ends with a reason, not a frozen screen
 io_ = fake(); s = new(io_); choose(s, "Network"); choose(s, "Test connection")
@@ -234,7 +244,7 @@ settings.text(s, "open sesame"); settings.press(s, "more"); settings.press(s, "b
 eq(title(s), "SSH"); eq(#io_.sent, 0)
 
 -- a real keyboard types text only on the keyboard screen
-s = new(); settings.text(s, "abc"); eq(title(s), "Settings")
+s = new(); settings.text(s, "abc"); eq(title(s), "Main menu")
 
 print("settings: ok")
 
@@ -276,7 +286,7 @@ do
   -- one that cannot start says so
   settings.press(d, "back"); done = nil; fakerep.ok = false; choose(d, "Composer"); assert(settings.node(d).bad, "a report that cannot start says so")
   settings.press(d, "back"); choose(d, "What these are"); eq(settings.node(d).pages[1][1], "about")
-  settings.press(d, "back"); choose(d, "Back"); eq(title(d), "Settings")
+  settings.press(d, "back"); choose(d, "Back"); eq(title(d), "Main menu")
   -- a report with needs shows them first and waits for A; B cancels and starts nothing
   fakerep.found = { { cmd = "r3i6nos-report", app = "r3i6nos (this system)", system = true, needs = { "Unplug the charger.", "", " 1. a cable" } },
                     { cmd = "compose-report", tool = "compose", app = "Composer" } }
@@ -367,7 +377,7 @@ do
   choose(a, "Check for updates"); eq(kind(a), "pages"); assert(settings.node(a).bad)
   settings.press(a, "back")
   choose(a, "Licences"); eq(#settings.node(a).pages, 2)
-  settings.press(a, "back"); choose(a, "Back"); eq(title(a), "Settings")
+  settings.press(a, "back"); choose(a, "Back"); eq(title(a), "Main menu")
 end
 print("settings about: ok")
 
@@ -429,7 +439,7 @@ do
   settings.press(d, "back"); choose(d, "Stop mirroring")
   eq(calls[#calls], "stop"); settings.press(d, "back"); eq(settings.node(d).items[1].label, "Mirror on eth0", "stopped: the links again")
   choose(d, "Instructions"); eq(settings.node(d).pages[1][1], "help")
-  settings.press(d, "back"); settings.press(d, "back"); assert(settings.isOpen(d) and title(d) == "Settings")
+  settings.press(d, "back"); settings.press(d, "back"); assert(settings.isOpen(d) and title(d) == "Main menu")
   links = {}
   choose(d, "Screen mirror"); eq(settings.node(d).items[1].label, "No link is up")
   choose(d, "No link is up"); assert(settings.node(d).bad); eq(settings.node(d).pages[1][1], "no link")

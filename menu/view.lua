@@ -224,6 +224,20 @@ local function drawMixer(scr, n)
   return mixer.hint(n)
 end
 
+-- The Keymap test (docs/r3i6nos-mapping.md): the buttons held, the sticks and the last presses; it acts on nothing.
+local function drawKeytest(scr, n)
+  local keymap = require("r3i6nos_keymap")
+  local st = theme.STYLE
+  scr:box(FULL.col, FULL.row, FULL.w, FULL.h, { title = n.title, foot = "B or L1+R1 Back" })
+  local t = { log = n.t.log, reader = n.reader or n.t.reader }
+  for i, l in ipairs(keymap.test_lines(t)) do
+    if FULL.row + i >= FULL.row + FULL.h - 1 then break end
+    local s = (i <= 2) and st.hint or st.body
+    scr:text(FULL.col + 2, FULL.row + i, theme.fit(l, FULL.w - 4), s.fg, s.bg)
+  end
+  return "Nothing here does anything"
+end
+
 --- Draw the Settings dialog's top screen. Returns the reply (a hint) and the breadcrumb for the command line.
 function view.dialog(scr, d)
   local n = settings.node(d)
@@ -235,7 +249,8 @@ function view.dialog(scr, d)
   elseif n.kind == "confirm" then hint = drawConfirm(scr, n)
   elseif n.kind == "notice" then hint = drawNotice(scr, n)
   elseif n.kind == "clock" then hint = drawClock(scr, n)
-  elseif n.kind == "mixer" then hint = drawMixer(scr, n) end
+  elseif n.kind == "mixer" then hint = drawMixer(scr, n)
+  elseif n.kind == "keytest" then hint = drawKeytest(scr, n) end
   local titles = {}
   for i, node in ipairs(d.stack) do titles[i] = node.title end
   return hint, table.concat(titles, " > "):lower()
@@ -288,17 +303,26 @@ end
 
 --- The start-up screen, drawn at once, before the card is scanned, so the panel is never black while the menu loads.
 --- done of total steps, and what the step is doing.
-function view.splash(scr, done, total, doing)
+function view.splash(scr, done, total, doing, build)
   scr:clear()
   local st = theme.STYLE
   theme.topBar(scr, "r3i6nos")
-  local w, h = 40, 7
+  local w, h = 40, 9
   local col, row = centered(w, h)
   scr:box(col, row, w, h, { title = "r3i6nos", foot = "Starting" })
   scr:text(col + 3, row + 2, theme.fit(doing, w - 6), st.hint.fg, st.hint.bg)
   local bw = w - 6
   local filled = total > 0 and math.floor(bw * done / total + 0.5) or 0
   for i = 0, bw - 1 do scr:put(col + 3 + i, row + 4, i < filled and 219 or 176, st.body.fg, st.body.bg) end
+  scr:text(col + 3, row + 6, theme.fit(view.buildLine(build), w - 6), st.hint.fg, st.hint.bg) -- rule 12: the version, the commit and the date
+end
+
+--- The splash's version line from /etc/r3i6nos-release's keys (VERSION, COMMIT, COMMIT_DATE; nil: unknown): "v0.1.0 1a2b3c4d5e 2026-11-24".
+function view.buildLine(b)
+  b = b or {}
+  local commit = b.COMMIT or "unknown"
+  if commit:match("^%x+$") and #commit >= 10 then commit = commit:sub(1, 10) end
+  return ("v%s %s %s%s"):format(b.VERSION or "unknown", commit, b.COMMIT_DATE or b.BUILT or "unknown", b.MODIFIED == "1" and " +changes" or "")
 end
 
 --- Draw the whole screen. state: entries, selected (1-based), dialog (settings state), reply (optional { text, kind }).
@@ -315,7 +339,7 @@ function view.render(scr, state)
   theme.listDialog(scr, {
     col = view.LIST.col, row = view.LIST.row, w = view.LIST.w, h = view.LIST.h,
     title = "Games and apps", items = items, sel = sel,
-    foot = "A Run  L1/R1 Page  L2/R2 Top/End  Start Settings",
+    foot = "A Run  R1+Up/Down Page  Y Menu",
     empty = { "Nothing here yet.", "", "Drop a .love into Love 11.5 or Love 12.0,", "or an ARM64 .deb into native_deb, and reboot." },
   })
 

@@ -132,7 +132,7 @@ The font data it builds on: `theme/r3i6nos_vga8x16.h` has the 256 glyphs (`r3i6n
 (`r3i6nos_cp437[i]`). Use the same 64x24 grid of 10x20 cells, the same row roles, colours and mapping from 8x16 to 10x20 as above.
 (The C header includes it; the app's `.deb` carries `NOTICE` and the font licence in its doc folder.)
 
-## The main menu (rule 17; **specified 2026-11-19; built in the C theme on 2026-11-20, not yet in the Lua theme**)
+## The main menu (rule 17; **specified 2026-11-19; built in the C theme on 2026-11-20; the Lua theme has the reader and the Keymap since 2026-11-24 and the boot menu is the first LÖVE app on them**)
 
 Every app made for r3i6nos has a main menu, opened by **L1 + R1** (keyboard: the backquote key, and the backslash key for the contextual menu, L2 + R2; settled 2026-11-20), drawn as the standard list dialog above (a box centred in
 the display view, `Page x/y` when it needs it). The input map it belongs to is `docs/r3i6nos-mapping.md`.
@@ -157,7 +157,7 @@ fixed ids (`R3MM_ABOUT` ... `R3MM_QUIT`) and the app's own items after Quit (`R3
 measure; `r3_mm_open`, `r3_mm_key(&m, action)` (returns the chosen id, `R3MM_CLOSED` or `R3MM_NOTHING`) and `r3_mm_draw`; `r3_about_draw` and
 `r3_theme_pick_draw` (the picker over `r3_themes`: the app applies the theme as the selection moves, keeps it on A and reverts on B); and
 **`r3_mm_selftest`, which an app calls from its own self-test** so "the items are there and in this order" is checked once. The app does what each item means.
-**The Lua theme still has none** (`theme.mainMenu` is to build; the menu and the LÖVE apps follow later).
+**The Lua theme has the reader (`theme/r3i6nos_input.lua`: `input.new`, `input.button`, `input.key`, `input.axis`, `input.tick`, `input.list_step`, the constants) and the Keymap's help and test (`theme/r3i6nos_keymap.lua`), tested by `tests/test_input.lua`; `theme.mainMenu` as one shared structure is still to build, so the boot menu builds its own in `menu/settings.lua` (`root`), with the six items in order. The launcher's Quit powers the unit off (it is the only screen); Benchmark is hidden.**
 
 **The reader** (`theme/r3i6nos_input.h`): `R3Input` and `r3_input_button(in, raw_button, down)` give the action for a raw button with R1 held as "increase" and the chords
 (L1+R1 `R3_MENU`, L2+R2 `R3_CONTEXT`, Fn `R3_PANEL_NEXT`, L1+Fn `R3_PANEL_FIRST`, R1+Fn `R3_PANEL_PREV`); `r3_input_axis` and `r3_input_tick` turn the right stick into steps

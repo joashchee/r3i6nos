@@ -218,6 +218,8 @@ layers (abc, ABC, #+=), the text shown, optionally hidden. The map above drives 
 
 ## Where today's code differs
 
+- **The boot menu (2026-11-24)** reads the pad and the keyboard through the Lua reader (`theme/r3i6nos_input.lua`): L1 + R1, backquote or Y open its main menu (About, Colour theme, Keymap, Device report, Rec demo, Quit, then its settings), R1 held pages, the stick steps the list, the keyboard map is the permanent one, no input quits, and its Quit powers the unit off. Its Rec demo and own report flags, the Keymap's remap and R3 for the Wi-Fi keyboard are not built. Untested on a unit.
+
 - **Keyboard bindings (2026-11-22):** only MusiCue's desktop build has them so far (`key_button` in `../musicue/src/musicue.c`), and there I K J L move the selection only in the player; the C theme's own `r3_key_action` and the other apps still have their own keys and are to follow the table in "The keyboard bindings".
 - **MusiCue (2026-11-20)** follows the mapping through the C reader and main menu too (its own one-touch map for Start, Rec mode, the D-pad, A-B on R1, the Jump panel and the Piano, `../musicue/docs/MUSICUE.md`); its Device report and Rec demo items say not built yet.
 - **Built so far (2026-11-20): the C theme's reader and main menu** (`theme/r3i6nos_input.h`, `theme/r3i6nos_mainmenu.h`, `tests/test_input.c`) and **the native IO Checker**, which

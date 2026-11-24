@@ -134,7 +134,7 @@ assert(text:find("Test sound", 1, true) and text:find("< Tone, left only >", 1, 
 
 -- B leaves
 settings.press(s, "back")
-eq(settings.node(s).title, "Settings")
+eq(settings.node(s).title, "Main menu")
 
 -- many controls: whole pages, the sound's row on every one
 local many = { controls = {}, sel = 1, sound = 1 }

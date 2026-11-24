@@ -14,8 +14,20 @@ local mixer = require("mixer")
 local mirror = require("mirror")
 local datacard = require("datacard")
 local portmaster = require("portmaster")
+local keymap = require("r3i6nos_keymap")
 
 local settings = {}
+
+--- What the buttons do in the games list: the Keymap's page for this app (the one-touch buttons are the app's, docs/r3i6nos-mapping.md).
+local MENU_KEYS = {
+  { "A", "Run the selected game or app" },
+  { "B", "Close a dialog" },
+  { "Y", "Open the main menu" },
+  { "Up, Down", "Move the selection" },
+  { "R1 + Up/Down", "A page up or down" },
+  { "R1 + Left/Right", "The first or last game" },
+  { "Select, Start", "Nothing here" },
+}
 
 --- Seconds to wait for the helper before giving up, by verb (a scan or a Wi-Fi join is slow).
 settings.TIMEOUT = { default = 30, scan = 45, wifi = 75, wired = 60, test = 60, ["ssh-enable"] = 45 }
@@ -146,7 +158,7 @@ local function networkMenu(s)
     { label = "Test connection", hint = "Link, address, gateway, DNS, internet", run = asker("Connection test", "test") },
     { label = "Disconnect", hint = "Turn the network off", run = asker("Disconnect", "disconnect") },
     { label = "Instructions", hint = "What to plug in and how to set it up", run = function(sx) showPages(sx, "Network help", pages_net) end },
-    { label = "Back", hint = "Return to Settings", run = function(sx) pop(sx) end },
+    { label = "Back", hint = "Return to the main menu", run = function(sx) pop(sx) end },
   }, 52))
 end
 
@@ -167,7 +179,7 @@ local function sshMenu(s)
     { label = "Start SSH", hint = "Needs a network and a password or key. Off after reboot", run = asker("Start SSH", "ssh-enable") },
     { label = "Stop SSH", hint = "Turn the SSH server off", run = asker("Stop SSH", "ssh-disable") },
     { label = "Instructions", hint = "How to log in from a computer", run = function(sx) showPages(sx, "SSH help", pages_ssh) end },
-    { label = "Back", hint = "Return to Settings", run = function(sx) pop(sx) end },
+    { label = "Back", hint = "Return to the main menu", run = function(sx) pop(sx) end },
   }, 56))
 end
 
@@ -189,7 +201,7 @@ local function batteryMenu(s)
           else show(sy, "Battery", { "Could not clear the history." }, false) end
         end)
       end },
-    { label = "Back", hint = "Return to Settings", run = function(sx) pop(sx) end },
+    { label = "Back", hint = "Return to the main menu", run = function(sx) pop(sx) end },
   }, 48))
 end
 
@@ -233,6 +245,31 @@ local function waitReport(s, r)
   })
 end
 
+-- Start a device report: wait on it when it runs already; a report that needs a setup (a cable, a charger out) says so first and waits for a
+-- keypress (A runs it, B cancels); one that must be run several times says which run this is ("run 2 of 3"; Y shows another run's setup).
+local function startReport(sx, r)
+  local rep = sx.rep
+  if rep.running and rep.running() == r.cmd then return waitReport(sx, r) end
+  local function go(sy, k)
+    local ok, err = rep.start(r, nil, k)
+    if ok then waitReport(sy, r)
+    else show(sy, r.app .. " report", { "Could not start the report:", tostring(err) }, false) end
+  end
+  if (r.needs and #r.needs > 0) or r.runs then
+    local k = r.runs and (rep.nextRun and rep.nextRun(r) or 1) or nil
+    local node = { kind = "pages", page = 1, runs = r.runs, run = k }
+    function node.rebuild()
+      node.title = r.app .. " report" .. (r.runs and (": run %d of %d"):format(node.run, r.runs) or ": set up")
+      node.pages = pages.paginate(setupLines(r, node.run))
+      node.page = 1
+    end
+    node.go = function(sy) go(sy, node.run) end
+    node.rebuild()
+    return push(sx, node)
+  end
+  go(sx)
+end
+
 -- Device reports (docs/DEVICE-REPORTS.md): r3i6nos's own and each installed tool's <command>-report, started in the background.
 local function reportsMenu(s)
   local rep = s.rep
@@ -246,35 +283,13 @@ local function reportsMenu(s)
     items[#items + 1] = { label = r.app, value = value,
       hint = mine and "Running now: choose it to see how far it has got"
         or (nextRun and ("Run it %d times, one setup each: this is run %d"):format(r.runs, nextRun))
-        or ("Check " .. r.app .. " on this unit, for Claude"), run = function(sx)
-      if rep.running and rep.running() == r.cmd then return waitReport(sx, r) end
-      local function go(sy, k)
-        local ok, err = rep.start(r, nil, k)
-        if ok then waitReport(sy, r)
-        else show(sy, r.app .. " report", { "Could not start the report:", tostring(err) }, false) end
-      end
-      -- a report that needs a setup (a cable, a charger out) says so first and waits for a keypress: A runs it, B cancels.
-      -- One that must be run several times says which run this is ("run 2 of 3"); Y shows another run's setup.
-      if (r.needs and #r.needs > 0) or r.runs then
-        local k = r.runs and (rep.nextRun and rep.nextRun(r) or 1) or nil
-        local node = { kind = "pages", page = 1, runs = r.runs, run = k }
-        function node.rebuild()
-          node.title = r.app .. " report" .. (r.runs and (": run %d of %d"):format(node.run, r.runs) or ": set up")
-          node.pages = pages.paginate(setupLines(r, node.run))
-          node.page = 1
-        end
-        node.go = function(sy) go(sy, node.run) end
-        node.rebuild()
-        return push(sx, node)
-      end
-      go(sx)
-    end }
+        or ("Check " .. r.app .. " on this unit, for Claude"), run = function(sx) startReport(sx, r) end }
   end
   if #found == 0 then
     items[#items + 1] = { label = "None installed", hint = "No command-line tool with a report", run = function(sx) show(sx, "Device reports", rep.NONE) end }
   end
   items[#items + 1] = { label = "What these are", hint = "A file for Claude about this unit", run = function(sx) show(sx, "Device reports", rep.ABOUT) end }
-  items[#items + 1] = { label = "Back", hint = "Return to Settings", run = function(sx) pop(sx) end }
+  items[#items + 1] = { label = "Back", hint = "Return to the main menu", run = function(sx) pop(sx) end }
   push(s, menu("Device reports", items, 48))
 end
 
@@ -299,7 +314,7 @@ local function demosMenu(s)
     items[#items + 1] = { label = "None installed", hint = "No command-line tool with a Rec demo", run = function(sx) show(sx, "Rec demos", dm.NONE) end }
   end
   items[#items + 1] = { label = "What these are", hint = "Screenshots and a video of an app", run = function(sx) show(sx, "Rec demos", dm.ABOUT) end }
-  items[#items + 1] = { label = "Back", hint = "Return to Settings", run = function(sx) pop(sx) end }
+  items[#items + 1] = { label = "Back", hint = "Return to the main menu", run = function(sx) pop(sx) end }
   push(s, menu("Rec demos", items, 48))
 end
 
@@ -335,7 +350,7 @@ mirrorMenu = function(s)
     end
   end
   items[#items + 1] = { label = "Instructions", hint = "What to plug in and how to open the page", run = function(sx) showPages(sx, "Screen mirror help", mr.INSTRUCTIONS) end }
-  items[#items + 1] = { label = "Back", hint = "Return to Settings", run = function(sx) pop(sx) end }
+  items[#items + 1] = { label = "Back", hint = "Return to the main menu", run = function(sx) pop(sx) end }
   push(s, menu("Screen mirror", items, 48))
 end
 
@@ -371,7 +386,7 @@ local function dataCardMenu(s)
     end }
   end
   items[#items + 1] = { label = "What this does", hint = "Format, folders, mount: and the system card is safe", run = function(sx) show(sx, "Data card", dc.ABOUT) end }
-  items[#items + 1] = { label = "Back", hint = "Return to Settings", run = function(sx) pop(sx) end }
+  items[#items + 1] = { label = "Back", hint = "Return to the main menu", run = function(sx) pop(sx) end }
   push(s, menu("Data card", items, 48))
 end
 
@@ -392,7 +407,7 @@ local function aboutMenu(s)
         })
       end },
     { label = "Licences", hint = "r3i6nos, the font and the other parts", run = function(sx) showPages(sx, "Licences", ab.LICENCES) end },
-    { label = "Back", hint = "Return to Settings", run = function(sx) pop(sx) end },
+    { label = "Back", hint = "Return to the main menu", run = function(sx) pop(sx) end },
   }, 48))
 end
 
@@ -415,8 +430,44 @@ local function setClock(s, n)
   })
 end
 
+--- The system's own report (r3i6nos-report), the menu's "Device report" (rule 9): the one about this unit and this menu.
+local function ownReport(s)
+  for _, r in ipairs(s.rep.list()) do
+    if r.cmd == s.rep.SYSTEM then return startReport(s, r) end
+  end
+  show(s, "Device report", { "The system's report (r3i6nos-report) is not", "installed here." }, false)
+end
+
+--- The main menu (rule 17, docs/r3i6nos-mapping.md): the six compulsory items in order, the launcher's own after them.
+--- Benchmark is hidden: the menu has nothing to measure that its own report does not. Quit is how the launcher is left: it powers the
+--- unit off, since the menu is the unit's only screen (docs/R3I6NOS-ANSIAPPS-THEME.md, "The main menu").
 local function root(s)
-  return menu("Settings", {
+  return menu("Main menu", {
+    { label = "About", hint = "Version, updates, this unit and licences", run = aboutMenu },
+    { label = "Colour theme", value = "VGA Classic", hint = "The menu's colours: one theme so far", run = function(sx)
+        push(sx, menu("Colour theme", {
+          { label = "VGA Classic", value = "in use", hint = "The 16 VGA colours; every pair passes 4.5:1", run = function(sy) pop(sy) end },
+          { label = "Back", hint = "Return to the main menu", run = function(sy) pop(sy) end },
+        }, 44))
+      end },
+    { label = "Keymap", hint = "The input map: help and a test of every button", run = function(sx)
+        push(sx, menu("Keymap", {
+          { label = "Help", hint = "What every input does, the keys, what is never bound", run = function(sy)
+              showPages(sy, "Keymap help", keymap.pages(MENU_KEYS, "The games list"))
+            end },
+          { label = "Test", hint = "Press anything: it is shown and does nothing", run = function(sy)
+              push(sy, { kind = "keytest", title = "Keymap test", t = keymap.test_new(), reader = sy.input })
+            end },
+          { label = "Back", hint = "Return to the main menu", run = function(sy) pop(sy) end },
+        }, 44))
+      end },
+    { label = "Device report", hint = "Check this unit, for Claude (a file on the card)", run = ownReport },
+    { label = "Rec demo", hint = "Not built for the menu yet", run = function(sx)
+        show(sx, "Rec demo", { "The menu has no Rec demo yet (rule 11).", "", "Settings > Rec demos records the installed", "tools; the menu's own tour is still to build." }, false)
+      end },
+    { label = "Quit", value = "shut down", hint = "The menu is the unit's only screen: this powers it off", run = function(sx)
+        confirm(sx, "Shut down the device?", "Yes, shut down", "Powers the device off", function() return "poweroff" end)
+      end },
     { label = "Network", hint = "Wired and Wi-Fi: status, setup, test, instructions", run = networkMenu },
     { label = "SSH", hint = "Log in from a computer (off until you start it)", run = sshMenu },
     { label = "Battery", hint = "Charge, health and how much each app uses", run = batteryMenu },
@@ -426,16 +477,11 @@ local function root(s)
         push(sx, n)
       end },
     { label = "Date and time", hint = "Set the clock and time zone (kept across restarts)", run = function(sx) clockNode(sx, false) end },
-    { label = "Device reports", hint = "Check this unit for an app's maker (a file for Claude)", run = reportsMenu },
+    { label = "Device reports", hint = "Every tool's report (a file for Claude)", run = reportsMenu },
     { label = "Rec demos", hint = "Screenshots and a video of an app, for its store page", run = demosMenu },
     { label = "Screen mirror", hint = "Show this screen on a computer, monitor or TV", run = mirrorMenu },
     { label = "Data card", hint = "Format the card in the second slot for r3i6nos and open it", run = dataCardMenu },
-    { label = "About", hint = "Version, updates, this unit and licences", run = aboutMenu },
-    { label = "Shutdown", hint = "Power the device off", run = function(sx)
-        confirm(sx, "Shut down the device?", "Yes, shut down", "Powers the device off", function() return "poweroff" end)
-      end },
-    { label = "Back", hint = "Return to the games", run = function(sx) sx.stack = {} end },
-  }, 40)
+  }, 44)
 end
 
 function settings.open(s)
@@ -532,6 +578,9 @@ function settings.press(s, action)
     end
   elseif n.kind == "mixer" then
     if s.mx.press(n, action) == "close" then pop(s) end
+  elseif n.kind == "keytest" then
+    if action == "back" or action == "menu" then pop(s)   -- the test acts on nothing; B or L1 + R1 leaves it
+    else keymap.test_press(n.t, require("r3i6nos_input").ACTION_NAME[action] or action) end
   elseif n.kind == "busy" then
     if action == "back" then pop(s) end -- stop waiting; the answer, if it comes, is ignored
   end

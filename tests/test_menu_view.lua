@@ -82,7 +82,7 @@ eq(view.PER_PAGE, 18)
 has(rows[2], "Games and apps"); has(rows[2], "Page 1/3")
 has(rows[3], "Game 01"); has(rows[3], "L?VE 11.5"); has(rows[5], "native")
 has(rows[20], "Game 18"); assert(not rows[20]:find("Game 19", 1, true), "18 a page")
-has(rows[21], "L2/R2")
+has(rows[21], "Y Menu")
 -- the command line: the selected game's path, the line that would run it, the place in the list
 has(rows[22], "/roms/Love/g1.love"); has(rows[23], "> run Game 01"); has(rows[24], "1 of 40"); has(rows[24], "L?VE 11.5")
 for r = 22, 24 do eq(scr.bg[(r - 1) * 64 + 1], theme.BLACK) end
@@ -109,33 +109,21 @@ settings.open(dialog)
 view.render(scr, { entries = entries, selected = 1, dialog = dialog })
 rows = scr:dump()
 local joined = table.concat(rows, "\n")
-has(joined, "Settings"); has(joined, "Network"); has(joined, "SSH"); has(joined, "Shutdown"); has(joined, "Back"); has(joined, "A Choose  B Back")
-has(rows[22], "Wired and Wi-Fi"); has(rows[23], "> settings")
+has(joined, "Main menu"); has(joined, "About"); has(joined, "Colour theme"); has(joined, "Keymap"); has(joined, "Device report"); has(joined, "Rec demo"); has(joined, "Quit"); has(joined, "A Choose  B Back")
+has(rows[22], "Version, updates"); has(rows[23], "> main menu")
 has(rows[1], "r3i6nos")
-settings.press(dialog, "down"); settings.press(dialog, "down"); settings.press(dialog, "down")
+-- each item's hint on the command line, walking down the main menu from About
+for _, hint in ipairs({ "one theme so far", "input map", "Check this unit, for Claude", "Not built for the menu yet", "powers it off",
+  "Wired and Wi-Fi", "off until you start it", "how much each app uses", "with a test sound", "Set the clock and time zone",
+  "a file for Claude", "a video of an app", "Show this screen on a computer", "Format the card in the second slot" }) do
+  settings.press(dialog, "down")
+  view.render(scr, { entries = entries, selected = 1, dialog = dialog })
+  has(scr:dump()[22], hint)
+end
+settings.press(dialog, "down"); settings.press(dialog, "down") -- the list wraps to About, then Colour theme
+settings.press(dialog, "down"); settings.press(dialog, "down"); settings.press(dialog, "down"); settings.press(dialog, "down") -- Keymap, Device report, Rec demo, Quit
 view.render(scr, { entries = entries, selected = 1, dialog = dialog })
-has(scr:dump()[22], "with a test sound") -- Sound mixer (docs/SOUND.md)
-settings.press(dialog, "down")
-view.render(scr, { entries = entries, selected = 1, dialog = dialog })
-has(scr:dump()[22], "Set the clock and time zone") -- Date and time (docs/CLOCK.md)
-settings.press(dialog, "down")
-view.render(scr, { entries = entries, selected = 1, dialog = dialog })
-has(scr:dump()[22], "a file for Claude") -- Device reports (CLAUDE.md rule 9)
-settings.press(dialog, "down")
-view.render(scr, { entries = entries, selected = 1, dialog = dialog })
-has(scr:dump()[22], "a video of an app") -- Rec demos (CLAUDE.md rule 11)
-settings.press(dialog, "down")
-view.render(scr, { entries = entries, selected = 1, dialog = dialog })
-has(scr:dump()[22], "Show this screen on a computer") -- Screen mirror (docs/SCREEN-MIRROR.md)
-settings.press(dialog, "down")
-view.render(scr, { entries = entries, selected = 1, dialog = dialog })
-has(scr:dump()[22], "Format the card in the second slot") -- Data card (docs/STORAGE.md)
-settings.press(dialog, "down")
-view.render(scr, { entries = entries, selected = 1, dialog = dialog })
-has(scr:dump()[22], "Version, updates") -- About
-settings.press(dialog, "down")
-view.render(scr, { entries = entries, selected = 1, dialog = dialog })
-has(scr:dump()[22], "Power the device off")
+has(scr:dump()[22], "powers it off")
 settings.press(dialog, "accept")
 view.render(scr, { entries = entries, selected = 1, dialog = dialog })
 rows = scr:dump()
@@ -162,7 +150,7 @@ local function snap(name) screens[#screens + 1] = { name = name, rows = draw(), 
 
 dialog = settings.new(io_); settings.open(dialog)
 pick("Network"); rows = draw()
-has(table.concat(rows, "\n"), "Network"); has(table.concat(rows, "\n"), "Wired setup"); has(table.concat(rows, "\n"), "Test connection"); has(rows[23], "> settings > network")
+has(table.concat(rows, "\n"), "Network"); has(table.concat(rows, "\n"), "Wired setup"); has(table.concat(rows, "\n"), "Test connection"); has(rows[23], "> main menu > network")
 snap("network menu")
 pick("Status"); rows = draw()                                   -- waiting
 has(table.concat(rows, "\n"), "Waiting for the network helper"); has(table.concat(rows, "\n"), "B Stop waiting"); has(rows[22], "Working")
@@ -212,7 +200,7 @@ do
   dialog = settings.new(io_, fake); settings.open(dialog)
   pick("Battery"); rows = draw()
   local all = table.concat(rows, "\n")
-  has(all, "Battery"); has(all, "Use by app"); has(all, "Clear history"); has(rows[23], "> settings > battery")
+  has(all, "Battery"); has(all, "Use by app"); has(all, "Clear history"); has(rows[23], "> main menu > battery")
   has(rows[22], "Charge, voltage, health")
   snap("battery menu")
   pick("Status"); rows = draw(); all = table.concat(rows, "\n")
@@ -234,7 +222,7 @@ do
     startCheck = function() return true end, poll = function() return nil end,
   }
   dialog = settings.new(io_, nil, nil, fakeab); settings.open(dialog)
-  pick("About"); rows = draw(); has(table.concat(rows, "\n"), "Check for updates"); has(rows[23], "> settings > about")
+  pick("About"); rows = draw(); has(table.concat(rows, "\n"), "Check for updates"); has(rows[23], "> main menu > about")
   snap("about menu")
   pick("This system"); rows = draw(); has(table.concat(rows, "\n"), "r3i6nos 0.1.0")
   snap("about system")
@@ -339,8 +327,11 @@ do
   has(text, "Looking for games and apps"); has(text, "Starting")
   local lit = select(2, text:gsub("\219", "")) -- the dump may show the bar as ?; count either form
   assert(text:find("[\219?]"), "a progress bar is drawn")
-  view.splash(sp, 3, 3, "Ready")
-  has(table.concat(sp:dump(), "\n"), "Ready")
+  has(text, "unknown", "no release file: the version line says unknown, never nothing")
+  view.splash(sp, 3, 3, "Ready", { VERSION = "0.4.2", COMMIT = ("a1b2c3d4e5"):rep(4), COMMIT_DATE = "2026-11-24" })
+  local ready = table.concat(sp:dump(), "\n")
+  has(ready, "Ready"); has(ready, "v0.4.2 a1b2c3d4e5 2026-11-24") -- rule 12: the version, the commit and the date
+  eq(view.buildLine({ VERSION = "1", COMMIT = "unknown", BUILT = "2026-01-02", MODIFIED = "1" }), "v1 unknown 2026-01-02 +changes")
 end
 -- rule 18: an install over SSH shows its bar on the command line
 view.render(scr, { entries = entries, selected = 1, dialog = settings.new(), install = { step = 1, steps = 4, doing = "Installing pyxel" } })
@@ -348,5 +339,24 @@ local last = scr:dump()
 local found = false
 for _, r in ipairs(last) do if r:find("Installing pyxel", 1, true) and r:find("[##", 1, true) and r:find("1 of 4", 1, true) then found = true end end
 assert(found, "the install bar is on the command line")
+
+-- the Keymap's help and test pages draw, in the same style, and the test shows what the reader holds
+do
+  local input = require("r3i6nos_input")
+  local d = settings.new()
+  d.input = input.new()
+  settings.open(d)
+  local function pick(label) local n = settings.node(d); for i, it in ipairs(n.items) do if it.label == label then n.sel = i; return settings.press(d, "accept") end end error(label) end
+  pick("Keymap"); pick("Help")
+  view.render(scr, { entries = entries, selected = 1, dialog = d })
+  local help = table.concat(scr:dump(), "\n")
+  has(help, "Keymap help"); has(help, "Page 1/3"); has(help, "L1 + R1")
+  settings.press(d, "back"); pick("Test")
+  input.button(d.input, input.BTN.R1, true)
+  settings.press(d, "up")
+  view.render(scr, { entries = entries, selected = 1, dialog = d })
+  local test = table.concat(scr:dump(), "\n")
+  has(test, "Keymap test"); has(test, "Held:    R1"); has(test, "Up"); has(test, "B or L1+R1 Back")
+end
 
 print("splash ok")

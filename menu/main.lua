@@ -1,7 +1,9 @@
 -- r3i6nos menu: one list of every LÖVE game and native app on the card, in the r3i6nos-ansiapps theme
 -- (theme/, docs/R3I6NOS-ANSIAPPS-THEME.md): 64x24 text cells, a top bar, the list, a three-row command line.
--- D-pad up/down move, A launches, L1/R1 (or left/right) turn a page, L2/R2 jump to the top/end, Start opens
--- Settings (S / F1 on a keyboard): Network, SSH, Battery, Sound mixer, Date and time, reports, About and Shutdown. The battery shows at the top right. Never scrolls.
+-- The input is the mapping's (docs/r3i6nos-mapping.md, theme/r3i6nos_input.lua): D-pad or right stick move, A launches, R1 held pages (up/down)
+-- and goes to the first or last game (left/right), Y or L1 + R1 (backquote on a keyboard) opens the main menu: About, Colour theme, Keymap,
+-- Device report, Rec demo, Quit (it powers the unit off), then Network, SSH, Battery, Sound mixer, Date and time, reports and the cards.
+-- The keyboard is the permanent map (W A S D, I J K L, ...). No button or key quits: the main menu's Quit does. The battery shows at the top right. Never scrolls.
 
 package.path = (os.getenv("R3I6NOS_THEME") or "/opt/loveos/theme") .. "/?.lua;" .. package.path
 
@@ -13,6 +15,8 @@ local settings = require("settings")
 local about = require("about")
 local mixer = require("mixer")
 local theme = require("r3i6nos_ansiapps")
+local input = require("r3i6nos_input") -- the mapping's reader: buttons, chords, the right stick, the keyboard (docs/r3i6nos-mapping.md)
+local pad = input.new()
 local toast = require("r3i6nos_toast")
 local hotplug = toast.new() -- the hot-plug toast over the top bar: headphones, USB, DC power (docs/HOTPLUG.md)
 local view = require("view")
@@ -33,6 +37,7 @@ local NEXT = os.getenv("R3I6NOS_NEXT") or "/run/loveos/next"
 
 local entries, selected = {}, 1
 local dialog = settings.new(netclient, battery)
+dialog.input = pad -- the Keymap test shows what the reader holds
 
 -- Settings > About: what only LÖVE knows. The pads' GUIDs are what the SDL mapping in run_app.sh needs (still unread on a unit).
 about.extra = function()
@@ -56,8 +61,19 @@ local net = nil -- the link for the top bar, read with the battery
 
 -- The first screen goes up before anything slow runs (the card scan forks `ls` for every folder): a black panel for
 -- seconds feels like a hang. Shown twice, so both buffers of the display hold it.
+local build -- /etc/r3i6nos-release's keys, for the splash's version line (rule 12)
+local function readBuild()
+  local t = {}
+  local f = io.open(os.getenv("R3I6NOS_RELEASE") or "/etc/r3i6nos-release", "r")
+  if f then
+    for line in f:lines() do local k, v = line:match("^(%u[%u_]*)=(.*)$"); if k then t[k] = v end end
+    f:close()
+  end
+  return t
+end
+
 local function splash(done, total, doing)
-  view.splash(screen, done, total, doing)
+  view.splash(screen, done, total, doing, build)
   for _ = 1, 2 do
     love.graphics.origin()
     love.graphics.clear(love.graphics.getBackgroundColor())
@@ -71,6 +87,7 @@ function love.load()
   theme.init()
   theme.useMono(true)   -- R3i6nos Mono: the top bar's battery and Wi-Fi are glyphs, and a title with a letter CP437 lacks is drawn (the table loads on the first glyph)
   screen = theme.screen()
+  build = readBuild()
   splash(0, 3, "Starting")
   -- Packages waiting to be extracted (a new card's first boot: the default apps): loveos-session left the watcher to this splash so there is a bar (rule 18)
   local watch = os.getenv("R3I6NOS_MENU_WATCH")
@@ -132,6 +149,7 @@ end
 
 function love.update(dt)
   toast.poll(hotplug, love.timer.getTime())
+  for _, a in ipairs(input.tick(pad, dt)) do act(a); redraw.mark(rd) end -- a stick step is not an event
   settings.tick(dialog, dt)
   pkgProgressAge = pkgProgressAge + dt
   if pkgProgressAge >= pkgflag.EVERY then -- an install over SSH is extracting: show how far on the command line
@@ -171,7 +189,7 @@ function love.run()
     end
     love.update(love.timer.step())
     local n = settings.isOpen(dialog) and settings.node(dialog)
-    local moving = n and (n.kind == "mixer" or (n.kind == "busy" and "slow")) -- the test sound; a helper's wait counts seconds (a report held this at 30 fps: 35% of a core)
+    local moving = n and (n.kind == "mixer" or n.kind == "keytest" or (n.kind == "busy" and "slow")) -- the test sound; the Keymap test's sticks; a helper's wait counts seconds (a report held this at 30 fps: 35% of a core)
     local token = hotplug.showing and ((hotplug.error and "e" or "i") .. hotplug.text) or ""
     local draw, nap = redraw.frame(rd, token, moving)
     if draw and love.graphics.isActive() then
@@ -194,30 +212,40 @@ end
 local function poweroff() request("system\tpoweroff") end
 local function reboot() request("system\treboot") end
 
--- One place for every input (a list dialog's actions: up, down, left, right, pageup, pagedown, home, end, accept, back, more).
+-- One place for every input (the reader's actions: up down left right pageup pagedown home end accept back x y select start menu context ...).
 local function act(action)
   if settings.isOpen(dialog) then
+    if action == "menu" then -- L1 + R1 closes the main menu again, except where it has a meaning of its own (a keyboard, a test page)
+      local n = settings.node(dialog)
+      if n.kind == "keytest" then settings.press(dialog, action) elseif n.kind ~= "osk" and n.kind ~= "busy" then dialog.stack = {} end
+      return
+    end
     local r = settings.press(dialog, action)
     if r == "poweroff" then poweroff() elseif r == "reboot" then reboot() end
     return
   end
-  local new, event = theme.listKey(selected, #entries, view.PER_PAGE, action)
+  if action == "menu" or action == "y" then settings.open(dialog) return end
+  if action == "context" or action == "panelnext" or action == "panelfirst" or action == "panelprev" then return end -- one panel: nothing to turn
+  local new = input.list_step(selected, #entries, view.PER_PAGE, action)
   selected = math.max(1, new)
-  if event == "accept" then launch()
-  elseif event == "more" then settings.open(dialog) end
+  if action == "accept" then launch() end
 end
 
+-- A key that is a pad button goes through the same reader as the pad's buttons (docs/r3i6nos-mapping.md, "The keyboard bindings").
 function love.keypressed(key)
   if toast.key(hotplug) then return end -- the key that clears a failure toast is used up
   if typing() then -- letters are text here, not commands
     if key == "backspace" then settings.backspace(dialog)
-    elseif key == "return" or key == "kpenter" then act("more")
+    elseif key == "return" or key == "kpenter" then settings.press(dialog, "more") -- the keyboard's Enter is Done (the pad's Start)
     elseif key == "escape" then act("back")
     elseif key == "up" or key == "down" or key == "left" or key == "right" then act(key) end
     return
   end
-  if theme.KEYS[key] then act(theme.KEYS[key]) end
+  local a = input.key(pad, key, true)
+  if a then act(a) end
 end
+
+function love.keyreleased(key) input.key(pad, key, false) end
 
 function love.textinput(text)
   if typing() then settings.text(dialog, text) end
@@ -226,8 +254,20 @@ end
 -- Raw buttons only: this pad's SDL gamepad mapping does not match its real layout (docs/hardware-findings.md).
 function love.joystickpressed(_, button)
   if toast.key(hotplug) then return end
-  if theme.PAD[button] then act(theme.PAD[button]) end
+  local a = input.button(pad, button, true)
+  if a then
+    -- the on-screen keyboard keeps Select and Start (docs/r3i6nos-mapping.md, "What the virtual keyboard overrides"), and Y changes its layer
+    if typing() and (a == "start") then a = "more" end
+    act(a)
+  end
 end
+
+function love.joystickreleased(_, button) input.button(pad, button, false) end
+
+-- The right stick is the D-pad at a rate that follows how far it is pushed (dead zone 0.35, at most 6 steps a second).
+function love.joystickaxis(_, axis, value) input.axis(pad, axis, value) end
+
+function love.focus(f) if not f then input.release_all(pad) end end
 
 function love.draw()
   view.render(screen, { entries = entries, selected = selected, dialog = dialog, battery = power, net = net, install = pkgProgress })

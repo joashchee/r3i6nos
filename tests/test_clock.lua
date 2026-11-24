@@ -76,7 +76,7 @@ settings.open(s)
 local n = settings.node(s)
 for i, it in ipairs(n.items) do if it.label == "Date and time" then n.sel = i end end
 settings.press(s, "accept"); eq(settings.node(s).title, "Date and time"); assert(not settings.node(s).first)
-settings.press(s, "back"); eq(settings.node(s).title, "Settings"); assert(clock.needed(), "B in Settings is not Not now")
+settings.press(s, "back"); eq(settings.node(s).title, "Main menu"); assert(clock.needed(), "B in Settings is not Not now")
 settings.press(s, "accept"); settings.press(s, "accept")
 settings.tick(s, clock.WAIT + 1)
 eq(settings.node(s).kind, "pages"); assert(settings.node(s).bad, "no answer: shown as a failure")
