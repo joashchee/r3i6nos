@@ -82,7 +82,7 @@ int main(void) {
     r3_dump(&s, dump);
     int caps = 0;
     for (int i = 0; i < R3_COLS * R3_ROWS; i++) if (s.ux[i]) caps++;
-    CHECK(strstr(dump[7], "Chorus") && caps == 2 * R3_OSK_ROWS * R3_OSK_COLS, "the text is on the screen and every key is a two-cell cap (R3i6nos Mono, the default font): %d cells\n%s", caps, dump[7]);
+    CHECK(strstr(dump[7], "Chorus") && caps == 2 * R3_OSK_ROWS * R3_OSK_COLS, "the text is on the screen and every key is a two-cell cap (ANSIapps Mono, the default font): %d cells\n%s", caps, dump[7]);
     if (fails) { fprintf(stderr, "test_osk: %d failed\n", fails); return 1; }
     puts("test_osk: ok");
     return 0;

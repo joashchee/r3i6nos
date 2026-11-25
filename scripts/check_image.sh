@@ -61,7 +61,7 @@ mount -o ro "$ROOT_DEV" "$MNT"
 for f in etc/fstab etc/systemd/system/loveos.service usr/local/bin/loveos-session \
          usr/local/bin/run_app.sh usr/local/bin/deb_watcher.py usr/local/bin/r3i6nos-poweroff usr/local/bin/r3i6nos-about etc/r3i6nos-release usr/local/bin/r3i6nos-cards usr/local/bin/r3i6nos-format usr/local/bin/r3i6nos-runtimes etc/systemd/system/r3i6nos-runtimes.path etc/systemd/system/r3i6nos-runtimes.service usr/local/bin/r3i6nos-setup usr/local/bin/r3i6nos-report etc/systemd/system/r3i6nos-cards.service etc/systemd/system/r3i6nos-setup.service \
          opt/loveos/menu/main.lua opt/loveos/menu/settings.lua opt/loveos/menu/reports.lua opt/loveos/menu/view.lua \
-         opt/loveos/theme/r3i6nos_ansiapps.lua opt/loveos/theme/vga8x16.lua opt/loveos/theme/font/LICENSE.TXT; do
+         opt/loveos/theme/r3i6nos_ansiapps.lua opt/loveos/theme/font/ansiapps-mono/ansiapps_cp437.lua opt/loveos/theme/font/ansiapps-mono/OFL.txt; do
     [ -e "$MNT/$f" ] || fail "missing in rootfs: /$f"
 done
 for f in usr/local/bin/loveos-session usr/local/bin/run_app.sh usr/local/bin/r3i6nos-poweroff; do
@@ -73,7 +73,7 @@ if [ "${R3I6NOS_ALLOW_NO_NTTPLAY:-0}" != 1 ]; then
     [ -s "$MNT/usr/share/nttplay/NOTICE" ] || fail "no /usr/share/nttplay/NOTICE: nttplay's third-party licences must travel with it"
     for f in usr/bin/nttplay-report usr/bin/nttplay-demo; do [ -x "$MNT/$f" ] || fail "no /$f (rules 9 and 11 for nttplay)"; done
     [ -s "$MNT/usr/share/nttplay/commands.txt" ] || fail "no /usr/share/nttplay/commands.txt: nttplay-report and nttplay-demo have nothing to run"
-    [ -s "$MNT/usr/share/nttplay/NOTICE-font" ] || fail "no /usr/share/nttplay/NOTICE-font: the demo draws with the CC BY-SA font, its credit must travel"
+    [ -s "$MNT/usr/share/nttplay/NOTICE-font" ] || fail "no /usr/share/nttplay/NOTICE-font: the demo draws with ANSIapps Mono, its credit must travel"
 fi
 # PortMaster is in the image for testing (docs/PORTMASTER.md): its package, its licence notice, and the libraries its GUI loads.
 if [ "${R3I6NOS_ALLOW_NO_PORTMASTER:-0}" != 1 ]; then

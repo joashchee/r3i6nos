@@ -1,6 +1,6 @@
 # Default apps
 
-> New apps start from the r3i6nos-ansiapps theme (`docs/R3I6NOS-ANSIAPPS-THEME.md`), whose font is **R3i6nos Mono** by default (`docs/R3I6NOS-MONO-FONT.md`): print icons, status, gamepad and key glyphs by name from it. The IO Checker and Commander are on it.
+> New apps start from the r3i6nos-ansiapps theme (`docs/R3I6NOS-ANSIAPPS-THEME.md`), whose font is **ANSIapps Mono** by default (`docs/ANSIAPPS-MONO-FONT.md`): print icons, status, gamepad and key glyphs by name from it. The IO Checker and Commander are on it.
 
 Built into every image (`/opt/loveos/defaults`), so the menu is never empty: **native `.deb` apps only** (Commander, the native IO Checker, and PortMaster for testing; since 2026-11-18 the
 LÖVE builds of the IO Checker are not in the image). Anything on the games card (`EASYROMS`) is listed beside them, and a file of the same name there replaces the built-in one.
@@ -151,9 +151,9 @@ buttons, how it looks on the panel, speed on the SD card (and how long a big JPE
 
 ## Font Editor (`fontedit-native/`, not in the image)
 
-`native_deb/Font_Editor.deb` (C and SDL2, on the theme): touches up R3i6nos Mono with the pad, and other monospace bitmap fonts (`--font FILE.bdf`). Its first panel is the font's **multi-cell glyphs**
-(the 492 two-cell icons, key caps, shoulders, sticks and knobs), each opened whole on one canvas drawn across the seam between its cells. Edits are saved after every stroke to `FontEdit/edits-r3i6nos-mono.txt` and folded
-into the font by `scripts/merge_font_edits.py` and `scripts/build-r3-font.sh`. Controls, the file format, the rules it follows and what is untested: **`docs/FONT-EDITOR.md`**. Build: `scripts/build-native-local.sh fontedit-native`;
+`native_deb/Font_Editor.deb` (C and SDL2, on the theme): touches up ANSIapps Mono with the pad, and other monospace bitmap fonts (`--font FILE.bdf`). Its first panel is the font's **multi-cell glyphs**
+(the 677 multi-cell names: icons, key caps, shoulders, sticks, knobs, and the wide and tall versions), each opened whole on one canvas drawn across the seam between its cells. Edits are saved after every stroke to `FontEdit/edits-ansiapps-mono.txt` and are carried
+to the font's own repository (`ansiapps-mono-font`; the importer is open, ROADMAP section 44). Controls, the file format, the rules it follows and what is untested: **`docs/FONT-EDITOR.md`**. Build: `scripts/build-native-local.sh fontedit-native`;
 check: `scripts/check.sh --app fontedit-native --theme`.
 
 ## Adding an app: its own build, apart from the firmware

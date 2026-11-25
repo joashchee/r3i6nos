@@ -19,7 +19,7 @@ the games card.
 How the cells arrive: the foreground app (theme/r3i6nos_mirror.lua or .h) sends UDP datagrams to 127.0.0.1:INGEST_PORT, only while
 the flag file DIR/on exists, so with no mirror the cost in an app is one file test when its screen changes. A datagram is
     F + 3072 bytes                     the whole screen: cell i is bytes 2i (character) and 2i+1 (attribute)
-    E + runs of (u16 start, u8 count, count x (u24 code point, u8 attribute))   cells drawn from R3i6nos Mono (their character byte is 254)
+    E + runs of (u16 start, u8 count, count x (u24 code point, u8 attribute))   cells drawn from ANSIapps Mono (their character byte is 254)
     D + runs of (u16 start, u8 count, count x 2 bytes)   the changed cells
 The daemon keeps the current screen, sends a page the whole of it when it connects, then each change. The stream is Server-Sent
 Events (one way, unit to page). There is no heartbeat and no timer: the process blocks on its socket and costs nothing at rest.
@@ -105,7 +105,7 @@ def info_text(hub):
 
 def apply_delta(state, body, ext=None):
     """Apply a delta body (runs) to the bytearray `state`. Returns True when it was well formed (nothing is applied otherwise).
-    `ext` (a dict, cell -> R3i6nos Mono code point) loses the cells the runs cover: an ordinary cell replaces an extended one."""
+    `ext` (a dict, cell -> ANSIapps Mono code point) loses the cells the runs cover: an ordinary cell replaces an extended one."""
     runs, i = [], 0
     while i < len(body):
         if i + 3 > len(body):
@@ -191,7 +191,7 @@ class Hub:
     def __init__(self):
         self.lock = threading.Lock()
         self.state = bytearray(testcard())   # the test card, until an app sends its screen
-        self.ext = {}                        # cell -> R3i6nos Mono code point, for the cells whose character is not code page 437
+        self.ext = {}                        # cell -> ANSIapps Mono code point, for the cells whose character is not code page 437
         self.viewers = set()
         self.on_count = None  # called with the viewer count when it changes
         self.on_real = None   # called once, when the first screen arrives from an app

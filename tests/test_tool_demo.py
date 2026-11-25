@@ -18,7 +18,7 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
 DEMO = REPO / "tools/qjs-node/demo.py"
-HEADER = REPO / "theme/r3i6nos_vga8x16.h"
+HEADER = REPO / "theme/font/ansiapps-mono/ansiapps_cp437.h"
 
 COMMANDS = """# a fake tool's commands, with the demo's directives in comments (report.py ignores them)
 #@hero first: The first feature

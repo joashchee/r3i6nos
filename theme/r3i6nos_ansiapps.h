@@ -2,11 +2,11 @@
  * (docs/R3I6NOS-ANSIAPPS-THEME.md). The C twin of theme/r3i6nos_ansiapps.lua: the same grid, colours, widgets and
  * button map, so a native app looks and plays like the menu.
  *
- * 640x480 = 64 columns x 24 rows of 10x20 cells (the IBM VGA 8x16 font scaled up). Row 0 is the reserved top bar,
+ * 640x480 = 64 columns x 24 rows of 10x20 cells (ANSIapps Mono, the official font, drawn at 10x20). Row 0 is the reserved top bar,
  * rows 1-20 the display view, rows 21-23 the three-row command line (reply, prompt, status). Nothing scrolls.
  *
  * Single header, static functions. Include after defining nothing; compile with -I theme and SDL2's flags.
- * The font data (theme/r3i6nos_vga8x16.h) is CC BY-SA 4.0: see theme/font/README.txt and NOTICE. */
+ * The font data (theme/font/ansiapps-mono/) is ANSIapps Mono, SIL OFL 1.1: see theme/font/ansiapps-mono/README.txt and NOTICE. */
 #ifndef R3I6NOS_ANSIAPPS_H
 #define R3I6NOS_ANSIAPPS_H
 
@@ -17,14 +17,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "r3i6nos_vga8x16.h"
-#if !defined(R3_WITH_MONO) && !defined(R3_NO_MONO)    /* R3i6nos Mono is the font of every app (2026-11-24); an app that must not carry it defines R3_NO_MONO */
+/* ANSIapps Mono is the one font of every app (since 2026-11-25, docs/ANSIAPPS-MONO-FONT.md): the 256 code page 437 characters AND every other glyph
+ * come from the same 10x20 table, so a cell can hold either. R3_WITH_MONO is therefore always on (kept so an app's `#ifdef R3_WITH_MONO` still compiles). */
+#ifndef R3_WITH_MONO
 #define R3_WITH_MONO 1
 #endif
-#ifdef R3_WITH_MONO     /* cells may hold any glyph of R3i6nos Mono, docs/R3I6NOS-MONO-FONT.md */
-#include "font/r3i6nos-mono/r3i6nos_mono10x20.h"
-#include "font/r3i6nos-mono/r3i6nos_mono_names.h"
-#endif
+#include "font/ansiapps-mono/ansiapps_mono10x20.h"
+#include "font/ansiapps-mono/ansiapps_mono_names.h"
+#include "font/ansiapps-mono/ansiapps_cp437.h"
 
 enum {
     R3_COLS = 64, R3_ROWS = 24, R3_CELL_W = 10, R3_CELL_H = 20, R3_W = 640, R3_H = 480,
@@ -164,11 +164,11 @@ static inline int r3_decode(const char *s, unsigned char *out, int max) {
     return n;
 }
 
-/* ---- the font: 8x16 scaled to 10x20 ------------------------------------------------------------------------------ */
+/* ---- the font: ANSIapps Mono at 10x20 ----------------------------------------------------------------------------- */
 
-/* Nearest neighbour: dest column x takes source column x*8/10, dest row y takes y*16/20 (integer division). */
+/* A pixel of code page 437 character ch (0-255): the font's own 10x20 bitmap of the character's code point (ansiapps_cp437.h). */
 static inline int r3_glyph_bit(int ch, int x, int y) {
-    return (r3i6nos_vga8x16[ch][(y * 16) / R3_CELL_H] >> (7 - (x * 8) / R3_CELL_W)) & 1;
+    return (ansiapps_cp437_10x20[ch & 255][y] >> (R3_CELL_W - 1 - x)) & 1;
 }
 
 /* FNV-1a over every pixel (0 or 1) of every 10x20 glyph: the Lua twin computes the same number, so the two
@@ -183,14 +183,14 @@ static inline uint32_t r3_glyph_hash(void) {
             }
     return h;
 }
-#define R3_GLYPH_HASH 0x71e726c8u /* what theme.glyphHash() gives in Lua (tests/test_theme.lua) */
+/* R3_GLYPH_HASH (ansiapps_cp437.h) is what theme.glyphHash() gives in Lua (tests/test_theme.lua) */
 
 /* ---- the screen: 64 x 24 cells ----------------------------------------------------------------------------------- */
 
 typedef struct {
     unsigned char ch[R3_COLS * R3_ROWS], fg[R3_COLS * R3_ROWS], bg[R3_COLS * R3_ROWS];
 #ifdef R3_WITH_MONO
-    unsigned int ux[R3_COLS * R3_ROWS];     /* 0: the cell is CP437 character ch; else a code point of R3i6nos Mono (ch is then a stand-in, 254, for a mirror) */
+    unsigned int ux[R3_COLS * R3_ROWS];     /* 0: the cell is CP437 character ch; else a code point of ANSIapps Mono (ch is then a stand-in, 254, for a mirror) */
 #endif
 } R3Screen;
 
@@ -216,7 +216,7 @@ static inline void r3_put(R3Screen *s, int col, int row, int ch, int fg, int bg)
 }
 
 #ifdef R3_WITH_MONO
-/* One cell of any R3i6nos Mono code point (a private-use icon half, a piano key, a Braille dot pattern ...). */
+/* One cell of any ANSIapps Mono code point (a private-use icon half, a piano key, a Braille dot pattern ...). */
 static inline void r3_put_mono(R3Screen *s, int col, int row, unsigned int cp, int fg, int bg) {
     if (col < 0 || col >= R3_COLS || row < 0 || row >= R3_ROWS) return;
     r3_put(s, col, row, 254, fg, bg);
@@ -346,7 +346,7 @@ static inline void r3_text_right(R3Screen *s, int col, int row, const char *str,
 }
 
 #ifdef R3_WITH_MONO
-/* Print a UTF-8 string of R3i6nos Mono glyphs one cell each, left to right, and return the cells used. A two-cell icon is two cells and
+/* Print a UTF-8 string of ANSIapps Mono glyphs one cell each, left to right, and return the cells used. A two-cell icon is two cells and
  * is printed as one string (R3I_ICON_APP_HYDROLIK, or r3mono_name("icon.app.hydrolik")): never split the halves or put anything between. */
 static inline int r3_puts_mono(R3Screen *s, int col, int row, const char *utf8, int fg, int bg) {
     if (!utf8) return 0;

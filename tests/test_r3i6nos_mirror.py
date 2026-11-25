@@ -385,7 +385,7 @@ def ext_run(start, cells):
 
 
 class ExtendedCells(unittest.TestCase):
-    """Cells drawn from R3i6nos Mono (docs/SCREEN-MIRROR.md): E sets them, an F or a D that covers them makes them ordinary."""
+    """Cells drawn from ANSIapps Mono (docs/SCREEN-MIRROR.md): E sets them, an F or a D that covers them makes them ordinary."""
 
     def setUp(self):
         self.m = load()
@@ -453,8 +453,8 @@ class Page(unittest.TestCase):
 
     def test_the_page_carries_the_font_credit_and_stays_read_only(self):
         html = PAGE.read_text()
-        self.assertIn("CC BY-SA 4.0", html)
-        self.assertIn("VileR", html)
+        self.assertIn("SIL Open Font License 1.1", html)
+        self.assertIn("ANSIapps Mono", html)
         for forbidden in ("XMLHttpRequest", "fetch(", "WebSocket", "sendBeacon", ".send("):
             self.assertNotIn(forbidden, html, "the page must send nothing to the unit")
         glyphs, cmap, cp437 = (html.split(f'b64("', k)[k].split('"', 1)[0] for k in (1, 2, 3))

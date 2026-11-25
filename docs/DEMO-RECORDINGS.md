@@ -137,7 +137,7 @@ log says FAIL with why, and the frames (`demo-frames.r3f`) and the audio (`demo.
 
 ## Command-line tools (`tools/qjs-node/demo.py`)
 
-A tool has no screen, so its `<command>-demo` **draws the commands and what they print on the theme's 64x24 screen** (the IBM VGA 8x16 font scaled to 10x20, the top
+A tool has no screen, so its `<command>-demo` **draws the commands and what they print on the theme's 64x24 screen** (the ANSIapps Mono 8x16 size scaled to 10x20, the top
 bar, a framed display, the three-row command line with the caption and the step) and records that: it opens on the splash (rule 12: the app's name, tagline,
 a progress bar and `v<version> <commit> <date>`), then for each step types the command, shows its output (stdout, stderr in red, the exit status, the files it made
 with their sizes), and ends back on the splash. Pure Python 3 standard library: PNGs are made by hand (4-bit indexed, zlib), a screen's rows and glyph strips are cached
@@ -166,7 +166,7 @@ so a unit can draw a minute of video in about a second.
   draw taken first, then three phases measured the way the device report measures a command (CPU seconds, % of a core, wake-ups a second, peak memory, the draw in mW):
   **the tool's commands, drawing the frames, and the encode** (ffmpeg's own rusage), the busiest other processes, the total energy over idle, the time left, a
   wake-up goal of at most 200 a second per phase of a second or more, and a "cut first" line. It reads `report.py`'s readers from the `<command>-report` installed beside it.
-- **Credit:** the font is CC BY-SA 4.0, so the package's NOTICE carries its README and licence when the demo is built in.
+- **Credit:** the font is ANSIapps Mono (SIL OFL 1.1), so the package's NOTICE carries its README and licence when the demo is built in.
 
 **Not done / untested:** nothing has run on a unit (a Mac and Debian 12 arm64 under Docker only; the packaging smoke test runs the whole tour with `--no-video`); the video with the
 real ffmpeg is tested on a Mac only. The `.r3f` frames Commander plays are not written by this recorder (it keeps the PNG stream instead).

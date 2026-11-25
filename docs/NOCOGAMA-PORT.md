@@ -9,7 +9,7 @@ behaviours, play it, all with the pad. The code, its plan and its tests live in 
 - **A LÖVE app, user-installed**: one `NoCoGaMa.love` packed for each of `Love 11.5/` and `Love 12.0/` on the games card, from the same code, never `DEFAULT=1` (not in the image), as the IO Checker is packed twice.
   Its own `scripts/build.sh` mirrors `scripts/build_love_app.sh` and its release workflow will mirror `app-io-checker-love.yml`; `love-app.yml` is not called while its repo is private.
 - **The theme without a departure** (rule 8): 64 x 24 cells of 10 x 20, top bar, 20-row display, three-row command line. A LÖVE app can draw one pixel region inside the cells, so the level view (320 x 240) sits in the
-  theme and nothing is left out (KlamANSI's native host had to give up the tool bar and command-line rows). It does not copy the theme or its CC BY-SA font: it loads `theme/` from `/opt/loveos/theme` on the device and
+  theme and nothing is left out (KlamANSI's native host had to give up the tool bar and command-line rows). It does not copy the theme or its font: it loads `theme/` from `/opt/loveos/theme` on the device and
   from `R3I6NOS_THEME` on a Mac.
 - **Pure Lua core, thin LÖVE shell**, tested with luajit; both runtimes from the first commit (only API that exists and is not deprecated in 11.5 and 12.0, no `t.version`).
 - **Files** only under `$R3I6NOS_ROMS/NoCoGaMa/` (`/roms/NoCoGaMa/`), written to a temp file and renamed, so a pulled card leaves the old file whole (rule 7).

@@ -146,7 +146,7 @@ static inline int r3_toast_key(R3Toast *t) {
     return 1;
 }
 
-/* The R3i6nos Mono status glyph (by name) a toast's text calls for, or NULL: the hot-plug service's words tell what changed. The Lua twin is
+/* The ANSIapps Mono status glyph (by name) a toast's text calls for, or NULL: the hot-plug service's words tell what changed. The Lua twin is
  * M.icon in r3i6nos_toast.lua; both are tested with the same texts. */
 static inline const char *r3_toast_icon(const char *text) {
     char w[40];
@@ -180,7 +180,7 @@ static inline void r3_toast_draw(const R3Toast *t, R3Screen *s) {
     int fg = t->error ? R3_WHITE : R3_BLACK, bg = t->error ? R3_RED : R3_LIGHT_GREEN;
     for (int c = 0; c < R3_COLS; c++) r3_put(s, c, R3_TOP_ROW, ' ', fg, bg);
     int col = 1, room = t->error ? R3_COLS - 18 : R3_COLS - 2;
-#ifdef R3_WITH_MONO     /* an app that opted into R3i6nos Mono gets the status glyph before the words */
+#ifdef R3_WITH_MONO     /* an app that opted into ANSIapps Mono gets the status glyph before the words */
     const char *name = r3_toast_icon(t->text), *glyph = name ? r3mono_name(name) : NULL;
     if (glyph) { col = 1 + r3_puts_mono(s, 1, R3_TOP_ROW, glyph, fg, bg) + 1; room -= col - 1; }
 #endif

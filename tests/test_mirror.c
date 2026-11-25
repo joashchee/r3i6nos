@@ -128,7 +128,7 @@ int main(void) {
     r3_mirror_tap(&d, &c);
     CHECK(sent_n == 4 && sent[3][0] == 'F', "and when it comes back, the whole screen again");
 
-    /* R3i6nos Mono cells: the frame holds the stand-in 254, an E datagram the code point */
+    /* ANSIapps Mono cells: the frame holds the stand-in 254, an E datagram the code point */
     {
         static R3Screen m, n0;
         r3_clear(&m);

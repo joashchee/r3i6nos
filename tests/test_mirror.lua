@@ -191,7 +191,7 @@ do -- the IPv4 socket is asked for by name: socket.udp() refused every send on t
   eq(M.newSocket({}), nil, "no socket library function: no socket, no error")
 end
 
-do -- R3i6nos Mono cells: the frame carries the stand-in 254, an E datagram the code point (daemon: tests/test_r3i6nos_mirror.py)
+do -- ANSIapps Mono cells: the frame carries the stand-in 254, an E datagram the code point (daemon: tests/test_r3i6nos_mirror.py)
   eq(M.EXT, T.EXT, "the mirror and the theme agree on the extended cell")
   T.useMono(true)
   local a = T.screen()

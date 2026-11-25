@@ -7,12 +7,8 @@
 <title>r3i6nos screen</title>
 <!--
   The screen of an r3i6nos handheld, painted from its text cells. Read-only: this page sends nothing to the unit.
-  Font: R3i6nos Mono (r3i6nos, 2026), 10x20 1-bit bitmaps, embedded below as base64. Its code page 437 letters are "WebPlus IBM VGA 8x16"
-  from The Ultimate Oldschool PC Font Pack v2.2, (c) 2016-2020 VileR, https://int10h.org/oldschool-pc-fonts/ , licensed under CC BY-SA 4.0
-  (https://creativecommons.org/licenses/by-sa/4.0/).
-  CHANGES: rasterised at 16 px to 1-bit 8x16 bitmaps, scaled to 10x20 (nearest neighbour), and joined by the glyphs of R3i6nos Mono
-  (theme/font/r3i6nos-mono/README.txt). This page is that adaptation and is licensed under CC BY-SA 4.0, not under the repository's MIT
-  licence. Provided as is, without warranties.
+  Font: ANSIapps Mono (ansiapps, 2026), the 10x20 size, 1-bit bitmaps embedded below as base64. Licensed under the SIL Open Font License 1.1,
+  Reserved Font Name "ANSIapps Mono" (theme/font/ansiapps-mono/OFL.txt). Provided as is, without warranties.
 -->
 <style>
   :root { color-scheme: dark; --bg: #000; --fg: #aaa; --hint: #55ffff; }
@@ -40,24 +36,24 @@
     <li>If it stays like this after a button press in the menu, stop and start the mirror on the unit, then reload this page.</li>
   </ul>
 </div>
-<div id="credit">Font: R3i6nos Mono, from IBM VGA 8x16 by <a href="https://int10h.org/oldschool-pc-fonts/">VileR</a>, CC BY-SA 4.0</div>
+<div id="credit">Font: ANSIapps Mono, SIL Open Font License 1.1</div>
 <script>
 "use strict";
 var COLS = 64, ROWS = 24, W = 10, H = 20, N = COLS * ROWS;
 var RGB = [[0,0,0],[0,0,170],[0,170,0],[0,170,170],[170,0,0],[170,0,170],[170,85,0],[170,170,170],
            [85,85,85],[85,85,255],[85,255,85],[85,255,255],[255,85,85],[255,85,255],[255,255,85],[255,255,255]];
-var GLYPHS = b64("@GLYPHS@");          // R3i6nos Mono: glyph g is 20 rows of 2 bytes (10 bits, the top bit the leftmost pixel)
+var GLYPHS = b64("@GLYPHS@");          // ANSIapps Mono: glyph g is 20 rows of 2 bytes (10 bits, the top bit the leftmost pixel)
 var CMAP = b64("@CMAP@");              // code point (3 bytes) and glyph (2 bytes), in code point order
 var CP437 = b64("@CP437@");            // the 256 code page 437 characters as code points (2 bytes each)
 var glyphOf = {};
 for (var k = 0; k + 5 <= CMAP.length; k += 5) glyphOf[(CMAP[k] << 16) | (CMAP[k + 1] << 8) | CMAP[k + 2]] = (CMAP[k + 3] << 8) | CMAP[k + 4];
-var cells = new Uint8Array(N * 2), ext = {};   // ext: cell -> code point, for the cells the unit draws from R3i6nos Mono
+var cells = new Uint8Array(N * 2), ext = {};   // ext: cell -> code point, for the cells the unit draws from ANSIapps Mono
 var cv = document.getElementById("screen"), ctx = cv.getContext("2d"), stateEl = document.getElementById("state");
 var img = ctx.createImageData(W, H);
 
 function b64(s) { var b = atob(s), a = new Uint8Array(b.length); for (var i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return a; }
 
-function paint(i) {                    // cell i, from its character and attribute (or its R3i6nos Mono code point)
+function paint(i) {                    // cell i, from its character and attribute (or its ANSIapps Mono code point)
   var ch = cells[2 * i], at = cells[2 * i + 1], fg = RGB[at & 15], bg = RGB[at >> 4], d = img.data;
   var cp = ext[i] || (CP437[2 * ch] << 8 | CP437[2 * ch + 1]), g = glyphOf[cp];
   for (var y = 0; y < H; y++) {
@@ -81,7 +77,7 @@ function delta(b) {                    // runs of (u16 start, u8 count, count x 
   }
 }
 
-function extended(b) {                 // runs of (u16 start, u8 count, count x (u24 code point, u8 attribute)): cells of R3i6nos Mono
+function extended(b) {                 // runs of (u16 start, u8 count, count x (u24 code point, u8 attribute)): cells of ANSIapps Mono
   var i = 0;
   while (i + 3 <= b.length) {
     var start = (b[i] << 8) | b[i + 1], count = b[i + 2]; i += 3;

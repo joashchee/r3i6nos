@@ -31,19 +31,20 @@ pyxel.run(update, draw)
 PY
 if timeout 90 xvfb-run -a -s "-screen 0 640x480x24" r3i6nos-run-pyxel /g/py >/g/py.out 2>&1; then echo "E2E pyxel PASS"; else echo "E2E pyxel FAIL"; tail -3 /g/py.out; fi
 
-# R3i6nos Mono (theme/font/r3i6nos-mono, mounted at /f): the BDF in Pyxel and the TTF in SDL2_ttf (what Solarus and the SDL engines load). Each draws the
-# letter A, a box-drawing corner and a pad button and compares every pixel with the font's own bitmap (r3i6nos-mono.json). Nothing here draws on a unit.
+# ANSIapps Mono (theme/font/ansiapps-mono, mounted at /f): the 10x20 BDF in Pyxel. It draws the letter A, a box-drawing corner, a pad button, a thorn and a
+# theta and compares every pixel with the font's own bitmap (ansiapps-mono.json). The TrueType file (SDL2_ttf: Solarus and the SDL engines) is not tested:
+# the font's repository makes no 10x20 TrueType yet (ROADMAP section 43). Nothing here draws on a unit.
 if [ -d /f ]; then
 mkdir -p /g/pf && cat > /g/pf/main.py <<'PY'
 import json, pyxel
-d = json.load(open("/f/r3i6nos-mono.json"))
+d = json.load(open("/f/ansiapps-mono.json"))
 def rows(cp):
     g = d["glyphs"][d["cmap"][str(cp)]]
     return [[(int(g[y * 3:y * 3 + 3], 16) >> (9 - x)) & 1 for x in range(10)] for y in range(20)]
 pyxel.init(120, 40, title="font", fps=30)
-font = pyxel.Font("/f/R3i6nosMono-Regular.bdf")
+font = pyxel.Font("/f/AnsiappsMono10x20-Regular.bdf")
 state = {"n": 0, "bad": 0, "checked": 0}
-tests = [(ord("A"), 0, 0), (0x2554, 20, 0), (d["names"]["pad.btn.A.on"][0], 40, 0), (0xDE, 60, 0), (0x3B8, 80, 0)]
+tests = [(ord("A"), 0, 0), (0x2554, 20, 0), (d["names"]["pad.btn.A.on"]["cp"], 40, 0), (0xDE, 60, 0), (0x3B8, 80, 0)]
 def update():
     state["n"] += 1
     if state["n"] == 3:
@@ -64,44 +65,6 @@ def draw():
 pyxel.run(update, draw)
 PY
 if out="$(timeout 120 xvfb-run -a -s "-screen 0 640x480x24" r3i6nos-run-pyxel /g/pf 2>&1)" && echo "$out" | grep -q "PYXELFONT bad=0 "; then echo "E2E font-pyxel PASS $(echo "$out" | grep PYXELFONT)"; else echo "E2E font-pyxel FAIL $(echo "$out" | tail -3 | tr '\n' ' ')"; fi
-
-cat > /g/ttf.py <<'PY'
-import ctypes, json
-d = json.load(open("/f/r3i6nos-mono.json"))
-def rows(cp):
-    g = d["glyphs"][d["cmap"][str(cp)]]
-    return [[(int(g[y * 3:y * 3 + 3], 16) >> (9 - x)) & 1 for x in range(10)] for y in range(20)]
-ttf = ctypes.CDLL("libSDL2_ttf-2.0.so.0")
-ttf.TTF_OpenFont.restype = ctypes.c_void_p
-ttf.TTF_OpenFont.argtypes = [ctypes.c_char_p, ctypes.c_int]
-ttf.TTF_RenderGlyph32_Solid.restype = ctypes.c_void_p
-ttf.TTF_RenderGlyph32_Solid.argtypes = [ctypes.c_void_p, ctypes.c_uint32, ctypes.c_uint32]
-ttf.TTF_SetFontHinting.argtypes = [ctypes.c_void_p, ctypes.c_int]
-ttf.TTF_GlyphMetrics32.argtypes = [ctypes.c_void_p, ctypes.c_uint32] + [ctypes.POINTER(ctypes.c_int)] * 5
-class Surf(ctypes.Structure):
-    _fields_ = [("flags", ctypes.c_uint32), ("format", ctypes.c_void_p), ("w", ctypes.c_int), ("h", ctypes.c_int), ("pitch", ctypes.c_int), ("pixels", ctypes.c_void_p)]
-assert ttf.TTF_Init() == 0
-f = ttf.TTF_OpenFont(b"/f/R3i6nosMono-Regular.ttf", 20)
-assert f
-ttf.TTF_SetFontHinting(f, 2)  # TTF_HINTING_MONO
-bad = checked = 0
-for cp in (ord("A"), 0x2554, d["names"]["pad.btn.A.on"][0], 0xDE, 0x3B8, 0x1FB00):
-    s = ctypes.cast(ttf.TTF_RenderGlyph32_Solid(f, cp, 0xFFFFFF), ctypes.POINTER(Surf)).contents
-    adv = ctypes.c_int()
-    ttf.TTF_GlyphMetrics32(f, cp, None, None, None, None, ctypes.byref(adv))
-    assert adv.value == 10, "advance %d" % adv.value
-    want = rows(cp)
-    # the surface is the whole 10 x 20 cell, so every pixel is compared in place
-    assert s.w == 10 and s.h == 20, "surface %dx%d" % (s.w, s.h)
-    pix = (ctypes.c_uint8 * (s.pitch * s.h)).from_address(s.pixels)
-    for y in range(20):
-        for x in range(10):
-            checked += 1
-            if (1 if pix[y * s.pitch + x] else 0) != want[y][x]:
-                bad += 1
-print("TTFFONT bad=%d checked=%d" % (bad, checked))
-PY
-if out="$(SDL_VIDEODRIVER=dummy python3 /g/ttf.py 2>&1)" && echo "$out" | grep -q "TTFFONT bad=0 "; then echo "E2E font-sdl-ttf PASS $(echo "$out" | grep TTFFONT)"; else echo "E2E font-sdl-ttf FAIL $(echo "$out" | tail -3 | tr '\n' ' ')"; fi
 fi
 
 # Ren'Py: compile a one-line script (no window: the dummy video driver)

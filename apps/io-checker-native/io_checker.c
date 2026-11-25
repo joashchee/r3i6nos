@@ -26,7 +26,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define R3_WITH_MONO 1                  /* cells may hold any R3i6nos Mono glyph (the R3i6nos Mono screen test) */
+#define R3_WITH_MONO 1                  /* cells may hold any ANSIapps Mono glyph (the ANSIapps Mono screen test) */
 #include "r3i6nos_ansiapps.h"
 #include "r3i6nos_themes.h"
 #include "r3i6nos_input.h"
@@ -67,11 +67,11 @@ static const char *NAMES[18] = {"", "B", "A", "X", "Y", "L1", "R1", "L2", "R2", 
 
 enum { P_HOME, P_INPUT, P_VIDEO, P_PATTERN, P_SOUND, P_FILES, P_SYSTEM, P_USB, P_USBSUB, P_MAPPING, P_MONO, P_COUNT };
 enum { H_INPUT, H_MAPPING, H_VIDEO, H_SOUND, H_FILES, H_USB, H_SYSTEM, H_MONO, H_REPORT, H_QUIT, H_COUNT, H_BENCH = 100 };   /* H_BENCH is a job, not a list row */
-static const char *HOME_LABEL[H_COUNT] = {"Buttons and sticks", "R3i6nos Mapping", "Video", "Sound", "Files", "USB and OTG", "System", "R3i6nos Mono", "Device report", "Quit"};
+static const char *HOME_LABEL[H_COUNT] = {"Buttons and sticks", "R3i6nos Mapping", "Video", "Sound", "Files", "USB and OTG", "System", "ANSIapps Mono", "Device report", "Quit"};
 /* The pages where every button, stick and chord is a test: nothing navigates on them (the mapping's chords are recorded, not obeyed). Select + Start
  * held for a second, or 15 s with no input, goes back to the list. */
 #define TEST_PAGE(p) ((p) == P_INPUT || (p) == P_MAPPING)
-#include "mono_page.h"                /* the R3i6nos Mono screen test: needs the L_ buttons above */
+#include "mono_page.h"                /* the ANSIapps Mono screen test: needs the L_ buttons above */
 /* The checks behind "USB and OTG": what the OTG port can bring (usb_io.h). */
 enum { U_DEVICES, U_VIDEO, U_MIDI, U_STORAGE, U_NETWORK, U_KEYBOARD, U_MOUSE, U_PADS, U_COUNT };
 static const char *HOME_ABOUT[H_COUNT][4] = {
@@ -88,8 +88,8 @@ static const char *HOME_ABOUT[H_COUNT][4] = {
     {"What the OTG port brings: every USB device and what it is,", "video out (HDMI or DisplayLink docks), MIDI in and out,",
      "USB storage, Ethernet, a keyboard, a mouse and game", "controllers. Plug one in and watch it appear."},
     {"The r3i6nos build, kernel, board, CPU, memory, battery,", "backlight, the pad's name and GUID, and the video and", "sound drivers.", NULL},
-    {"A screen test of the 10x20 R3i6nos Mono font: CP437 and the", "line, block and Braille sets, the gamepad drawn live, the",
-     "on-screen keyboard, a piano, UI widgets, music notation and", "the two-cell icons, each drawn the way an app should."},
+    {"A screen test of ANSIapps Mono, the 10x20 font: CP437, lines,", "blocks, Braille, the gamepad live, keyboard, piano, UI,",
+     "music, icons, the wide and tall versions, every named glyph,", "every code point, and the portrait maker with its checks."},
     {"Runs the checks again and writes everything, with your", "heard / silent answers and the buttons you pressed, to",
      "IO_Checker/ on the data card (else the games card).", NULL},
     {"Back to the r3i6nos menu.", NULL, NULL, NULL},
@@ -236,7 +236,7 @@ typedef struct {
     /* benchmark */
     Uint32 bench_end;                               /* when the motion run ends (0: no benchmark running) */
     char bench_file[96];
-    MonoState mono;                                 /* the R3i6nos Mono page */
+    MonoState mono;                                 /* the ANSIapps Mono page */
 } App;
 
 enum { OV_NONE, OV_MENU, OV_ABOUT, OV_THEME, OV_KEYMAP };
@@ -798,10 +798,34 @@ static void report_input(App *a, R3Report *r) {
 }
 
 static void power_windows(App *a, R3Report *r);
-#define IO_REPORT_STEPS 10   /* the milestones of write_report, for its progress bar (rule 18) */
+static void report_font(R3Report *r);
+#define IO_REPORT_STEPS 11   /* the milestones of write_report, for its progress bar (rule 18) */
 static void report_usb(App *a, R3Report *r);
 static void report_mapping(App *a, R3Report *r);
 static void run_files(App *a);
+
+/* The font's checks (font_check.h): what a program can answer about ANSIapps Mono at 10x20, in the report's own section. */
+static void report_font(R3Report *r) {
+    FcNames n;
+    FcPortrait p;
+    fc_names(&n);
+    fc_portrait(&p);
+    r3_report_section(r, "font");
+    r3_report_line(r, R3_INFO, "font", "ANSIapps Mono, %dx%d, %d code points, %d named glyphs", R3MONO_W, R3MONO_H, n.codes, n.names);
+    r3_report_line(r, n.codes_missing ? R3_FAIL : R3_PASS, "code points", "%d of %d have a bitmap", n.codes - n.codes_missing, n.codes);
+    r3_report_line(r, n.cells_missing ? R3_FAIL : R3_PASS, "named glyphs", "%d names, %d cells (%d one cell, %d two across, %d bigger), %d without a bitmap%s%s", n.names, n.cells, n.one, n.two, n.bigger, n.cells_missing,
+                   n.first_bad[0] ? ": " : "", n.first_bad);
+    r3_report_line(r, n.wide_ok == n.wide && !n.wide_nobase ? R3_PASS : R3_FAIL, "wide counterparts", "%d of %d are twice the cells across of their base", n.wide_ok, n.wide);
+    r3_report_line(r, n.tall_ok == n.tall && !n.tall_nobase ? R3_PASS : R3_FAIL, "tall counterparts", "%d of %d are twice the cells across and down of their base", n.tall_ok, n.tall);
+    r3_report_line(r, p.parts_in_font == p.parts ? R3_PASS : R3_FAIL, "portrait parts", "%d of %d are in the font (%d are names of another part's picture)", p.parts_in_font, p.parts, p.aliases);
+    r3_report_line(r, p.mirror_ok == p.mirror_pairs ? R3_PASS : R3_FAIL, "portrait mirrors", "%d of %d right parts are their left part reversed", p.mirror_ok, p.mirror_pairs);
+    r3_report_line(r, p.join_bad ? R3_FAIL : R3_PASS, "portrait joins", "%d of %d listed joins hold on the 10x20 bitmaps (%d exact, %d sloped, %d hair over the face)%s%s", p.joins - p.join_bad, p.joins,
+                   p.join_exact, p.join_soft, p.join_over, p.first_bad[0] ? ": " : "", p.first_bad);
+    r3_report_line(r, p.compat_lost || p.compat_count_bad ? R3_FAIL : R3_PASS, "portrait kinds", "%d of %d pairs of neighbouring kinds lost no join in the scaling to 10x20 (%d gained)", p.compat_rows - p.compat_lost, p.compat_rows, p.compat_gained);
+    r3_report_line(r, p.layout_cells_bad ? R3_FAIL : R3_PASS, "portrait layouts", "%d layouts of 32 cells, %d cells without a kind", p.layouts, p.layout_cells_bad);
+    r3_report_line(r, p.builds_clean == p.builds ? R3_PASS : R3_FAIL, "portrait maker", "%d of %d portraits built from seeds have every seam joined", p.builds_clean, p.builds);
+    r3_report_line(r, R3_INFO, "drawn on the unit", "untested: the checks read the tables, not the screen (look at the Portrait maker and Named glyphs panels)");
+}
 
 /* The app's data folder (rule 16): where r3_appdata_init settled, $R3I6NOS_APP_DATA. A run that did not settle one (--selftest,
  * --screenshot) keeps the old place under the games card. The per-card checks (card_check) make their own IO_Checker folder on every card
@@ -898,6 +922,8 @@ static void write_report(App *a, const char *how) {
     }
     r3_report_at(&r, 7, "USB and OTG");
     report_usb(a, &r);
+    r3_report_at(&r, 8, "Font: glyphs, wide and tall, portrait parts");
+    report_font(&r);
     r3_report_memory(&r);
     power_windows(a, &r);
     r3_reportbar_end(&r);
@@ -1885,7 +1911,7 @@ static void report_mapping(App *a, R3Report *r) {
     if (a->map_speed_max[0] > 1 && a->map_speed_max[1] > 1) r3_report_line(r, R3_INFO, "R1 gain", "x%.2f (the mapping says x%.1f at the same push)", a->map_speed_max[1] / a->map_speed_max[0], R3_R1_POINTER_X);
 }
 
-/* The R3i6nos Mono screen test (mono_page.h): the live part is what the pad is doing now. */
+/* The ANSIapps Mono screen test (mono_page.h): the live part is what the pad is doing now. */
 static void mono_live_fill(const App *a, MonoLive *l) {
     memset(l, 0, sizeof *l);
     for (int b = 1; b <= L_FN; b++) l->down[b] = down(a, b) ? 1 : 0;
@@ -1925,7 +1951,7 @@ static void compose(App *a, R3Screen *s, Uint32 now) {
     if (a->overlay == OV_MENU) r3_mm_draw(s, &a->mm, r3_themes[a->theme].name);
     else if (a->overlay == OV_ABOUT) {
         static const char *const lines[] = {"The R36S's hardware check: buttons, sticks, video,", "sound, files and the OTG port, and a device report.",
-                                            "Font: IBM VGA 8x16 by VileR, CC BY-SA 4.0.", "Code: MIT. No network, no telemetry.", NULL};
+                                            "Font: ANSIapps Mono, SIL OFL 1.1.", "Code: MIT. No network, no telemetry.", NULL};
         r3_about_draw(s, "IO Checker", VERSION, BUILD_LINE, lines);
     } else if (a->overlay == OV_THEME) r3_theme_pick_draw(s, a->theme_sel, a->theme);
     else if (a->overlay == OV_KEYMAP) r3_km_draw(s, &a->km);
@@ -2225,7 +2251,7 @@ static void dispatch(App *a, int action, Uint32 now) {
     case R3_CONTEXT: say(a, R3_ST_HINT, "No contextual menu here: A opens the selected check."); return;
     case R3_PANEL_NEXT: case R3_PANEL_FIRST: case R3_PANEL_PREV:
         if (a->page == P_MONO) { act(a, action, now); return; }
-        say(a, R3_ST_HINT, "No panels here: Fn turns them on R3i6nos Mapping and R3i6nos Mono."); return;
+        say(a, R3_ST_HINT, "No panels here: Fn turns them on R3i6nos Mapping and ANSIapps Mono."); return;
     case R3_L3: say(a, R3_ST_HINT, "IO Checker has no virtual mouse."); return;
     case R3_R3: say(a, R3_ST_HINT, "IO Checker has no virtual keyboard."); return;
     case R3_START: return;
@@ -2490,17 +2516,17 @@ static void idle_turn(void *arg) {
 
 /* idle: the app open on its list, nothing pressed. working: the Motion pattern, its heaviest page (a frame every vsync). */
 static void power_windows(App *a, R3Report *r) {
-    r3_report_at(r, 8, "Memory and power");
+    r3_report_at(r, 9, "Memory and power");
     r3_report_power_section(r);
     if (!a->loop) {
-        r3_report_at(r, 10, "Power: no window");
+        r3_report_at(r, 11, "Power: no window");
         r3_report_line(r, R3_SKIP, "idle", "no window (--report): open Device report in the app to measure the app itself");
         return;
     }
     R3PowerResult idle, work;
-    r3_report_at(r, 9, "Power: idle, nothing pressed");
+    r3_report_at(r, 10, "Power: idle, nothing pressed");
     r3_report_power_idle(r, r3_report_power_seconds(10), idle_turn, a, &idle);
-    r3_report_at(r, 10, "Power: the Motion pattern");
+    r3_report_at(r, 11, "Power: the Motion pattern");
     int was = a->sel[P_VIDEO];
     a->sel[P_VIDEO] = PAT_MOTION;
     R3Power p;
@@ -2779,10 +2805,18 @@ static void selftest_usb(void) {
         r3_report_mkdirs(shots);
         u->page = P_HOME; u->sel[P_HOME] = H_USB; compose(u, &sc, 0); snprintf(f, sizeof f, "%s/home.bmp", shots); save_bmp(&sc, f);
         u->page = P_USB; compose(u, &sc, 0); snprintf(f, sizeof f, "%s/usb.bmp", shots); save_bmp(&sc, f);
-        u->page = P_MONO;                                                  /* the R3i6nos Mono panels, with a chord and a few keys down */
+        u->page = P_MONO;                                                  /* the ANSIapps Mono panels, with a chord and a few keys down */
         u->mono.notes = (1ull << 0) | (1ull << 4) | (1ull << 7) | (1ull << 6); u->mono.pcur = 7; u->mono.kx = 3; u->mono.ky = 1; snprintf(u->mono.typed, sizeof u->mono.typed, "r3i6nos");
         u->down[L_A] = u->down[L_L1] = u->down[L_L2] = u->down[L_UP] = 1; u->axis[1] = 0.9f; u->naxes = 4;
         for (int p = 0; p < MONO_PANELS; p++) { u->mono.panel = p; compose(u, &sc, 2400); snprintf(f, sizeof f, "%s/mono%d.bmp", shots, p + 1); save_bmp(&sc, f); }
+        u->mono.panel = MONO_WIDETALL; mono_wt_build();            /* the page with the first tall glyphs, the bigger names, the last code points, the other portrait layout */
+        for (int pg = 0; pg < mp_wt_pages; pg++) { u->mono.wt_page = pg; int has = 0; for (int k = mp_wt_start[pg]; k < mp_wt_start[pg + 1]; k++) has |= mp_wt[k].tall != NULL; if (has) break; }
+        compose(u, &sc, 2400); snprintf(f, sizeof f, "%s/mono9-tall.bmp", shots); save_bmp(&sc, f);
+        u->mono.panel = MONO_NAMES; u->mono.nm_set = 2; u->mono.nm_group = 0; u->mono.nm_cur = 3; compose(u, &sc, 2400); snprintf(f, sizeof f, "%s/mono10-bigger.bmp", shots); save_bmp(&sc, f);
+        u->mono.nm_set = 1; u->mono.nm_group = 0; u->mono.nm_cur = 0; compose(u, &sc, 2400); snprintf(f, sizeof f, "%s/mono10-wide.bmp", shots); save_bmp(&sc, f);
+        u->mono.panel = MONO_CODES; u->mono.cp_cur = R3MONO_COUNT - 1; compose(u, &sc, 2400); snprintf(f, sizeof f, "%s/mono11-last.bmp", shots); save_bmp(&sc, f);
+        u->mono.panel = MONO_PORTRAIT; u->mono.pt_layout = 1; u->mono.pt_seed = 7; compose(u, &sc, 2400); snprintf(f, sizeof f, "%s/mono12-standard.bmp", shots); save_bmp(&sc, f);
+        u->mono.wt_page = 0; u->mono.nm_set = 0; u->mono.cp_cur = 0; u->mono.pt_layout = 0; u->mono.pt_seed = 0;
         memset(u->down, 0, sizeof u->down);
         u->page = P_USBSUB;
         for (int sub = 0; sub < U_COUNT; sub++) {
@@ -2998,12 +3032,12 @@ static int splash_has(const R3Screen *s, const char *text) {
     return 0;
 }
 
-/* The R3i6nos Mono screen test: every panel draws, every glyph it asks for exists, the icons are two adjacent cells, and the piano and keyboard answer. */
+/* The ANSIapps Mono screen test: every panel draws, every glyph it asks for exists, the icons are two adjacent cells, and the piano and keyboard answer. */
 static void selftest_mono(App *a) {
     R3Screen s;
-    CHECK(!strcmp(HOME_LABEL[H_MONO], "R3i6nos Mono") && H_MONO == H_SYSTEM + 1 && H_REPORT == H_MONO + 1, "R3i6nos Mono is the entry after System and before the report");
+    CHECK(!strcmp(HOME_LABEL[H_MONO], "ANSIapps Mono") && H_MONO == H_SYSTEM + 1 && H_REPORT == H_MONO + 1, "ANSIapps Mono is the entry after System and before the report");
     go(a, P_MONO, 1000);
-    CHECK(a->page == P_MONO, "go opens the R3i6nos Mono page");
+    CHECK(a->page == P_MONO, "go opens the ANSIapps Mono page");
     for (int p = 0; p < MONO_PANELS; p++) {
         a->mono.panel = p;
         compose(a, &s, 5000);
@@ -3015,7 +3049,7 @@ static void selftest_mono(App *a) {
         CHECK(missing == 0, "panel %d (%s) asks for %d glyph(s) the font does not have", p + 1, MONO_PANEL_NAME[p], missing);
         CHECK(qmarks == 0, "panel %d (%s) uses %d glyph name(s) that do not exist", p + 1, MONO_PANEL_NAME[p], qmarks);
         CHECK(p == MONO_TEXT || mono_cells >= 20, "panel %d (%s) draws font glyphs (%d cells)", p + 1, MONO_PANEL_NAME[p], mono_cells);
-        CHECK(screen_has(&s, MONO_PANEL_NAME[p]) && screen_has(&s, "R3i6nos Mono"), "panel %d says its name", p + 1);
+        CHECK(screen_has(&s, MONO_PANEL_NAME[p]) && screen_has(&s, "ANSIapps Mono"), "panel %d says its name", p + 1);
     }
     /* Fn turns the panels in a carousel, R1+Fn goes back, L1+Fn is the first */
     a->mono.panel = 0;
@@ -3096,6 +3130,118 @@ static void selftest_mono(App *a) {
     dispatch(a, R3_Y, 1440); CHECK(a->mono.layer == 1, "Y changes the layer");
     compose(a, &s, 5000);
     CHECK(screen_has(&s, "Typed:") && screen_has(&s, "q_"), "the typed text shows");
+    /* the font's own checks (font_check.h): every glyph and counterpart is whole, and the portrait maker's parts still join at 10x20 */
+    {
+        FcNames n;
+        FcPortrait p;
+        fc_names(&n);
+        fc_portrait(&p);
+        CHECK(n.codes == 4583 && n.codes_missing == 0, "all %d code points have a bitmap (%d missing)", n.codes, n.codes_missing);
+        CHECK(n.names == 2219 && n.cells_missing == 0, "%d named glyphs, %d cells without a bitmap (%s)", n.names, n.cells_missing, n.first_bad);
+        CHECK(n.one == 1570 && n.two == 619 && n.bigger == 30, "named glyphs by size: %d one cell, %d two across, %d bigger", n.one, n.two, n.bigger);
+        CHECK(n.wide == 113 && n.wide_ok == 113 && n.wide_nobase == 0, "113 wide counterparts, each twice its base across (%d ok of %d, %d without a base)", n.wide_ok, n.wide, n.wide_nobase);
+        CHECK(n.tall == 28 && n.tall_ok == 28 && n.tall_nobase == 0, "28 tall counterparts, each twice its base across and down (%d ok of %d, %d without a base)", n.tall_ok, n.tall, n.tall_nobase);
+        CHECK(p.parts == 692 && p.parts_in_font == 692, "all %d portrait parts are in the font (%d)", p.parts, p.parts_in_font);
+        CHECK(p.mirror_pairs == 259 && p.mirror_ok == 259, "every right part is its left part reversed (%d of %d)", p.mirror_ok, p.mirror_pairs);
+        CHECK(p.joins == 1283 && p.join_bad == 0, "every listed join holds at 10x20: %d of %d (%s)", p.joins - p.join_bad, p.joins, p.first_bad);
+        CHECK(p.join_exact + p.join_soft + p.join_over == p.joins, "exact %d + sloped %d + hair over %d = %d joins", p.join_exact, p.join_soft, p.join_over, p.joins);
+        CHECK(p.compat_rows == 82 && p.compat_lost == 0 && p.compat_count_bad == 0, "no kind pair lost a join in the scaling (%d lost of %d, %d count mismatches)", p.compat_lost, p.compat_rows, p.compat_count_bad);
+        CHECK(p.layouts == 2 && p.layout_cells_bad == 0, "both portrait layouts have a kind in every cell");
+        CHECK(p.builds_clean == p.builds, "the portrait maker joins every seam: %d of %d portraits", p.builds_clean, p.builds);
+        int clean = 0, drawn = 0;                                                /* the maker over many seeds: every seam joined, every part drawn from the font */
+        for (unsigned seed = 100; seed < 160; seed++) {
+            FcPortraitImg img;
+            fc_build(&img, seed * 2654435761u + 12345u, (int)(seed & 1));
+            clean += img.conflicts == 0;
+            for (int y = 0; y < 4; y++) for (int x = 0; x < 8; x++) if (img.part[y][x] != FC_BLANK && r3mono_find(ap_part[img.part[y][x]].cp)) drawn++;
+        }
+        CHECK(clean == 60, "60 more portraits have every seam joined (%d)", clean);
+        CHECK(drawn >= 60 * 24, "a portrait fills most of its 32 cells (%d cells in 60)", drawn);
+        /* a contrast check: every colour pair a portrait uses reads at 4.5:1 or better (the theme's rule) */
+        int pairs_ok = 1;
+        static const int skin[3] = {R3_LIGHT_RED, R3_LIGHT_GRAY, R3_BROWN}, hair[6] = {R3_YELLOW, R3_WHITE, R3_LIGHT_GRAY, R3_LIGHT_GREEN, R3_LIGHT_CYAN, R3_LIGHT_MAGENTA};
+        for (int k = 0; k < 3; k++) {
+            int ink = skin[k] == R3_BROWN ? R3_WHITE : R3_BLACK;
+            if (r3_contrast(ink, skin[k]) < 4.5) pairs_ok = 0;
+            if (r3_contrast(skin[k], R3_BLACK) < 4.5 && skin[k] != R3_BROWN) pairs_ok = 0;
+        }
+        for (int k = 0; k < 6; k++) if (r3_contrast(hair[k], R3_BLACK) < 4.5) pairs_ok = 0;
+        if (r3_contrast(R3_CYAN, R3_BLACK) < 4.5) pairs_ok = 0;
+        CHECK(pairs_ok, "every ink and paper pair of a portrait passes 4.5:1");
+    }
+    /* the four panels for looking: wide and tall, named glyphs, code points, the portrait maker */
+    a->mono.panel = MONO_WIDETALL; a->mono.wt_page = 0;
+    compose(a, &s, 5000);
+    CHECK(screen_has(&s, "wide,") && screen_has(&s, "Page 1/"), "the wide and tall panel says how many it checked and its page");
+    {
+        int base = 0, big = 0;
+        for (int i = 0; i < R3_COLS * R3_ROWS; i++) if (s.ux[i] >= 0xF0000) { if (i % R3_COLS < 6) base++; else big++; }
+        CHECK(base >= 10 && big >= 20, "the panel draws the bases (%d cells) and their wide and tall versions (%d cells)", base, big);
+    }
+    dispatch(a, R3_RIGHT, 1600); CHECK(a->mono.wt_page == 1, "right turns to the next page of counterparts");
+    dispatch(a, R3_LEFT, 1610); dispatch(a, R3_LEFT, 1620); CHECK(a->mono.wt_page == mp_wt_pages - 1, "left from the first page wraps to the last (%d pages)", mp_wt_pages);
+    for (int pg = 0; pg < mp_wt_pages; pg++) {
+        a->mono.wt_page = pg;
+        compose(a, &s, 5000);
+        int missing = 0;
+        for (int i = 0; i < R3_COLS * R3_ROWS; i++) if (s.ux[i] && !r3mono_find(s.ux[i])) missing++;
+        CHECK(missing == 0, "wide and tall page %d draws only glyphs the font has", pg + 1);
+    }
+    a->mono.panel = MONO_NAMES; a->mono.nm_set = 0; a->mono.nm_group = 0; a->mono.nm_cur = 0;
+    compose(a, &s, 5000);
+    CHECK(screen_has(&s, "one cell, all: 1 of 1570") && screen_has(&s, "page 1/4"), "the named glyphs panel starts on the one-cell names: 1570 over 4 pages");
+    dispatch(a, R3_RIGHT, 1700); dispatch(a, R3_DOWN, 1710);
+    CHECK(a->mono.nm_cur == 31, "right and down move the cursor one and a row (%d)", a->mono.nm_cur);
+    dispatch(a, R3_Y, 1720); CHECK(a->mono.nm_group == 1 && a->mono.nm_cur == 0, "Y takes the next group of names and goes back to its first");
+    for (int g = 0; g < 60; g++) {                                                  /* every group, in every size set, draws and lists only names the font has */
+        for (int set = 0; set < 3; set++) {
+            a->mono.nm_set = set; a->mono.nm_cur = 0;
+            compose(a, &s, 5000);
+            int missing = 0;
+            for (int i = 0; i < R3_COLS * R3_ROWS; i++) if (s.ux[i] && !r3mono_find(s.ux[i])) missing++;
+            CHECK(missing == 0, "named glyphs, set %d, group %d draw only glyphs the font has", set, a->mono.nm_group);
+        }
+        dispatch(a, R3_Y, 1730);
+    }
+    CHECK(mp_group_n == 18 && a->mono.nm_group == 61 % mp_group_n, "Y goes round the %d groups (all and 17 words) and wraps (%d)", mp_group_n, a->mono.nm_group);
+    a->mono.nm_set = 0; a->mono.nm_group = 0; a->mono.nm_cur = 0;
+    dispatch(a, R3_ACCEPT, 1740); CHECK(a->mono.nm_set == 1, "A takes the next size set: two across");
+    compose(a, &s, 5000); CHECK(screen_has(&s, "two across, all: 1 of 619"), "the two-across set lists 619 names");
+    dispatch(a, R3_ACCEPT, 1750); compose(a, &s, 5000); CHECK(screen_has(&s, "bigger, all: 1 of 30"), "the bigger set lists 30 names (tall and four across)");
+    a->mono.panel = MONO_CODES; a->mono.cp_cur = 0;
+    compose(a, &s, 5000);
+    CHECK(screen_has(&s, "U+0020") && screen_has(&s, "1 of 4583") && screen_has(&s, "page 1/6"), "the code point sheet starts at the first code point: 4583 over 6 pages");
+    dispatch(a, R3_Y, 1800); CHECK(a->mono.cp_cur == 768, "Y is a page on (%d)", a->mono.cp_cur);
+    dispatch(a, R3_X, 1810); CHECK(a->mono.cp_cur == 0, "X is a page back");
+    a->mono.cp_cur = R3MONO_COUNT - 1;
+    compose(a, &s, 5000);
+    CHECK(screen_has(&s, "4583 of 4583") && screen_has(&s, "page 6/6"), "the last code point is on the last page");
+    dispatch(a, R3_RIGHT, 1820); CHECK(a->mono.cp_cur == R3MONO_COUNT - 1, "the cursor stops at the last code point");
+    {
+        int total = 0, missing = 0;
+        for (int pg = 0; pg < 6; pg++) {
+            a->mono.cp_cur = pg * 768;
+            compose(a, &s, 5000);
+            for (int i = 0; i < R3_COLS * R3_ROWS; i++) if (s.ux[i]) { total++; if (!r3mono_find(s.ux[i])) missing++; }
+        }
+        CHECK(total == 4583 && missing == 0, "the six code point pages draw all %d code points, %d of them missing", total, missing);
+    }
+    a->mono.panel = MONO_PORTRAIT; a->mono.pt_seed = 1; a->mono.pt_layout = 0;
+    compose(a, &s, 5000);
+    CHECK(screen_has(&s, "PASS") && !screen_has(&s, "FAIL") && screen_has(&s, "layout high"), "the portrait maker panel shows its checks, all passing, and the layout");
+    {
+        unsigned before[32], same = 0;
+        for (int y = 0; y < 4; y++) for (int x = 0; x < 8; x++) before[y * 8 + x] = s.ux[(3 + y) * R3_COLS + 3 + x];
+        for (int k = 0; k < 32; k++) CHECK(before[k] != 0 || k % 8 == 0 || k % 8 == 7, "portrait cell %d is drawn", k);
+        dispatch(a, R3_ACCEPT, 1900);
+        compose(a, &s, 5000);
+        for (int y = 0; y < 4; y++) for (int x = 0; x < 8; x++) same += before[y * 8 + x] == s.ux[(3 + y) * R3_COLS + 3 + x];
+        CHECK(a->mono.pt_seed == 2 && same < 32, "A makes a new portrait (%u of 32 cells the same)", same);
+        dispatch(a, R3_X, 1910); CHECK(a->mono.pt_seed == 1, "X goes one portrait back");
+        dispatch(a, R3_Y, 1920); compose(a, &s, 5000);
+        CHECK(a->mono.pt_layout == 1 && screen_has(&s, "layout standard"), "Y takes the other layout");
+    }
+    CHECK(MONO_PANELS == 12, "twelve panels");
     dispatch(a, R3_BACK, 1500); CHECK(a->page == P_HOME, "B leaves the page");
     a->page = P_MONO; a->mono.panel = MONO_UI;
     R3Video v = {0};
@@ -3393,7 +3539,7 @@ static int selftest_logic(void) {
         r3_mm_open(&a->mm); a->overlay = OV_MENU;
         PRESS(L_A); CHECK(a->overlay == OV_ABOUT, "About");
         compose(a, &s, t);
-        CHECK(screen_has(&s, "About") && screen_has(&s, "v" VERSION) && screen_has(&s, "CC BY-SA 4.0"), "the About box has the version and the font credit");
+        CHECK(screen_has(&s, "About") && screen_has(&s, "v" VERSION) && screen_has(&s, "SIL OFL 1.1"), "the About box has the version and the font credit");
         PRESS(L_B); CHECK(a->overlay == OV_NONE, "a key closes About");
         r3_mm_open(&a->mm); a->overlay = OV_MENU; PRESS(L_DOWN); PRESS(L_A);
         CHECK(a->overlay == OV_THEME && a->theme_sel == 0, "Colour theme opens the picker");

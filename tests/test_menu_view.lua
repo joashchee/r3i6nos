@@ -44,7 +44,7 @@ view.render(scr, { entries = entries, selected = 1, dialog = dialog, net = { wir
 assert(scr.ch[64 - 1] == 137, "no battery: the wired mark ends at the battery's place, got " .. tostring(scr.ch[63]))
 view.render(scr, { entries = entries, selected = 1, dialog = dialog })
 rows = scr:dump()
--- R3i6nos Mono on (the menu turns it on at start): the battery and the network are status glyphs, the text stand-ins are gone
+-- ANSIapps Mono on (the menu turns it on at start): the battery and the network are status glyphs, the text stand-ins are gone
 do
   eq(theme.useMono(true), true)
   local function top(state) state.entries, state.selected, state.dialog = entries, 1, dialog; view.render(scr, state); return scr end
@@ -234,7 +234,7 @@ do
   snap("about answer")
   settings.press(dialog, "back"); pick("Licences"); rows = draw(); has(table.concat(rows, "\n"), "MIT licence")
   snap("about licences")
-  settings.press(dialog, "pagedown"); rows = draw(); has(table.concat(rows, "\n"), "CC BY-SA 4.0")
+  settings.press(dialog, "pagedown"); rows = draw(); has(table.concat(rows, "\n"), "SIL Open Font License 1.1")
   snap("about licences 2")
 end
 

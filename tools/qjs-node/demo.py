@@ -7,13 +7,13 @@ PACKAGE = "@PACKAGE@"
 COMMIT = "@COMMIT@"      # the short git hash the package was built from (+dirty), and that commit's date: the splash's version line (rule 12)
 DATE = "@DATE@"
 TAGLINE = "@TAGLINE@"    # the splash's tagline: the package description after the app's name
-FONT_HEX = "@FONT_HEX@"  # r3i6nos_vga8x16 as hex (256 glyphs of 16 bytes), baked in by --bake
+FONT_HEX = "@FONT_HEX@"  # ansiapps8x16 as hex (256 glyphs of 16 bytes), baked in by --bake
 CP437 = "@CP437@"        # r3i6nos_cp437 as comma-separated code points
 
 """The Rec demo of a command-line tool (CLAUDE.md rule 11, docs/DEMO-RECORDINGS.md): its package installs this as <command>-demo.
 
-A tool has no screen of its own, so the demo draws the tool's commands and what they print on the theme's 64x24 text-mode screen (the IBM VGA
-8x16 font scaled to 10x20, row 0 the top bar, rows 1-20 the display, rows 21-23 the command line), frame by frame, and records it like an app does:
+A tool has no screen of its own, so the demo draws the tool's commands and what they print on the theme's 64x24 text-mode screen (the ANSIapps Mono
+8x16 size scaled to 10x20, row 0 the top bar, rows 1-20 the display, rows 21-23 the command line), frame by frame, and records it like an app does:
 numbered PNG screenshots, `demo-<timestamp>.mp4` (H.264 and AAC, 640x480, 30 fps; the tool's own .wav outputs are the sound), copies of the files
 the tour made, and `rec-demo.txt` (the log, in the device report's grammar, with a `== power ==` section; rule 14). Everything lands in
 /roms/<App>/Demo/ (R3I6NOS_ROMS for tests).
@@ -71,16 +71,16 @@ BAR, BODY, STRONG, FRAME, HINT, OK, WARN, ERROR = (15, 1), (7, 0), (15, 0), (7, 
 # ---- the font and the screen -------------------------------------------------------------------------------------------------------
 
 def load_font(header=None):
-    """(glyphs, to_cp437): 256 x 16 bytes, and {unicode code point: glyph index}. From the baked-in values, else from theme/r3i6nos_vga8x16.h."""
+    """(glyphs, to_cp437): 256 x 16 bytes, and {unicode code point: glyph index}. From the baked-in values, else from theme/font/ansiapps-mono/ansiapps_cp437.h."""
     import re
     if not FONT_HEX.startswith("@"):
         glyphs = bytes.fromhex(FONT_HEX)
         cps = [int(x) for x in CP437.split(",")]
     else:
-        path = header or os.environ.get("R3I6NOS_THEME_FONT") or os.path.join(HERE, "..", "..", "theme", "r3i6nos_vga8x16.h")
+        path = header or os.environ.get("R3I6NOS_THEME_FONT") or os.path.join(HERE, "..", "..", "theme", "font", "ansiapps-mono", "ansiapps_cp437.h")
         with open(path, encoding="utf-8") as f:
             text = f.read()
-        body = text.split("r3i6nos_vga8x16[256][16] = {", 1)[1].split("};", 1)[0]
+        body = text.split("ansiapps8x16[256][16] = {", 1)[1].split("};", 1)[0]
         glyphs = bytes(int(x, 16) for x in re.findall(r"0x([0-9a-fA-F]{2})", body))
         cp = text.split("r3i6nos_cp437[256] = {", 1)[1].split("};", 1)[0]
         cps = [int(x, 16) if x.lower().startswith("0x") else int(x) for x in re.findall(r"0x[0-9a-fA-F]+|\d+", cp)]
@@ -1024,7 +1024,7 @@ def record(argv, quiet, no_video, how, tool, listing, demo, logpath, heroes, ste
     if ver and "Linux version" in ver:
         log.line("INFO", "kernel", ver.split("Linux version", 1)[1].split()[0])
     log.line("INFO", "ffmpeg", (ffmpeg_version(ff) or ff) if ff else ("not looked for (--no-video)" if no_video else "none found"))
-    log.line("INFO", "screen", f"{COLS}x{ROWS} cells at {W}x{H}, {FPS} fps, the IBM VGA 8x16 font scaled to {CELL_W}x{CELL_H}")
+    log.line("INFO", "screen", f"{COLS}x{ROWS} cells at {W}x{H}, {FPS} fps, the ANSIapps Mono 8x16 font scaled to {CELL_W}x{CELL_H}")
     log.section("shows")
     log.line("INFO", "shows", ", ".join(h[0] for h in on))
     for h in heroes:

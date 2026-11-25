@@ -1,5 +1,6 @@
-/* The IO Checker's R3i6nos Mono page: a screen test of the 10x20 font (docs/R3I6NOS-MONO-FONT.md), eight panels, each drawing its glyphs the way an app
- * should use them. The rules the panels show:
+/* The IO Checker's ANSIapps Mono page: a screen test of the 10x20 font (docs/ANSIAPPS-MONO-FONT.md), twelve panels. The first eight draw the glyphs the way an
+ * app should use them; the last four are for looking at all of it: the wide and tall counterparts, every named glyph, every code point, and the portrait
+ * maker with its checks (font_check.h). The rules the panels show:
  *   - a glyph is printed by name (r3mono_name("pad.btn.A.on"), or the R3I_ macro when the name is known at build time) and never by code point;
  *   - a two-cell icon (app, system and file icons, triggers, the D-pad, sticks, key caps, switches, waveforms, big knobs) is ONE string of two cells, printed
  *     together on one row: the halves are never separated, never coloured differently, never given a different background;
@@ -10,10 +11,13 @@
 #define IOC_MONO_PAGE_H
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include "font_check.h"
 
-enum { MONO_TEXT, MONO_PAD, MONO_KEYS, MONO_PIANO, MONO_UI, MONO_MUSIC, MONO_ICONS_A, MONO_ICONS_B, MONO_PANELS };
-static const char *const MONO_PANEL_NAME[MONO_PANELS] = {"Text mode", "Gamepad", "Keyboard", "Piano", "UI widgets", "Music", "Icons: apps, files", "Icons: system"};
+enum { MONO_TEXT, MONO_PAD, MONO_KEYS, MONO_PIANO, MONO_UI, MONO_MUSIC, MONO_ICONS_A, MONO_ICONS_B, MONO_WIDETALL, MONO_NAMES, MONO_CODES, MONO_PORTRAIT, MONO_PANELS };
+static const char *const MONO_PANEL_NAME[MONO_PANELS] = {"Text mode", "Gamepad", "Keyboard", "Piano", "UI widgets", "Music", "Icons: apps, files", "Icons: system",
+                                                          "Wide and tall", "Named glyphs", "Code points", "Portrait maker"};
 
 typedef struct {
     int panel;
@@ -21,6 +25,11 @@ typedef struct {
     char typed[40];
     int pcur;                       /* the piano panel: the cursor, a semitone from the first C (0-36) */
     unsigned long long notes;       /* the piano's notes that are on (bit = semitone) */
+    int wt_page;                    /* wide and tall: the page */
+    int nm_set, nm_group, nm_cur;   /* named glyphs: the size set (one cell, two across, bigger), the name group (0 = all), the cursor in that list */
+    int cp_cur;                     /* code points: the cursor (an index into the font's code points) */
+    unsigned pt_seed;               /* portrait maker: the seed of the portrait shown, its layout, and the colours' seed */
+    int pt_layout;
 } MonoState;
 
 typedef struct {                    /* what the pad is doing now, filled by the app */
@@ -64,7 +73,7 @@ static int mono_stick_q(float v) { return v < -0.8f ? -2 : v < -0.35f ? -1 : v >
 static void mono_frame(R3Screen *s, int n) {
     char right[48];
     snprintf(right, sizeof right, "Panel %d/%d  %s", n + 1, MONO_PANELS, MONO_PANEL_NAME[n]);
-    r3_box(s, 0, R3_DISPLAY_TOP, R3_COLS, R3_DISPLAY_ROWS, &(R3Box){1, "R3i6nos Mono", right, "Fn next panel  B back", 0});
+    r3_box(s, 0, R3_DISPLAY_TOP, R3_COLS, R3_DISPLAY_ROWS, &(R3Box){1, "ANSIapps Mono", right, "Fn next panel  B back", 0});
 }
 
 /* ---- panel 1: text mode ---------------------------------------------------------------------------------------------------- */
@@ -78,7 +87,7 @@ static void mono_text(R3Screen *s) {
     mt(s, 36, 5, "╰─────╯ ┗━━━━━┛ ╚═════╝", R3_ST_BODY);
     mt(s, 36, 6, "▁▂▃▄▅▆▇█ ▏▎▍▌▋▊▉█", R3_ST_BODY);
     mt(s, 36, 7, "░▒▓█ ▖▗▘▝▚▞▙▛▜▟ ▀▄", R3_ST_BODY);
-    mt(s, 36, 8, "\U0001FB00\U0001FB01\U0001FB02\U0001FB03\U0001FB04\U0001FB05\U0001FB06 ⠁⠃⠇⡇⣇⣧⣷⣿", R3_ST_BODY);
+    mt(s, 36, 8, "\U0001FB00\U0001FB01\U0001FB02\U0001FB03\U0001FB04\U0001FB05\U0001FB06 \U0001CD00\U0001CD40 ⠁⠃⠇⡇⣇⣧⣷⣿", R3_ST_BODY);
     mt(s, 36, 9, "⣀⣤⣶⣿⣶⣤⣀⠤⠒⠉⠒⠤⣀⣤⣶⣿⣶⣤⣀", R3_ST_BODY);
     mt(s, 36, 10, "ÀÉÎÕÜ ąčęł őű øđ ß ŁŞŽ", R3_ST_BODY);
     mt(s, 36, 11, "“Quotes” – — … € ™ © ® ¾", R3_ST_BODY);
@@ -91,10 +100,11 @@ static void mono_text(R3Screen *s) {
     r3_put_mono(s, 51, 13, 0xE0B4, R3_CYAN, R3_BLACK);
     r3_text(s, 52, 13, " ok ", R3_BLACK, R3_CYAN);
     r3_put_mono(s, 56, 13, 0xE0B6, R3_CYAN, R3_BLACK);
-    mt(s, 36, 14, "↖↗↘↙ ⇦⇨⇧⇩ ↺↻ ➔➤ ⏴⏵⏶⏷", R3_ST_BODY);
-    mt(s, 36, 15, "✓✔✗✘ ★☆ ♡ ⚠⚡ ☐☑☒ ●◉◐◑◒◓ ◖◗", R3_ST_BODY);
-    mt(s, 36, 16, "♩♪♫♬ ♭♮♯ \U0001D11E \U0001D122 \U0001D10B \U0001D10C", R3_ST_BODY);
-    mt(s, 36, 17, "⠿ ⋮ ⋯ ☰ ⚙ ⌕ ⌘ ⌫ ⏎ ␣ ①②③ ❶❷❸", R3_ST_BODY);
+    mt(s, 36, 14, "↖↗↘↙ ←↑→↓ ↔↕ ⇐⇒⇔ ⇑⇓", R3_ST_BODY);
+    mt(s, 36, 15, "●○■□▪▫▲▼◆ ♪♫ ⠿", R3_ST_BODY);
+    r3_text(s, 36, 16, "Not in the font yet:", R3_ST(R3_ST_HINT));
+    r3_text(s, 36, 17, "check marks, ballot boxes,", R3_ST(R3_ST_HINT));
+    r3_text(s, 36, 18, "media keys, flats, sharps", R3_ST(R3_ST_HINT));
     r3_text(s, 36, 19, "0O1lI| rn m {}[]() <>", R3_ST(R3_ST_STRONG));
 }
 
@@ -259,7 +269,7 @@ static void mono_ui(R3Screen *s, unsigned now) {
     snprintf(n, sizeof n, "ui.ring.%d", (int)(now / 250 % 9)); MPS(s, 14, 9, n, R3_ST_OK);
     snprintf(n, sizeof n, "ui.wait.hourglass.%d", (int)(now / 400 % 8)); MPS(s, 2, 10, n, R3_ST_OK);   // 20x20 wait glyphs: two cells, one string
     snprintf(n, sizeof n, "ui.wait.orbit.%d", (int)(now / 100 % 8)); MPS(s, 5, 10, n, R3_ST_OK);
-    MP(s, 17, 9, "ui.radio.off"); MP(s, 18, 9, "ui.radio.on"); MP(s, 20, 9, "ui.check.mixed"); mt(s, 22, 9, "☐☑☒", R3_ST_BODY);
+    MP(s, 17, 9, "ui.radio.off"); MP(s, 18, 9, "ui.radio.on"); MP(s, 20, 9, "ui.check.mixed");
     MP(s, 26, 9, "ui.badge.dot"); MP(s, 27, 9, "ui.badge.ring"); MP(s, 29, 9, "ui.chevron.up"); MP(s, 30, 9, "ui.chevron.down");
     MP(s, 31, 9, "ui.chevron.left"); MP(s, 32, 9, "ui.chevron.right"); MP(s, 34, 9, "ui.grip");
     r3_text(s, 2, 11, "Pills and a hairline frame:", R3_ST(R3_ST_STRONG));
@@ -310,9 +320,8 @@ static void mono_music(R3Screen *s, unsigned now) {
     MP(s, 38, 8, "staff.bar"); MP(s, 39, 8, "staff.bar.double"); MP(s, 40, 8, "staff.bar.end"); MP(s, 41, 8, "staff.repeat.start"); MP(s, 42, 8, "staff.repeat.end"); MP(s, 43, 8, "staff.repeat.both");
     MP(s, 45, 8, "staff.clef.alto"); MP(s, 46, 8, "staff.clef.perc"); MP(s, 47, 8, "staff.time.common"); MP(s, 48, 8, "staff.time.cut"); MP(s, 49, 8, "staff.time.6_8");
     r3_text(s, 2, 10, "In running text:", R3_ST(R3_ST_STRONG));
-    mt(s, 20, 10, "♩ ♪ ♫ ♬ ♭ ♮ ♯   \U0001D11E \U0001D122 \U0001D12A \U0001D12B \U0001D110 \U0001D10B", R3_ST_BODY);
-    mt(s, 20, 11, "⏮ ⏪ ⏵ ⏸ ⏹ ⏺ ⏩ ⏭ ⏯", R3_ST_BODY);
-    mt(s, 20, 12, "Cmaj7  F♯m7♭5  G7♭9  B♭Δ  Dø  A°  Esus4", R3_ST_BODY);
+    mt(s, 20, 10, "♪ ♫   (the rest of the notation is the staff cells below)", R3_ST_BODY);
+    mt(s, 20, 11, "Cmaj7  Fm7  G7  BΔ  A°  Esus4", R3_ST_BODY);
     r3_text(s, 2, 13, "Marks:", R3_ST(R3_ST_STRONG));
     static const char *const mk2[] = {"accent", "marcato", "staccato", "tenuto", "fermata", "trill", "mordent", "turn", "segno", "coda", "caesura", "breath", "flat", "natural", "sharp", "ped"};
     for (int i = 0; i < 16; i++) { snprintf(n, sizeof n, "mus.%s", mk2[i]); MP(s, 9 + i, 13, n); }
@@ -395,6 +404,253 @@ static void mono_icons_b(R3Screen *s) {
     MPS(s, 36, 18, "code.fold.closed", R3_ST_BODY); r3_text(s, 38, 18, "fold closed", R3_ST(R3_ST_BODY));
 }
 
+/* ---- the font checks, run once -------------------------------------------------------------------------------------------------- */
+
+static FcNames mp_names;
+static FcPortrait mp_por;
+static int mp_checked;
+static void mono_checks(void) {
+    if (mp_checked) return;
+    fc_names(&mp_names);
+    fc_portrait(&mp_por);
+    mp_checked = 1;
+}
+
+/* A glyph of any size from its name's entry: every cell of every row, left to right and top to bottom. */
+static void mp_put(R3Screen *s, int col, int row, const R3MonoName *e, int fg, int bg) {
+    for (int r = 0; r < e->rows; r++)
+        for (int c = 0; c < e->cols; c++) r3_put_mono(s, col + c, row + r, e->cp + (unsigned)(r * e->cols + c), fg, bg);
+}
+
+/* ---- panel 9: the wide and tall counterparts ----------------------------------------------------------------------------------------- */
+
+/* One line for each base name that has a counterpart: the one-cell glyph, its `.wide` (twice across) and its `.tall` (twice across and down). */
+typedef struct { const R3MonoName *base, *wide, *tall; } MonoWT;
+#define MONO_WT_MAX 200
+static MonoWT mp_wt[MONO_WT_MAX];
+static int mp_wt_n, mp_wt_pages, mp_wt_start[40];
+#define MONO_WT_ROWS 14
+
+static int mp_cmp_cp(const void *a, const void *b) {
+    const R3MonoName *x = *(const R3MonoName *const *)a, *y = *(const R3MonoName *const *)b;
+    return x->cp < y->cp ? -1 : x->cp > y->cp;
+}
+
+static void mono_wt_build(void) {
+    if (mp_wt_n) return;
+    const R3MonoName *bases[MONO_WT_MAX];
+    int nb = 0;
+    for (int i = 0; i < R3MONO_NAMES && nb < MONO_WT_MAX; i++) {
+        const R3MonoName *e = &r3mono_names[i];
+        size_t n = strlen(e->name);
+        if (n > 5 && (!strcmp(e->name + n - 5, ".wide") || !strcmp(e->name + n - 5, ".tall"))) {
+            char base[96];
+            snprintf(base, sizeof base, "%.*s", (int)(n - 5), e->name);
+            const R3MonoName *b = r3mono_entry(base);
+            int seen = 0;
+            for (int k = 0; k < nb; k++) if (bases[k] == b) seen = 1;
+            if (b && !seen) bases[nb++] = b;
+        }
+    }
+    qsort(bases, (size_t)nb, sizeof bases[0], mp_cmp_cp);
+    for (int k = 0; k < nb; k++) {
+        char nm[112];
+        snprintf(nm, sizeof nm, "%s.wide", bases[k]->name); mp_wt[k].wide = r3mono_entry(nm);
+        snprintf(nm, sizeof nm, "%s.tall", bases[k]->name); mp_wt[k].tall = r3mono_entry(nm);
+        mp_wt[k].base = bases[k];
+    }
+    mp_wt_n = nb;
+    int row = 0, pg = 0;                                    /* pages: a line is one row, two with a tall glyph */
+    mp_wt_start[0] = 0;
+    for (int k = 0; k < nb; k++) {
+        int h = mp_wt[k].tall ? mp_wt[k].tall->rows : 1;
+        if (row + h > MONO_WT_ROWS) { row = 0; if (pg + 1 < 39) mp_wt_start[++pg] = k; }
+        row += h;
+    }
+    mp_wt_pages = pg + 1;
+    mp_wt_start[mp_wt_pages] = nb;
+}
+
+static void mono_widetall(R3Screen *s, const MonoState *m) {
+    mono_checks();
+    mono_wt_build();
+    int wp = m->wt_page < 0 ? 0 : m->wt_page >= mp_wt_pages ? mp_wt_pages - 1 : m->wt_page;
+    r3_text(s, 2, 2, "Base", R3_ST(R3_ST_STRONG)); r3_text(s, 7, 2, "Wide", R3_ST(R3_ST_STRONG)); r3_text(s, 13, 2, "Tall", R3_ST(R3_ST_STRONG)); r3_text(s, 20, 2, "Name", R3_ST(R3_ST_STRONG));
+    int row = 3;
+    for (int k = mp_wt_start[wp]; k < mp_wt_start[wp + 1]; k++) {
+        const MonoWT *w = &mp_wt[k];
+        int h = w->tall ? w->tall->rows : 1;
+        if (w->base) mp_put(s, 2, row, w->base, R3_ST(R3_ST_BODY));
+        if (w->wide) mp_put(s, 7, row, w->wide, R3_ST(R3_ST_BODY));
+        if (w->tall) mp_put(s, 13, row, w->tall, R3_ST(R3_ST_BODY));
+        r3_text_fit(s, 20, row, w->base->name, 42, R3_ST(R3_ST_BODY));
+        row += h;
+    }
+    char t[96];
+    int ok = mp_names.wide_ok == mp_names.wide && mp_names.tall_ok == mp_names.tall && !mp_names.wide_nobase && !mp_names.tall_nobase;
+    snprintf(t, sizeof t, "%d wide, %d tall: %s the right size", mp_names.wide, mp_names.tall, ok ? "all" : "NOT ALL");
+    r3_text_fit(s, 2, 18, t, 60, R3_ST(ok ? R3_ST_OK : R3_ST_ERROR));
+    snprintf(t, sizeof t, "Page %d/%d   Left and right turn the page", wp + 1, mp_wt_pages);
+    r3_text(s, 2, 19, t, R3_ST(R3_ST_HINT));
+}
+
+/* ---- panel 10: every named glyph --------------------------------------------------------------------------------------------------- */
+
+/* The list a size set and a name group give, in code point order. Set 0: one cell, 1: two across, 2: anything bigger. Group 0: all, else the names that begin with a word. */
+#define MONO_SETS 3
+#define MONO_GROUPS_MAX 48
+static const R3MonoName *mp_list[2400];
+static int mp_list_n, mp_list_set = -1, mp_list_group = -1;
+static const char *mp_group_word[MONO_GROUPS_MAX];
+static int mp_group_len[MONO_GROUPS_MAX];
+static int mp_group_n;
+
+static int mp_set_of(const R3MonoName *e) { return e->cols == 1 && e->rows == 1 ? 0 : e->cols == 2 && e->rows == 1 ? 1 : 2; }
+static int mp_word_len(const char *n) { const char *d = strchr(n, '.'); return d ? (int)(d - n) : (int)strlen(n); }
+
+static void mono_groups_build(void) {
+    if (mp_group_n) return;
+    mp_group_word[0] = "all";
+    mp_group_len[0] = 3;
+    mp_group_n = 1;
+    for (int i = 0; i < R3MONO_NAMES; i++) {                /* names are sorted, so a word's names are together */
+        const R3MonoName *e = &r3mono_names[i];
+        if (fc_row_name(e->name)) continue;
+        int L = mp_word_len(e->name), known = 0;
+        for (int g = 1; g < mp_group_n; g++) if (mp_group_len[g] == L && !strncmp(mp_group_word[g], e->name, (size_t)L)) known = 1;
+        if (!known && mp_group_n < MONO_GROUPS_MAX) { mp_group_word[mp_group_n] = e->name; mp_group_len[mp_group_n++] = L; }     /* the word is the start of this name, L long */
+    }
+}
+
+static int mp_in_group(const R3MonoName *e, int g) {
+    if (g <= 0) return 1;
+    int L = mp_group_len[g];
+    return mp_word_len(e->name) == L && !strncmp(e->name, mp_group_word[g], (size_t)L);
+}
+
+static void mono_list_build(int set, int group) {
+    mono_groups_build();
+    if (mp_list_set == set && mp_list_group == group) return;
+    mp_list_n = 0;
+    for (int i = 0; i < R3MONO_NAMES; i++) {
+        const R3MonoName *e = &r3mono_names[i];
+        if (fc_row_name(e->name) || mp_set_of(e) != set || !mp_in_group(e, group)) continue;
+        if (mp_list_n < (int)(sizeof mp_list / sizeof mp_list[0])) mp_list[mp_list_n++] = e;
+    }
+    qsort(mp_list, (size_t)mp_list_n, sizeof mp_list[0], mp_cmp_cp);
+    mp_list_set = set; mp_list_group = group;
+}
+
+/* Where item i of a set goes: columns across the page, rows of bands, the pitch of one item, and so how many fit. */
+typedef struct { int px, py, across, down; } MonoGrid;
+static MonoGrid mono_grid(int set) {
+    static const MonoGrid g[MONO_SETS] = {{2, 1, 30, 16}, {3, 1, 20, 16}, {5, 3, 12, 5}};
+    return g[set];
+}
+
+static void mono_names(R3Screen *s, const MonoState *m) {
+    mono_checks();
+    int set = m->nm_set < 0 || m->nm_set >= MONO_SETS ? 0 : m->nm_set;
+    mono_groups_build();
+    int group = m->nm_group < 0 || m->nm_group >= mp_group_n ? 0 : m->nm_group;
+    mono_list_build(set, group);
+    MonoGrid g = mono_grid(set);
+    int per = g.across * g.down;
+    int cur = m->nm_cur >= mp_list_n ? mp_list_n - 1 : m->nm_cur;
+    if (cur < 0) cur = 0;
+    int page = cur / per, pages = mp_list_n ? (mp_list_n + per - 1) / per : 1;
+    for (int k = 0; k < per && page * per + k < mp_list_n; k++) {
+        const R3MonoName *e = mp_list[page * per + k];
+        int col = 2 + (k % g.across) * g.px, row = 2 + (k / g.across) * g.py;
+        if (page * per + k == cur) mp_put(s, col, row, e, R3_BLACK, R3_CYAN);
+        else mp_put(s, col, row, e, R3_ST(R3_ST_BODY));
+    }
+    if (!mp_list_n) r3_text(s, 2, 2, "No names in this set and group.", R3_ST(R3_ST_WARN));
+    char t[128];
+    const R3MonoName *c = mp_list_n ? mp_list[cur] : NULL;
+    if (c) snprintf(t, sizeof t, "%s  U+%X  %dx%d", c->name, c->cp, c->cols, c->rows); else t[0] = 0;
+    r3_text_fit(s, 2, 18, t, 60, R3_ST(R3_ST_STRONG));
+    static const char *const setn[MONO_SETS] = {"one cell", "two across", "bigger"};
+    snprintf(t, sizeof t, "%s, %.*s: %d of %d  page %d/%d  A size  Y group  X page", setn[set], mp_group_len[group], mp_group_word[group], mp_list_n ? cur + 1 : 0, mp_list_n, page + 1, pages);
+    r3_text_fit(s, 2, 19, t, 60, R3_ST(R3_ST_HINT));
+}
+
+/* ---- panel 11: every code point ---------------------------------------------------------------------------------------------------- */
+
+#define MONO_CP_ACROSS 48
+#define MONO_CP_DOWN 16
+
+static void mono_codes(R3Screen *s, const MonoState *m) {
+    int cur = m->cp_cur < 0 ? 0 : m->cp_cur >= R3MONO_COUNT ? R3MONO_COUNT - 1 : m->cp_cur;
+    int per = MONO_CP_ACROSS * MONO_CP_DOWN, page = cur / per, pages = (R3MONO_COUNT + per - 1) / per;
+    char t[128];
+    for (int r = 0; r < MONO_CP_DOWN; r++) {
+        int i0 = page * per + r * MONO_CP_ACROSS;
+        if (i0 >= R3MONO_COUNT) break;
+        snprintf(t, sizeof t, "%06X", r3mono_cp[i0]);
+        r3_text(s, 2, 2 + r, t, R3_ST(R3_ST_HINT));
+        for (int c = 0; c < MONO_CP_ACROSS && i0 + c < R3MONO_COUNT; c++) {
+            int i = i0 + c;
+            if (i == cur) r3_put_mono(s, 10 + c, 2 + r, r3mono_cp[i], R3_BLACK, R3_CYAN);
+            else r3_put_mono(s, 10 + c, 2 + r, r3mono_cp[i], R3_ST(R3_ST_BODY));
+        }
+    }
+    unsigned cp = r3mono_cp[cur];
+    const char *nm = "";
+    for (int i = 0; i < R3MONO_NAMES; i++) if (r3mono_names[i].cp == cp) { nm = r3mono_names[i].name; break; }
+    snprintf(t, sizeof t, "U+%04X  %s", cp, nm);
+    r3_text_fit(s, 2, 18, t, 60, R3_ST(R3_ST_STRONG));
+    snprintf(t, sizeof t, "%d of %d  page %d/%d  Arrows move  X Y page", cur + 1, R3MONO_COUNT, page + 1, pages);
+    r3_text_fit(s, 2, 19, t, 60, R3_ST(R3_ST_HINT));
+}
+
+/* ---- panel 12: the portrait maker --------------------------------------------------------------------------------------------------- */
+
+static void mp_check_line(R3Screen *s, int row, int ok, const char *fmt, int a, int b, int c) {
+    char t[96];
+    snprintf(t, sizeof t, fmt, a, b, c);
+    r3_text(s, 19, row, ok ? "PASS" : "FAIL", R3_ST(ok ? R3_ST_OK : R3_ST_ERROR));
+    r3_text_fit(s, 24, row, t, 38, R3_ST(R3_ST_BODY));
+}
+
+static void mono_portrait(R3Screen *s, const MonoState *m) {
+    mono_checks();
+    FcPortraitImg img;
+    fc_build(&img, m->pt_seed * 2654435761u + 12345u, m->pt_layout);
+    r3_text(s, 2, 2, "8 x 4 cells", R3_ST(R3_ST_STRONG));
+    fc_draw(s, 3, 3, &img);
+    char t[64];
+    snprintf(t, sizeof t, "layout %s", ap_layout_name[img.layout]);
+    r3_text(s, 2, 8, t, R3_ST(R3_ST_BODY));
+    snprintf(t, sizeof t, "seed %u", m->pt_seed);
+    r3_text(s, 2, 9, t, R3_ST(R3_ST_BODY));
+    r3_text(s, 2, 10, img.conflicts ? "seam broken" : "seams join", R3_ST(img.conflicts ? R3_ST_ERROR : R3_ST_OK));
+    static const int pick[4][2] = {{0, 1}, {1, 2}, {2, 3}, {3, 1}};
+    static const char *const lab[4] = {"hair", "eye", "nose", "jaw"};
+    for (int k = 0; k < 4; k++) {
+        int i = img.part[pick[k][0]][pick[k][1]];
+        const char *n = i == FC_BLANK ? "-" : strchr(ap_part[i].name + 9, '.');      /* after "portrait.<family>" */
+        snprintf(t, sizeof t, "%s %s", lab[k], n ? n + 1 : "-");
+        r3_text_fit(s, 2, 12 + k, t, 16, R3_ST(R3_ST_BODY));
+    }
+    const FcPortrait *p = &mp_por;
+    r3_text(s, 19, 2, "Checks on the 10x20 bitmaps", R3_ST(R3_ST_STRONG));
+    mp_check_line(s, 3, p->parts_in_font == p->parts, "%d of %d parts are in the font", p->parts_in_font, p->parts, 0);
+    mp_check_line(s, 4, p->mirror_ok == p->mirror_pairs, "%d of %d right parts mirror left", p->mirror_ok, p->mirror_pairs, 0);
+    mp_check_line(s, 5, p->join_bad == 0, "%d of %d listed joins hold", p->joins - p->join_bad, p->joins, 0);
+    mp_check_line(s, 6, p->join_bad == 0, "%d exact %d sloped %d hair over", p->join_exact, p->join_soft, p->join_over);
+    mp_check_line(s, 7, p->compat_lost == 0 && p->compat_count_bad == 0, "%d of %d kind pairs lost no join", p->compat_rows - p->compat_lost, p->compat_rows, 0);
+    mp_check_line(s, 8, p->layout_cells_bad == 0, "%d layouts, every cell has a kind", p->layouts, 0, 0);
+    mp_check_line(s, 9, p->builds_clean == p->builds, "%d of %d portraits join every seam", p->builds_clean, p->builds, 0);
+    mp_check_line(s, 10, mp_names.cells_missing == 0 && mp_names.codes_missing == 0, "%d names, none lacks a bitmap", mp_names.names, 0, 0);
+    mp_check_line(s, 11, mp_names.wide_ok == mp_names.wide && mp_names.tall_ok == mp_names.tall, "%d wide, %d tall: the right size", mp_names.wide, mp_names.tall, 0);
+    if (p->first_bad[0]) r3_text_fit(s, 19, 13, p->first_bad, 43, R3_ST(R3_ST_ERROR));
+    else if (mp_names.first_bad[0]) r3_text_fit(s, 19, 13, mp_names.first_bad, 43, R3_ST(R3_ST_ERROR));
+    r3_text(s, 19, 15, "A  a new portrait", R3_ST(R3_ST_HINT));
+    r3_text(s, 19, 16, "Y  the other layout (mouth high or low)", R3_ST(R3_ST_HINT));
+    r3_text(s, 19, 17, "X  the portrait before", R3_ST(R3_ST_HINT));
+}
+
 /* ---- the page ------------------------------------------------------------------------------------------------------------------------ */
 
 static void mono_draw(R3Screen *s, const MonoState *m, const MonoLive *l, unsigned now) {
@@ -407,7 +663,11 @@ static void mono_draw(R3Screen *s, const MonoState *m, const MonoLive *l, unsign
     case MONO_UI: mono_ui(s, now); break;
     case MONO_MUSIC: mono_music(s, now); break;
     case MONO_ICONS_A: mono_icons_a(s); break;
-    default: mono_icons_b(s);
+    case MONO_ICONS_B: mono_icons_b(s); break;
+    case MONO_WIDETALL: mono_widetall(s, m); break;
+    case MONO_NAMES: mono_names(s, m); break;
+    case MONO_CODES: mono_codes(s, m); break;
+    default: mono_portrait(s, m);
     }
 }
 
@@ -440,6 +700,50 @@ static int mono_act(MonoState *m, int action) {
             else if (m->kx == 5) m->typed[0] = 0;
             return 1;
         }
+        default: return 0;
+        }
+    }
+    if (m->panel == MONO_WIDETALL) {
+        mono_wt_build();
+        switch (action) {
+        case R3_LEFT: case R3_X: m->wt_page = (m->wt_page + mp_wt_pages - 1) % mp_wt_pages; return 1;
+        case R3_RIGHT: case R3_Y: case R3_ACCEPT: m->wt_page = (m->wt_page + 1) % mp_wt_pages; return 1;
+        default: return 0;
+        }
+    }
+    if (m->panel == MONO_NAMES) {
+        mono_groups_build();
+        mono_list_build(m->nm_set, m->nm_group);
+        MonoGrid g = mono_grid(m->nm_set);
+        int per = g.across * g.down, n = mp_list_n;
+        switch (action) {
+        case R3_LEFT: if (m->nm_cur > 0) m->nm_cur--; return 1;
+        case R3_RIGHT: if (m->nm_cur + 1 < n) m->nm_cur++; return 1;
+        case R3_UP: m->nm_cur = m->nm_cur >= g.across ? m->nm_cur - g.across : m->nm_cur; return 1;
+        case R3_DOWN: m->nm_cur = m->nm_cur + g.across < n ? m->nm_cur + g.across : m->nm_cur; return 1;
+        case R3_X: m->nm_cur = m->nm_cur >= per ? m->nm_cur - per : 0; return 1;
+        case R3_ACCEPT: m->nm_set = (m->nm_set + 1) % MONO_SETS; m->nm_cur = 0; return 1;
+        case R3_Y: m->nm_group = (m->nm_group + 1) % mp_group_n; m->nm_cur = 0; return 1;
+        default: return 0;
+        }
+    }
+    if (m->panel == MONO_CODES) {
+        int per = MONO_CP_ACROSS * MONO_CP_DOWN;
+        switch (action) {
+        case R3_LEFT: if (m->cp_cur > 0) m->cp_cur--; return 1;
+        case R3_RIGHT: if (m->cp_cur + 1 < R3MONO_COUNT) m->cp_cur++; return 1;
+        case R3_UP: if (m->cp_cur >= MONO_CP_ACROSS) m->cp_cur -= MONO_CP_ACROSS; return 1;
+        case R3_DOWN: if (m->cp_cur + MONO_CP_ACROSS < R3MONO_COUNT) m->cp_cur += MONO_CP_ACROSS; return 1;
+        case R3_X: m->cp_cur = m->cp_cur >= per ? m->cp_cur - per : 0; return 1;
+        case R3_Y: case R3_ACCEPT: m->cp_cur = m->cp_cur + per < R3MONO_COUNT ? m->cp_cur + per : R3MONO_COUNT - 1; return 1;
+        default: return 0;
+        }
+    }
+    if (m->panel == MONO_PORTRAIT) {
+        switch (action) {
+        case R3_ACCEPT: m->pt_seed++; return 1;
+        case R3_X: if (m->pt_seed) m->pt_seed--; return 1;
+        case R3_Y: m->pt_layout = (m->pt_layout + 1) % AP_LAYOUTS; return 1;
         default: return 0;
         }
     }

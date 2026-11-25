@@ -85,7 +85,7 @@ end
 function love.load()
   love.mouse.setVisible(false)
   theme.init()
-  theme.useMono(true)   -- R3i6nos Mono: the top bar's battery and Wi-Fi are glyphs, and a title with a letter CP437 lacks is drawn (the table loads on the first glyph)
+  theme.useMono(true)   -- ANSIapps Mono: the top bar's battery and Wi-Fi are glyphs, and a title with a letter CP437 lacks is drawn (the table loads on the first glyph)
   screen = theme.screen()
   build = readBuild()
   splash(0, 3, "Starting")

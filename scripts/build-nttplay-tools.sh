@@ -14,10 +14,10 @@ DATE="$(awk '{print $3}' "$OUT/SOURCE" 2>/dev/null)"; [ -n "$DATE" ] || DATE=unk
 COMMIT="$VERSION"
 APP=nttplay
 sed -e "s|@TOOL@|nttplay|; s|@APP@|$APP|; s|@VERSION@|$COMMIT|; s|@PACKAGE@|nttplay|" "$REPO/tools/qjs-node/report.py" > "$OUT/nttplay-report"
-python3 "$REPO/tools/qjs-node/demo.py" --bake "$OUT/nttplay-demo" nttplay "$APP" "$COMMIT" nttplay "$COMMIT" "$DATE" "Neumetik's players as a command-line tool" "$REPO/theme/r3i6nos_vga8x16.h"
+python3 "$REPO/tools/qjs-node/demo.py" --bake "$OUT/nttplay-demo" nttplay "$APP" "$COMMIT" nttplay "$COMMIT" "$DATE" "Neumetik's players as a command-line tool" "$REPO/theme/font/ansiapps-mono/ansiapps_cp437.h"
 chmod 755 "$OUT/nttplay-report" "$OUT/nttplay-demo"
 cp "$REPO/tools/nttplay/commands.txt" "$OUT/commands.txt"
-# the font is CC BY-SA 4.0 and the demo draws with it: its credit, changes and licence travel with nttplay's NOTICE
-{ printf -- '---- IBM VGA 8x16 font (nttplay-demo draws with it; CC BY-SA 4.0) ----\n\n'; cat "$REPO/theme/font/README.txt"; printf '\n\n'; cat "$REPO/theme/font/LICENSE.TXT"; } > "$OUT/NOTICE-font"
+# the font is ANSIapps Mono (SIL OFL 1.1) and the demo draws with it: its credit and licence travel with nttplay's NOTICE
+{ printf -- '---- ANSIapps Mono font (nttplay-demo draws with it; SIL OFL 1.1) ----\n\n'; cat "$REPO/theme/font/ansiapps-mono/README.txt"; printf '\n\n'; cat "$REPO/theme/font/ansiapps-mono/OFL.txt"; } > "$OUT/NOTICE-font"
 grep -q '^#@hero ' "$OUT/commands.txt" || die "commands.txt has no #@hero lines"
 echo "[*] $OUT: nttplay-report, nttplay-demo, commands.txt, NOTICE-font"

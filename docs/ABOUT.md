@@ -36,7 +36,7 @@ Bump `VERSION` in the commit that makes a release, and tag that commit `v<VERSIO
      never pushed (a local build of unpushed work), which is said in those words.
   Unreachable, rate-limited, or a private repository (which answers 404 to both) are each reported as such.
   HTTPS needs `ca-certificates` in the rootfs (`build_rootfs.sh`).
-- **Licences**: MIT, the VGA font's CC BY-SA 4.0 credit (as in `NOTICE`), LÖVE's zlib, the privacy rules.
+- **Licences**: MIT, the font's SIL OFL 1.1 credit (as in `NOTICE`), LÖVE's zlib, the privacy rules.
 
 ## Untested on the R36S
 

@@ -1,12 +1,12 @@
 /* Font Editor: the font model, the canvas and its tools, the undo history and the files (docs/FONT-EDITOR.md). Pure C, no SDL, so the self-test
- * can drive all of it. The one font it ships with is R3i6nos Mono (the compiled tables of theme/font/r3i6nos-mono/); any monospace cell-shaped BDF
+ * can drive all of it. The one font it ships with is ANSIapps Mono (the compiled tables of theme/font/ansiapps-mono/); any monospace cell-shaped BDF
  * up to 16 x 20 opens as well (--font FILE.bdf).
  *
- * Everything is kept a code point at a time: a cell is the picture of one code point, and a NAME (R3i6nos Mono's 884 named glyphs) is a group of
+ * Everything is kept a code point at a time: a cell is the picture of one code point, and a NAME (ANSIapps Mono's 884 named glyphs) is a group of
  * one, two or more cells, edited together on one canvas, so a two-cell icon is drawn across its seam and not as two separate tiles. The pictures
  * the compiled tables share between code points (blank staff cells, the Greek capitals that are Latin shapes) are not shared here: an edit
- * changes the one code point, and the font builder (scripts/r3font/edits.py) lets the code points that alias it follow it.
- * Licence of what it edits: CC BY-SA 4.0 (theme/font/r3i6nos-mono/README.txt). The editor itself is MIT, like theme/. */
+ * changes the one code point, and the edits file is kept for the font's own repository (ansiapps-mono-font), where a person folds it in.
+ * Licence of what it edits: SIL OFL 1.1 (theme/font/ansiapps-mono/README.txt). The editor itself is MIT, like theme/. */
 #ifndef FE_MODEL_H
 #define FE_MODEL_H
 
@@ -20,16 +20,16 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-#include "font/r3i6nos-mono/r3i6nos_mono10x20.h"
-#include "font/r3i6nos-mono/r3i6nos_mono_names.h"
+#include "font/ansiapps-mono/ansiapps_mono10x20.h"
+#include "font/ansiapps-mono/ansiapps_mono_names.h"
 
 #define FE_MAXW 16              /* the widest cell: 16 pixels */
 #define FE_MAXH 20              /* the tallest: the display view's 20 rows */
-#define FE_MAXCELLS 4           /* cells in one group (R3i6nos Mono's longest has 2) */
+#define FE_MAXCELLS 4           /* cells in one group (ANSIapps Mono's longest has 2) */
 #define FE_CANVAS_W (FE_MAXCELLS * FE_MAXW)
 #define FE_UNDO 256
-#define FE_BUILTIN_ID "r3i6nos-mono"
-#define FE_EDITS_FONT_LINE "font R3i6nos Mono 10x20"
+#define FE_BUILTIN_ID "ansiapps-mono"
+#define FE_EDITS_FONT_LINE "font ANSIapps Mono 10x20"
 
 typedef uint16_t FeRow;         /* bit w-1 is the leftmost pixel */
 
@@ -40,7 +40,7 @@ typedef struct {
 } FeGroup;
 
 typedef struct {
-    char id[64], title[96];     /* "r3i6nos-mono", "R3i6nos Mono 10x20" */
+    char id[64], title[96];     /* "ansiapps-mono", "ANSIapps Mono 10x20" */
     int w, h, base;             /* the cell; base is the number of rows above the baseline */
     int n;                      /* code points */
     uint32_t *cp;               /* sorted */
@@ -48,7 +48,7 @@ typedef struct {
     int *group_of;              /* per code point: the first named group it is in, or -1 */
     FeGroup *groups;            /* the named groups, sorted by name */
     int ng;
-    int builtin;                /* 1: R3i6nos Mono (edits go to an edits file), 0: a BDF (saved as a BDF) */
+    int builtin;                /* 1: ANSIapps Mono (edits go to an edits file), 0: a BDF (saved as a BDF) */
     char path[512];             /* the BDF read */
     char *bdf_head;             /* a BDF's header up to CHARS, written back as it was */
     int clipped;                /* BDF pixels that fell outside the cell when it was read */
@@ -97,7 +97,7 @@ static inline int fe_alloc(FeFont *f, int n) {
 
 static inline int fe_cmp_group(const void *a, const void *b) { return strcmp(((const FeGroup *)a)->name, ((const FeGroup *)b)->name); }
 
-/* ---- R3i6nos Mono, from the compiled tables ------------------------------------------------------------------------------------- */
+/* ---- ANSIapps Mono, from the compiled tables ------------------------------------------------------------------------------------- */
 
 static inline int fe_load_builtin(FeFont *f) {
     memset(f, 0, sizeof *f);
@@ -105,7 +105,7 @@ static inline int fe_load_builtin(FeFont *f) {
     f->builtin = 1;
     f->w = R3MONO_W; f->h = R3MONO_H; f->base = R3MONO_BASE;
     snprintf(f->id, sizeof f->id, "%s", FE_BUILTIN_ID);
-    snprintf(f->title, sizeof f->title, "R3i6nos Mono %dx%d", f->w, f->h);
+    snprintf(f->title, sizeof f->title, "ANSIapps Mono %dx%d", f->w, f->h);
     for (int i = 0; i < f->n; i++) {
         f->cp[i] = r3mono_cp[i];
         for (int y = 0; y < FE_MAXH && y < R3MONO_H; y++) f->rows[i][y] = f->orig[i][y] = r3mono_glyph[r3mono_idx[i]][y];
@@ -345,7 +345,7 @@ static inline int fe_revert(FeFont *f, const FeGroup *g) {
     return changed;
 }
 
-/* ---- the edits file (R3i6nos Mono): the cells that differ from the compiled font, as scripts/r3font/edits.py reads them ------------ */
+/* ---- the edits file (ANSIapps Mono): the cells that differ from the compiled font, as a person folds them into the font's repository ------------ */
 
 static inline int fe_mkdirs(const char *path) {
     char tmp[PATH_MAX];
@@ -409,7 +409,7 @@ static inline int fe_edits_load(FeFont *f, const char *path, char *err, size_t c
         }
         if (L == 0 || line[0] == '#') continue;
         if (!strncmp(line, "font ", 5)) {
-            if (strcmp(line, FE_EDITS_FONT_LINE)) { snprintf(err, cap, "line %d: this file is for '%s', not R3i6nos Mono %dx%d", ln, line + 5, f->w, f->h); rc = -1; }
+            if (strcmp(line, FE_EDITS_FONT_LINE)) { snprintf(err, cap, "line %d: this file is for '%s', not ANSIapps Mono %dx%d", ln, line + 5, f->w, f->h); rc = -1; }
             seen_font = 1;
         } else if (!strncmp(line, "cell ", 5)) {
             char name[96] = "-", extra[32];

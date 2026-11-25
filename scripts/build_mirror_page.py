@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """Make overlay/usr/share/r3i6nos/mirror/page.html (the page r3i6nos-mirror serves) from scripts/mirror_page.template.html and
-R3i6nos Mono (theme/font/r3i6nos-mono/r3i6nos-mono.json, which has CP437 as the theme draws it) with the glyphs, the code point map and the
+ANSIapps Mono (theme/font/ansiapps-mono/ansiapps-mono.json; CP437 by the table in ansiapps_cp437.lua) with the glyphs, the code point map and the
 code page 437 table embedded as base64, so the unit serves one file and needs no font.
 
 Standard library only. Usage: scripts/build_mirror_page.py [--check]  (--check writes nothing and exits 1 if the committed page differs.)
-The font is CC BY-SA 4.0 (theme/font/, NOTICE): the page carries the credit and the licence note in its own comment and footer.
+The font is SIL OFL 1.1 (theme/font/ansiapps-mono/, NOTICE): the page carries the credit and the licence note in its own comment and footer.
 """
 import base64
 import json
@@ -14,8 +14,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 TEMPLATE = ROOT / "scripts" / "mirror_page.template.html"
-FONT = ROOT / "theme" / "vga8x16.lua"          # its `unicode` list says which code point each code page 437 byte is
-MONO = ROOT / "theme" / "font" / "r3i6nos-mono" / "r3i6nos-mono.json"
+FONT = ROOT / "theme" / "font" / "ansiapps-mono" / "ansiapps_cp437.lua"          # its `unicode` list says which code point each code page 437 byte is
+MONO = ROOT / "theme" / "font" / "ansiapps-mono" / "ansiapps-mono.json"
 OUT = ROOT / "overlay" / "usr" / "share" / "r3i6nos" / "mirror" / "page.html"
 
 

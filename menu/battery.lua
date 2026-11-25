@@ -85,7 +85,7 @@ function B.indicator(r)
   return ("BAT %s %d%%"):format(bar, r.pct), r.pct <= B.LOW and "low" or "normal"
 end
 
---- The top bar's battery as R3i6nos Mono glyphs (the theme's T.glyph names): { names = {"sys.bat.charge"?, "sys.bat.N"}, text = "87%" }, and the same kind
+--- The top bar's battery as ANSIapps Mono glyphs (the theme's T.glyph names): { names = {"sys.bat.charge"?, "sys.bat.N"}, text = "87%" }, and the same kind
 --- as indicator ("low", "charging", "normal"). N is 0-4 quarters of charge. nil with no battery. indicator() is the stand-in when the font is not there.
 function B.glyphs(r)
   if not r then return nil end

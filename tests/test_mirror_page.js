@@ -1,10 +1,10 @@
 // The mirror page's script, run in node against a stub DOM: a full frame, a delta and an extended-cell datagram paint the cells they should, from
-// R3i6nos Mono, pixel for pixel (the glyph rows in theme/font/r3i6nos-mono/r3i6nos-mono.json). Run: node tests/test_mirror_page.js
+// ANSIapps Mono, pixel for pixel (the glyph rows in theme/font/ansiapps-mono/ansiapps-mono.json). Run: node tests/test_mirror_page.js
 "use strict";
 const fs = require("fs"), path = require("path");
 const root = path.resolve(__dirname, "..");
 const html = fs.readFileSync(path.join(root, "overlay/usr/share/r3i6nos/mirror/page.html"), "utf8");
-const font = JSON.parse(fs.readFileSync(path.join(root, "theme/font/r3i6nos-mono/r3i6nos-mono.json"), "utf8"));
+const font = JSON.parse(fs.readFileSync(path.join(root, "theme/font/ansiapps-mono/ansiapps-mono.json"), "utf8"));
 const script = html.split("<script>")[1].split("</script>")[0];
 
 const painted = {};   // "x,y" -> Uint8ClampedArray of the last 10 x 20 block put there
@@ -44,7 +44,7 @@ check(same(at(71), expected(0x2554, 11, 0)), "byte 0xC9 is U+2554 of the font");
 check(same(at(0), expected(32, 7, 0)), "a space is blank");
 
 // an extended cell: a pad button and the left half of an icon, after the stand-in 254 of a delta
-const padA = require(path.join(root, "theme/font/r3i6nos-mono/r3i6nos-mono.json")).names["pad.btn.A.on"][0];
+const padA = require(path.join(root, "theme/font/ansiapps-mono/ansiapps-mono.json")).names["pad.btn.A.on"].cp;
 const d = [0, 80, 1, 254, 0x1F];
 listeners.delta({ data: b64(d) });
 check(same(at(80), expected(0x25A0 /* stand-in 254 is the CP437 black square */, 15, 1)), "an old unit's stand-in draws the CP437 ■");

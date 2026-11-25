@@ -2,18 +2,14 @@ r3i6nos: third-party material with its own licence
 
 The repository's own code is MIT (LICENSE). These parts are not:
 
-IBM VGA 8x16 font (theme/font/, theme/vga8x16.lua, theme/r3i6nos_vga8x16.h, and the screen mirror's page,
-  overlay/usr/share/r3i6nos/mirror/page.html, which embeds it as base64 and carries the credit in its comment and footer)
-  "WebPlus IBM VGA 8x16" from The Ultimate Oldschool PC Font Pack v2.2 by VileR,
-  https://int10h.org/oldschool-pc-fonts/ , (c) 2016-2020 VileR.
-  Licence: CC BY-SA 4.0, https://creativecommons.org/licenses/by-sa/4.0/ (theme/font/LICENSE.TXT).
-  Changed: rasterised to 8x16 bitmaps (the two generated files) and scaled to 10x20 at run time.
-  The generated files are adaptations and stay under CC BY-SA 4.0. Details: theme/font/README.txt.
-
-R3i6nos Mono (theme/font/r3i6nos-mono/, scripts/build_r3_font.py, scripts/r3font/)
-  The 10x20 text-mode font of r3i6nos and the ansiapps apps. Its code page 437 letters are the same VileR font as above (CC BY-SA 4.0), so the font
-  and every file in that folder are an adaptation under CC BY-SA 4.0; the scripts that make them are MIT. The glyphs added around the letters
-  were drawn for r3i6nos. Credit, changes and the licence: theme/font/r3i6nos-mono/README.txt.
+ANSIapps Mono (theme/font/ansiapps-mono/, made by scripts/build_ansiapps_font.py from the font's own repository, ansiapps-mono-font)
+  The one font of every r3i6nos app and of the ansiapps family, its 10x20 size: 4,583 code points, 2,219 named glyphs (gamepad, keys, piano, music, UI,
+  system, icons, the portrait maker's parts, the game glyphs), and the 256 characters of code page 437. Drawn clean-room (from a written brief and the
+  Unicode character names; no other font's shapes or outlines were used); the repository's provenance log (provenance/LOG.md) says who drew each batch.
+  Licence: SIL Open Font License 1.1, Reserved Font Name "ANSIapps Mono" (theme/font/ansiapps-mono/OFL.txt). The generated tables (C, Lua, JSON, BDF) and
+  the screen mirror's page, which embeds the glyphs as base64 and carries the credit in its comment and footer, are the font in other formats and carry the
+  same licence. The scripts that make the tables are MIT. It replaced R3i6nos Mono and the IBM VGA 8x16 font ("WebPlus IBM VGA 8x16" by VileR, CC BY-SA 4.0)
+  on 2026-11-25; neither is in the repository's files any more.
 
 Test corpus (corpus/files, installed at /opt/loveos/test-files and copied to EASYROMS by flash-macos.sh)
   Made for r3i6nos on 2026-11-09 and 2026-11-11 by the maintainer's own apps (ansiapps): Neumetik's generators, writers and its tracker tests' hand-built

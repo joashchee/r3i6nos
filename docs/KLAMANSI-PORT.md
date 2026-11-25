@@ -10,7 +10,7 @@ section 8 tracks it.
 
 1. **Where the code lives: the private KlamANSI repo** (an `r36s/` folder and its own workflow). This repo keeps the plan, the theme, the pad
    mapping and a `ROADMAP.md` pointer, and never any KlamANSI code (rule 2). The host reads this repo's public theme
-   (`theme/r3i6nos_ansiapps.h`; the CC BY-SA font credit ships in the deb).
+   (`theme/r3i6nos_ansiapps.h`; the font credit and licence ship in the deb).
 2. **Release: free, with no shareware notices**, a gift for r3i6nos users. The R36S build disables the notices (`public/edition.js`) and
    is not sold.
 3. **The typed line is the usual three-row command line** (reply, prompt, status), not a side-column box. It **floats over the bottom three rows

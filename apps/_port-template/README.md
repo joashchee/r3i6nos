@@ -20,4 +20,4 @@ Not an app: this folder has no `app.conf`, so no script or workflow picks it up.
 
 A port is a user-installed `.deb` (card `native_deb/`), never part of the firmware image, and links only libraries the rootfs has.
 
-**Font:** the theme's font is R3i6nos Mono by default (`docs/R3I6NOS-MONO-FONT.md`): print icons and gamepad or key glyphs by name from it; do not ship your own art or font.
+**Font:** the theme's font is ANSIapps Mono by default (`docs/ANSIAPPS-MONO-FONT.md`): print icons and gamepad or key glyphs by name from it; do not ship your own art or font.

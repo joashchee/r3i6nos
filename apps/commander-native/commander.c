@@ -42,7 +42,7 @@
 #include <time.h>
 #include <unistd.h>
 
-#define R3_WITH_MONO 1                  /* the file icons are R3i6nos Mono glyphs (docs/R3I6NOS-MONO-FONT.md) */
+#define R3_WITH_MONO 1                  /* the file icons are ANSIapps Mono glyphs (docs/ANSIAPPS-MONO-FONT.md) */
 #include "r3i6nos_ansiapps.h"
 #include "r3i6nos_themes.h"
 #include "r3i6nos_toast.h"
@@ -2113,7 +2113,7 @@ static void draw_pane(const App *a, R3Screen *s, int idx) {
         char label[300];
         snprintf(label, sizeof label, "%s%s", e->is_dir ? "/" : "", e->name);
         int lx = x + 1, lw = 21;
-        if (!a->no_file_icons) {   /* a two-cell R3i6nos Mono icon of the file's kind, then a space: the name has 3 cells less */
+        if (!a->no_file_icons) {   /* a two-cell ANSIapps Mono icon of the file's kind, then a space: the name has 3 cells less */
             const char *ic = file_icon(e->name, e->is_dir, e->is_link);
             if (ic) { r3_puts_mono(s, lx, y, ic, ink, r3_styles[st][1]); lx += 3; lw -= 3; }
         }
@@ -2297,7 +2297,7 @@ static void app_compose(const App *a, R3Screen *s) {
         r3_mm_draw(s, &a->mm, r3_themes[a->theme].name);
     } else if (a->mode == M_ABOUT) {
         static const char *const lines[] = {"A two-panel file manager and viewer for about 150", "formats, with a Play tab for sound and video.",
-                                            "Font: IBM VGA 8x16 by VileR, CC BY-SA 4.0.", "Code: MIT. No network, no telemetry.", NULL};
+                                            "Font: ANSIapps Mono, SIL OFL 1.1.", "Code: MIT. No network, no telemetry.", NULL};
         r3_about_draw(s, "Commander", VERSION, BUILD_LINE, lines);
     } else if (a->mode == M_KEYMAP) {
         r3_km_draw(s, &a->km);
@@ -2771,7 +2771,7 @@ static void test_colour(const char *root) {
             if (!memcmp(&s.ch[(R3_DISPLAY_TOP + 1 + r) * R3_COLS + c], "a.zip", 5)) { row = R3_DISPLAY_TOP + 1 + r; namecol = c; break; }
     CHECK(row >= 0, "a.zip is in the panel");
     if (row >= 0) {
-        /* file icons (R3i6nos Mono): a two-cell icon of the kind, a space, then the name; off, the name is where it was */
+        /* file icons (ANSIapps Mono): a two-cell icon of the kind, a space, then the name; off, the name is where it was */
         CHECK(namecol == 5 && s.ux[row * R3_COLS + 2] != 0 && s.ux[row * R3_COLS + 3] == s.ux[row * R3_COLS + 2] + 1,
               "a.zip has its archive icon (two adjacent glyphs) and its name 3 cells on (name at column %d)", namecol);
         const char *want = r3mono_name("icon.file.archive");

@@ -7,7 +7,7 @@ native app. It is the text-mode look of the ansiapps family fitted to the R36S's
 
 ## The screen
 
-The font is **R3i6nos Mono** (10x20; **the default of every app since 2026-11-24**, guide and policy in `docs/R3I6NOS-MONO-FONT.md`), whose first 256 glyphs are IBM VGA 8x16 scaled up to **10x20**, so **64 columns by 24 rows** fill 640x480 exactly. Every character is a cell of the grid; the
+The font is **ANSIapps Mono** (10x20; **the only font of every app since 2026-11-25**, guide and policy in `docs/ANSIAPPS-MONO-FONT.md`), whose code page 437 characters are the font's own 10x20 drawings, so **64 columns by 24 rows** fill 640x480 exactly. Every character is a cell of the grid; the
 whole screen is drawn only with characters in cells (code page 437), in the 16 VGA colours. Nothing scrolls: a list that is too long
 turns whole pages (`Page 2/3` in its top edge).
 
@@ -22,30 +22,32 @@ turns whole pages (`Page 2/3` in its top edge).
 The three bottom rows work as KlamANSI's command line does, and a quiet window leaves them blank. A widescreen dashboard is **not**
 part of this theme: the screen is fixed at 640x480 (on a bigger window the whole screen is scaled by a whole number and centred).
 
-## The font: 8x16 to 10x20
+## The font: ANSIapps Mono at 10x20
 
-The font is *WebPlus IBM VGA 8x16* from VileR's Ultimate Oldschool PC Font Pack, **CC BY-SA 4.0**. The original and its licence are in
-`theme/font/`; `scripts/build_vga_font.py` rasterises its 256 code page 437 characters into `theme/vga8x16.lua` and
-`theme/r3i6nos_vga8x16.h` (adaptations, same licence; `scripts/check.sh` fails if they are stale). **What CC BY-SA 4.0 requires, and where it is done:** credit the author, the licence and a link (`NOTICE`, `README.md`, `theme/font/README.txt`, and the
-header of each generated file); say what was changed (the same places); keep the licence text (`theme/font/LICENSE.TXT`); keep the adaptations
-under the same licence, so the two generated files are CC BY-SA, not MIT; add no further restriction. **Anything that ships the theme ships
-`theme/font/`** (`configure_rootfs.sh` does, and a test checks), and a release that bundles the repo ships `NOTICE`.
+The font is **ANSIapps Mono**, the official font of the ansiapps family, drawn clean-room in its own repository (`~/Coding/ansiapps-mono-font`) and licensed **SIL Open Font License 1.1**
+(Reserved Font Name "ANSIapps Mono"). `scripts/build_ansiapps_font.py` imports its 10x20 size into `theme/font/ansiapps-mono/` (`scripts/check.sh` fails if the committed tables are stale, when
+the font's repository is beside this one). **What the OFL requires, and where it is done:** keep the copyright and licence with every copy (`theme/font/ansiapps-mono/OFL.txt`, `README.txt`, `NOTICE`,
+and the header of each generated file); do not sell the font by itself; do not use the Reserved Font Name for a modified version. **Anything that ships the theme ships `theme/font/`** (`configure_rootfs.sh`
+does, and a test checks), and a release that bundles the repo ships `NOTICE`.
 
-At run time each 8x16 glyph becomes 10x20 by nearest neighbour: destination column x takes source column `floor(x*8/10)`, row y takes
-`floor(y*16/20)`. So source columns 0 and 4 and rows 0, 4, 8 and 12 are doubled. The map depends only on the position in the cell, so box
-lines and blocks join across cells exactly as in the 8x16 original (tested). No smoothing, no other font, no bold or italic.
+The 256 code page 437 characters are the font's glyphs at their Unicode code points (`ansiapps_cp437.h|.lua`: byte, code point, bitmap), so a cell holding a CP437 index and a cell holding
+any other code point of the font are drawn from the same table. The 10x20 bitmaps are made from the 8x16 ones in the font's repository: text by inserting lines (one-pixel strokes stay one pixel),
+tiling glyphs (box drawing, blocks, Braille, sextants, Powerline) by repeating columns 0 and 7 and rows 0, 4, 11 and 15 (a half block is exactly 5 columns or 10 rows), so box lines and blocks join across cells
+exactly as in 8x16 (`tests/test_theme.lua`, `tests/test_ansiapps_font.py`). No smoothing, no bold or italic.
 
-## R3i6nos Mono, the font of every app (default since 2026-11-24)
+## ANSIapps Mono, the font of every app
 
-**Every app has it: new apps use it and print their icons, status and key glyphs from it, not their own art.** The C theme defines `R3_WITH_MONO` itself (`R3_NO_MONO` opts out) and the Lua theme's `T.init` turns it on. The full guide, the policy and the names are `docs/R3I6NOS-MONO-FONT.md`.
+**Every app has it: new apps use it and print their icons, status and key glyphs from it, not their own art.** The C theme always includes it (`R3_WITH_MONO` is on, `R3_NO_MONO` is gone: the
+CP437 characters come from the same table) and the Lua theme's `T.init` turns it on. The full guide, the policy and the names are `docs/ANSIAPPS-MONO-FONT.md`.
 
-The theme's CP437 glyphs above are also the first 256 glyphs of **R3i6nos Mono** (`theme/font/r3i6nos-mono/`, `docs/R3I6NOS-MONO-FONT.md`), which adds box, block and Braille sets, symbols,
-music, gamepad, keyboard, UI and icon glyphs by name. A native app can put any of them in a cell: `r3_put_mono(s, col, row, cp, fg, bg)`
-for one code point, `r3_puts_mono(s, col, row, r3mono_name("icon.app.hydrolik"), fg, bg)` for a named glyph (a two-cell icon is one string). The cell keeps `ch` = 254 as a stand-in for the
-mirror (a datagram `E` after the frame carries the code points). **The Lua theme draws them since 2026-11-24:** a cell is a CP437 index (0-255) or `T.EXT + code point`; an app calls
+The theme's CP437 glyphs above are also the first 256 of the font's 4,583 (`theme/font/ansiapps-mono/`), which adds box, block, Braille and octant sets, symbols, Cyrillic,
+music, gamepad, keyboard, UI, icon, portrait and game glyphs by name. A native app can put any of them in a cell: `r3_put_mono(s, col, row, cp, fg, bg)`
+for one code point, `r3_puts_mono(s, col, row, r3mono_name("icon.app.hydrolik"), fg, bg)` for a named glyph (a two-cell icon is one string; a glyph more than one cell tall is printed row by row, `name` then
+`name.row2`). The cell keeps `ch` = 254 as a stand-in for the
+mirror (a datagram `E` after the frame carries the code points). **The Lua theme draws them:** a cell is a CP437 index (0-255) or `T.EXT + code point`; an app calls
 `T.useMono(true)` once (it checks the font folder; the table loads on the first glyph), after which `T.decode` draws what CP437 lacks and `scr:glyph(col, row, "icon.app.hydrolik", fg, bg)` or `T.glyph(name)` (a
 list of cells, two for an icon) draws a named glyph; `T.monoBitmap(cell)` is the 10 x 20 bitmap and `T.mono()` the table (nil on an image whose theme folder has no font folder: the app then draws its text
-stand-ins). The menu does this for its top bar. Details and tests: `docs/R3I6NOS-MONO-FONT.md`, `tests/test_theme.lua`.
+stand-ins). The menu does this for its top bar. Details and tests: `docs/ANSIAPPS-MONO-FONT.md`, `tests/test_theme.lua`.
 
 ## Colour
 
@@ -127,9 +129,9 @@ the cells into a texture and lets SDL scale it by a whole number. **Call `r3_vid
 input: a change is presented `R3_VIDEO_SETTLE` (4) times over the next calls, because on the R36S a screen presented once stayed black
 (Commander and the IO Checker started blank, 2026-11-09); keep the loop short while `settle > 0` (Commander waits 16 ms then, 500 ms
 idle). `apps/commander-native/commander.c` is the reference app. **`r3_render_hook`** (2026-11-24): a function pointer (NULL by default) that `r3_render` calls last with the finished 640 x 480 pixels, for an app that paints what the cell grid cannot (the Font Editor's edited glyphs, `docs/FONT-EDITOR.md`); the app must force a repaint when what it draws changes, since the video compares cells only, and a screen mirror, which sends cells, does not see it. The two themes
-cannot drift on the font: both hash all 256 scaled glyphs and the same number is in `tests/test_theme.lua` and in `r3i6nos_ansiapps.h`.
-The font data it builds on: `theme/r3i6nos_vga8x16.h` has the 256 glyphs (`r3i6nos_vga8x16[i][row]`, top bit leftmost) and the Unicode of each
-(`r3i6nos_cp437[i]`). Use the same 64x24 grid of 10x20 cells, the same row roles, colours and mapping from 8x16 to 10x20 as above.
+cannot drift on the font: both hash all 256 character bitmaps and the same number is `R3_GLYPH_HASH` in `theme/font/ansiapps-mono/ansiapps_cp437.h` (`tests/test_theme.lua` compares).
+The font data it builds on: `theme/font/ansiapps-mono/ansiapps_cp437.h` has the 256 characters (`ansiapps_cp437_10x20[i][row]`, 10 bits, bit 9 leftmost; `ansiapps8x16[i][row]` for 8x16) and the Unicode of each
+(`r3i6nos_cp437[i]`). Use the same 64x24 grid of 10x20 cells, the same row roles and colours as above.
 (The C header includes it; the app's `.deb` carries `NOTICE` and the font licence in its doc folder.)
 
 ## The main menu (rule 17; **specified 2026-11-19; built in the C theme on 2026-11-20; the Lua theme has the reader and the Keymap since 2026-11-24 and the boot menu is the first LÖVE app on them**)
@@ -183,7 +185,7 @@ loading step, and put any load error in `what`. There is no Lua version yet.
 `theme/r3i6nos_mirror.lua` (called by `T.draw`) and `theme/r3i6nos_mirror.h` (called by `r3_video_draw`) hand the cells that changed to the
 screen mirror (`docs/SCREEN-MIRROR.md`) when one is on. An app does nothing: the tap runs when a screen has changed and is about to be
 remembered as the previous one, and with no mirror it costs one test of a flag file, at most once a second. An app that draws its own screen
-without `T.draw` or `r3_video_draw` is not mirrored. Cells of R3i6nos Mono are sent as the stand-in 254 and then as an `E` datagram (code point and attribute), which the page draws. The Lua module is optional (`pcall(require)`), so an image's theme folder that predates it still works.
+without `T.draw` or `r3_video_draw` is not mirrored. Cells of ANSIapps Mono are sent as the stand-in 254 and then as an `E` datagram (code point and attribute), which the page draws. The Lua module is optional (`pcall(require)`), so an image's theme folder that predates it still works.
 
 
 ## Scrolling text (native C, 2026-11-19)

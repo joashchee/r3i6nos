@@ -11,7 +11,7 @@ folder), never here (rule 2). `ROADMAP.md` section 11 tracks it.
 1. **Where the code lives: the Neumetik repo**, an `r36s/` folder and its own workflow, as KlamANSI's `r36s/`. This repo keeps the plan, the theme, the pad mapping
    and the `ROADMAP.md` pointer.
 2. **Release: free for the R36S**, a gift for r3i6nos users, under the same grant wording as KlamANSI's (free to use and pass on, unmodified; holder ansiapps), in
-   `r36s/package/copyright` (confirmed with the rest; `NEUMETIK_RELEASE=1` still refuses a copyright that carries a draft marker). The MIT notice of `neumetik-midi` and the theme font's CC BY-SA credit ship in the package.
+   `r36s/package/copyright` (confirmed with the rest; `NEUMETIK_RELEASE=1` still refuses a copyright that carries a draft marker). The MIT notice of `neumetik-midi` and the theme font's (SIL OFL 1.1) credit ship in the package.
 3. **A player first, editors later.** The handheld has a pad, no keyboard: the first version plays (MIDI, tracker modules, BGN scenes, Endless Mode) and shows
    (Visual). The Tracker editor, the Music Editor, Compose, Synth and the samples repository are later items; Keys comes back on the pad (section 3).
 4. **Rule 8 with no departure.** Visual already draws CP437 cells in the 16 VGA colours, the theme's own cells, so its display view is Visual's canvas at 64 x 20 and

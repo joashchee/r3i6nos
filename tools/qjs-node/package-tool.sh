@@ -65,10 +65,10 @@ if [ -n "$share" ] && grep -q '^#@hero ' "$APP/$COMMANDS"; then
         [ -z "$(git -c safe.directory='*' -C "$APP" status --porcelain 2>/dev/null)" ] || commit="$commit+dirty"
         cdate="$(git -c safe.directory='*' -C "$APP" log -1 --format=%cs)"
     fi
-    python3 "$HERE/demo.py" --bake "$OUT/bin/$NAME-demo" "$NAME" "$APP_NAME" "$VERSION" "$PKG" "${commit:-nogit}" "${cdate:-unknown}" "${DESC#*: }" "$R3/theme/r3i6nos_vga8x16.h"
+    python3 "$HERE/demo.py" --bake "$OUT/bin/$NAME-demo" "$NAME" "$APP_NAME" "$VERSION" "$PKG" "${commit:-nogit}" "${cdate:-unknown}" "${DESC#*: }" "$R3/theme/font/ansiapps-mono/ansiapps_cp437.h"
     demo="$OUT/bin/$NAME-demo"
-    # the font is CC BY-SA 4.0: its credit, changes and licence travel with the package (the demo draws with it)
-    { printf -- '\n---- IBM VGA 8x16 font (the Rec demo draws with it; CC BY-SA 4.0) ----\n\n'; cat "$R3/theme/font/README.txt"; printf '\n\n'; cat "$R3/theme/font/LICENSE.TXT"; } >> "$OUT/NOTICE"
+    # the font is ANSIapps Mono (SIL OFL 1.1): its credit and licence travel with the package (the demo draws with it)
+    { printf -- '\n---- ANSIapps Mono font (the Rec demo draws with it; SIL OFL 1.1) ----\n\n'; cat "$R3/theme/font/ansiapps-mono/README.txt"; printf '\n\n'; cat "$R3/theme/font/ansiapps-mono/OFL.txt"; } >> "$OUT/NOTICE"
 fi
 # shellcheck disable=SC2086  # $demo is empty or one path
 MAKE_DEB_SHARE="$share" "$HERE/make-deb.sh" "$OUT/$NAME.deb" "$PKG" "$VERSION" "$DESC" "$OUT/copyright" "$OUT/NOTICE" "$OUT/bin/$NAME" "$OUT/bin/$NAME-report" $demo

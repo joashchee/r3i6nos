@@ -24,8 +24,8 @@ A tiny operating system for the **R36S** handheld. It turns on, shows a simple m
   and none of them is in the image.
 - **No emulators, no telemetry, no accounts, and no network at boot.** It goes online only when you choose it.
 
-**The font:** every screen is drawn in **R3i6nos Mono**, a 10 x 20 pixel font with 2,887 characters (code page 437, box, block and Braille sets, accents, Greek, music, gamepad buttons, key caps, icons).
-It is free to use under CC BY-SA 4.0: [what it is and how to use it](docs/R3I6NOS-MONO-FONT.md), [every glyph](theme/font/r3i6nos-mono/overview.png).
+**The font:** every screen is drawn in **ANSIapps Mono**, the official font of ansiapps, here at 10 x 20 pixels with 4,583 characters (code page 437, box, block and Braille sets, accents, Greek, Cyrillic, music, gamepad buttons, key caps, icons, wide and tall versions of them, a portrait maker's parts and game glyphs).
+It is drawn clean-room and free to use under the SIL Open Font License 1.1: [what it is and how to use it](docs/ANSIAPPS-MONO-FONT.md).
 
 **Help, news and updates:** join the community on Discord, <https://discord.gg/6q8mrKRKqh>.
 
@@ -167,6 +167,5 @@ project, Debian or anyone else whose names appear here; those names belong to th
 
 ## Licence
 
-MIT, see `LICENSE`, **except the font** (`theme/font/` including R3i6nos Mono, `theme/vga8x16.lua`, `theme/r3i6nos_vga8x16.h`), which is VileR's
-IBM VGA 8x16 under CC BY-SA 4.0 (credit: *The Ultimate Oldschool PC Font Pack*, <https://int10h.org/oldschool-pc-fonts/>; see `NOTICE`).
+MIT, see `LICENSE`, **except the font** (`theme/font/ansiapps-mono/`), which is ANSIapps Mono under the SIL Open Font License 1.1 (`theme/font/ansiapps-mono/OFL.txt`; see `NOTICE`).
 LÖVE is zlib-licensed; the minimal ffmpeg is GPL-2.0-or-later and PortMaster is MIT; the base system and runtimes keep their own licences (`NOTICE`).

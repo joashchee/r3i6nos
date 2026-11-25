@@ -28,7 +28,7 @@ typedef struct {
 } R3Keymap;
 
 #ifdef R3_WITH_MONO
-/* The R3i6nos Mono glyph of a button as the Keymap names it ("A", "L1", "Up", "Select", "Fn"...), `on` for pressed; NULL for a name that is not a
+/* The ANSIapps Mono glyph of a button as the Keymap names it ("A", "L1", "Up", "Select", "Fn"...), `on` for pressed; NULL for a name that is not a
  * button. A, B, X and Y are one cell, every other button two (a two-cell glyph is printed as one string, never split). */
 static inline const char *r3_km_glyph(const char *btn, int on) {
     char key[40];
@@ -136,7 +136,7 @@ static inline void r3_km_draw(R3Screen *s, const R3Keymap *k) {
     const R3KmPage *p = &k->pages[k->page];
     if (!r3_km_on_test(k)) {
         for (int i = 0; i < p->n && i < R3KM_ROWS; i++) {
-#ifdef R3_WITH_MONO     /* an app that opted into R3i6nos Mono sees the buttons as they are on the pad: a chord of button names is glyphs */
+#ifdef R3_WITH_MONO     /* an app that opted into ANSIapps Mono sees the buttons as they are on the pad: a chord of button names is glyphs */
             int used = r3_km_chord_glyphs(s, col + 2, row + 1 + i, p->rows[i].btn, 0, R3_ST(R3_ST_STRONG));
             if (!used) r3_text_fit(s, col + 2, row + 1 + i, p->rows[i].btn, 12, R3_ST(R3_ST_STRONG));
 #else

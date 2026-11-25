@@ -15,7 +15,7 @@ M.CELLS = M.COLS * M.ROWS
 M.RECHECK = 1        -- seconds between looks for the flag file while a screen keeps changing
 
 local char = string.char
-M.EXT = 0x110000     -- the theme's extended cell (T.EXT): EXT + a code point of R3i6nos Mono; the datagrams carry 254 in its place, and E the code point
+M.EXT = 0x110000     -- the theme's extended cell (T.EXT): EXT + a code point of ANSIapps Mono; the datagrams carry 254 in its place, and E the code point
 
 local function byteOf(ch) return ch >= M.EXT and 254 or ch % 256 end
 
@@ -131,7 +131,7 @@ function M.tap(scr, prev)
     if prev and state.sent_full then data = M.delta(scr, prev) else data = M.full(scr); state.sent_full = true end
     if data then
       M.sys.send(data); M.stats.sent = M.stats.sent + 1
-      -- cells from R3i6nos Mono follow the frame that carries their stand-in (a delta that fell back to a full frame has made every cell ordinary)
+      -- cells from ANSIapps Mono follow the frame that carries their stand-in (a delta that fell back to a full frame has made every cell ordinary)
       local e = M.ext(scr, (data:sub(1, 1) == "D") and prev or nil)
       if e then M.sys.send(e); M.stats.sent = M.stats.sent + 1 end
     end

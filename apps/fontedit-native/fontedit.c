@@ -1,10 +1,10 @@
 /* Font Editor (native ARM64, C and SDL2): a controller-first bitmap font editor for the R36S (docs/FONT-EDITOR.md).
  *
- * It touches up R3i6nos Mono (the 10 x 20 font of every r3i6nos app, theme/font/r3i6nos-mono/) and, with --font FILE.bdf, any monospace cell-shaped
- * BDF up to 16 x 20. Its first job is the font's MULTI-CELL glyphs: the 508 two-cell icons, key caps, shoulders, sticks, triggers, D-pads and knobs of
- * R3i6nos Mono (a name such as icon.app.hydrolik is two code points printed together). The first panel lists them, and A opens a name on ONE canvas,
+ * It touches up ANSIapps Mono (the 10 x 20 font of every r3i6nos app, theme/font/ansiapps-mono/) and, with --font FILE.bdf, any monospace cell-shaped
+ * BDF up to 16 x 20. Its first job is the font's MULTI-CELL glyphs: the 677 multi-cell names (two cells wide or tall, and four), key caps, shoulders, sticks, triggers, D-pads and knobs of
+ * ANSIapps Mono (a name such as icon.app.hydrolik is two code points printed together). The first panel lists them, and A opens a name on ONE canvas,
  * 2 columns of text cells a pixel, 20 x 20 pixels for a pair, drawn across the seam between the cells; the side shows it at the size it is used, in
- * a line of text and enlarged. Everything else (the 884 names, every code point, what has changed) is a panel away (Fn).
+ * a line of text and enlarged. Everything else (the 2,247 names, every code point, what has changed) is a panel away (Fn).
  *
  *   fontedit                              the editor
  *   fontedit --font FILE.bdf              edit another bitmap font (saved as <data folder>/<name>.bdf; the file read is never written)
@@ -13,8 +13,8 @@
  *   fontedit --screenshot out.bmp [scr]   draw a screen to a file (browse, edit, sample, menu, commands)
  *   fontedit --version
  *
- * Edits to R3i6nos Mono are written, at the end of every stroke and command, to <app data>/edits-r3i6nos-mono.txt; scripts/merge_font_edits.py folds that
- * file into theme/font/r3i6nos-mono/edits.txt and scripts/build-r3-font.sh puts the change in every output of the font. App data: edits-<font>.txt (or
+ * Edits to ANSIapps Mono are written, at the end of every stroke and command, to <app data>/edits-ansiapps-mono.txt; a person carries that
+ * file to the font's own repository (ansiapps-mono-font), where the change is drawn into the font (its provenance log, ROADMAP section 43). App data: edits-<font>.txt (or
  * <name>.bdf), settings.conf, r36s-report.txt. Overrides for tests: R3I6NOS_APP_DATA, R3I6NOS_ROMS.
  * Untested on a unit: nothing here has run on a real R36S (CLAUDE.md rule 1). */
 #define _GNU_SOURCE
@@ -148,7 +148,7 @@ static int settings_save(const App *a) {
     return fclose(f) == 0 && ok ? 0 : -1;
 }
 
-/* Writes the edits (R3i6nos Mono) or the BDF. A card that is out or full says so on the reply row and the editing goes on, in memory. */
+/* Writes the edits (ANSIapps Mono) or the BDF. A card that is out or full says so on the reply row and the editing goes on, in memory. */
 static int autosave(App *a) {
     int rc = a->font.builtin ? fe_edits_save(&a->font, a->edits_path) : fe_save_bdf(&a->font, a->edits_path);
     if (rc != 0) {
@@ -470,8 +470,8 @@ static void cmd_label(const App *a, int id, char *label, size_t lc, char *value,
 static void draw_overlay(App *a, R3Screen *s) {
     if (a->overlay == OV_MENU) r3_mm_draw(s, &a->mm, r3_themes[a->theme].name);
     else if (a->overlay == OV_ABOUT) {
-        static const char *const lines[] = {"Edits the R3i6nos Mono font and other bitmap fonts,", "with its multi-cell glyphs first.",
-            "Font: CC BY-SA 4.0 (theme/font/). App: MIT.", "Untested on a real R36S.", NULL};
+        static const char *const lines[] = {"Edits the ANSIapps Mono font and other bitmap fonts,", "with its multi-cell glyphs first.",
+            "Font: SIL OFL 1.1 (theme/font/). App: MIT.", "Untested on a real R36S.", NULL};
         r3_about_draw(s, APP, VERSION, BUILD_LINE, lines);
     } else if (a->overlay == OV_THEME) r3_theme_pick_draw(s, a->theme_sel, a->theme);
     else if (a->overlay == OV_KEYMAP) r3_km_draw(s, &a->km);
@@ -710,12 +710,12 @@ static void write_report(App *a, const char *how) {
 
     r3_report_at(&r, 2, "The font");
     r3_report_section(&r, "font");
-    r3_report_line(&r, R3_INFO, "font", "%s (%s)", f->title, f->builtin ? "R3i6nos Mono, compiled in" : f->path);
+    r3_report_line(&r, R3_INFO, "font", "%s (%s)", f->title, f->builtin ? "ANSIapps Mono, compiled in" : f->path);
     r3_report_line(&r, R3_INFO, "code points", "%d", f->n);
     int multi = 0, cells = 0, biggest = 0;
     for (int i = 0; i < f->ng; i++) { if (f->groups[i].n >= 2) { multi++; cells += f->groups[i].n; } if (f->groups[i].n > biggest) biggest = f->groups[i].n; }
     r3_report_line(&r, R3_INFO, "names", "%d, of which %d multi-cell (%d cells), the longest %d cells", f->ng, multi, cells, biggest);
-    r3_report_line(&r, f->builtin ? (f->ng == 884 && f->n == 2919 ? R3_PASS : R3_FAIL) : R3_SKIP, "font tables", f->builtin ? "2919 code points and 884 names expected" : "not R3i6nos Mono");
+    r3_report_line(&r, f->builtin ? (f->ng == 2247 && f->n == 4583 ? R3_PASS : R3_FAIL) : R3_SKIP, "font tables", f->builtin ? "4583 code points and 2247 names expected" : "not ANSIapps Mono");
     r3_report_line(&r, R3_INFO, "changed cells", "%d", fe_count_changed(f));
 
     r3_report_at(&r, 3, "Saving");
@@ -977,12 +977,12 @@ static void save_bmp(const R3Screen *s, const char *path) {
     free(px);
 }
 
-/* The edits file the Python side writes and reads (tests/test_fontedit_edits.py checks these very lines against scripts/r3font/edits.py): one cell of
+/* The edits file the Python side writes and reads (the file format is kept stable for the font's repository): one cell of
  * icon.app.hydrolik, the first row all ink and the last row one pixel. Each line is a row of the file. */
 /* FIXTURE BEGIN */
 static const char FIXTURE[] =
     "# r3i6nos font edits 1\n"
-    "font R3i6nos Mono 10x20\n"
+    "font ANSIapps Mono 10x20\n"
     "\n"
     "cell 10FD14 icon.app.hydrolik 1/2\n"
     "##########\n"
@@ -1026,11 +1026,11 @@ static int find_group(const FeFont *f, const char *name) {
 
 static void selftest_model(void) {
     FeFont f;
-    CHECK(fe_load_builtin(&f) == 0, "R3i6nos Mono loads");
-    CHECK(f.n == 2919 && f.ng == 884 && f.w == 10 && f.h == 20, "the font has %d code points, %d names, %dx%d", f.n, f.ng, f.w, f.h);
-    int multi = 0, three = 0;
-    for (int i = 0; i < f.ng; i++) { multi += f.groups[i].n >= 2; three += f.groups[i].n > 2; }
-    CHECK(multi == 508 && three == 0, "multi-cell names: %d (expected 508, none longer than 2)", multi);
+    CHECK(fe_load_builtin(&f) == 0, "ANSIapps Mono loads");
+    CHECK(f.n == 4583 && f.ng == 2247 && f.w == 10 && f.h == 20, "the font has %d code points, %d names, %dx%d", f.n, f.ng, f.w, f.h);
+    int multi = 0, five = 0;
+    for (int i = 0; i < f.ng; i++) { multi += f.groups[i].n >= 2; five += f.groups[i].n > 4; }
+    CHECK(multi == 677 && five == 0, "multi-cell names: %d (expected 677, none longer than 4)", multi);
     int hy = find_group(&f, "icon.app.hydrolik");
     CHECK(hy >= 0 && f.groups[hy].n == 2 && f.cp[f.groups[hy].ci[1]] == f.cp[f.groups[hy].ci[0]] + 1, "icon.app.hydrolik is two consecutive code points");
     for (int i = 1; i < f.ng; i++) if (strcmp(f.groups[i - 1].name, f.groups[i].name) >= 0) { CHECK(0, "names not sorted at %d", i); break; }
@@ -1124,11 +1124,11 @@ static void selftest_model(void) {
         CHECK(nb == strlen(FIXTURE) && !memcmp(b, FIXTURE, nb), "what C writes is what Python writes (the fixture), byte for byte");
 
         const char *wrong[][2] = {
-            {"stale name", "# r3i6nos font edits 1\nfont R3i6nos Mono 10x20\n\ncell 10FD14 icon.app.klamansi 1/2\n"},
-            {"not in the font", "# r3i6nos font edits 1\nfont R3i6nos Mono 10x20\n\ncell 10FFFF - 1/1\n"},
+            {"stale name", "# r3i6nos font edits 1\nfont ANSIapps Mono 10x20\n\ncell 10FD14 icon.app.klamansi 1/2\n"},
+            {"not in the font", "# r3i6nos font edits 1\nfont ANSIapps Mono 10x20\n\ncell 10FFFF - 1/1\n"},
             {"other font", "# r3i6nos font edits 1\nfont Other 8x16\n"},
-            {"short cell", "# r3i6nos font edits 1\nfont R3i6nos Mono 10x20\n\ncell 41 - 1/1\n..........\n..........\n\n"},
-            {"bad row", "# r3i6nos font edits 1\nfont R3i6nos Mono 10x20\n\ncell 41 - 1/1\n.....x....\n"},
+            {"short cell", "# r3i6nos font edits 1\nfont ANSIapps Mono 10x20\n\ncell 41 - 1/1\n..........\n..........\n\n"},
+            {"bad row", "# r3i6nos font edits 1\nfont ANSIapps Mono 10x20\n\ncell 41 - 1/1\n.....x....\n"},
         };
         for (size_t i = 0; i < sizeof wrong / sizeof wrong[0]; i++) {
             fe_free(&f2);
@@ -1141,15 +1141,15 @@ static void selftest_model(void) {
         rm_rf(dir);
     }
 
-    /* another font: R3i6nos Mono's own BDF, read back as the same pictures (looked for beside the repository; skipped where it is not) */
-    static const char *const bdfs[] = {"theme/font/r3i6nos-mono/R3i6nosMono-Regular.bdf", "/opt/loveos/theme/font/r3i6nos-mono/R3i6nosMono-Regular.bdf"};
+    /* another font: ANSIapps Mono's own BDF, read back as the same pictures (looked for beside the repository; skipped where it is not) */
+    static const char *const bdfs[] = {"theme/font/ansiapps-mono/AnsiappsMono10x20-Regular.bdf", "/opt/loveos/theme/font/ansiapps-mono/AnsiappsMono10x20-Regular.bdf"};
     int tried = 0;
     for (size_t i = 0; i < 2; i++) {
         if (access(bdfs[i], R_OK) != 0) continue;
         tried = 1;
         FeFont b;
         int n = fe_load_bdf(&b, bdfs[i], err, sizeof err);
-        CHECK(n == 2919 && b.w == 10 && b.h == 20 && b.base == 15 && b.clipped == 0, "the BDF reads: %d glyphs, %dx%d, base %d, %d clipped (%s)", n, b.w, b.h, b.base, b.clipped, err);
+        CHECK(n == 4583 && b.w == 10 && b.h == 20 && b.base == 15 && b.clipped == 0, "the BDF reads: %d glyphs, %dx%d, base %d, %d clipped (%s)", n, b.w, b.h, b.base, b.clipped, err);
         int diff = 0;
         for (int k = 0; k < b.n && k < f.n; k++) if (b.cp[k] != f.cp[k] || memcmp(b.rows[k], f.rows[k], sizeof b.rows[k])) diff++;
         CHECK(diff == fe_count_changed(&f), "the BDF's pictures are the compiled font's, except the two cells edited above (%d differ)", diff);
@@ -1160,7 +1160,7 @@ static void selftest_model(void) {
             b.rows[100][4] ^= 0x2A;
             CHECK(fe_save_bdf(&b, p2) == 0, "the BDF is written");
             FeFont b2;
-            CHECK(fe_load_bdf(&b2, p2, err, sizeof err) == 2919 && !memcmp(b2.rows, b.rows, (size_t)b.n * sizeof *b.rows), "the BDF written reads back the same: %s", err);
+            CHECK(fe_load_bdf(&b2, p2, err, sizeof err) == 4583 && !memcmp(b2.rows, b.rows, (size_t)b.n * sizeof *b.rows), "the BDF written reads back the same: %s", err);
             CHECK(b2.bdf_head && strstr(b2.bdf_head, "FAMILY_NAME") != NULL, "the BDF keeps its header");
             fe_free(&b2);
             rm_rf(d2);
@@ -1168,7 +1168,7 @@ static void selftest_model(void) {
         fe_free(&b);
         break;
     }
-    if (!tried) fprintf(stderr, "fontedit selftest: NOT RUN: the R3i6nos Mono BDF is not beside this binary (run from the repository to read it)\n");
+    if (!tried) fprintf(stderr, "fontedit selftest: NOT RUN: the ANSIapps Mono BDF is not beside this binary (run from the repository to read it)\n");
     {   /* a BDF the editor cannot take, and one that is not a BDF */
         char d3[PATH_MAX], p3[PATH_MAX + 40];
         tmp_dir(d3, sizeof d3, "badbdf");
@@ -1215,7 +1215,7 @@ static void selftest_app(const char *shots, SDL_Renderer *rend, R3Video *video) 
 
     compose(a, s);
     CHECK(screen_has(s, "Multi-cell glyphs") && screen_has(s, "Font Editor") && screen_has(s, "Panel 1/4"), "the browser opens on the multi-cell panel");
-    CHECK(a->nlist[PN_MULTI] == 508 && a->nlist[PN_NAMES] == 884 && a->nlist[PN_CODES] == 2919 && a->nlist[PN_CHANGED] == 0, "list sizes %d %d %d %d", a->nlist[0], a->nlist[1], a->nlist[2], a->nlist[3]);
+    CHECK(a->nlist[PN_MULTI] == 677 && a->nlist[PN_NAMES] == 2247 && a->nlist[PN_CODES] == 4583 && a->nlist[PN_CHANGED] == 0, "list sizes %d %d %d %d", a->nlist[0], a->nlist[1], a->nlist[2], a->nlist[3]);
     CHECK(a->nov >= 3, "the list has glyphs to paint (%d)", a->nov);
 
     /* find the Hydrolik icon by stepping down the list: the pages are whole, nothing scrolls */
@@ -1251,7 +1251,7 @@ static void selftest_app(const char *shots, SDL_Renderer *rend, R3Video *video) 
     CHECK(fe_get(&a->c, 8, 0) && fe_get(&a->c, 9, 0) && fe_get(&a->c, 10, 0) && fe_get(&a->c, 11, 0), "holding A and moving draws a stroke across the seam");
     CHECK(a->hist.nu == 1, "one stroke is one history entry (%d)", a->hist.nu);
     CHECK(fe_count_changed(&a->font) > before, "the font has changed");
-    snprintf(path, sizeof path, "%s/edits-r3i6nos-mono.txt", dir);
+    snprintf(path, sizeof path, "%s/edits-ansiapps-mono.txt", dir);
     {
         char txt[8192] = "";
         FILE *f = fopen(path, "r");
@@ -1341,7 +1341,7 @@ static void selftest_app(const char *shots, SDL_Renderer *rend, R3Video *video) 
     CHECK(fe_count_changed(&a->font) == 0 && a->nlist[PN_CHANGED] == 0, "Yes reverts it and the list empties");
     {
         char txt[8192] = "x";
-        snprintf(path, sizeof path, "%s/edits-r3i6nos-mono.txt", dir);
+        snprintf(path, sizeof path, "%s/edits-ansiapps-mono.txt", dir);
         FILE *f = fopen(path, "r");
         size_t n = f ? fread(txt, 1, sizeof txt - 1, f) : 0;
         txt[n] = 0;
@@ -1399,7 +1399,7 @@ static void selftest_app(const char *shots, SDL_Renderer *rend, R3Video *video) 
     snprintf(path, sizeof path, "%s/not-a-folder", dir);
     FILE *blocker = fopen(path, "w");
     if (blocker) { fputs("x", blocker); fclose(blocker); }
-    snprintf(a->edits_path, sizeof a->edits_path, "%.3900s/edits-r3i6nos-mono.txt", a->data_dir);
+    snprintf(a->edits_path, sizeof a->edits_path, "%.3900s/edits-ansiapps-mono.txt", a->data_dir);
     FeGroup g;
     fe_group_cp(&a->font, fe_find(&a->font, 'A'), &g);
     open_group(a, &g);
@@ -1411,7 +1411,7 @@ static void selftest_app(const char *shots, SDL_Renderer *rend, R3Video *video) 
     compose(a, s);
     CHECK(screen_has(s, "NOT SAVED"), "and the top bar says it too");
     app_data_dir(a->data_dir, sizeof a->data_dir);
-    snprintf(a->edits_path, sizeof a->edits_path, "%.3900s/edits-r3i6nos-mono.txt", a->data_dir);
+    snprintf(a->edits_path, sizeof a->edits_path, "%.3900s/edits-ansiapps-mono.txt", a->data_dir);
     run_command(a, C_SAVE);
     CHECK(!a->save_failed, "Save now works once the card is back");
     a->confirm_id = C_REVERT_ALL;

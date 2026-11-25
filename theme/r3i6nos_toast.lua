@@ -91,7 +91,7 @@ function M.key(t)
   return false
 end
 
---- The R3i6nos Mono status glyph (by name) a toast's text calls for, or nil: the hot-plug service's words (r3i6nos-hotplug) tell what changed.
+--- The ANSIapps Mono status glyph (by name) a toast's text calls for, or nil: the hot-plug service's words (r3i6nos-hotplug) tell what changed.
 --- The C twin is r3_toast_icon in r3i6nos_toast.h; both are tested with the same texts.
 function M.icon(text)
   local w = (text or ""):lower()

@@ -37,7 +37,7 @@ static int art_init(Art *a, int w) {
     if (w > ART_MAX_COLS) w = ART_MAX_COLS;
     a->w = w;
     for (int i = 0; i < 16; i++) a->pal[i] = 0xFF000000u | (uint32_t)r3_rgb[i][0] << 16 | (uint32_t)r3_rgb[i][1] << 8 | r3_rgb[i][2];
-    memcpy(a->font, r3i6nos_vga8x16, sizeof a->font);
+    memcpy(a->font, ansiapps8x16, sizeof a->font);
     return 0;
 }
 

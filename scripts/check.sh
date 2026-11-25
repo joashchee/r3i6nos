@@ -20,12 +20,9 @@ if git rev-parse --git-dir >/dev/null 2>&1; then
     fi
 else echo "NOT RUN: not a git checkout"; fi
 
-step "theme font up to date"
-if python3 -c "import PIL" 2>/dev/null; then python3 scripts/build_vga_font.py --check || fail=1
-else echo "NOT RUN: Pillow is not installed (the generated font files were not compared with the font)"; fi
-
-step "R3i6nos Mono font tables up to date (scripts/build_r3_font.py; the TrueType files are checked by scripts/build-r3-font.sh in Debian)"
-python3 -I scripts/build_r3_font.py --check || fail=1
+step "ANSIapps Mono tables up to date (scripts/build_ansiapps_font.py reads the font's own repository, ../ansiapps-mono-font)"
+if [ -d "${ANSIAPPS_MONO_DIR:-../ansiapps-mono-font}/fonts/10x20" ]; then python3 -I scripts/build_ansiapps_font.py --check || fail=1
+else echo "NOT RUN: the font's repository (ansiapps-mono-font, or \$ANSIAPPS_MONO_DIR) is not beside this checkout: the committed tables were not compared with it (tests/test_ansiapps_font.py still checks them against each other)"; fi
 
 step "screen mirror page up to date (scripts/mirror_page.template.html and the font)"
 python3 -I scripts/build_mirror_page.py --check || fail=1
@@ -206,7 +203,7 @@ if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     rm -f "$osk_bin"
 else echo "NOT RUN: needs a C compiler and libsdl2-dev (sdl2-config)"; fi
 
-step "Keymap with R3i6nos Mono glyphs (theme/r3i6nos_keymap.h)"
+step "Keymap with ANSIapps Mono glyphs (theme/r3i6nos_keymap.h)"
 if command -v cc >/dev/null && command -v sdl2-config >/dev/null; then
     kmg_bin="$(mktemp "${TMPDIR:-/tmp}/r3i6nos-kmg.XXXXXX")"
     # shellcheck disable=SC2046,SC2086  # sdl2-config prints separate flags; $werror is empty or one flag
@@ -271,7 +268,6 @@ bash tests/test_streamtools.sh || fail=1
 bash tests/test_run_app_runtime.sh || fail=1
 bash tests/test_portmaster_unpack.sh || fail=1
 bash tests/test_image.sh || fail=1
-bash tests/test_r3font_love.sh || fail=1                   # R3i6nos Mono through LOVE's own rasteriser (prints SKIPPED without the desktop LOVE)
 
 step "shell syntax"
 for f in overlay/usr/local/bin/run_app.sh overlay/usr/local/bin/loveos-session apps/portmaster/portmaster apps/portmaster/shim/sudo scripts/*.sh tests/*.sh tests/runtimes/*.sh tests/streamtools/*.sh tools/runtimes/*/run tools/streamtools/build.sh tools/streamtools/*/run tools/qjs-node/*.sh; do

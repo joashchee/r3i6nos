@@ -11,7 +11,7 @@ device (CLAUDE.md rule 14); an idle screen must cost an idle mirror.
 
 1. **Send the cells that changed, not pixels.** Every app is the 64x24 text-mode screen (CLAUDE.md rule 8): a cell is one character byte and one
    attribute byte (foreground and background, the 16 VGA colours), so a whole frame is 64 x 24 x 2 = **3072 bytes** and a change is a few bytes. (Since 2026-11-24 a cell may also
-   be a glyph of R3i6nos Mono, which an `E` datagram carries as a 3-byte code point: below.) Nothing
+   be a glyph of ANSIapps Mono, which an `E` datagram carries as a 3-byte code point: below.) Nothing
    is read back from the GPU, nothing is compressed, an idle screen sends nothing. The computer draws the grid with the VGA font at any size, so a TV
    gets sharp text, which a scaled pixel stream never gives.
 2. **The viewer is a web page.** The computer needs nothing installed; a TV's browser can open it. The unit serves it.
@@ -26,7 +26,7 @@ device (CLAUDE.md rule 14); an idle screen must cost an idle mirror.
 | Piece | Where | Tests |
 |---|---|---|
 | The daemon `r3i6nos-mirror` (`start`, `serve`, `stop`, `status`, `list`) | `overlay/usr/local/bin/r3i6nos-mirror` | `tests/test_r3i6nos_mirror.py` (a real daemon on loopback, a UDP socket for an app, a plain socket for a page) |
-| The page: a 640 x 480 canvas painted from the cells with R3i6nos Mono embedded (glyphs, code point map, CP437 table) | `overlay/usr/share/r3i6nos/mirror/page.html`, made by `scripts/build_mirror_page.py` from `scripts/mirror_page.template.html` | the same file; `check.sh` fails when it is stale; `tests/test_mirror_page.js` runs the page's script in node and compares every painted pixel with the font |
+| The page: a 640 x 480 canvas painted from the cells with ANSIapps Mono embedded (glyphs, code point map, CP437 table) | `overlay/usr/share/r3i6nos/mirror/page.html`, made by `scripts/build_mirror_page.py` from `scripts/mirror_page.template.html` | the same file; `check.sh` fails when it is stale; `tests/test_mirror_page.js` runs the page's script in node and compares every painted pixel with the font |
 | The tap, Lua and C | `theme/r3i6nos_mirror.lua` (in `T.draw`), `theme/r3i6nos_mirror.h` (in `r3_video_draw`) | `tests/test_mirror.lua`, `tests/test_mirror.c` (the same cases; a fuzz that every delta replays to the screen) |
 | Settings > Screen mirror (pick a link, the address, stop, instructions) | `menu/mirror.lua`, `menu/settings.lua` | `tests/test_mirror_menu.lua`, `tests/test_settings.lua` |
 
@@ -64,7 +64,7 @@ The device report answers the first two (below). One thing about USB 2.0: an Eth
   library on the unit, no WebSocket framing. No heartbeat (a timer would wake the unit): TCP keepalive finds a dead page.
 - **Frame:** `full` (all 3072 bytes, sent on connect and when a page asks) and `delta` (runs: start cell, length, the cells). Base64 inside the event.
   A keyframe is never sent on a timer.
-- **Cells of R3i6nos Mono (2026-11-24):** a cell that holds a glyph CP437 lacks (an icon, a gamepad button, a Braille pattern, an accented capital) goes in the `F` or `D` datagram as the character **254** with its attribute,
+- **Cells of ANSIapps Mono (2026-11-24):** a cell that holds a glyph CP437 lacks (an icon, a gamepad button, a Braille pattern, an accented capital) goes in the `F` or `D` datagram as the character **254** with its attribute,
   and an **`E`** datagram follows it: `E` + runs of (u16 start, u8 count, count x (u24 code point, u8 attribute)). The daemon keeps a second table (cell to code point): an `F` or a `D` that covers a cell makes
   it an ordinary one again, an `E` sets it (and its character to 254, so a page that predates `E` shows ■); a page that joins gets the full screen and then one `ext` event with every extended cell;
   a malformed `E` is dropped whole. The page's event is `ext`. The Lua tap (`M.ext`) and the C tap (`r3_mirror_ext`, with `R3_WITH_MONO`) send an `E` only when a changed cell is extended, after a full frame all of them.
@@ -76,7 +76,7 @@ The device report answers the first two (below). One thing about USB 2.0: an Eth
   server in every LÖVE and C app; one daemon is smaller.) How an app learns a mirror is on, without polling, is an open design point.
 - **Pages that are not cells** (Commander's picture viewer and video, any pixel canvas): the mirror falls back to changed **32x32 tiles**, hashed, LZ4 or
   zstd, sent only when redrawn, at a low rate; or says "this screen is a picture" and shows the cells around it. Decide after the cells work.
-- **The page:** a canvas painted with the IBM VGA 8x16 font (CC BY-SA 4.0: the credit and `NOTICE` come with it), the 16 VGA colours, scaled to the
+- **The page:** a canvas painted with ANSIapps Mono at 10x20 (SIL OFL 1.1: the credit and `NOTICE` come with it), the 16 VGA colours, scaled to the
   window with `image-rendering: pixelated` or drawn as text for any size; the top bar's version line is part of the cells. **Non-interactive**, like the
   widescreen dashboard (CLAUDE.md): it sends no input to the unit.
 - **Access:** listens only on the interface the person chose (the gadget's `usb0` or the adapter's), with a **random token** in the address, shown on

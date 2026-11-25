@@ -45,7 +45,7 @@ for f in nttplay-report nttplay-demo; do
     [ -L "$R/opt/loveos/bin/$f" ]                 || fail "$f is not linked into the tools folder, so Settings cannot list it"
 done
 [ -s "$R/usr/share/nttplay/commands.txt" ]        || fail "nttplay's commands.txt is not in the image"
-grep -q 'CC BY-SA' "$R/usr/share/nttplay/NOTICE-font" || fail "the font's credit does not travel with nttplay-demo"
+grep -q 'SIL OPEN FONT LICENSE' "$R/usr/share/nttplay/NOTICE-font" || fail "the font's credit does not travel with nttplay-demo"
 grep -q '^APP = "nttplay"' "$R/usr/bin/nttplay-demo" || fail "nttplay-demo has no baked app name (the menu reads it)"
 for f in NOTICE build.sh README.md; do [ -s "$R/usr/share/ffmpeg-min/$f" ] || fail "ffmpeg's $f (the source offer) is not in the image"; done
 grep -q 'f4fa066278f7a47feab316fef905f4db0d5e9b589451949740f83972b30901bd' "$R/usr/share/ffmpeg-min/NOTICE" || fail "NOTICE does not give the ffmpeg source's hash"
@@ -57,11 +57,10 @@ if [ -f /usr/share/common-licenses/GPL-2 ]; then [ -s "$R/usr/share/ffmpeg-min/G
 [ -f "$R/opt/loveos/menu/battery.lua" ]         || fail "the menu's battery module not installed"
 [ -f "$R/opt/loveos/menu/main.lua" ]            || fail "menu not installed"
 [ -f "$R/opt/loveos/theme/r3i6nos_ansiapps.lua" ] || fail "theme not installed"
-[ -f "$R/opt/loveos/theme/vga8x16.lua" ]        || fail "theme font data not installed"
-[ -f "$R/opt/loveos/theme/font/LICENSE.TXT" ]    || fail "the font's licence must ship with the theme"
-[ -f "$R/opt/loveos/theme/font/r3i6nos-mono/README.txt" ]                 || fail "R3i6nos Mono's credit and licence must ship with it"
-[ -f "$R/opt/loveos/theme/font/r3i6nos-mono/R3i6nosMono-Regular.ttf" ]    || fail "R3i6nos Mono's TrueType file must ship with the theme"
-[ -f "$R/opt/loveos/theme/font/r3i6nos-mono/r3i6nos_mono10x20.lua" ]      || fail "R3i6nos Mono's Lua table must ship with the theme"
+[ -f "$R/opt/loveos/theme/font/ansiapps-mono/ansiapps_cp437.lua" ]        || fail "theme font data not installed"
+[ -f "$R/opt/loveos/theme/font/ansiapps-mono/OFL.txt" ]                   || fail "the font's licence must ship with the theme"
+[ -f "$R/opt/loveos/theme/font/ansiapps-mono/README.txt" ]                || fail "ANSIapps Mono's credit must ship with it"
+[ -f "$R/opt/loveos/theme/font/ansiapps-mono/ansiapps_mono10x20.lua" ]    || fail "ANSIapps Mono's Lua table must ship with the theme"
 [ -f "$R/opt/loveos/test-files/MANIFEST.tsv" ] || fail "the test corpus is not on the boot disk"
 [ -f "$R/opt/loveos/test-files/README.md" ]    || fail "the test corpus's README is not on the boot disk"
 for f in $(cd corpus/files && find . -type f | sed 's|^\./||'); do cmp -s "corpus/files/$f" "$R/opt/loveos/test-files/$f" || fail "test corpus file not installed: $f"; done

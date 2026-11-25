@@ -1,4 +1,4 @@
-/* theme/r3i6nos_keymap.h with R3i6nos Mono (R3_WITH_MONO): the Keymap shows buttons as the pad's own glyphs. Run by scripts/check.sh. */
+/* theme/r3i6nos_keymap.h with ANSIapps Mono (R3_WITH_MONO): the Keymap shows buttons as the pad's own glyphs. Run by scripts/check.sh. */
 #include <SDL.h>
 #define R3_WITH_MONO
 #include "r3i6nos_ansiapps.h"

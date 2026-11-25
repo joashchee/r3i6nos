@@ -43,7 +43,7 @@ static inline int fk_of(const char *name, int is_dir, int is_link) {
 }
 
 #ifdef R3_WITH_MONO
-/* The R3i6nos Mono icon (two cells, a string to print as one) of a name in a panel: the kind's picture, finer where the kinds are broad (a MIDI file, a tracker
+/* The ANSIapps Mono icon (two cells, a string to print as one) of a name in a panel: the kind's picture, finer where the kinds are broad (a MIDI file, a tracker
  * module, a text file, a font). The ".." row is the open folder. NULL when the font has no such name (it always does: tests/test_r3font.py). */
 static inline const char *fk_icon_name(const char *name, int is_dir, int is_link) {
     if (is_dir) return !strcmp(name, "..") ? "icon.file.folder.open" : "icon.file.folder";

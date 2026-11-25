@@ -88,9 +88,9 @@ done
 
 cp "$REPO/LICENSE" "$pkgdir/usr/share/doc/$BIN/copyright"
 if [ "$THEME" = 1 ]; then
-    # The theme's font is CC BY-SA 4.0 and is compiled in: its credit and licence travel with the binary.
+    # The theme's font (ANSIapps Mono, SIL OFL 1.1) is compiled in: its credit and licence travel with the binary.
     cp "$REPO/NOTICE" "$pkgdir/usr/share/doc/$BIN/NOTICE"
-    cp "$REPO/theme/font/LICENSE.TXT" "$REPO/theme/font/README.txt" "$pkgdir/usr/share/doc/$BIN/"
+    cp "$REPO/theme/font/ansiapps-mono/OFL.txt" "$REPO/theme/font/ansiapps-mono/README.txt" "$pkgdir/usr/share/doc/$BIN/"
 fi
 size_kb="$(du -sk "$pkgdir/usr" | cut -f1)"
 cat > "$pkgdir/DEBIAN/control" <<CONTROL

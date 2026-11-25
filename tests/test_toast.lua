@@ -67,7 +67,7 @@ toast.hold(t, true); toast.hold(t, false); toast.poll(t, 9002)
 assert(t.showing and t.error, "a failure that was up comes back")
 assert(T.contrast(T.BLACK, T.LIGHT_GREEN) >= 4.5 and T.contrast(T.WHITE, T.RED) >= 4.5, "readable")
 
--- the status glyph before the words (R3i6nos Mono): chosen by what the hot-plug service says; the same table as r3_toast_icon in C
+-- the status glyph before the words (ANSIapps Mono): chosen by what the hot-plug service says; the same table as r3_toast_icon in C
 for text, want in pairs({ ["Headphones connected"] = "sys.headphones", ["Headphones removed"] = "sys.headphones", ["Battery low: 12%"] = "sys.bat.0",
     ["Battery critically low: 4%. Plug in power or save now"] = "sys.bat.0", ["Battery full"] = "sys.bat.4", ["DC power connected"] = "sys.dc",
     ["USB power connected"] = "sys.dc", ["USB device attached"] = "sys.usb", ["Volume 0%"] = "sys.mute", ["Volume 20%"] = "sys.vol.1",

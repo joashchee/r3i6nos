@@ -47,7 +47,7 @@ t, k = ind(8, "Charging"); eq(k, "charging", "charging is never 'low'"); eq(t, "
 t, k = ind(100, "Full"); eq(t, "FULL █████ 100%"); eq(k, "charging")
 t, k = ind(40, "Unknown"); eq(t, "BAT ██░░░ 40%")
 eq(B.indicator(nil), nil, "no battery, no indicator")
--- the same as R3i6nos Mono glyph names: quarters of charge, a bolt while charging
+-- the same as ANSIapps Mono glyph names: quarters of charge, a bolt while charging
 do
   local g, kind = B.glyphs({ pct = 87, status = "Discharging" })
   eq(g.names[1], "sys.bat.4"); eq(#g.names, 1); eq(g.text, "87%"); eq(kind, "normal")
